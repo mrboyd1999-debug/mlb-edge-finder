@@ -5,7 +5,7 @@ body,
   min-height: 100%;
   background: #0a0f1a;
   color: #f1f5f9;
-  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-family: "Helvetica Neue", Arial, sans-serif;
 }
 
 * {
@@ -16,6 +16,7 @@ body,
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
   }

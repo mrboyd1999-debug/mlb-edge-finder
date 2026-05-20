@@ -1,5 +1,5 @@
-import MLBPickFinder from "./MLBPickFinder";
+import DFSPropsApp from "./DFSPropsApp";
 
 export default function App() {
-  return <MLBPickFinder />;
+  return <DFSPropsApp />;
 }
