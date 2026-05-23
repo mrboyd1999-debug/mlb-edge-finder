@@ -32,3 +32,52 @@ body,
     transform: rotate(360deg);
   }
 }
+
+.accepted-props-section,
+.top-picks-section {
+  margin-top: 14px;
+}
+
+.accepted-props-grid,
+.top-picks-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 8px;
+}
+
+.accepted-prop-card,
+.top-pick-card {
+  border: 1px solid #334155;
+  background: #111827;
+  color: #f8fafc;
+  border-radius: 8px;
+  padding: 12px;
+  min-height: 120px;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.top-pick-card {
+  border-color: #22c55e;
+  background: #0f172a;
+}
+
+.prop-card-player {
+  font-size: 15px;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.prop-card-market,
+.prop-card-pick,
+.prop-card-line,
+.prop-card-confidence {
+  color: #cbd5e1;
+}
+
+.prop-card-confidence {
+  font-weight: 700;
+  color: #86efac;
+}

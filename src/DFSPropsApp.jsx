@@ -103,7 +103,6 @@ import {
   filterReadyToBetProps,
   isReadyToBet,
   isEliteTopPickEligible,
-  selectTopPicks,
   mergeManualStatsIntoProfile,
   READY_MIN_CONFIDENCE,
   READY_MIN_DATA_QUALITY,
@@ -1718,12 +1717,24 @@ export default function DFSPropsApp() {
     const fromReady = qualifiedReadyProps.length
       ? qualifiedReadyProps
       : props.filter((prop) => prop.isQualificationAccepted || isReadyToBet(prop));
-    const pool = sortDecisionBoard(filterVerifiedSportsbookProps(fromReady.filter(Boolean)));
-    console.log("ACCEPTED PROPS COUNT", pool.length);
+    const pool = sortDecisionBoard(fromReady.filter(Boolean));
     console.log("ACCEPTED PROPS", pool);
+    console.log("RENDERING ACCEPTED", pool.length);
     return pool;
   }, [qualifiedReadyProps, props]);
-  const topPicksDisplay = useMemo(() => selectTopPicks(acceptedProps, 2), [acceptedProps]);
+  const topPicksDisplay = useMemo(() => {
+    const topPicks =
+      acceptedProps
+        ?.filter(Boolean)
+        ?.sort(
+          (a, b) =>
+            (b.weightedScore || b.confidenceScore || b.confidence || 0) -
+            (a.weightedScore || a.confidenceScore || a.confidence || 0)
+        )
+        ?.slice(0, 2) || [];
+    console.log("TOP PICKS", topPicks);
+    return topPicks;
+  }, [acceptedProps]);
   const topPicksForTracking = useMemo(() => topPicksDisplay, [topPicksDisplay]);
   const goblinPropsForTracking = useMemo(
     () => streakFinderProps.filter(isVerifiedSportsbookProp).filter(isGoblinProp),
@@ -2241,7 +2252,7 @@ export default function DFSPropsApp() {
         </section>
       ) : null}
 
-      <AcceptedPropsPanel props={acceptedProps} loading={loading} />
+      <AcceptedPropsPanel props={acceptedProps} loading={loading} onOpen={setSelectedEvaluation} />
 
       {visibleError ? <section style={styles.errorPanel}>{visibleError}</section> : null}
 
@@ -2310,7 +2321,6 @@ export default function DFSPropsApp() {
           picks={topPicksDisplay}
           loading={loading}
           onOpen={setSelectedEvaluation}
-          compactMode={compactMode}
         />
       )}
 
@@ -2323,12 +2333,26 @@ export default function DFSPropsApp() {
             Weighted qualification · market-aware thresholds · verified stats · positive edge · target 15–30 per cycle.
           </p>
           </div>
-          <p style={styles.countPill}>{readyToBetProps.length} qualified</p>
+          <p style={styles.countPill}>{readyToBetProps.length || acceptedProps.length} qualified</p>
         </div>
         {loading ? (
           <EmptyState text="Loading picks…" />
-        ) : readyToBetProps.length === 0 ? (
+        ) : readyToBetProps.length === 0 && acceptedProps.length === 0 ? (
           <EmptyState text={NO_VERIFIED_PROPS_MESSAGE} />
+        ) : readyToBetProps.length === 0 ? (
+          <div className="accepted-props-grid">
+            {acceptedProps.map((prop, idx) => (
+              <div key={prop.id || idx} className="accepted-prop-card">
+                <div className="prop-card-player">{prop.playerName || prop.player}</div>
+                <div className="prop-card-market">{prop.market || prop.statType}</div>
+                <div className="prop-card-pick">{prop.pick || prop.bestPick || prop.pickDirection}</div>
+                <div className="prop-card-line">{prop.line}</div>
+                <div className="prop-card-confidence">
+                  Confidence: {Math.round(prop.confidenceScore || prop.confidence || 0)}%
+                </div>
+              </div>
+            ))}
+          </div>
         ) : (
           <>
             <VirtualCardList
