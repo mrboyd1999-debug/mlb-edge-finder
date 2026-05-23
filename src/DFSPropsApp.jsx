@@ -1238,7 +1238,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   pipelineAudit = coercePipelineAudit(pipelineAudit);
   const cacheCounts = countPropCacheLayers(displayProps);
   finalizePipelineCounters(pipelineAudit, {
-    displayed: displayProps,
+    displayed: qualBoards.ready.length ? qualBoards.ready : displayProps,
     rejected: Math.max(0, (pipelineAudit.fetched || 0) - (pipelineAudit.scored || 0)),
     stale: cacheCounts.stale,
     cached: cacheCounts.cached,
@@ -1714,23 +1714,16 @@ export default function DFSPropsApp() {
   const currentCategoryLabel = currentStreakBoard.label || STREAK_TAB_OPTIONS.find((option) => option.value === streakSport)?.label || "MLB";
   const isGoblinTab = streakSport === "goblins";
   const isDemonTab = streakSport === "demons";
-  const acceptedPropsPool = useMemo(
-    () => sortDecisionBoard(filterVerifiedSportsbookProps(qualifiedReadyProps)),
-    [qualifiedReadyProps]
-  );
-  const topPicksDisplay = useMemo(() => {
-    const acceptedSource = readyToBetProps.length ? readyToBetProps : acceptedPropsPool;
-    const selected = selectTopPicks(acceptedSource, 2);
-    if (selected.length) return selected;
-    if (acceptedSource.length) {
-      return acceptedSource.slice(0, 2).map((prop) => ({
-        ...prop,
-        weightedScore: Number(prop.weightedScore ?? prop.confidenceScore ?? prop.confidence ?? 0),
-        topPickFallback: true,
-      }));
-    }
-    return [];
-  }, [readyToBetProps, acceptedPropsPool]);
+  const acceptedProps = useMemo(() => {
+    const fromReady = qualifiedReadyProps.length
+      ? qualifiedReadyProps
+      : props.filter((prop) => prop.isQualificationAccepted || isReadyToBet(prop));
+    const pool = sortDecisionBoard(filterVerifiedSportsbookProps(fromReady.filter(Boolean)));
+    console.log("ACCEPTED PROPS COUNT", pool.length);
+    console.log("ACCEPTED PROPS", pool);
+    return pool;
+  }, [qualifiedReadyProps, props]);
+  const topPicksDisplay = useMemo(() => selectTopPicks(acceptedProps, 2), [acceptedProps]);
   const topPicksForTracking = useMemo(() => topPicksDisplay, [topPicksDisplay]);
   const goblinPropsForTracking = useMemo(
     () => streakFinderProps.filter(isVerifiedSportsbookProp).filter(isGoblinProp),
@@ -2248,7 +2241,7 @@ export default function DFSPropsApp() {
         </section>
       ) : null}
 
-      <AcceptedPropsPanel props={readyToBetProps} loading={loading} />
+      <AcceptedPropsPanel props={acceptedProps} loading={loading} />
 
       {visibleError ? <section style={styles.errorPanel}>{visibleError}</section> : null}
 

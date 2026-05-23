@@ -36,8 +36,8 @@ const DEFAULT_TIER_THRESHOLDS = {
 export const PLAYABLE_CONFIDENCE_MIN = 65;
 export const TIER3_CONFIDENCE_MIN = 68;
 
-/** Soft penalties stack — hard reject only when multiple severe concerns combine. */
-const SOFT_PENALTY_HARD_REJECT = 22;
+/** Soft penalties stack — concerns reduce score; only extreme stacks cap to watchlist. */
+const SOFT_PENALTY_HARD_REJECT = 32;
 
 const METRIC_WEIGHTS = {
   matchupQuality: 0.18,
@@ -122,11 +122,7 @@ export function checkQualificationHardGates(prop = {}) {
   if (prop.unsupportedSport || prop.marketUnsupported || prop.esports) {
     return { pass: false, reason: "unsupported sport or market", gate: "market" };
   }
-  if (prop.marketResearchOnly || prop.marketSupportTier === 2 || prop.noveltyMarket) {
-    return { pass: false, reason: "research-only market tier", gate: "market" };
-  }
   if (!hasValidPickFields(prop)) return { pass: false, reason: "missing required pick fields", gate: "fields" };
-  if (!isPositiveEdge(prop)) return { pass: false, reason: "no positive edge", gate: "edge" };
   if (!hasProjectionIntegrity(prop)) {
     return { pass: false, reason: "projection integrity — missing projection context", gate: "projection" };
   }
@@ -143,9 +139,6 @@ export function checkQualificationHardGates(prop = {}) {
     if (delta >= 1) {
       return { pass: false, reason: "catastrophic line movement against pick", gate: "lineMovement" };
     }
-  }
-  if (prop.bookDisagreement?.sharpDisagreement && prop.bookDisagreement?.staleLine) {
-    return { pass: false, reason: "conflicting stale sportsbook data", gate: "verification" };
   }
   const status = String(prop.status || "").toLowerCase();
   if (status === "locked" || status === "expired" || status === "live") {
@@ -408,9 +401,22 @@ export function computeSoftConcernPenalties(prop = {}, metrics = {}, rules = get
   const edge = Number(prop.edge || 0);
   const marketThresholds = getMarketReadyThreshold(prop);
   const minEdge = marketThresholds.minEdge * (rules.minEdgeScale || 1);
-  if (edge > 0 && edge < minEdge * 0.85) {
+  if (edge <= 0) {
+    stack.push({ key: "weakEdge", label: "Non-positive edge penalty", penalty: 8 });
+    totalPenalty += 8;
+  } else if (edge < minEdge * 0.85) {
     stack.push({ key: "weakEdge", label: "Weak edge penalty", penalty: 4 });
     totalPenalty += 4;
+  }
+
+  if (prop.marketResearchOnly || prop.marketSupportTier === 2 || prop.noveltyMarket) {
+    stack.push({ key: "researchMarket", label: "Research-only market penalty", penalty: 5 });
+    totalPenalty += 5;
+  }
+
+  if (prop.bookDisagreement?.sharpDisagreement && prop.bookDisagreement?.staleLine) {
+    stack.push({ key: "bookDisagreement", label: "Conflicting sportsbook data penalty", penalty: 6 });
+    totalPenalty += 6;
   }
 
   if (metrics.lineStability != null && metrics.lineStability < 48) {
@@ -542,13 +548,6 @@ export function evaluateAdaptiveQualification(prop = {}, options = {}) {
   const penaltyStack = [...(adjusted.penaltyStack || []), ...softPenalties.stack];
   if (softPenalties.totalPenalty >= SOFT_PENALTY_HARD_REJECT && tier !== QUALIFICATION_TIERS.REJECT) {
     tier = QUALIFICATION_TIERS.WATCHLIST;
-  }
-  if (
-    softPenalties.totalPenalty >= SOFT_PENALTY_HARD_REJECT &&
-    penaltyStack.filter((row) => row.penalty >= 5).length >= 2 &&
-    recovery.score < tierThresholds.watchlist
-  ) {
-    tier = QUALIFICATION_TIERS.REJECT;
   }
 
   const metricEntries = Object.entries(metrics).sort((a, b) => b[1] - a[1]);

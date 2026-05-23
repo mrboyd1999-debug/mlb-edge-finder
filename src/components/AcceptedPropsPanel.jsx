@@ -1,13 +1,7 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { formatNumber } from "../utils/formatters.js";
+import { computeTopPickWeightedScore } from "../services/topPicksSelection.js";
 import { styles } from "../theme/styles.js";
-
-function statusLabel(prop = {}) {
-  const vol = Number(prop.volatility);
-  if (Number.isFinite(vol) && vol >= 3.5) return "High vol";
-  if (Number.isFinite(vol) && vol >= 2.75) return "Moderate vol";
-  return "Stable vol";
-}
 
 function movementLabel(prop = {}) {
   const tag = prop.lineMovementTag || prop.lineMovement?.tag || "stable";
@@ -15,18 +9,23 @@ function movementLabel(prop = {}) {
   return tag;
 }
 
-function sportsbookLabel(prop = {}) {
-  if (prop.sportsbookLine != null) return `Book ${formatNumber(prop.sportsbookLine)}`;
-  if (prop.sportsbookComparison?.marketAverageLine != null) {
-    return `Book ${formatNumber(prop.sportsbookComparison.marketAverageLine)}`;
-  }
-  return prop.platform || "—";
+function sourceLabel(prop = {}) {
+  return prop.platform || prop.source || prop.projectionSource || "—";
 }
 
 function AcceptedPropsPanel({ props = [], loading = false }) {
+  const rows = useMemo(
+    () =>
+      (props || []).filter(Boolean).map((prop) => ({
+        ...prop,
+        weightedScore: computeTopPickWeightedScore(prop),
+      })),
+    [props]
+  );
+
   if (loading) {
     return (
-      <section style={styles.section} aria-label="Accepted props debug">
+      <section style={styles.section} aria-label="Accepted props">
         <div style={styles.sectionHeading}>
           <div>
             <p style={styles.eyebrow}>Visibility</p>
@@ -38,35 +37,48 @@ function AcceptedPropsPanel({ props = [], loading = false }) {
     );
   }
 
-  if (!props.length) return null;
+  if (!rows.length) return null;
 
   return (
-    <section style={styles.section} aria-label="Accepted props debug">
-      <div style={styles.sectionHeading}>
-        <div>
-          <p style={styles.eyebrow}>Visibility</p>
-          <h2 style={styles.sectionTitle}>Accepted Props</h2>
-          <p style={styles.streakCopy}>Verified accepted props with confidence, edge, volatility, and line movement status.</p>
-        </div>
-        <p style={styles.countPill}>{props.length} accepted</p>
-      </div>
+    <details open style={styles.compactDetails} aria-label="Accepted props">
+      <summary style={styles.detailsSummary}>
+        <span>
+          <span style={styles.eyebrow}>Visibility</span>
+          <strong>Accepted Props</strong>
+        </span>
+        <span style={styles.countPill}>{rows.length} accepted</span>
+      </summary>
       <div style={styles.compactPanel}>
+        <p style={{ ...styles.streakCopy, marginTop: 0 }}>
+          All qualification-accepted MLB props — not filtered by UI tabs or search.
+        </p>
         <div style={styles.compactFlags}>
-          {props.slice(0, 40).map((prop) => (
-            <div key={prop.id} style={{ margin: "8px 0", paddingBottom: 8, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-              <strong>{prop.playerName}</strong> · {prop.statType} · {prop.bestPick || prop.pick}{" "}
-              {formatNumber(prop.line)} · {prop.confidenceScore ?? prop.confidence}% conf · +{formatNumber(prop.edge)} edge ·{" "}
-              {sportsbookLabel(prop)}
-              <p style={{ margin: "4px 0 0", opacity: 0.85 }}>
-                Volatility: {statusLabel(prop)} · Line movement: {movementLabel(prop)} · Tier:{" "}
-                {prop.qualificationLabel || prop.qualificationTier || "—"}
-                {prop.topPickWeightedScore ? ` · Weight ${prop.topPickWeightedScore}` : ""}
+          {rows.map((prop) => (
+            <div
+              key={prop.id || `${prop.playerName}-${prop.statType}-${prop.line}`}
+              style={{ margin: "10px 0", paddingBottom: 10, borderBottom: "1px solid rgba(255,255,255,0.06)" }}
+            >
+              <strong>{prop.playerName || "—"}</strong>
+              <p style={{ margin: "4px 0 0", opacity: 0.92 }}>
+                Market: {prop.statType || "—"} · Line: {formatNumber(prop.line)} · Pick:{" "}
+                {prop.bestPick || prop.pick || prop.pickDirection || "—"}
               </p>
+              <p style={{ margin: "4px 0 0", opacity: 0.85 }}>
+                Confidence: {formatNumber(prop.confidenceScore ?? prop.confidence)}% · Edge: +{formatNumber(prop.edge)} ·
+                Weighted: {formatNumber(prop.weightedScore)} · Volatility:{" "}
+                {Number.isFinite(Number(prop.volatility)) ? formatNumber(prop.volatility) : "—"} · Line movement:{" "}
+                {movementLabel(prop)} · Source: {sourceLabel(prop)}
+              </p>
+              {prop.qualificationLabel || prop.qualificationTier ? (
+                <p style={{ margin: "4px 0 0", opacity: 0.75 }}>
+                  Tier: {prop.qualificationLabel || prop.qualificationTier}
+                </p>
+              ) : null}
             </div>
           ))}
         </div>
       </div>
-    </section>
+    </details>
   );
 }
 
