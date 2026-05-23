@@ -4,6 +4,22 @@ import { canonicalMarketKey } from "./marketNormalization.js";
 /**
  * Temporary product scope: MLB-only decision engine.
  * Set to false to re-enable multi-sport pipelines without restoring deleted code.
+ *
+ * Multi-sport expansion checklist (DO NOT enable yet):
+ *   1. Flip MLB_ONLY_MODE → false.
+ *   2. Add a `<sport>QualityTier` map to this file (mirror MLB_QUALITY_*_KEYS).
+ *   3. Register the sport's market keys in `src/utils/approvedMarkets.js`
+ *      (`APPROVED_MARKET_KEYS[sport]` and `SPORT_PROCESSING_LIMITS[sport]`).
+ *   4. Add provider mappings (PrizePicks/Underdog) — both services already
+ *      branch off `prop.sport`, so adding a sport requires no parser changes.
+ *   5. Add Odds API `SPORT_KEYS[sport]` entry in `src/services/sportsbookOdds.js`
+ *      so consensus-line comparison works.
+ *   6. Add market models in `src/services/marketConfidenceModels.js` if the
+ *      sport needs custom scoring (NBA/PRA already lives there as a stub).
+ *
+ * The qualification pipeline, confidence engine, and Top Picks selection are
+ * sport-agnostic — they only consult tier/volatility helpers that are
+ * branched on `prop.sport`, so no rewrite is needed when MLB-only is flipped.
  */
 export const MLB_ONLY_MODE = true;
 

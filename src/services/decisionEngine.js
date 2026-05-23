@@ -150,6 +150,34 @@ export function calculateProjectionConfidence(prop = {}, options = {}) {
   };
 }
 
+/**
+ * Sportsbook edge — directional gap between the DFS line and the
+ * consensus sportsbook line for the player's pick side. Positive when the
+ * sportsbook line is more favourable than the DFS line for the user's pick.
+ * Used both for ranking (Top 2 Picks bias) and the "Sportsbook Edge" card row.
+ */
+export function computeSportsbookEdge(prop = {}, bookDisagreement = null) {
+  const line = finiteNumber(prop.line);
+  const book = bookDisagreement || detectBookDisagreement(prop);
+  const bookLine = finiteNumber(book.sportsbookLine);
+  if (!Number.isFinite(line) || !Number.isFinite(bookLine)) {
+    return { edge: 0, label: "", direction: "" };
+  }
+  const pickSide = String(prop.bestPick || prop.side || "").toLowerCase();
+  const rawGap = bookLine - line;
+  let directional = 0;
+  if (pickSide === "more" || pickSide === "over") directional = rawGap;
+  else if (pickSide === "less" || pickSide === "under") directional = -rawGap;
+  else directional = Math.abs(rawGap);
+  const rounded = round(directional);
+  const sign = rounded > 0 ? "+" : "";
+  return {
+    edge: rounded,
+    label: `${sign}${rounded.toFixed(1)} vs book ${bookLine.toFixed(1)}`,
+    direction: rounded > 0 ? "favorable" : rounded < 0 ? "against" : "flat",
+  };
+}
+
 export function detectBookDisagreement(prop = {}) {
   const line = finiteNumber(prop.line);
   const sportsbook = prop.sportsbookComparison || null;
@@ -434,6 +462,8 @@ export function enrichPropDecision(prop = {}, context = {}) {
   else if (decisionTier === "demon") parts.push("Demon tier");
   if (parts.length) qualificationReason = parts.join(" · ");
 
+  const sportsbookEdge = computeSportsbookEdge(prop, bookDisagreement);
+
   return {
     ...prop,
     bookDisagreement,
@@ -446,6 +476,10 @@ export function enrichPropDecision(prop = {}, context = {}) {
     qualificationReason,
     sportsbookLine: bookDisagreement.sportsbookLine,
     bestAvailableLine: bookDisagreement.bestAvailableLine,
+    sportsbookEdge: sportsbookEdge.edge,
+    sportsbookEdgeLabel: sportsbookEdge.label,
+    sportsbookEdgeDirection: sportsbookEdge.direction,
+    sportsbookBooksCount: bookDisagreement.books || 0,
     volatilityTier: prop.volatilityTier || getPropVolatilityTier(prop),
     marketModel: prop.marketModel || null,
     marketModelLabel: prop.marketModelLabel || null,

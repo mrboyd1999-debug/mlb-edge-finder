@@ -9,7 +9,7 @@ import {
 } from "./statEnrichment.js";
 import { MLB_ONLY_MODE, shouldRunNonMlbStatFetch } from "../utils/mlbOnlyMode.js";
 import { canonicalStatType } from "../utils/marketNormalization.js";
-import { getSportsDataApiKey } from "./runtimeSettings.js";
+import { getSportsDataApiKey } from "../config/apiConfig.js";
 
 export { statProfileKey, findStatProfile } from "../utils/playerNames.js";
 

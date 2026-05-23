@@ -33,8 +33,9 @@ import {
   recordSourceFailure,
   markSourceCached,
   withSourceRequestLock,
+  withSourceRetryQueue,
 } from "./sourceRateLimit.js";
-import { getProxyUrl } from "./runtimeSettings.js";
+import { getProxyUrl } from "../config/apiConfig.js";
 import { MLB_ONLY_MODE, emptySourcePipelineAudit } from "../utils/mlbOnlyMode.js";
 
 const UNDERDOG_ENDPOINTS = [
@@ -241,6 +242,28 @@ function buildCachedUnderdogResult({ sport, statType, attempts, reason = "fetch-
 }
 
 async function fetchUnderdogEndpoint(endpoint) {
+  // Soft retry queue: transient network/5xx failures retry with exponential
+  // backoff (~750ms → 1.5s → 3s → 6s) before bubbling up so the cache
+  // fallback only kicks in after we've genuinely failed. 429s short-circuit.
+  return withSourceRetryQueue(
+    SOURCE_IDS.UNDERDOG,
+    () => attemptUnderdogEndpoint(endpoint),
+    {
+      maxAttempts: 3,
+      isRetryable: (result, error) => {
+        if (error) return true;
+        if (!result || result.ok) return false;
+        if (result.rateLimited) return false;
+        if (result.networkError) return true;
+        const status = Number(result.attempt?.status || 0);
+        if (status === 502 || status === 503 || status === 504) return true;
+        return false;
+      },
+    }
+  );
+}
+
+async function attemptUnderdogEndpoint(endpoint) {
   const attempt = {
     url: absoluteUrl(endpoint),
     status: null,

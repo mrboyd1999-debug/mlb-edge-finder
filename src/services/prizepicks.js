@@ -36,7 +36,7 @@ import {
   markSourceCached,
   withSourceRequestLock,
 } from "./sourceRateLimit.js";
-import { getProxyUrl } from "./runtimeSettings.js";
+import { getProxyUrl } from "../config/apiConfig.js";
 
 export const PRIZEPICKS_HTML_BANNER = "API route is serving source/HTML instead of JSON. Check proxy/backend routing.";
 export const PRIZEPICKS_RATE_LIMIT_MESSAGE = "Rate limited. Showing cached lines until cooldown ends.";

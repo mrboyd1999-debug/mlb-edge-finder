@@ -38,6 +38,13 @@ Edit `.env.local` and paste your keys:
 | `VITE_PRIZEPICKS_PROXY_URL` | External proxy when PrizePicks direct fetch is blocked |
 | `VITE_UNDERDOG_PROXY_URL` | External proxy when Underdog direct fetch is blocked |
 
+Shorter aliases `VITE_PRIZEPICKS_PROXY` and `VITE_UNDERDOG_PROXY` are also accepted.
+
+All keys are read through `src/config/apiConfig.js`, which honours the resolution
+order: **localStorage override → Vite env → legacy storage key**. Missing keys
+never crash the app — `validateApiConfig()` surfaces warnings inside the
+Settings panel.
+
 Restart `npm run dev` after changing `.env.local`.
 
 ### Option B — Settings panel (browser localStorage)

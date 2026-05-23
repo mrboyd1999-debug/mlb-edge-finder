@@ -94,14 +94,29 @@ export function computeTopPickWeightedScore(prop = {}) {
     projectionStrength = clamp((Math.abs(projection - line) / line) * 20, 0, 12);
   }
 
+  // Sportsbook disagreement bonus — reward props where the sportsbook
+  // consensus agrees with the DFS pick (positive sportsbookEdge) more strongly
+  // than props where books disagree. Pulled from enrichPropDecision.
+  const sportsbookEdge = Number(prop.sportsbookEdge || 0);
+  const sportsbookBonus = clamp(sportsbookEdge * 3, -6, 10);
+
+  // Consistency bonus — recent hit rate + sample size.
+  const hitRate = finiteNumber(prop.recentHitRate ?? prop.last5HitRate ?? prop.last10HitRate);
+  const sample = finiteNumber(prop.sampleSize) || 0;
+  let consistencyBonus = 0;
+  if (Number.isFinite(hitRate)) consistencyBonus += clamp((hitRate - 0.5) * 14, -3, 7);
+  if (sample >= 10) consistencyBonus += 2;
+
   const score =
     confidence +
-    clamp(edgeValue(prop) * 6, 0, 18) +
+    clamp(edge * 6, 0, 18) +
     projectionStrength +
     (marketReliability - 50) * 0.12 +
     getMlbQualityTierWeight(prop) * 6 +
     volatilitySafetyScore(prop) * 2 +
-    lineStabilityScore(prop) * 2 -
+    lineStabilityScore(prop) * 2 +
+    sportsbookBonus +
+    consistencyBonus -
     volatilityPenalty(prop) -
     lineMovementPenalty(prop);
 

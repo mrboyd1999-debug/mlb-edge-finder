@@ -16,7 +16,22 @@ const BACKOFF_MS = [30_000, 60_000, 180_000, 300_000];
 const STORAGE_KEY = "dfs-source-rate-limit-v1";
 export const MIN_SOURCE_CACHE_MS = 10 * 60 * 1000;
 
+/**
+ * Per-source minimum interval between two successful refreshes. Prevents the
+ * frontend from hammering Underdog/PrizePicks when the user spams the refresh
+ * button, which is the most common cause of 429s.
+ */
+const MIN_REQUEST_INTERVAL_MS = {
+  PrizePicks: 3_000,
+  Underdog: 5_000,
+  "Odds API": 4_000,
+};
+
+/** Per-source soft retry queue — exponential backoff for transient failures. */
+const RETRY_QUEUE_BACKOFF_MS = [750, 1_500, 3_000, 6_000];
+
 const inFlightPromises = new Map();
+const lastDispatchAt = new Map();
 let memoryState = null;
 const sessionRequestCounts = {};
 
@@ -206,21 +221,72 @@ export function markSourceCached(sourceId, lastSuccessfulFetchAt = "") {
   return next;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Stagger consecutive calls per source. Resolves once at least
+ * `MIN_REQUEST_INTERVAL_MS[sourceId]` ms have elapsed since the last dispatch.
+ */
+async function waitForSourceInterval(sourceId) {
+  const minInterval = MIN_REQUEST_INTERVAL_MS[sourceId] || 0;
+  if (!minInterval) return;
+  const last = lastDispatchAt.get(sourceId) || 0;
+  const wait = last + minInterval - Date.now();
+  if (wait > 0) await sleep(wait);
+  lastDispatchAt.set(sourceId, Date.now());
+}
+
 export async function withSourceRequestLock(sourceId, fn) {
   if (inFlightPromises.has(sourceId)) {
     return inFlightPromises.get(sourceId);
   }
-  const promise = Promise.resolve()
-    .then(fn)
-    .finally(() => {
-      inFlightPromises.delete(sourceId);
-    });
+  const promise = (async () => {
+    await waitForSourceInterval(sourceId);
+    return fn();
+  })().finally(() => {
+    inFlightPromises.delete(sourceId);
+  });
   inFlightPromises.set(sourceId, promise);
   return promise;
 }
 
+/**
+ * Retry queue with exponential backoff. The caller supplies an async
+ * `attempt()` and an `isRetryable(result)` predicate. If `attempt()` throws or
+ * `isRetryable()` is true, we wait and retry up to `RETRY_QUEUE_BACKOFF_MS`
+ * entries. Aborts immediately when the source enters cooldown so we never
+ * pile-on after a 429.
+ */
+export async function withSourceRetryQueue(sourceId, attempt, options = {}) {
+  const { isRetryable = () => false, maxAttempts = RETRY_QUEUE_BACKOFF_MS.length + 1 } = options;
+  let lastResult = null;
+  let lastError = null;
+  for (let i = 0; i < maxAttempts; i += 1) {
+    if (isSourceInCooldown(sourceId)) break;
+    try {
+      const result = await attempt(i);
+      if (!isRetryable(result, null)) return result;
+      lastResult = result;
+    } catch (error) {
+      lastError = error;
+      if (!isRetryable(null, error)) throw error;
+    }
+    const backoff = RETRY_QUEUE_BACKOFF_MS[Math.min(i, RETRY_QUEUE_BACKOFF_MS.length - 1)];
+    await sleep(backoff);
+  }
+  if (lastResult != null) return lastResult;
+  if (lastError) throw lastError;
+  return null;
+}
+
 export function isSourceRequestInFlight(sourceId) {
   return inFlightPromises.has(sourceId);
+}
+
+export function getMinRequestIntervalMs(sourceId) {
+  return MIN_REQUEST_INTERVAL_MS[sourceId] || 0;
 }
 
 export function buildSourceHealthSnapshot() {

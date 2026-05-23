@@ -90,6 +90,24 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
   const bookLine = prop.sportsbookLine ?? prop.sportsbookComparison?.marketAverageLine;
   const lastUpdated = prop.updatedAt || prop.lastFetchAt || prop.cacheMetadata?.verifiedAt || "";
   const cacheLabel = prop.cacheVerified || prop.lineSourceBadge === "CACHED" ? "cached verified" : "";
+  const sportsbookEdgeNum = Number(prop.sportsbookEdge ?? 0);
+  const sportsbookEdgeLabel = prop.sportsbookEdgeLabel || "";
+  const sportsbookBooksCount = Number(prop.sportsbookBooksCount || prop.sportsbookComparison?.books || 0);
+
+  // Player stat expansion fields — already populated by enrichment pipeline.
+  const last5Avg = prop.last5Average ?? prop.profile?.last5Average ?? null;
+  const last10Avg = prop.last10Average ?? prop.profile?.last10Average ?? null;
+  const hitRatePct = (() => {
+    const rate = prop.recentHitRate ?? prop.last5HitRate ?? prop.last10HitRate ?? prop.profile?.recentHitRate;
+    if (!Number.isFinite(Number(rate))) return null;
+    return Math.round(Number(rate) * 100);
+  })();
+  const opponentRank = prop.opponentRank ?? prop.profile?.opponentRank ?? null;
+  const opponentAllowed = prop.opponentAllowed ?? prop.profile?.opponentAllowed ?? null;
+  const homeAwaySplit = prop.homeAwaySplit || prop.profile?.homeAwaySplit || (prop.isHome === true ? "Home" : prop.isHome === false ? "Away" : "");
+  const recentTrend = prop.formNote || prop.profile?.formNote || prop.recentTrend || prop.strikeoutTrend || "";
+  const openingLine = prop.lineMovement?.openingLine ?? null;
+  const currentLineSnap = prop.lineMovement?.currentLine ?? prop.line ?? null;
 
   return (
     <article
@@ -219,6 +237,23 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
           <span style={styles.metaLabel}>DQ</span>
           <strong>{Number.isFinite(Number(prop.dataQualityScore)) ? Math.max(22, Math.round(Number(prop.dataQualityScore))) : "—"}</strong>
         </span>
+        {bookLine != null && Number.isFinite(sportsbookEdgeNum) && sportsbookEdgeNum !== 0 ? (
+          <span
+            style={styles.compactMetaItem}
+            title={sportsbookEdgeLabel || `Sportsbook consensus ${formatNumber(bookLine)}`}
+          >
+            <span style={styles.metaLabel}>SB Edge</span>
+            <strong
+              style={{
+                ...styles.metaValueStrong,
+                color: sportsbookEdgeNum > 0 ? "#86efac" : "#fca5a5",
+              }}
+            >
+              {sportsbookEdgeNum > 0 ? "+" : ""}
+              {formatNumber(sportsbookEdgeNum)}
+            </strong>
+          </span>
+        ) : null}
         {!compact && prop.edgeScore != null && (
           <span style={styles.compactMetaItem}>
             <span style={styles.metaLabel}>Edge</span>
@@ -251,6 +286,35 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
               {lastUpdated ? ` · Updated ${formatDateTime(lastUpdated)}` : ""}
               {cacheLabel ? ` · ${cacheLabel}` : ""}
             </p>
+            {sportsbookEdgeLabel ? (
+              <p style={{ ...styles.compactFlags, margin: "2px 0 0", color: sportsbookEdgeNum > 0 ? "#86efac" : "#fca5a5" }}>
+                Sportsbook Edge: {sportsbookEdgeLabel}
+                {sportsbookBooksCount > 0 ? ` · ${sportsbookBooksCount} book${sportsbookBooksCount === 1 ? "" : "s"}` : ""}
+              </p>
+            ) : null}
+            {last5Avg != null || hitRatePct != null || opponentRank != null || opponentAllowed != null || homeAwaySplit || recentTrend ? (
+              <p style={{ ...styles.compactFlags, margin: "2px 0 0", color: "#cbd5e1" }}>
+                {last5Avg != null ? `Last 5: ${formatNumber(last5Avg)}` : null}
+                {last5Avg != null && (last10Avg != null || hitRatePct != null) ? " · " : ""}
+                {last10Avg != null ? `Last 10: ${formatNumber(last10Avg)}` : null}
+                {(last5Avg != null || last10Avg != null) && hitRatePct != null ? " · " : ""}
+                {hitRatePct != null ? `Hit ${hitRatePct}%` : null}
+                {(last5Avg != null || last10Avg != null || hitRatePct != null) && (opponentRank != null || opponentAllowed != null) ? " · " : ""}
+                {opponentRank != null ? `Opp rank #${opponentRank}` : null}
+                {opponentRank != null && opponentAllowed != null ? " · " : ""}
+                {opponentAllowed != null ? `Opp allowed ${formatNumber(opponentAllowed)}` : null}
+                {(last5Avg != null || hitRatePct != null || opponentRank != null || opponentAllowed != null) && (homeAwaySplit || recentTrend) ? " · " : ""}
+                {homeAwaySplit ? homeAwaySplit : null}
+                {homeAwaySplit && recentTrend ? " · " : ""}
+                {recentTrend ? recentTrend : null}
+              </p>
+            ) : null}
+            {Number.isFinite(Number(openingLine)) && Number.isFinite(Number(currentLineSnap)) && Number(openingLine) !== Number(currentLineSnap) ? (
+              <p style={{ ...styles.compactFlags, margin: "2px 0 0", color: "#94a3b8" }}>
+                Line history: open {formatNumber(openingLine)} → now {formatNumber(currentLineSnap)}
+                {movementTag ? ` (${movementTag})` : ""}
+              </p>
+            ) : null}
             <p style={styles.compactFlags}>{shortReason(prop)}</p>
             {prop.qualificationReason ? (
               <p style={{ ...styles.compactFlags, margin: "2px 0 0", color: "#86efac" }}>{prop.qualificationReason}</p>

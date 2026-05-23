@@ -29,7 +29,7 @@ export const RUNTIME_SETTING_DEFS = [
     label: "PrizePicks Proxy URL",
     type: "url",
     placeholder: "https://your-provider.example/prizepicks",
-    envKeys: ["VITE_PRIZEPICKS_PROXY_URL", "PRIZEPICKS_PROXY_URL"],
+    envKeys: ["VITE_PRIZEPICKS_PROXY_URL", "VITE_PRIZEPICKS_PROXY", "PRIZEPICKS_PROXY_URL"],
     legacyStorageKeys: ["PRIZEPICKS_PROXY_URL"],
   },
   {
@@ -37,7 +37,7 @@ export const RUNTIME_SETTING_DEFS = [
     label: "Underdog Proxy URL",
     type: "url",
     placeholder: "https://your-provider.example/underdog",
-    envKeys: ["VITE_UNDERDOG_PROXY_URL", "UNDERDOG_PROXY_URL"],
+    envKeys: ["VITE_UNDERDOG_PROXY_URL", "VITE_UNDERDOG_PROXY", "UNDERDOG_PROXY_URL"],
     legacyStorageKeys: ["UNDERDOG_PROXY_URL"],
   },
 ];

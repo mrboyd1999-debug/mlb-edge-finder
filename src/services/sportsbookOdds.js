@@ -10,7 +10,7 @@ import {
   markSourceCached,
   withSourceRequestLock,
 } from "./sourceRateLimit.js";
-import { getOddsApiKey as getRuntimeOddsApiKey } from "./runtimeSettings.js";
+import { getOddsApiKey as getRuntimeOddsApiKey } from "../config/apiConfig.js";
 
 const ODDS_CACHE_KEY = "dfs-odds-last-good-comparisons";
 const ODDS_CACHE_MAX_MS = 60 * 60 * 1000;
@@ -23,8 +23,6 @@ const SPORT_KEYS = {
   "WTA Tennis": "tennis_wta",
   Soccer: "soccer_epl",
 };
-
-const API_KEY = import.meta.env.VITE_ODDS_API_KEY;
 
 const COMPARISON_BOOKS = new Set([
   "fanduel",

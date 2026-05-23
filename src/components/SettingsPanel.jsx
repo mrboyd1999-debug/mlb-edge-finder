@@ -9,6 +9,7 @@ import {
   writeRuntimeSettings,
   writeSettingsMeta,
 } from "../services/runtimeSettings.js";
+import { validateApiConfig } from "../config/apiConfig.js";
 import { connectionStatusStyle, testAllApiConnections } from "../services/apiConnectionTest.js";
 
 export default function SettingsPanel({ onSaved, onClearCaches }) {
@@ -20,6 +21,7 @@ export default function SettingsPanel({ onSaved, onClearCaches }) {
   const [connectionReport, setConnectionReport] = useState(null);
 
   const isSaved = settingsDraftMatchesSaved(draft, saved);
+  const apiValidation = validateApiConfig();
 
   function handleSave() {
     writeRuntimeSettings(draft);
@@ -64,6 +66,15 @@ export default function SettingsPanel({ onSaved, onClearCaches }) {
           Keys are stored in <code>localStorage</code> for development. For production, set the same{" "}
           <code>VITE_*</code> variables in Vercel — never commit <code>.env.local</code>.
         </p>
+        {apiValidation.warnings.length > 0 ? (
+          <ul style={{ ...styles.explanationList, margin: "4px 0 0", paddingLeft: "18px" }}>
+            {apiValidation.warnings.map((warning) => (
+              <li key={warning} style={{ ...styles.compactFlags, color: apiValidation.ok ? "#fcd34d" : "#fca5a5" }}>
+                {warning}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <div style={styles.controls}>
           {RUNTIME_SETTING_DEFS.map((def) => {
             const value = draft[def.key] || "";
