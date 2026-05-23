@@ -31,40 +31,91 @@ export function computeConfidence({
   sampleSize = 0,
   multiplier = 1,
   profile = {},
+  matchupBoost = 0,
+  seasonEdgeBoost = 0,
+  formBoost = 0,
+  opponentBoost = 0,
+  completenessBoost = 0,
+  researchPenalty = 0,
+  historyBoost = 0,
+  sportBoost = 0,
+  movementBoost = 0,
+  lineOnly = false,
 }) {
   const absoluteEdge = Math.abs(edge);
   const lineScale = Math.max(1, Math.abs(line) || 1);
-  const edgeComponent = clamp((absoluteEdge / lineScale) * 28, 0, 14);
+  const edgeComponent = clamp((absoluteEdge / lineScale) * 28, 0, 16);
   const hitRateComponent =
     Number.isFinite(recentHitRate) ? clamp((recentHitRate - 0.5) * 22, -4, 10) : 0;
   const multiplierPenalty = Number(multiplier) > 1 ? clamp((Number(multiplier) - 1) * 10, 0, 12) : 0;
 
   const raw =
-    50 +
+    48 +
     edgeComponent +
     projectionScore * 0.85 +
     consistencyScore +
     sampleScore +
     lineValueBoost +
     sportsbookBoost +
-    dataQualityScore * 0.06 +
-    hitRateComponent -
+    dataQualityScore * 0.08 +
+    hitRateComponent +
+    matchupBoost +
+    seasonEdgeBoost +
+    formBoost +
+    opponentBoost +
+    completenessBoost +
+    historyBoost +
+    sportBoost +
+    movementBoost -
+    researchPenalty -
     volatilityPenalty -
     injuryPenalty -
     multiplierPenalty;
 
+  const marketDerived =
+    projectionSource === "sportsbook-market" || projectionSource === "platform-line-comparison";
+  const hasPlayerProjection =
+    projectionSource === "player-stats" ||
+    projectionSource === "player-stats-estimate" ||
+    projectionSource === "manual-stats" ||
+    projectionSource === "model";
+
   let cap = 78;
-  if (projectionSource === "missing") cap = 54;
-  else if (profileIsFallback) cap = 66;
-  else if (!Number.isFinite(edge) || edge <= 0) cap = 58;
+  let capReason = "";
+  if (hasPlayerProjection && !profileIsFallback && dataQualityScore >= 55) {
+    cap = 82;
+  } else if (marketDerived && (sportsbookBoost > 0 || absoluteEdge > 0)) {
+    cap = 74;
+  } else if (lineOnly) {
+    cap = 62 + clamp(lineValueBoost + sportsbookBoost + Math.max(0, movementBoost), 0, 10);
+    capReason = "Limited stat context — confidence derived mainly from line/market signals.";
+  } else if (projectionSource === "missing") {
+    cap = 58;
+    capReason = "Projection missing.";
+  } else if (profileIsFallback || dataQualityScore < 45) {
+    cap = 66;
+    capReason = "Sparse stat profile.";
+  } else if (!Number.isFinite(edge) || edge <= 0) {
+    cap = 58;
+    capReason = "No positive edge.";
+  }
 
   const verifiedHistory = hasVerifiedHitRateHistory({ ...profile, sampleSize, recentHitRate });
-  if (verifiedHistory && Number(recentHitRate) >= 0.68 && sampleSize >= 12) {
-    cap = 82;
+  const strongData = dataQualityScore >= 72 && sampleSize >= 8 && Number.isFinite(recentHitRate);
+  if (
+    !lineOnly &&
+    !profileIsFallback &&
+    dataQualityScore >= 50 &&
+    verifiedHistory &&
+    strongData &&
+    Number(recentHitRate) >= 0.65 &&
+    sampleSize >= 12
+  ) {
+    cap = 85;
   }
 
   const score = Math.round(clamp(raw, 35, cap));
-  return { score, cap, verifiedHistory };
+  return { score, cap, verifiedHistory, strongData, capReason };
 }
 
 export function computeStreakConfidence(inputs) {
@@ -83,6 +134,7 @@ export function computeStreakConfidence(inputs) {
     historyAdjustment = 0,
     recentHitRate = null,
     sampleSize = 0,
+    profileIsFallback = false,
     profile = {},
   } = inputs;
 
@@ -102,48 +154,136 @@ export function computeStreakConfidence(inputs) {
     historyAdjustment;
 
   let cap = 78;
+  if (profileIsFallback) cap = 64;
   const verifiedHistory = hasVerifiedHitRateHistory({ ...profile, sampleSize, recentHitRate });
-  if (verifiedHistory && Number(recentHitRate) >= 0.68 && sampleSize >= 12) {
+  if (!profileIsFallback && verifiedHistory && Number(recentHitRate) >= 0.68 && sampleSize >= 12) {
     cap = 82;
   }
 
   return Math.round(clamp(raw, 35, cap));
 }
 
-export function confidenceTierLabel(score, riskLevel = "") {
+export function confidenceTierLabel(score, riskLevel = "", opts = {}) {
   if (riskLevel === "Low Data Confidence" || riskLevel === "Invalid Data") return "Weak lean";
-  if (score >= 80) return "Elite verified";
+  const eliteOk = opts.strongData && opts.verifiedHistory && score >= 79;
+  if (eliteOk) return "Elite verified";
+  if (score >= 79 && !eliteOk) return "Strong";
   if (score >= 70) return "Strong";
   if (score >= 60) return "Solid";
   if (score >= 50) return "Weak lean";
   return "Risky";
 }
 
-export function computeRankScore(prop = {}) {
+/**
+ * Unified edge score (0–100) from all available signals.
+ * Missing signals contribute 0 — never inflate with fake values.
+ */
+export function computeEdgeScore(prop = {}) {
   const signal = prop.modelSignal || {};
-  const edge = Number(prop.edge ?? signal.edge ?? 0);
-  const edgeRating = Number(prop.edgeRating ?? signal.edgeRating ?? 0);
-  const confidence = Number(prop.confidenceScore ?? signal.confidenceScore ?? 0);
+  const line = Number(prop.line ?? signal.line);
+  const projection = Number(prop.projection ?? signal.projection);
+  const edge = Number(prop.edge ?? signal.edge ?? (Number.isFinite(projection) && Number.isFinite(line) ? Math.abs(projection - line) : 0));
+  const lineScale = Math.max(1, Math.abs(line) || 1);
+  const modelProbability = Number(prop.modelProbability ?? signal.modelProbability);
+  const probabilityEdge = Number(prop.probabilityEdge ?? signal.probabilityEdge);
+
+  let score = 48;
+  if (Number.isFinite(edge) && edge > 0) {
+    score += clamp((edge / lineScale) * 38, 0, 22);
+  } else if (Number.isFinite(projection) && Number.isFinite(line)) {
+    score += clamp((Math.abs(projection - line) / lineScale) * 18, 0, 10);
+  } else if (prop.projectionSource === "missing") {
+    score = 28;
+  }
+
+  if (Number.isFinite(modelProbability)) {
+    score += clamp((modelProbability - 0.5) * 40, -4, 14);
+  }
+  if (Number.isFinite(probabilityEdge) && probabilityEdge > 0) {
+    score += clamp(probabilityEdge * 120, 0, 10);
+  }
+
+  const recentHitRate = Number(prop.recentHitRate ?? signal.recentHitRate);
+  const l10 = Number(prop.last10HitRate ?? signal.last10HitRate);
+  const l5 = Number(prop.last5HitRate ?? signal.last5HitRate);
+  const hitRate = Number.isFinite(l10) ? l10 : Number.isFinite(l5) ? l5 : recentHitRate;
+  if (Number.isFinite(hitRate)) score += clamp((hitRate - 0.5) * 28, -6, 12);
+
+  const last5Avg = Number(prop.last5Average ?? signal.last5Average);
+  const seasonAvg = Number(prop.seasonAverage ?? signal.seasonAverage);
+  if (Number.isFinite(last5Avg) && Number.isFinite(line) && line > 0) {
+    score += clamp(((last5Avg - line) / line) * 10, -4, 8);
+  } else if (Number.isFinite(seasonAvg) && Number.isFinite(line) && line > 0) {
+    score += clamp(((seasonAvg - line) / line) * 6, -3, 5);
+  }
+
+  const matchup = String(prop.matchupRating ?? signal.matchupRating ?? "");
+  if (matchup === "Favorable") score += 7;
+  else if (matchup === "Playable") score += 3;
+  else if (matchup === "Tough") score -= 5;
+
+  const movement = prop.lineMovement ?? signal.lineMovement;
+  if (movement?.supportsPick) score += 6;
+  else if (movement?.againstPick) score -= 6;
+
+  const injury = prop.injuryRisk ?? signal.injuryRisk;
+  if (injury === "High") score -= 12;
+  else if (injury === "Medium") score -= 5;
+
+  const bookEdge = Number(prop.sportsbookDiscrepancy ?? signal.sportsbookDiscrepancy);
+  if (Number.isFinite(bookEdge) && bookEdge > 0) score += clamp(bookEdge * 4, 0, 12);
+
+  const lineComparison = prop.lineComparison ?? signal.lineComparison;
+  if (lineComparison && Number.isFinite(Number(lineComparison.difference))) {
+    score += clamp(Math.abs(Number(lineComparison.difference)) * 3, 0, 8);
+  }
+
   const dataQuality = Number(prop.dataQualityScore ?? signal.dataQualityScore ?? 0);
+  score += clamp((dataQuality - 50) * 0.14, -8, 10);
+
+  const volatility = Number(prop.volatility ?? signal.volatility);
+  if (Number.isFinite(volatility)) score -= clamp(volatility * 1.1, 0, 10);
+
+  const multiplier = Number(prop.multiplier ?? 1);
+  if (multiplier > 1) score -= clamp((multiplier - 1) * 10, 0, 12);
+  else if (multiplier > 0 && multiplier < 1) score += clamp((1 - multiplier) * 6, 0, 6);
+
+  const isFallback = Boolean(prop.fallbackProfile || signal.fallbackProfile);
+  let signalCount = 0;
+  if (Number.isFinite(edge) && edge > 0) signalCount += 1;
+  if (Number.isFinite(hitRate)) signalCount += 1;
+  if (Number.isFinite(modelProbability)) signalCount += 1;
+  if (matchup && matchup !== "Neutral") signalCount += 1;
+  if (movement) signalCount += 1;
+  if (Number.isFinite(bookEdge)) signalCount += 1;
+  if (dataQuality >= 55) signalCount += 1;
+
+  const edgeScore = Math.round(clamp(score, 0, 100));
+  const edgeRating = edgeScore;
+
+  return { edgeScore, edgeRating, signalCount, isFallback };
+}
+
+export function computeRankScore(prop = {}) {
+  const { edgeScore, signalCount } = computeEdgeScore(prop);
+  const signal = prop.modelSignal || {};
+  const confidence = Number(prop.confidenceScore ?? signal.confidenceScore ?? 0);
   const expectedValue = Number(prop.expectedValue ?? signal.expectedValue ?? 0);
   const probabilityEdge = Number(prop.probabilityEdge ?? signal.probabilityEdge ?? 0);
-  const recentHitRate = Number(prop.recentHitRate ?? signal.recentHitRate);
   const sampleSize = Number(prop.sampleSize ?? signal.sampleSize ?? 0);
   const multiplier = Number(prop.multiplier ?? 1);
-  const hasForm = Number.isFinite(recentHitRate) ? 8 : 0;
-  const completeness = dataQuality * 0.35 + (sampleSize >= 5 ? 10 : sampleSize >= 3 ? 5 : 0);
-  const marketReliability = prop.platform === "PrizePicks" ? 4 : 3;
-  const multiplierRisk = multiplier > 1 ? -8 : multiplier < 1 ? 2 : 0;
+  const priorityScore = Number(prop.priorityScore ?? 0);
+  const completeness = sampleSize >= 5 ? 8 : sampleSize >= 3 ? 4 : 0;
+  const multiplierRisk = multiplier > 1 ? -10 : multiplier < 1 ? 3 : 0;
 
   return (
-    edge * 12 +
-    edgeRating * 0.4 +
-    confidence * 0.55 +
+    edgeScore * 0.45 +
+    confidence * 0.28 +
+    priorityScore * 0.22 +
+    signalCount * 3 +
     completeness +
-    marketReliability +
-    (Number.isFinite(expectedValue) ? expectedValue * 40 : 0) +
-    (Number.isFinite(probabilityEdge) ? probabilityEdge * 100 : 0) +
-    hasForm +
+    (Number.isFinite(expectedValue) ? expectedValue * 30 : 0) +
+    (Number.isFinite(probabilityEdge) ? probabilityEdge * 75 : 0) +
     multiplierRisk
   );
 }
@@ -241,25 +381,9 @@ export function buildPickExplanation(prop = {}) {
 }
 
 export function propPayoutLabel(prop = {}) {
+  if (!prop.verifiedAdjustedOdds) return "standard";
   const oddsType = String(prop.oddsType || prop.odds_type || prop.adjustedOddsType || "").toLowerCase();
-  if (prop.verifiedAdjustedOdds || isVerifiedAdjustedOddsProp(prop)) {
-    if (oddsType.includes("goblin") || /goblin|green goblin|lower payout/.test(adjustedDescriptor(prop))) return "Goblin";
-    if (oddsType.includes("demon") || /demon|higher payout|boosted payout/.test(adjustedDescriptor(prop))) return "Demon";
-  }
-  if (oddsType === "goblin" || oddsType === "demon") {
-    return oddsType.charAt(0).toUpperCase() + oddsType.slice(1);
-  }
+  if (oddsType.includes("goblin")) return "Goblin";
+  if (oddsType.includes("demon")) return "Demon";
   return "standard";
-}
-
-function isVerifiedAdjustedOddsProp(prop) {
-  const descriptor = adjustedDescriptor(prop);
-  return Boolean(prop.verifiedAdjustedOdds) || /demon|goblin|green goblin|higher payout|lower payout|verified adjusted/.test(descriptor);
-}
-
-function adjustedDescriptor(prop) {
-  return [prop.adjustedOddsType, prop.oddsType, prop.odds_type, prop.multiplierSource, prop.optionLabel]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
 }

@@ -1,6 +1,19 @@
 import { cachedFetch } from "./fetchUtil.js";
+import { readSmartCacheIfFresh, writeSmartCache, CACHE_TTL } from "./smartCache.js";
+import {
+  SOURCE_LABELS,
+  mlbRoleContext,
+  minutesTrendFromGames,
+  sparseProfileForProp,
+  usageTrendFromGames,
+} from "./statEnrichment.js";
+import { MLB_ONLY_MODE, shouldRunNonMlbStatFetch } from "../utils/mlbOnlyMode.js";
+import { canonicalStatType } from "../utils/marketNormalization.js";
+
+export { statProfileKey, findStatProfile } from "../utils/playerNames.js";
 
 const MLB_SEARCH_URL = "https://statsapi.mlb.com/api/v1/people/search";
+const mlbProfileInflight = new Map();
 const MLB_PLAYER_FETCH_LIMIT = 60;
 const NBA_PLAYER_FETCH_LIMIT = 50;
 const WNBA_PLAYER_FETCH_LIMIT = 50;
@@ -21,10 +34,18 @@ export async function fetchPlayerStats({ props = [] } = {}) {
   const grouped = groupPropsBySport(props);
   const jobs = [
     { sport: "MLB", run: () => fetchMlbStats(grouped.MLB || []) },
-    { sport: "NBA", run: () => fetchNbaStats(grouped.NBA || []) },
-    { sport: "WNBA", run: () => fetchWnbaStats(grouped.WNBA || []) },
-    { sport: "Soccer", run: () => fetchSoccerStats(grouped.Soccer || []) },
-    { sport: "Tennis", run: () => buildFallbackStatsForSport(grouped.Tennis || [], "Tennis fallback profile") },
+    ...(shouldRunNonMlbStatFetch("NBA") ? [{ sport: "NBA", run: () => fetchNbaStats(grouped.NBA || []) }] : []),
+    ...(shouldRunNonMlbStatFetch("WNBA") ? [{ sport: "WNBA", run: () => fetchWnbaStats(grouped.WNBA || []) }] : []),
+    ...(shouldRunNonMlbStatFetch("Soccer") ? [{ sport: "Soccer", run: () => fetchSoccerStats(grouped.Soccer || []) }] : []),
+    ...(shouldRunNonMlbStatFetch("Tennis")
+      ? [
+          {
+            sport: "Tennis",
+            run: () =>
+              fetchTennisStats([...(grouped.Tennis || []), ...(grouped["ATP Tennis"] || []), ...(grouped["WTA Tennis"] || [])]),
+          },
+        ]
+      : []),
   ];
 
   const settled = await Promise.allSettled(jobs.map((job) => job.run()));
@@ -36,15 +57,18 @@ export async function fetchPlayerStats({ props = [] } = {}) {
       return;
     }
 
-    const fallback = buildFallbackStatsForSport(grouped[sport] || [], `${sport} stats unavailable; using fallback profile`);
-    mergeStats(stats, fallback.stats);
-    warnings.push(`${sport} stat source failed; using fallback profiles.`);
+    (grouped[sport] || []).forEach((prop) => {
+      if (!findStatProfile(stats, prop)) {
+        storeStatProfile(stats, prop, sparseProfileForProp(prop, `${sport} stat source failed`));
+      }
+    });
+    warnings.push(`${sport} stat source failed; props left without verified stats.`);
   });
 
-  const coveredKeys = new Set(stats.keys());
-  const uncovered = props.filter((prop) => !coveredKeys.has(statLookupKey(prop)));
-  const fallback = buildFallbackStatsForSport(uncovered, "generic fallback profile");
-  mergeStats(stats, fallback.stats);
+  const uncovered = props.filter((prop) => !findStatProfile(stats, prop) || findStatProfile(stats, prop)?.sparse);
+  uncovered.forEach((prop) => {
+    storeStatProfile(stats, prop, sparseProfileForProp(prop, "no stat source matched"));
+  });
 
   return {
     source: "Player stats",
@@ -58,26 +82,48 @@ async function fetchMlbStats(props) {
   if (!supportedProps.length) return { stats: new Map(), warnings: [] };
 
   const players = uniquePlayerNames(supportedProps).slice(0, MLB_PLAYER_FETCH_LIMIT);
-  const settled = await Promise.allSettled(players.map((playerName) => fetchMlbProfile(playerName)));
+  const [settled, opponentMap] = await Promise.all([
+    Promise.allSettled(players.map((playerName) => fetchMlbProfile(playerName))),
+    buildMlbOpponentMap(supportedProps),
+  ]);
   const profiles = new Map();
   const stats = new Map();
 
   settled.forEach((result) => {
     if (result.status === "fulfilled" && result.value?.playerName) {
-      profiles.set(normalize(result.value.playerName), result.value);
+      profiles.set(normalizePlayerName(result.value.playerName), result.value);
     }
   });
 
   supportedProps.forEach((prop) => {
-    const profile = profiles.get(normalize(prop.playerName));
-    const nextProfile = profile ? profileForMlbProp(profile, prop.statType, prop.line) : fallbackProfileForProp(prop, "MLB fallback profile");
-    stats.set(statLookupKey(prop), nextProfile);
+    const profile = profiles.get(normalizePlayerName(prop.playerName));
+    let nextProfile = profile
+      ? profileForMlbProp(profile, prop.statType, prop.line)
+      : sparseProfileForProp(prop, "MLB player logs unavailable");
+    const opponentCtx = opponentMap.get(normalize(prop.opponent));
+    if (opponentCtx) {
+      nextProfile = {
+        ...nextProfile,
+        opponentAllowed: opponentCtx.allowed,
+        opponentRank: opponentCtx.rank,
+        opponentPitcherWhip: opponentCtx.whip,
+        opponentPitcherHrAllowed: opponentCtx.homeRunsAllowed,
+        opponentPitcherSbAllowed: opponentCtx.stolenBasesAllowed,
+        catcherPopTimeProxy: opponentCtx.catcherPopTimeProxy,
+        matchupNote: opponentCtx.note,
+        statSources: uniqueSources([...(nextProfile.statSources || []), SOURCE_LABELS.mlb]),
+        hasMatchup: true,
+      };
+    }
+    nextProfile.roleContext = mlbRoleContext(profile?.splits || [], prop.statType);
+    if (nextProfile.roleContext) nextProfile.hasRoleContext = true;
+    storeStatProfile(stats, prop, { ...nextProfile, sport: "MLB", statType: prop.statType });
   });
 
   const failed = settled.some((result) => result.status === "rejected");
   return {
     stats,
-    warnings: failed ? ["Some MLB player stats failed; fallback profiles filled gaps."] : [],
+    warnings: failed ? ["Some MLB player stats failed; missing players left without verified stats."] : [],
   };
 }
 
@@ -99,9 +145,36 @@ async function fetchWnbaStats(props) {
   const result = profilesToBasketballStats({ props: supportedProps, settled, sourceName: "ESPN WNBA stats" });
   if (result.stats.size) return result;
 
-  return buildFallbackStatsForSport(supportedProps, "WNBA fallback profile", [
-    "WNBA stat source unavailable; fallback profiles are being used.",
-  ]);
+  const stats = new Map();
+  supportedProps.forEach((prop) => {
+    storeStatProfile(stats, prop, sparseProfileForProp(prop, "WNBA stat source unavailable"));
+  });
+  return {
+    stats,
+    warnings: ["WNBA stat source unavailable; props left without verified stats."],
+  };
+}
+
+async function fetchTennisStats(props) {
+  const supportedProps = props.filter((prop) => isSupportedTennisStat(prop.statType));
+  const stats = new Map();
+  if (!supportedProps.length) return { stats, warnings: [] };
+
+  supportedProps.forEach((prop) => {
+    const embedded = embeddedProfileForProp(prop, "Tennis stats embedded in source feed");
+    storeStatProfile(
+      stats,
+      prop,
+      embedded || {
+        ...sparseProfileForProp(prop, "Tennis logs require manual stat boost for now"),
+        statSources: [prop.platform === "Underdog" ? SOURCE_LABELS.underdog : SOURCE_LABELS.line, SOURCE_LABELS.tennis],
+      }
+    );
+  });
+  return {
+    stats,
+    warnings: stats.size ? [] : ["Tennis props need manual stat boost or future log integration — not using synthetic averages."],
+  };
 }
 
 async function fetchSoccerStats(props) {
@@ -115,24 +188,45 @@ async function fetchSoccerStats(props) {
 
   settled.forEach((result) => {
     if (result.status === "fulfilled" && result.value?.playerName) {
-      profiles.set(normalize(result.value.playerName), result.value);
+      profiles.set(normalizePlayerName(result.value.playerName), result.value);
     }
   });
 
   supportedProps.forEach((prop) => {
-    const profile = profiles.get(normalize(prop.playerName));
-    const nextProfile = profile ? profileForSoccerProp(profile, prop.statType, prop.line) : fallbackProfileForProp(prop, "Soccer fallback profile");
-    stats.set(statLookupKey(prop), nextProfile);
+    const profile = profiles.get(normalizePlayerName(prop.playerName));
+    const embedded = embeddedProfileForProp(prop, "Soccer stats embedded in source feed");
+    const nextProfile = profile
+      ? profileForSoccerProp(profile, prop.statType, prop.line)
+      : embedded || sparseProfileForProp(prop, "Soccer player logs unavailable");
+    storeStatProfile(stats, prop, { ...nextProfile, sport: "Soccer", statType: prop.statType });
   });
 
   const failed = settled.some((result) => result.status === "rejected");
   return {
     stats,
-    warnings: failed ? ["Some Soccer player stats failed; fallback profiles filled gaps."] : [],
+    warnings: failed ? ["Some Soccer player stats failed; props left without verified stats."] : [],
   };
 }
 
 async function fetchMlbProfile(playerName) {
+  const cacheKey = String(playerName || "").trim().toLowerCase();
+  if (!cacheKey) return null;
+
+  const cached = readSmartCacheIfFresh("mlb-stats", cacheKey, CACHE_TTL.STATS_MS);
+  if (cached?.payload) return cached.payload;
+
+  if (mlbProfileInflight.has(cacheKey)) {
+    return mlbProfileInflight.get(cacheKey);
+  }
+
+  const task = fetchMlbProfileLive(playerName, cacheKey).finally(() => {
+    mlbProfileInflight.delete(cacheKey);
+  });
+  mlbProfileInflight.set(cacheKey, task);
+  return task;
+}
+
+async function fetchMlbProfileLive(playerName, cacheKey) {
   const searchUrl = new URL(MLB_SEARCH_URL);
   searchUrl.searchParams.set("names", playerName);
 
@@ -159,11 +253,13 @@ async function fetchMlbProfile(playerName) {
     .filter((split) => Number.isFinite(split.playedAt))
     .sort((a, b) => b.playedAt - a.playedAt);
 
-  return {
+  const profile = {
     playerName: player.fullName || playerName,
     playerImage: player.id ? `https://img.mlbstatic.com/mlb-photos/image/upload/w_213,q_100/v1/people/${player.id}/headshot/67/current` : "",
     splits: latest,
   };
+  writeSmartCache("mlb-stats", cacheKey, profile, { source: "mlb-stats-api" });
+  return profile;
 }
 
 async function fetchBallDontLieProfile(playerName) {
@@ -174,17 +270,38 @@ async function fetchBallDontLieProfile(playerName) {
   if (!playerResponse.ok) throw new Error("Could not load BallDontLie player search.");
 
   const playerPayload = await playerResponse.json();
-  const player = (playerPayload.data || []).find((item) => sameName(playerFullName(item), playerName)) || playerPayload.data?.[0];
+  const player =
+    (playerPayload.data || []).find((item) => playerNamesMatch(playerFullName(item), playerName)) ||
+    (playerPayload.data || []).find((item) => normalizePlayerName(playerFullName(item)) === normalizePlayerName(playerName)) ||
+    playerPayload.data?.[0];
   if (!player?.id) return null;
 
   const currentSeason = new Date().getFullYear();
-  const values = await fetchBallDontLieStatsForSeasons(player.id, [currentSeason, currentSeason - 1]);
+  const [values, seasonAverages] = await Promise.all([
+    fetchBallDontLieStatsForSeasons(player.id, [currentSeason, currentSeason - 1]),
+    fetchBallDontLieSeasonAverages(player.id, [currentSeason, currentSeason - 1]),
+  ]);
   return {
     playerName: playerFullName(player) || playerName,
     playerImage: "",
     sport: "NBA",
     games: values,
+    seasonAverages,
   };
+}
+
+async function fetchBallDontLieSeasonAverages(playerId, seasons) {
+  for (const season of seasons) {
+    const url = apiUrl(BALLDONTLIE_BASE, "/season_averages");
+    url.searchParams.append("player_ids[]", String(playerId));
+    url.searchParams.set("season", String(season));
+    const response = await cachedFetch(url, { headers: ballDontLieHeaders() });
+    if (!response.ok) continue;
+    const payload = await response.json();
+    const rows = (payload.data || []).filter((row) => String(row.player_id) === String(playerId));
+    if (rows.length) return rows;
+  }
+  return [];
 }
 
 async function fetchBallDontLieStatsForSeasons(playerId, seasons) {
@@ -256,14 +373,42 @@ async function fetchApiFootballProfile(playerName) {
 }
 
 function profileForMlbProp(profile, statType, line) {
-  const values = valuesFromMlbSplits(profile.splits || [], statType);
-  if (!values.length) return fallbackProfileForProp({ playerName: profile.playerName, statType, line, sport: "MLB" }, "MLB fallback profile");
+  const splits = profile.splits || [];
+  const values = valuesFromMlbSplits(splits, statType);
+  if (!values.length) {
+    return sparseProfileForProp(
+      { playerName: profile.playerName, statType, line, sport: "MLB", playerImage: profile.playerImage },
+      "MLB game logs empty for stat type"
+    );
+  }
   return profileFromValues({
     playerName: profile.playerName,
     playerImage: profile.playerImage,
     values,
     line,
     source: "MLB StatsAPI game logs",
+    statSources: [SOURCE_LABELS.mlb],
+    roleContext: mlbRoleContext(splits, statType),
+    extra: {
+      gradingRows: splits,
+      last5FantasyScores: valuesFromMlbSplits(splits, "Fantasy Score").slice(0, 5),
+      strikeoutTrend: trendLabel(valuesFromMlbSplits(splits, "Pitcher Strikeouts")),
+      pitchCountTrend: trendLabel(valuesFromMlbSplits(splits, "Pitches Thrown")),
+      handednessMatchup: handednessMatchupFromSplits(splits),
+      hitStreak: hitStreakFromSplits(splits),
+      battingOrderNote: battingOrderNoteFromSplits(splits),
+      parkFactorNote: parkFactorNoteFromSplits(splits),
+      recentStolenBaseRate: recentStolenBaseRateFromSplits(splits),
+      stolenBaseMatchupNote: stolenBaseMatchupNoteFromSplits(splits),
+      battingAverage: battingAverageFromSplits(splits),
+      recentHitsAverage: recentStatAverageFromSplits(splits, "hits"),
+      gapPowerRate: gapPowerFromSplits(splits),
+      extraBaseHitRate: extraBaseHitRateFromSplits(splits),
+      isolatedPower: isolatedPowerFromSplits(splits),
+      barrelRateEstimate: barrelRateEstimateFromSplits(splits),
+      hrPerFlyBallEstimate: hrPerFlyBallEstimateFromSplits(splits),
+      sprintSpeedProxy: sprintSpeedProxyFromSplits(splits),
+    },
   });
 }
 
@@ -273,55 +418,142 @@ function profilesToBasketballStats({ props, settled, sourceName }) {
 
   settled.forEach((result) => {
     if (result.status === "fulfilled" && result.value?.playerName) {
-      profiles.set(normalize(result.value.playerName), result.value);
+      profiles.set(normalizePlayerName(result.value.playerName), result.value);
     }
   });
 
   props.forEach((prop) => {
-    const profile = profiles.get(normalize(prop.playerName));
-    const nextProfile = profile ? profileForBasketballProp(profile, prop.statType, prop.line, sourceName) : fallbackProfileForProp(prop, `${prop.sport} fallback profile`);
-    stats.set(statLookupKey(prop), nextProfile);
+    const profile = resolveBasketballProfile(profiles, prop.playerName);
+    const nextProfile = profile
+      ? profileForBasketballProp(profile, prop.statType, prop.line, sourceName)
+      : sparseProfileForProp(prop, `${prop.sport} player logs unavailable`);
+    storeStatProfile(stats, prop, nextProfile);
   });
 
   const failed = settled.some((result) => result.status === "rejected");
   return {
     stats,
-    warnings: failed ? [`Some ${sourceName} requests failed; fallback profiles filled gaps.`] : [],
+    warnings: failed ? [`Some ${sourceName} requests failed; props left without verified stats.`] : [],
   };
+}
+
+function resolveBasketballProfile(profiles, playerName) {
+  const key = normalizePlayerName(playerName);
+  if (profiles.has(key)) return profiles.get(key);
+  for (const [profileKey, profile] of profiles.entries()) {
+    if (playerNamesMatch(profileKey, playerName) || playerNamesMatch(profile.playerName, playerName)) return profile;
+  }
+  return null;
 }
 
 function profileForBasketballProp(profile, statType, line, source) {
   const values = (profile.games || []).map((game) => basketballPrimaryStat(game, statType)).filter(Number.isFinite);
-  if (!values.length) return fallbackProfileForProp({ playerName: profile.playerName, statType, line, sport: profile.sport }, `${profile.sport} fallback profile`);
+  const seasonValues = basketballValuesFromSeasonAverages(profile.seasonAverages || [], statType);
+  const mergedValues = values.length >= 5 ? values : [...values, ...seasonValues].filter(Number.isFinite);
+  const effectiveSource =
+    values.length >= 5 ? source : seasonValues.length ? `${source} + BallDontLie season averages` : source;
+  if (!mergedValues.length) {
+    return sparseProfileForProp(
+      { playerName: profile.playerName, statType, line, sport: profile.sport, playerImage: profile.playerImage },
+      `${profile.sport} game logs empty`
+    );
+  }
+  const minutesTrend = minutesTrendFromGames(profile.games || []);
+  const usageTrend = usageTrendFromGames(profile.games || [], statType);
+  const projectedMinutes = projectedMinutes(profile.games);
   return profileFromValues({
     playerName: profile.playerName,
     playerImage: profile.playerImage,
-    values,
+    values: mergedValues,
     line,
-    source,
-    projectedMinutes: projectedMinutes(profile.games),
+    source: effectiveSource,
+    statSources: [profile.sport === "WNBA" ? SOURCE_LABELS.espn : SOURCE_LABELS.balldontlie],
+    projectedMinutes,
+    minutesTrend,
+    usageTrend,
+    usageAdjustment: usageTrend?.label || (minutesTrend?.stable ? "Minutes stable" : minutesTrend?.label || null),
+    pitchCountTrend: null,
+    extra: {
+      gradingRows: profile.games || [],
+      last5FantasyScores: (profile.games || []).map((game) => basketballPrimaryStat(game, "Fantasy Score")).filter(Number.isFinite).slice(0, 5),
+      minutesTrend,
+      usageTrend,
+      opponentRank: opponentRankFromEmbedded(profile, statType),
+    },
   });
+}
+
+function basketballValuesFromSeasonAverages(rows = [], statType = "") {
+  const key = canonicalStatType(statType);
+  return rows
+    .map((row) => {
+      const stats = row.stats || row;
+      const games = finiteNumber(stats.games_played ?? stats.gp) || 0;
+      if (!games) return null;
+      const points = safeRate(stats.pts, games);
+      const rebounds = safeRate(stats.reb, games);
+      const assists = safeRate(stats.ast, games);
+      const threes = safeRate(stats.fg3m, games);
+      if (key === "points") return points;
+      if (key === "rebounds") return rebounds;
+      if (key === "assists") return assists;
+      if (key === "pr" && Number.isFinite(points) && Number.isFinite(rebounds)) return round(points + rebounds);
+      if (key === "pa" && Number.isFinite(points) && Number.isFinite(assists)) return round(points + assists);
+      if (key === "ra" && Number.isFinite(rebounds) && Number.isFinite(assists)) return round(rebounds + assists);
+      if (key === "pra" && Number.isFinite(points) && Number.isFinite(rebounds) && Number.isFinite(assists)) {
+        return round(points + rebounds + assists);
+      }
+      if (key === "threes") return threes;
+      return null;
+    })
+    .filter(Number.isFinite);
 }
 
 function profileForSoccerProp(profile, statType, line) {
   const averageValue = soccerAverageFromApiFootball(profile.statistics || [], statType);
-  if (!Number.isFinite(averageValue)) return fallbackProfileForProp({ playerName: profile.playerName, statType, line, sport: "Soccer" }, "Soccer fallback profile");
+  if (!Number.isFinite(averageValue)) {
+    return sparseProfileForProp({ playerName: profile.playerName, statType, line, sport: "Soccer" }, "Soccer averages unavailable");
+  }
   const sampleSize = soccerAppearanceCount(profile.statistics || []);
   const values = syntheticValuesFromAverage(averageValue, Math.min(10, Math.max(5, sampleSize)), statVolatility("Soccer", statType, averageValue), profile.playerName + statType);
+  const minutes = soccerMinutesFromApiFootball(profile.statistics || []);
   return profileFromValues({
     playerName: profile.playerName,
     playerImage: profile.playerImage,
     values,
     line,
     source: "API-Football season rates",
+    statSources: [SOURCE_LABELS.soccer],
+    projectedMinutes: minutes.projectedMinutes,
+    minutesTrend: minutes.minutesTrend,
+    usageAdjustment: minutes.projectedMinutes,
+    extra: {
+      crossesAverage: soccerAverageFromApiFootball(profile.statistics || [], "Crosses"),
+      recentMinutes: minutes.recentMinutes,
+    },
   });
 }
 
-function profileFromValues({ playerName, playerImage = "", values = [], line, source, projectedMinutes = null, fallback = false }) {
+function profileFromValues({
+  playerName,
+  playerImage = "",
+  values = [],
+  line,
+  source,
+  statSources = [],
+  projectedMinutes = null,
+  minutesTrend = null,
+  usageTrend = null,
+  usageAdjustment = null,
+  roleContext = null,
+  fallback = false,
+  extra = {},
+}) {
   const cleanValues = values.filter(Number.isFinite);
   const last5 = cleanValues.slice(0, 5);
   const last10 = cleanValues.slice(0, 10);
   const projection = weightedProjection(last5, last10, cleanValues);
+  const sources = uniqueSources([...statSources, mapSourceFromText(source)]);
   return {
     playerName,
     playerImage,
@@ -330,7 +562,9 @@ function profileFromValues({ playerName, playerImage = "", values = [], line, so
     projection,
     projectionSource: fallback ? "fallback-player-stats" : "player-stats",
     source,
+    statSources: sources,
     fallback,
+    sparse: false,
     recentHitRate: hitRateVsLine(last10, line),
     last5Average: average(last5),
     last10Average: average(last10),
@@ -340,40 +574,391 @@ function profileFromValues({ playerName, playerImage = "", values = [], line, so
     volatility: standardDeviation(last10),
     sampleSize: last10.length,
     projectedMinutes,
+    minutesTrend,
+    usageTrend,
+    usageAdjustment,
+    roleContext,
+    hasGameLogs: last10.length >= 3,
+    hasSeasonAverage: Number.isFinite(average(cleanValues)),
+    hasPlayerAverage: Number.isFinite(average(last5)) || Number.isFinite(average(cleanValues)),
+    pitchCountTrend: roleContext,
+    ...extra,
   };
 }
 
-function buildFallbackStatsForSport(props, source = "fallback profile", warnings = []) {
-  const stats = new Map();
-  props.forEach((prop) => {
-    if (!prop?.playerName || !prop?.statType) return;
-    stats.set(statLookupKey(prop), fallbackProfileForProp(prop, source));
-  });
-  return { stats, warnings };
-}
+function embeddedProfileForProp(prop, source = "embedded source stats") {
+  const raw = prop.raw?.attributes || prop.raw || {};
+  const values = [
+    raw.last5,
+    raw.last_5,
+    raw.recent_results,
+    raw.recentResults,
+    raw.game_log,
+    raw.gameLog,
+    raw.logs,
+    raw.history,
+  ]
+    .flatMap((item) => valuesFromMaybeArray(item, prop.statType))
+    .filter(Number.isFinite);
+  const seasonAverage = firstFinite(
+    raw.season_average,
+    raw.seasonAverage,
+    raw.avg,
+    raw.average,
+    raw.player_average,
+    raw.playerAverage
+  );
+  const last5Average = firstFinite(raw.last5_average, raw.last5Average, raw.recent_average, raw.recentAverage);
+  const projection = firstFinite(raw.projection, raw.projected, raw.projected_stat, raw.projectedStat);
+  const seedValues = values.length
+    ? values
+    : [last5Average, seasonAverage, projection].filter(Number.isFinite);
+  if (!seedValues.length) return null;
+  const extra = {
+    embeddedStats: true,
+    hasGameLogs: values.length >= 3,
+    hasSeasonAverage: Number.isFinite(seasonAverage),
+  };
+  if (Number.isFinite(seasonAverage)) extra.seasonAverage = seasonAverage;
+  if (Number.isFinite(last5Average)) extra.last5Average = last5Average;
 
-function fallbackProfileForProp(prop, source = "fallback profile") {
-  const range = projectionRange(prop.sport, prop.statType);
-  const line = Number(prop.line);
-  const seed = `${prop.sport}|${prop.playerName}|${prop.statType}|${prop.line}`;
-  const base = Number.isFinite(line)
-    ? clamp(line, range.min, range.max)
-    : range.min + (range.max - range.min) * deterministicRatio(seed);
-  const direction = deterministicRatio(seed + "|direction") >= 0.5 ? 1 : -1;
-  const maxEdge = Math.max(range.step, Math.min((range.max - range.min) * 0.055, Math.max(0.4, Math.abs(base) * 0.08)));
-  let projection = clamp(base + direction * maxEdge * (0.65 + deterministicRatio(seed + "|edge") * 0.7), range.min, range.max);
-  if (Number.isFinite(line) && Math.abs(projection - line) < range.step) {
-    projection = clamp(line + direction * range.step, range.min, range.max);
-  }
-  const values = syntheticValuesFromAverage(projection, 10, statVolatility(prop.sport, prop.statType, projection), seed);
   return profileFromValues({
     playerName: prop.playerName,
     playerImage: prop.playerImage || prop.headshot || prop.imageUrl || "",
-    values,
+    values: seedValues,
     line: prop.line,
     source,
-    fallback: true,
+    statSources: [source.includes("Tennis") ? SOURCE_LABELS.tennis : SOURCE_LABELS.soccer],
+    extra,
   });
+}
+
+function valuesFromMaybeArray(item, statType) {
+  if (!item) return [];
+  if (Array.isArray(item)) {
+    return item
+      .map((row) => {
+        if (Number.isFinite(Number(row))) return Number(row);
+        if (row && typeof row === "object") {
+          return firstFinite(
+            row.value,
+            row.stat,
+            row.result,
+            row.fantasyScore,
+            row.fantasy_score,
+            row[canonicalStatType(statType)],
+            row[String(statType || "")]
+          );
+        }
+        return null;
+      })
+      .filter(Number.isFinite);
+  }
+  if (typeof item === "string") {
+    return item
+      .split(/[,\n|]/)
+      .map((value) => Number(String(value).replace(/[^0-9.-]/g, "")))
+      .filter(Number.isFinite);
+  }
+  if (typeof item === "object") {
+    return valuesFromMaybeArray(Object.values(item), statType);
+  }
+  return Number.isFinite(Number(item)) ? [Number(item)] : [];
+}
+
+function firstFinite(...values) {
+  return values.map((value) => Number(value)).find(Number.isFinite);
+}
+
+function trendLabel(values = []) {
+  const clean = values.filter(Number.isFinite).slice(0, 10);
+  if (clean.length < 4) return null;
+  const recent = average(clean.slice(0, 3));
+  const previous = average(clean.slice(3, 6));
+  if (!Number.isFinite(recent) || !Number.isFinite(previous)) return null;
+  const delta = round(recent - previous, 1);
+  if (Math.abs(delta) < 0.5) return "stable recent trend";
+  return delta > 0 ? `trending up ${delta}` : `trending down ${Math.abs(delta)}`;
+}
+
+function handednessMatchupFromSplits(splits = []) {
+  const recent = splits.slice(0, 10);
+  const left = recent.filter((split) => /L/i.test(String(split.stat?.opponentHandedness || split.opponentHandedness || ""))).length;
+  const right = recent.filter((split) => /R/i.test(String(split.stat?.opponentHandedness || split.opponentHandedness || ""))).length;
+  if (!left && !right) return null;
+  return left > right ? "Recent sample leaned vs LHP/LHB" : "Recent sample leaned vs RHP/RHB";
+}
+
+function hitStreakFromSplits(splits = []) {
+  let streak = 0;
+  for (const split of splits) {
+    const hits = finiteNumber(split.stat?.hits);
+    if ((hits || 0) >= 1) streak += 1;
+    else break;
+  }
+  return streak;
+}
+
+function battingOrderNoteFromSplits(splits = []) {
+  const orders = splits
+    .slice(0, 8)
+    .map((split) => finiteNumber(split.stat?.battingOrder ?? split.battingOrder))
+    .filter(Number.isFinite);
+  if (!orders.length) return null;
+  const avg = average(orders);
+  if (avg <= 2.2) return "Leadoff/top-of-order role in recent games";
+  if (avg <= 4.2) return "Top-third batting order spot";
+  if (avg <= 6.2) return "Heart-of-order cleanup spot";
+  return "Lower-order batting spot";
+}
+
+function parkFactorNoteFromSplits(splits = []) {
+  const recent = splits.slice(0, 8);
+  const runRates = recent
+    .map((split) => {
+      const runs = finiteNumber(split.stat?.runs);
+      const hits = finiteNumber(split.stat?.hits);
+      const homeRuns = finiteNumber(split.stat?.homeRuns);
+      if (runs == null && hits == null) return null;
+      return (runs || 0) + (hits || 0) * 0.35 + (homeRuns || 0) * 0.8;
+    })
+    .filter(Number.isFinite);
+  if (runRates.length < 3) return null;
+  const avg = average(runRates);
+  if (avg >= 2.4) return "Recent hitter-friendly run environment";
+  if (avg <= 1.1) return "Recent pitcher-friendly run environment";
+  return "Neutral recent park/run environment";
+}
+
+function recentStolenBaseRateFromSplits(splits = [], limit = 10) {
+  const recent = splits.slice(0, limit);
+  const games = recent.filter((split) => Number(split.stat?.atBats || split.stat?.plateAppearances) > 0);
+  if (!games.length) return null;
+  const stolen = games.reduce((sum, split) => sum + (finiteNumber(split.stat?.stolenBases) || 0), 0);
+  return round(stolen / games.length, 2);
+}
+
+function stolenBaseMatchupNoteFromSplits(splits = []) {
+  const rate = recentStolenBaseRateFromSplits(splits, 8);
+  if (rate == null) return null;
+  if (rate >= 0.25) return "Recent stolen-base activity supports SB upside";
+  if (rate >= 0.1) return "Moderate recent stolen-base usage";
+  return "Limited recent stolen-base activity";
+}
+
+function battingAverageFromSplits(splits = [], limit = 15) {
+  const recent = splits.slice(0, limit);
+  let hits = 0;
+  let atBats = 0;
+  recent.forEach((split) => {
+    const h = finiteNumber(split.stat?.hits);
+    const ab = finiteNumber(split.stat?.atBats ?? split.stat?.ab);
+    if (h != null) hits += h;
+    if (ab != null) atBats += ab;
+  });
+  if (!atBats) return null;
+  return round(hits / atBats, 3);
+}
+
+function recentStatAverageFromSplits(splits = [], statField = "hits", limit = 5) {
+  const recent = splits.slice(0, limit);
+  const values = recent.map((split) => finiteNumber(split.stat?.[statField])).filter(Number.isFinite);
+  if (!values.length) return null;
+  return round(average(values), 2);
+}
+
+function gapPowerFromSplits(splits = [], limit = 15) {
+  const recent = splits.slice(0, limit);
+  let doubles = 0;
+  let atBats = 0;
+  recent.forEach((split) => {
+    const d = finiteNumber(split.stat?.doubles);
+    const ab = finiteNumber(split.stat?.atBats ?? split.stat?.ab);
+    if (d != null) doubles += d;
+    if (ab != null) atBats += ab;
+  });
+  if (!atBats) {
+    const perGame = recent.map((split) => finiteNumber(split.stat?.doubles)).filter(Number.isFinite);
+    return perGame.length ? round(average(perGame), 3) : null;
+  }
+  return round(doubles / atBats, 3);
+}
+
+function extraBaseHitRateFromSplits(splits = [], limit = 15) {
+  const recent = splits.slice(0, limit);
+  let xbh = 0;
+  let hits = 0;
+  recent.forEach((split) => {
+    const d = finiteNumber(split.stat?.doubles) || 0;
+    const t = finiteNumber(split.stat?.triples) || 0;
+    const hr = finiteNumber(split.stat?.homeRuns) || 0;
+    const h = finiteNumber(split.stat?.hits);
+    xbh += d + t + hr;
+    if (h != null) hits += h;
+  });
+  if (!hits) return null;
+  return round(xbh / hits, 3);
+}
+
+function isolatedPowerFromSplits(splits = [], limit = 15) {
+  const recent = splits.slice(0, limit);
+  let totalBases = 0;
+  let atBats = 0;
+  let hits = 0;
+  recent.forEach((split) => {
+    const stat = split.stat || {};
+    const h = finiteNumber(stat.hits) || 0;
+    const d = finiteNumber(stat.doubles) || 0;
+    const t = finiteNumber(stat.triples) || 0;
+    const hr = finiteNumber(stat.homeRuns) || 0;
+    const ab = finiteNumber(stat.atBats ?? stat.ab);
+    hits += h;
+    totalBases += h + d + t * 2 + hr * 3;
+    if (ab != null) atBats += ab;
+  });
+  if (!atBats) return null;
+  const slugging = totalBases / atBats;
+  const avg = hits / atBats;
+  return round(Math.max(0, slugging - avg), 3);
+}
+
+function barrelRateEstimateFromSplits(splits = [], limit = 15) {
+  const recent = splits.slice(0, limit);
+  let homeRuns = 0;
+  let atBats = 0;
+  recent.forEach((split) => {
+    const hr = finiteNumber(split.stat?.homeRuns);
+    const ab = finiteNumber(split.stat?.atBats ?? split.stat?.ab);
+    if (hr != null) homeRuns += hr;
+    if (ab != null) atBats += ab;
+  });
+  if (!atBats) return null;
+  const hrRate = homeRuns / atBats;
+  return round(clamp(hrRate * 4.5, 0, 0.35), 3);
+}
+
+function hrPerFlyBallEstimateFromSplits(splits = [], limit = 15) {
+  const recent = splits.slice(0, limit);
+  let homeRuns = 0;
+  let atBats = 0;
+  recent.forEach((split) => {
+    const hr = finiteNumber(split.stat?.homeRuns);
+    const ab = finiteNumber(split.stat?.atBats ?? split.stat?.ab);
+    if (hr != null) homeRuns += hr;
+    if (ab != null) atBats += ab;
+  });
+  if (!atBats) return null;
+  const flyBallEstimate = atBats * 0.38;
+  if (!flyBallEstimate) return null;
+  return round(homeRuns / flyBallEstimate, 3);
+}
+
+function sprintSpeedProxyFromSplits(splits = [], limit = 10) {
+  const rate = recentStolenBaseRateFromSplits(splits, limit);
+  if (rate == null) return null;
+  return round(25 + rate * 18, 1);
+}
+
+function mlbSinglesFromStat(stat = {}) {
+  const hits = finiteNumber(stat.hits);
+  if (hits == null) return null;
+  const doubles = finiteNumber(stat.doubles) || 0;
+  const triples = finiteNumber(stat.triples) || 0;
+  const homeRuns = finiteNumber(stat.homeRuns) || 0;
+  return Math.max(0, hits - doubles - triples - homeRuns);
+}
+
+function opponentRankFromEmbedded(profile = {}, statType = "") {
+  const raw = profile.raw || profile;
+  return firstFinite(
+    raw.opponentRank,
+    raw.opponent_rank,
+    raw.matchupRank,
+    raw.matchup_rank,
+    raw[`${canonicalStatType(statType)}OpponentRank`]
+  );
+}
+
+async function buildMlbOpponentMap(props = []) {
+  const opponents = [...new Set(props.map((prop) => prop.opponent).filter(Boolean))].slice(0, 20);
+  const map = new Map();
+  await Promise.allSettled(
+    opponents.map(async (opponent) => {
+      const ctx = await fetchMlbOpponentContext(opponent);
+      if (ctx) map.set(normalize(opponent), ctx);
+    })
+  );
+  return map;
+}
+
+async function fetchMlbOpponentContext(opponentName) {
+  const teamsUrl = new URL("https://statsapi.mlb.com/api/v1/teams");
+  teamsUrl.searchParams.set("sportId", "1");
+  teamsUrl.searchParams.set("season", String(new Date().getFullYear()));
+  const teamsResponse = await cachedFetch(teamsUrl);
+  if (!teamsResponse.ok) return null;
+  const teamsPayload = await teamsResponse.json();
+  const needle = normalize(opponentName);
+  const team = (teamsPayload.teams || []).find((item) => {
+    const abbr = normalize(item.abbreviation || item.teamCode || "");
+    const name = normalize(item.name || item.teamName || "");
+    return abbr === needle || name.includes(needle) || needle.includes(abbr);
+  });
+  if (!team?.id) return null;
+
+  const statsUrl = new URL(`https://statsapi.mlb.com/api/v1/teams/${team.id}/stats`);
+  statsUrl.searchParams.set("stats", "season");
+  statsUrl.searchParams.set("group", "hitting,pitching");
+  statsUrl.searchParams.set("season", String(new Date().getFullYear()));
+  const statsResponse = await cachedFetch(statsUrl);
+  if (!statsResponse.ok) return null;
+  const statsPayload = await statsResponse.json();
+  const hitting = (statsPayload.stats || []).find((bucket) => bucket.group?.displayName === "hitting");
+  const pitching = (statsPayload.stats || []).find((bucket) => bucket.group?.displayName === "pitching");
+  const hitSplit = hitting?.splits?.[0]?.stat || {};
+  const pitchSplit = pitching?.splits?.[0]?.stat || {};
+  const games = finiteNumber(hitSplit.gamesPlayed) || finiteNumber(pitchSplit.gamesPlayed) || 1;
+  const runsAllowed = safeRate(pitchSplit.runs, games);
+  const hitsAllowed = safeRate(pitchSplit.hits, games);
+  const strikeouts = safeRate(pitchSplit.strikeOuts ?? pitchSplit.strikeouts, games);
+  const runsScored = safeRate(hitSplit.runs, games);
+  const homeRunsAllowed = safeRate(pitchSplit.homeRuns, games);
+  const stolenBasesAllowed = safeRate(pitchSplit.stolenBases ?? hitSplit.stolenBases, games);
+  const innings = finiteNumber(pitchSplit.inningsPitched) || games * 5;
+  const walks = finiteNumber(pitchSplit.baseOnBalls ?? pitchSplit.walks) || 0;
+  const hitsPitch = finiteNumber(pitchSplit.hits) || 0;
+  const whip = innings > 0 ? round((walks + hitsPitch) / innings, 2) : null;
+  const sbAgainstRate = stolenBasesAllowed;
+  const catcherPopTimeProxy = sbAgainstRate != null ? round(1.88 + Math.min(0.35, sbAgainstRate * 0.25), 2) : null;
+  return {
+    allowed: hitsAllowed ?? runsScored ?? runsAllowed,
+    rank: runsAllowed != null ? Math.round(clamp(30 - runsAllowed * 2.2, 1, 30)) : null,
+    whip,
+    homeRunsAllowed,
+    stolenBasesAllowed: sbAgainstRate,
+    catcherPopTimeProxy,
+    note: `${team.abbreviation || team.name}: ${round(runsScored || 0)} R/G, ${round(strikeouts || 0)} K/G${whip != null ? `, WHIP ${whip}` : ""}`,
+  };
+}
+
+function mapSourceFromText(source = "") {
+  const text = String(source).toLowerCase();
+  if (text.includes("mlb") || text.includes("statsapi")) return SOURCE_LABELS.mlb;
+  if (text.includes("espn")) return SOURCE_LABELS.espn;
+  if (text.includes("balldontlie")) return SOURCE_LABELS.balldontlie;
+  if (text.includes("soccer") || text.includes("api-football")) return SOURCE_LABELS.soccer;
+  if (text.includes("tennis")) return SOURCE_LABELS.tennis;
+  return "";
+}
+
+function uniqueSources(items = []) {
+  return [...new Set(items.filter(Boolean))];
+}
+
+function storeStatProfile(stats, prop, profile) {
+  const key = statProfileKey(prop);
+  stats.set(key, { ...profile, sport: profile.sport || prop.sport, statType: profile.statType || prop.statType });
+  stats.set(statLookupKey(prop), stats.get(key));
 }
 
 function valuesFromMlbSplits(splits, statType) {
@@ -382,15 +967,27 @@ function valuesFromMlbSplits(splits, statType) {
 
 function mlbPrimaryStat(stat = {}, statType = "") {
   const type = String(statType).toLowerCase();
+  const key = canonicalStatType(statType);
   if ((type.includes("hitter") || type.includes("batter")) && type.includes("strikeout")) return null;
   if (type.includes("pitches thrown") || type.includes("pitch count")) return pitchesThrown(stat);
   if (type.includes("fantasy")) return mlbFantasyScore(stat);
   if (isHitsRunsRbis(type)) return sumKnown([stat.hits, stat.runs, stat.rbi ?? stat.rbis]);
-  if (type.includes("total base")) return finiteNumber(stat.totalBases);
+  if (type.includes("total base") || key === "totalBases") return finiteNumber(stat.totalBases);
+  if (key === "singles" || (type.includes("single") && !type.includes("single game"))) return mlbSinglesFromStat(stat);
+  if (key === "doubles" || type === "doubles") return finiteNumber(stat.doubles);
+  if (key === "triples" || type.includes("triple")) return finiteNumber(stat.triples);
+  if (key === "homeRuns" || type.includes("home run")) return finiteNumber(stat.homeRuns);
+  if (key === "stolenBases" || type.includes("stolen base")) return finiteNumber(stat.stolenBases);
+  if (key === "hitsAllowed" || (type.includes("hit") && type.includes("allow"))) return finiteNumber(stat.hits);
+  if (key === "earnedRuns" || type.includes("earned run")) return finiteNumber(stat.earnedRuns);
+  if (key === "walks" || (type.includes("walk") && type.includes("allow"))) return finiteNumber(stat.baseOnBalls ?? stat.walks);
+  if (key === "batterWalks" || type === "walks") return finiteNumber(stat.baseOnBalls ?? stat.walks);
   if (type.includes("rbi")) return finiteNumber(stat.rbi ?? stat.rbis);
-  if (type.includes("run")) return finiteNumber(stat.runs);
-  if (type.includes("hit")) return finiteNumber(stat.hits);
-  if (type.includes("out")) return outsRecorded(stat);
+  if (type.includes("run") && !type.includes("earned") && !type.includes("allow")) return finiteNumber(stat.runs);
+  if (key === "hits" || type === "hits" || type === "hit") return finiteNumber(stat.hits);
+  if (key === "outs" || type.includes("pitching out") || (type.includes("out") && !type.includes("strikeout"))) {
+    return outsRecorded(stat);
+  }
   if (type.includes("strikeout") || type.includes("k")) return finiteNumber(stat.strikeOuts ?? stat.strikeouts);
   return null;
 }
@@ -406,6 +1003,9 @@ function basketballPrimaryStat(game = {}, statType = "") {
   if (key === "points") return points;
   if (key === "rebounds") return rebounds;
   if (key === "assists") return assists;
+  if (key === "pr") return points + rebounds;
+  if (key === "pa") return points + assists;
+  if (key === "ra") return rebounds + assists;
   if (key === "pra") return points + rebounds + assists;
   if (key === "threes") return finiteNumber(game.fg3m ?? game.threesMade ?? game.threePointersMade);
   if (key === "fantasyScore") return round(points + rebounds * 1.2 + assists * 1.5 + steals * 3 + blocks * 3 - turnovers);
@@ -420,6 +1020,7 @@ function soccerAverageFromApiFootball(statistics, statType) {
     if (key === "shots") return safeRate(row.shots?.total, appearances);
     if (key === "shotsOnTarget") return safeRate(row.shots?.on, appearances);
     if (key === "passesAttempted") return safeRate(row.passes?.total, appearances);
+    if (key === "crosses") return safeRate(row.passes?.crosses ?? row.passes?.key, appearances);
     if (key === "goalieSaves") return safeRate(row.goals?.saves, appearances);
     if (key === "goalsAllowed") return safeRate(row.goals?.conceded, appearances);
     if (key === "tackles") return safeRate(row.tackles?.total, appearances);
@@ -438,6 +1039,23 @@ function soccerAverageFromApiFootball(statistics, statType) {
 
 function soccerAppearanceCount(statistics) {
   return statistics.reduce((sum, row) => sum + (finiteNumber(row.games?.appearences ?? row.games?.appearances) || 0), 0);
+}
+
+function soccerMinutesFromApiFootball(statistics = []) {
+  const minutes = statistics
+    .map((row) => {
+      const appearances = finiteNumber(row.games?.appearences ?? row.games?.appearances) || 0;
+      const totalMinutes = finiteNumber(row.games?.minutes);
+      if (!appearances || !Number.isFinite(totalMinutes)) return null;
+      return totalMinutes / appearances;
+    })
+    .filter(Number.isFinite);
+  const avg = average(minutes);
+  return {
+    recentMinutes: minutes,
+    projectedMinutes: Number.isFinite(avg) ? `${Math.round(avg)} min avg` : null,
+    minutesTrend: minutes.length >= 2 ? { label: "season minutes profile", delta: 0, stable: true } : null,
+  };
 }
 
 function projectedMinutes(games = []) {
@@ -484,12 +1102,25 @@ function statVolatility(sport, statType, projection) {
   const key = canonicalStatType(statType);
   if (sport === "MLB" && key === "pitchesThrown") return 9;
   if (sport === "MLB" && key === "strikeouts") return 1.7;
+  if (sport === "MLB" && key === "outs") return 1.4;
+  if (sport === "MLB" && key === "hitsAllowed") return 1.1;
+  if (sport === "MLB" && key === "earnedRuns") return 1.2;
+  if (sport === "MLB" && key === "walks") return 0.9;
+  if (sport === "MLB" && key === "singles") return 0.8;
+  if (sport === "MLB" && key === "doubles") return 0.7;
+  if (sport === "MLB" && key === "triples") return 0.35;
+  if (sport === "MLB" && key === "homeRuns") return 0.85;
+  if (sport === "MLB" && key === "stolenBases") return 0.65;
+  if (sport === "MLB" && key === "batterWalks") return 0.75;
   if (sport === "MLB") return 0.9;
   if (sport === "NBA" || sport === "WNBA") {
     if (key === "points") return 5;
     if (key === "rebounds") return 3;
     if (key === "assists") return 2.5;
     if (key === "pra") return 7;
+    if (key === "ra") return 4.5;
+    if (key === "pr") return 6;
+    if (key === "pa") return 5.5;
     if (key === "threes") return 1.4;
     return 5;
   }
@@ -511,13 +1142,26 @@ function projectionRange(sport, statType) {
   const key = canonicalStatType(statType);
   if (sport === "MLB" && key === "pitchesThrown") return { min: 40, max: 130, step: 3 };
   if (sport === "MLB" && key === "strikeouts") return { min: 0, max: 15, step: 0.5 };
-  if (sport === "MLB" && key === "hitsRunsRbis") return { min: 0, max: 8, step: 0.35 };
+  if (sport === "MLB" && key === "outs") return { min: 0, max: 27, step: 0.5 };
+  if (sport === "MLB" && key === "hitsAllowed") return { min: 0, max: 12, step: 0.5 };
+  if (sport === "MLB" && key === "earnedRuns") return { min: 0, max: 8, step: 0.5 };
+  if (sport === "MLB" && key === "walks") return { min: 0, max: 6, step: 0.5 };
+  if (sport === "MLB" && key === "hrr") return { min: 0, max: 8, step: 0.35 };
   if (sport === "MLB" && key === "totalBases") return { min: 0, max: 8, step: 0.35 };
+  if (sport === "MLB" && key === "singles") return { min: 0, max: 4, step: 0.25 };
+  if (sport === "MLB" && key === "doubles") return { min: 0, max: 3, step: 0.25 };
+  if (sport === "MLB" && key === "triples") return { min: 0, max: 2, step: 0.25 };
+  if (sport === "MLB" && key === "homeRuns") return { min: 0, max: 3, step: 0.25 };
+  if (sport === "MLB" && key === "stolenBases") return { min: 0, max: 3, step: 0.25 };
+  if (sport === "MLB" && key === "batterWalks") return { min: 0, max: 3, step: 0.25 };
   if (sport === "MLB" && ["hits", "rbis", "runs"].includes(key)) return { min: 0, max: 6, step: 0.25 };
   if ((sport === "NBA" || sport === "WNBA") && key === "points") return { min: 0, max: 60, step: 1.2 };
   if ((sport === "NBA" || sport === "WNBA") && key === "rebounds") return { min: 0, max: 25, step: 0.8 };
   if ((sport === "NBA" || sport === "WNBA") && key === "assists") return { min: 0, max: 20, step: 0.7 };
   if ((sport === "NBA" || sport === "WNBA") && key === "pra") return { min: 0, max: 100, step: 1.8 };
+  if ((sport === "NBA" || sport === "WNBA") && key === "ra") return { min: 0, max: 35, step: 1.2 };
+  if ((sport === "NBA" || sport === "WNBA") && key === "pr") return { min: 0, max: 80, step: 1.5 };
+  if ((sport === "NBA" || sport === "WNBA") && key === "pa") return { min: 0, max: 80, step: 1.5 };
   if ((sport === "NBA" || sport === "WNBA") && key === "threes") return { min: 0, max: 12, step: 0.45 };
   if (sport === "Soccer" && key === "passesAttempted") return { min: 0, max: 140, step: 4 };
   if (sport === "Soccer" && key === "goalieSaves") return { min: 0, max: 15, step: 0.5 };
@@ -526,8 +1170,16 @@ function projectionRange(sport, statType) {
   if (sport === "ATP Tennis" || sport === "WTA Tennis" || sport === "Tennis") {
     if (key === "gamesWon") return { min: 0, max: 30, step: 0.75 };
     if (key === "totalGames") return { min: 12, max: 65, step: 1 };
+    if (key === "totalSets") return { min: 2, max: 5, step: 0.25 };
+    if (key === "totalTieBreaks") return { min: 0, max: 4, step: 0.25 };
     if (key === "aces") return { min: 0, max: 40, step: 1 };
     return { min: 0, max: 90, step: 2 };
+  }
+  if (sport === "NHL") {
+    if (key === "timeOnIce") return { min: 8, max: 30, step: 0.5 };
+    if (key === "shots") return { min: 0, max: 12, step: 0.35 };
+    if (key === "goals") return { min: 0, max: 4, step: 0.25 };
+    return { min: 0, max: 10, step: 0.35 };
   }
   return { min: 0, max: Math.max(8, Number(propSafeLine(statType)) * 2 || 20), step: 0.5 };
 }
@@ -538,26 +1190,60 @@ function propSafeLine() {
 
 function isSupportedMlbStat(statType = "") {
   const type = String(statType).toLowerCase();
+  const key = canonicalStatType(statType);
   return (
     type.includes("pitches thrown") ||
     type.includes("pitch count") ||
     (type.includes("strikeout") && !type.includes("hitter") && !type.includes("batter")) ||
     isHitsRunsRbis(type) ||
     type.includes("total base") ||
+    key === "singles" ||
+    key === "doubles" ||
+    key === "triples" ||
+    key === "homeRuns" ||
+    key === "stolenBases" ||
+    key === "batterWalks" ||
+    key === "hits" ||
     type === "hits" ||
     type === "rbis" ||
     type === "rbi" ||
     type === "runs" ||
+    key === "outs" ||
+    type.includes("pitching out") ||
+    key === "hitsAllowed" ||
+    (type.includes("hit") && type.includes("allow")) ||
+    key === "earnedRuns" ||
+    type.includes("earned run") ||
+    key === "walks" ||
+    (type.includes("walk") && type.includes("allow")) ||
     type.includes("fantasy")
   );
 }
 
 function isSupportedBasketballStat(statType = "") {
-  return ["points", "rebounds", "assists", "pra", "threes", "fantasyScore"].includes(canonicalStatType(statType));
+  const key = canonicalStatType(statType);
+  return [
+    "points",
+    "rebounds",
+    "assists",
+    "pr",
+    "pa",
+    "pra",
+    "threes",
+    "fantasyScore",
+    "doubleDouble",
+    "pointsFirst3Min",
+    "quarterPoints",
+  ].includes(key);
+}
+
+function isSupportedTennisStat(statType = "") {
+  const key = canonicalStatType(statType);
+  return ["totalGames", "gamesWon", "aces", "doubleFaults", "fantasyScore", "points"].includes(key);
 }
 
 function isSupportedSoccerStat(statType = "") {
-  return ["shots", "shotsOnTarget", "passesAttempted", "goalieSaves", "goalsAllowed", "tackles", "fantasyScore"].includes(canonicalStatType(statType));
+  return ["shots", "shotsOnTarget", "passesAttempted", "crosses", "goalieSaves", "goalsAllowed", "tackles", "fantasyScore"].includes(canonicalStatType(statType));
 }
 
 function pitchesThrown(stat = {}) {
@@ -752,41 +1438,11 @@ function uniquePlayerNames(props) {
 }
 
 function sameName(a, b) {
-  return normalize(a) === normalize(b);
+  return playerNamesMatch(a, b) || normalize(a) === normalize(b);
 }
 
 function statLookupKey(prop) {
-  return [prop.platform, prop.sport, prop.playerName, prop.statType, prop.startTime]
-    .map(normalize)
-    .join("|");
-}
-
-function canonicalStatType(statType) {
-  const key = normalize(statType);
-  if (key.includes("pitchesthrown") || key.includes("pitchcount")) return "pitchesThrown";
-  if (key.includes("strikeout")) return "strikeouts";
-  if (key.includes("hitsrunsrbis") || key.includes("hrr")) return "hitsRunsRbis";
-  if (key.includes("totalbases")) return "totalBases";
-  if (key === "hits") return "hits";
-  if (key === "rbis" || key === "rbi") return "rbis";
-  if (key === "runs") return "runs";
-  if (key.includes("pointsreboundsassists") || key === "pra") return "pra";
-  if (key === "points") return "points";
-  if (key === "rebounds") return "rebounds";
-  if (key === "assists") return "assists";
-  if (key.includes("3pointers") || key.includes("threepointers")) return "threes";
-  if (key.includes("gameswon") || key.includes("playergames")) return "gamesWon";
-  if (key.includes("totalgames")) return "totalGames";
-  if (key.includes("aces")) return "aces";
-  if (key.includes("doublefault")) return "doubleFaults";
-  if (key.includes("shotsontarget")) return "shotsOnTarget";
-  if (key === "shots" || key.includes("shotsattempted")) return "shots";
-  if (key.includes("passesattempted") || key === "passes") return "passesAttempted";
-  if (key.includes("goalsallowed")) return "goalsAllowed";
-  if (key.includes("goaliesaves") || key.includes("keepersaves") || key === "saves") return "goalieSaves";
-  if (key.includes("tackles")) return "tackles";
-  if (key.includes("fantasyscore")) return "fantasyScore";
-  return key;
+  return statProfileKey(prop);
 }
 
 function deterministicRatio(seed) {

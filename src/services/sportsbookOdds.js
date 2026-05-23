@@ -1,4 +1,18 @@
-import { cachedFetch } from "./fetchUtil.js";
+import { fetchJsonSafe, getCacheTtlMs } from "./fetchUtil.js";
+import { canonicalStatType } from "../utils/marketNormalization.js";
+import {
+  SOURCE_IDS,
+  cachedLinesMessage,
+  isSourceInCooldown,
+  recordSource429,
+  recordSourceSuccess,
+  recordSourceFailure,
+  markSourceCached,
+  withSourceRequestLock,
+} from "./sourceRateLimit.js";
+
+const ODDS_CACHE_KEY = "dfs-odds-last-good-comparisons";
+const ODDS_CACHE_MAX_MS = 60 * 60 * 1000;
 
 const SPORT_KEYS = {
   MLB: "baseball_mlb",
@@ -22,6 +36,10 @@ const COMPARISON_BOOKS = new Set([
 const MAX_EVENTS_PER_SPORT = 10;
 
 export async function fetchSportsbookComparison({ props = [] } = {}) {
+  return withSourceRequestLock(SOURCE_IDS.ODDS_API, () => fetchSportsbookComparisonInternal({ props }));
+}
+
+async function fetchSportsbookComparisonInternal({ props = [] } = {}) {
   const apiKey = getOddsApiKey();
   if (!props.length) {
     return {
@@ -38,6 +56,25 @@ export async function fetchSportsbookComparison({ props = [] } = {}) {
     };
   }
 
+  if (isSourceInCooldown(SOURCE_IDS.ODDS_API)) {
+    const cached = readOddsCache();
+    if (cached?.comparisons?.length) {
+      return {
+        source: "Sportsbook comparison",
+        comparisons: cached.comparisons,
+        warnings: [cachedLinesMessage(cached.savedAt) || "Odds API rate limited — using cached comparisons."],
+        cached: true,
+        lastSuccessfulFetchAt: cached.savedAt,
+      };
+    }
+    return {
+      source: "Sportsbook comparison",
+      comparisons: [],
+      warnings: ["Odds API rate limited. No cached comparisons available."],
+      rateLimited: true,
+    };
+  }
+
   const sports = Array.from(new Set(props.map((prop) => prop.sport).filter(Boolean)));
   const settled = await Promise.allSettled(
     sports.map((sport) => fetchSportMarkets(apiKey, sport, props.filter((prop) => prop.sport === sport)))
@@ -50,11 +87,75 @@ export async function fetchSportsbookComparison({ props = [] } = {}) {
     .filter((item) => item.status === "rejected")
     .map((item) => friendlyOddsError(item.reason));
 
+  const rateLimited = warnings.some((warning) => /rate limit|429|API limit/i.test(warning));
+  if (rateLimited) {
+    recordSource429(SOURCE_IDS.ODDS_API);
+    const cached = readOddsCache();
+    if (cached?.comparisons?.length) {
+      return {
+        source: "Sportsbook comparison",
+        comparisons: cached.comparisons,
+        warnings: [cachedLinesMessage(cached.savedAt), ...warnings],
+        cached: true,
+        lastSuccessfulFetchAt: cached.savedAt,
+        rateLimited: true,
+      };
+    }
+  }
+
+  if (comparisons.length) {
+    writeOddsCache(comparisons);
+    recordSourceSuccess(SOURCE_IDS.ODDS_API);
+    return {
+      source: "Sportsbook comparison",
+      comparisons,
+      warnings,
+      lastSuccessfulFetchAt: new Date().toISOString(),
+    };
+  }
+
+  if (warnings.length) {
+    recordSourceFailure(SOURCE_IDS.ODDS_API, warnings[0]);
+    const cached = readOddsCache();
+    if (cached?.comparisons?.length) {
+      markSourceCached(SOURCE_IDS.ODDS_API, cached.savedAt);
+      return {
+        source: "Sportsbook comparison",
+        comparisons: cached.comparisons,
+        warnings: [cachedLinesMessage(cached.savedAt), ...warnings],
+        cached: true,
+        lastSuccessfulFetchAt: cached.savedAt,
+      };
+    }
+  }
+
   return {
     source: "Sportsbook comparison",
     comparisons,
     warnings,
   };
+}
+
+function writeOddsCache(comparisons = []) {
+  try {
+    window.localStorage.setItem(
+      ODDS_CACHE_KEY,
+      JSON.stringify({ savedAt: new Date().toISOString(), comparisons: comparisons.slice(0, 500) })
+    );
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function readOddsCache() {
+  try {
+    const cached = JSON.parse(window.localStorage.getItem(ODDS_CACHE_KEY) || "null");
+    if (!cached?.comparisons || !Array.isArray(cached.comparisons)) return null;
+    if (Date.now() - new Date(cached.savedAt).getTime() > ODDS_CACHE_MAX_MS) return null;
+    return cached;
+  } catch {
+    return null;
+  }
 }
 
 async function fetchSportMarkets(apiKey, sport, propsForSport) {
@@ -63,12 +164,20 @@ async function fetchSportMarkets(apiKey, sport, propsForSport) {
   const markets = unique(propsForSport.map(marketForProp).filter(Boolean));
   if (!markets.length) return [];
 
-  const eventsUrl = new URL(`https://api.the-odds-api.com/v4/sports/${sportKey}/events`);
-  eventsUrl.searchParams.set("apiKey", apiKey);
+  const eventsUrl = sportsbookProxyUrl(`/v4/sports/${sportKey}/events`, { apiKey });
 
-  const eventsResponse = await cachedFetch(eventsUrl.toString());
-  if (!eventsResponse.ok) throw new Error(oddsApiErrorMessage(eventsResponse.status));
-  const events = await eventsResponse.json();
+  const result = await fetchJsonSafe(eventsUrl.toString(), {}, {
+    source: "Sportsbook odds events",
+    ttlMs: getCacheTtlMs(),
+    maxRetries: 0,
+    skip429Retry: true,
+  });
+  if (!result.ok) {
+    if (result.rateLimited) throw new Error(oddsApiErrorMessage(429));
+    throw new Error(result.error || "Could not load sportsbook comparison data.");
+  }
+  const events = result.data;
+  if (events?.error) throw new Error(events.message || "Could not load sportsbook comparison data.");
   const now = Date.now();
   const upcomingEvents = (events || [])
     .filter((event) => new Date(event.commence_time).getTime() > now)
@@ -85,15 +194,25 @@ async function fetchSportMarkets(apiKey, sport, propsForSport) {
 }
 
 async function fetchEventPlayerProps(apiKey, sportKey, sport, eventId, markets) {
-  const url = new URL(`https://api.the-odds-api.com/v4/sports/${sportKey}/events/${eventId}/odds`);
-  url.searchParams.set("apiKey", apiKey);
-  url.searchParams.set("regions", "us");
-  url.searchParams.set("markets", markets.join(","));
-  url.searchParams.set("oddsFormat", "american");
+  const url = sportsbookProxyUrl(`/v4/sports/${sportKey}/events/${eventId}/odds`, {
+    apiKey,
+    regions: "us",
+    markets: markets.join(","),
+    oddsFormat: "american",
+  });
 
-  const response = await cachedFetch(url.toString());
-  if (!response.ok) throw new Error(oddsApiErrorMessage(response.status));
-  const event = await response.json();
+  const result = await fetchJsonSafe(url.toString(), {}, {
+    source: "Sportsbook odds props",
+    ttlMs: getCacheTtlMs(),
+    maxRetries: 0,
+    skip429Retry: true,
+  });
+  if (!result.ok) {
+    if (result.rateLimited) throw new Error(oddsApiErrorMessage(429));
+    throw new Error(result.error || "Could not load sportsbook comparison data.");
+  }
+  const event = result.data;
+  if (event?.error) throw new Error(event.message || "Could not load sportsbook comparison data.");
 
   return (event.bookmakers || [])
     .filter((book) => COMPARISON_BOOKS.has(book.key))
@@ -102,6 +221,15 @@ async function fetchEventPlayerProps(apiKey, sportKey, sport, eventId, markets) 
         (market.outcomes || []).map((outcome) => normalizeOutcome({ sport, book, market, outcome })).filter(Boolean)
       )
     );
+}
+
+function sportsbookProxyUrl(path, params = {}) {
+  const url = new URL("/api/sportsbookOdds", window.location.origin);
+  url.searchParams.set("path", path);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value != null && value !== "") url.searchParams.set(key, value);
+  });
+  return url;
 }
 
 function normalizeOutcome({ sport, book, market, outcome }) {
@@ -173,6 +301,8 @@ function marketForProp(prop) {
   if (prop.sport === "MLB" && key === "strikeouts") return "player_strikeouts";
   if (prop.sport === "MLB" && key === "totalBases") return "batter_total_bases";
   if (prop.sport === "MLB" && key === "hits") return "batter_hits";
+  if (prop.sport === "MLB" && key === "homeRuns") return "batter_home_runs";
+  if (prop.sport === "MLB" && key === "stolenBases") return "batter_stolen_bases";
   if (prop.sport === "MLB" && key === "rbis") return "batter_rbis";
   if (prop.sport === "MLB" && key === "runs") return "batter_runs_scored";
   if (isBasketballSport(prop.sport) && key === "points") return "player_points";
@@ -196,11 +326,15 @@ function statTypeFromMarket(market) {
     player_strikeouts: "Strikeouts",
     batter_total_bases: "Total Bases",
     batter_hits: "Hits",
+    batter_home_runs: "Home Runs",
+    batter_stolen_bases: "Stolen Bases",
     batter_rbis: "RBIs",
     batter_runs_scored: "Runs",
     player_points: "Points",
     player_rebounds: "Rebounds",
     player_assists: "Assists",
+    player_points_rebounds: "Points + Rebounds",
+    player_points_assists: "Points + Assists",
     player_points_rebounds_assists: "Points + Rebounds + Assists",
     player_threes: "3-Pointers Made",
     player_shots: "Shots",
@@ -209,28 +343,6 @@ function statTypeFromMarket(market) {
     player_saves: "Goalie Saves",
   };
   return map[market] || market;
-}
-
-function canonicalStatType(statType) {
-  const key = normalize(statType);
-  if (key.includes("pitchesthrown") || key.includes("pitchcount")) return "pitchesThrown";
-  if (key.includes("strikeout")) return "strikeouts";
-  if (key.includes("hitsrunsrbis") || key.includes("hrr")) return "hitsRunsRbis";
-  if (key.includes("totalbases")) return "totalBases";
-  if (key === "hits") return "hits";
-  if (key === "rbis" || key === "rbi") return "rbis";
-  if (key === "runs") return "runs";
-  if (key.includes("pointsreboundsassists") || key === "pra") return "pra";
-  if (key === "points") return "points";
-  if (key === "rebounds") return "rebounds";
-  if (key === "assists") return "assists";
-  if (key.includes("3pointers") || key.includes("threepointers")) return "threes";
-  if (key.includes("shotsontarget")) return "shotsOnTarget";
-  if (key === "shots" || key.includes("shotsattempted")) return "shots";
-  if (key.includes("passesattempted") || key === "passes") return "passesAttempted";
-  if (key.includes("goalsallowed")) return "goalsAllowed";
-  if (key.includes("goaliesaves") || key.includes("keepersaves") || key === "saves") return "goalieSaves";
-  return key;
 }
 
 function average(values) {
@@ -251,6 +363,7 @@ function getOddsApiKey() {
   try {
     return (
       API_KEY ||
+      window.localStorage.getItem("VITE_ODDS_API_KEY") ||
       window.localStorage.getItem("odds-api-key") ||
       window.localStorage.getItem("the-odds-api-key") ||
       ""

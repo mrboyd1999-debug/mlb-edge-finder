@@ -1,17 +1,74 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchPrizePicksProps } from "./services/prizepicks";
-import { fetchUnderdogProps } from "./services/underdog";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { fetchPrizePicksProps, PRIZEPICKS_RATE_LIMIT_MESSAGE } from "./services/prizepicks";
+import { UNDERDOG_TEMPORARY_MESSAGE } from "./services/underdog";
+import {
+  fetchUnderdogProviderProps,
+  applyUnderdogProviderToDebug,
+  UNDERDOG_SOFT_MESSAGE,
+} from "./services/providers/underdogProvider.js";
+import { resolveSourceHealthState } from "./services/sourceHealth.js";
+import { enrichLineMovementWithTags } from "./services/lineMovementTrust.js";
 import { fetchSportsbookComparison } from "./services/sportsbookOdds";
-import { fetchPlayerStats } from "./services/playerStats";
+import { fetchPlayerStats, findStatProfile } from "./services/playerStats";
+import { PRIZEPICKS_HTML_BANNER } from "./services/prizepicks";
 import { fetchInjuryNews } from "./services/injuryNews";
-import { clearApiCache } from "./services/fetchUtil";
+import { clearApiCache, getRefreshCooldownMs, isDevEnvironment } from "./services/fetchUtil";
+import {
+  withBoardFetchLock,
+  canAutoRefresh,
+  getAutoRefreshIntervalMs,
+  markAutoRefresh,
+  isTabActive,
+} from "./services/fetchCoordinator.js";
+import {
+  isBoardCacheFresh,
+  resolveCacheLayer,
+  formatCacheLayerLabel,
+  CACHE_TTL,
+  readSmartCacheIfFresh,
+  writeSmartCache,
+} from "./services/smartCache.js";
+import {
+  buildSourceHealthSnapshot,
+  formatCooldownRemaining,
+  getMaxCooldownRemainingMs,
+  NO_VERIFIED_AFTER_COOLDOWN_MESSAGE,
+  RATE_LIMIT_COOLDOWN_MESSAGE,
+  SOURCE_IDS,
+} from "./services/sourceRateLimit.js";
+import { normalizeGameStartTime } from "./utils/normalizeGameStartTime.js";
+import { inferSportFromText } from "./utils/sportMappings.js";
+import {
+  APP_SPORTS,
+  isUnsupportedMarket,
+  matchesSelectedSportFilter,
+} from "./utils/marketClassification.js";
+import {
+  attachDebugArtifacts,
+  coercePipelineAudit,
+  createEmptyPipelineAudit,
+  createEmptyPipelineStats,
+  createEmptyValidationSummary,
+  formatGroupedDebugLine,
+  formatRejectionSummary,
+  finalizePipelineCounters,
+  sortGroupedDebugEntries,
+  logPipelineAudit,
+  recordFilterReason,
+  safeCreateEmptyPipelineAudit,
+  safeFormatRejectionSummary,
+} from "./utils/propPipelineDebug.js";
+import {
+  applyQualificationLabels,
+  buildHistoryAccuracyWeights,
+  buildQualificationBoards,
+  isGameNotExpired,
+} from "./services/qualification.js";
 import { dataQualityBadge, dataQualityFromSignals } from "./services/dataQuality";
 import {
-  buildPickExplanation,
-  computeConfidence,
+  computeEdgeScore,
   computeRankScore,
   computeStreakConfidence,
-  confidenceTierLabel,
   estimateModelProbability,
   propPayoutLabel,
 } from "./services/projectionEngine";
@@ -26,15 +83,122 @@ import {
   writeHistory,
   writeLineMovement,
   writeParlayHistory,
+  readManualStatsMap,
+  writeManualStatsForProp,
 } from "./services/pickStore";
+import {
+  assessResearchGaps,
+  buildDataCompletenessScore,
+  buildLowConfidenceReasons,
+  isLineOnlyData,
+  filterReadyToBetProps,
+  isReadyToBet,
+  isEliteTopPickEligible,
+  mergeManualStatsIntoProfile,
+  READY_MIN_CONFIDENCE,
+  READY_MIN_DATA_QUALITY,
+  resolvePickEdge,
+} from "./services/pickScoring.js";
+import { CONFIDENCE_THRESHOLDS } from "./services/confidenceEngine.js";
+import {
+  calculateProjectionConfidence,
+  enrichPropDecision,
+  attachDecisionDebug,
+  isTopPickEligible,
+  isDemonEligible,
+  isBestValueEligible,
+  sortDecisionBoard,
+} from "./services/decisionEngine.js";
+import { enrichLineMovementRecord } from "./services/lineMovementTrust.js";
+import { projectPlayerProp, resolveProjectionEdge, computeProjectionRiskLevel, buildQualificationReason, PROJECTION_CONFIDENCE_THRESHOLDS } from "./services/propProjection.js";
+import {
+  persistBoardOutcomes,
+  autoGradePendingOutcomes,
+  buildOutcomeDashboard,
+  gradeOutcome,
+} from "./services/outcomeTracking.js";
+import {
+  buildStatsMissingExplanation,
+  computeStatConfidenceAdjustments,
+  enrichPlayerProfile,
+  hasVerifiedStats,
+} from "./services/statEnrichment.js";
+import { shouldRouteMlbHitterToResearch } from "./services/mlbHitterConfidence.js";
+import { applySportMarketConfidenceCaps } from "./services/sportMarketConfidence.js";
+import { attachElitePickExplanation } from "./services/pickExplanation.js";
+import {
+  computePreScorePriority,
+  computePropPriorityScore,
+  classifyPriorityTier,
+  isSharpOnlyCandidate,
+  sortBoardProps,
+  BOARD_SORT_MODES,
+} from "./services/propPriority.js";
+import SportTabs from "./components/SportTabs.jsx";
+import TopPicksBoard from "./components/TopPicksBoard.jsx";
+import LazyDebugDetails from "./components/LazyDebugDetails.jsx";
+import GoblinBoard from "./components/GoblinBoard.jsx";
+import DemonBoard from "./components/DemonBoard.jsx";
+import VirtualCardList from "./components/VirtualCardList.jsx";
+import PropFilters from "./components/PropFilters.jsx";
+import PlayerPropCard from "./components/PlayerPropCard.jsx";
+import PickDetailModal from "./components/PickDetailModal.jsx";
+import AccuracyReview from "./components/AccuracyReview.jsx";
+import SourceStatusBar from "./components/SourceStatusBar.jsx";
+import { styles } from "./theme/styles.js";
+import {
+  formatDateTime, formatLeanSide, formatMultiplier, formatNumber, formatMaybeLine,
+  formatPercent, formatSignedNumber, formatSignedPercent, normalize, unique, dateKey, clamp, round, countBy,
+} from "./utils/formatters.js";
+import { confidenceTier, displaySport, isGoblinProp, isDemonProp } from "./utils/propLabels.js";
+import { getStaleFilterReason, labelPartialIfMissingTime } from "./utils/stalePropFilter.js";
+import {
+  DEFAULT_PREGAME_WINDOW_HOURS,
+  filterUpcomingSlate,
+  getSlateFilterReason,
+  isUpcomingSlateProp,
+} from "./utils/slateFilter.js";
+import { dataSourcesUsed } from "./utils/pickAnalysis.js";
+import { isParserMergeComboBug } from "./utils/comboMarkets.js";
+import {
+  MAX_ANALYSIS_PROPS,
+  RENDER_LIMITS,
+  isApprovedMarket,
+} from "./utils/approvedMarkets.js";
+import {
+  MLB_ONLY_MODE,
+  emptySourcePipelineAudit,
+  filterActiveSportProps,
+  getActiveFetchSport,
+  getActivePriorityPropTypes,
+  getActiveSportFilterOptions,
+  getActiveStreakTabOptions,
+  guardMlbOnlyProp,
+  sanitizeBoardForMlbOnly,
+  sanitizeDebugInfoForMlbOnly,
+} from "./utils/mlbOnlyMode.js";
+import { runFilterPipeline, runUiPipeline } from "./utils/pipelineStages.js";
+import { isDebugPanelEnabled, isHeavyDebugEnabled, shouldLogVerbose, shouldTrackRejectedProps } from "./utils/devMode.js";
+import { canonicalStatType } from "./utils/marketNormalization.js";
+import {
+  filterVerifiedSportsbookProps,
+  isVerifiedSportsbookProp,
+  NO_VERIFIED_PROPS_MESSAGE,
+  validateAndFilterProps,
+  validateProp,
+} from "./utils/propValidation.js";
 
 const HISTORY_KEY = "props-of-the-day-history";
 const PARLAY_HISTORY_KEY = "dfs-pickem-parlay-history";
 const LINE_MOVEMENT_KEY = "dfs-pickem-line-movement";
 const PROPS_OF_DAY_LIMIT = 9;
-const MAX_RANKED_PROPS = 240;
-const MAX_WATCHLIST_PROPS = 240;
-const MAX_STREAK_PROPS = 3000;
+const MAX_RANKED_PROPS = RENDER_LIMITS.readyToBet + 20;
+const MAX_WATCHLIST_PROPS = 40;
+const MAX_STREAK_PROPS = RENDER_LIMITS.goblins + RENDER_LIMITS.demons + 32;
+const MAX_PRE_SCORE_PROPS = MAX_ANALYSIS_PROPS;
+const INITIAL_VISIBLE_SECTION_LIMIT = 10;
+const VISIBLE_SECTION_LIMIT = RENDER_LIMITS.readyToBet;
+const HISTORY_LIMIT = 100;
 const BACKUP_STREAK_LIMIT = 12;
 const LADDER_STREAK_LIMIT = 12;
 const AVOID_STREAK_LIMIT = 12;
@@ -42,11 +206,64 @@ const MIN_RECOMMENDED_EDGE = 0.5;
 const MIN_RECOMMENDED_CONFIDENCE = 55;
 const MIN_STREAK_CONFIDENCE = 65;
 const MIN_GOBLIN_CONFIDENCE = 68;
-const MIN_DEMON_CONFIDENCE = 60;
-const MIN_START_BUFFER_MS = 0;
+const MIN_DEMON_CONFIDENCE = CONFIDENCE_THRESHOLDS.DEMON;
+const MIN_START_BUFFER_MS = 60 * 1000;
 const NO_EDGE_MESSAGE = "No betting edge detected. More data needed before this becomes a confident pick.";
 const NEEDS_STATS_MESSAGE = "This prop needs more stats before a confident pick can be made.";
 const STREAK_WARNING = "Low multiplier does not guarantee the pick will hit. Verify before adding to streak.";
+const NO_ACTIVE_SCHEDULED_PROPS_MESSAGE = NO_VERIFIED_PROPS_MESSAGE;
+const SETTINGS_KEYS = ["VITE_ODDS_API_KEY", "PRIZEPICKS_PROXY_URL", "UNDERDOG_PROXY_URL"];
+const INCLUDE_UNCERTAIN_KEY = "dfs-include-uncertain-props";
+const FILTER_PREFS_KEY = "dfs-filter-prefs";
+const COMPACT_MODE_KEY = "dfs-compact-mode";
+
+const DEFAULT_FILTER_PREFS = {
+  hideResearchOnly: false,
+  hideUnsupportedMarkets: true,
+  hideEsports: true,
+  excludeUnsupportedMarkets: true,
+  pregameWindowHours: DEFAULT_PREGAME_WINDOW_HOURS,
+  boardSortMode: BOARD_SORT_MODES.priority,
+  sharpOnly: false,
+};
+
+function readFilterPrefs() {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(FILTER_PREFS_KEY) || "null");
+    return { ...DEFAULT_FILTER_PREFS, ...(stored || {}) };
+  } catch {
+    return { ...DEFAULT_FILTER_PREFS };
+  }
+}
+
+function writeFilterPrefs(prefs) {
+  try {
+    window.localStorage.setItem(FILTER_PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    // ignore
+  }
+}
+
+function readCompactModePreference() {
+  try {
+    const stored = window.localStorage.getItem(COMPACT_MODE_KEY);
+    return stored == null ? true : stored !== "false";
+  } catch {
+    return true;
+  }
+}
+
+function writeCompactModePreference(value) {
+  try {
+    window.localStorage.setItem(COMPACT_MODE_KEY, value ? "true" : "false");
+  } catch {
+    // ignore
+  }
+}
+
+function yieldToMainThread() {
+  return new Promise((resolve) => window.setTimeout(resolve, 0));
+}
 
 const DEFAULT_SOURCE_STATUS = {
   PrizePicks: "Pending",
@@ -54,41 +271,229 @@ const DEFAULT_SOURCE_STATUS = {
   "The Odds API": "Pending",
 };
 
-const UNDERDOG_UNAVAILABLE_MESSAGE = "Underdog data source not connected or unavailable.";
+const UNDERDOG_DEGRADED_MESSAGE = "Underdog temporarily unavailable.";
+const UNDERDOG_UNAVAILABLE_MESSAGE = UNDERDOG_DEGRADED_MESSAGE;
+
+/** Underdog failures must never become red critical UI when MLB-only + PrizePicks props are live. */
+function isNonCriticalUnderdogFailure(message = "") {
+  const text = String(message || "").trim();
+  if (!text) return false;
+  return (
+    /underdog/i.test(text) ||
+    /provider unavailable/i.test(text) ||
+    /upstream unavailable/i.test(text) ||
+    /underdog unavailable/i.test(text) ||
+    /underdog temporarily unavailable/i.test(text) ||
+    /underdog provider returned/i.test(text) ||
+    /underdog data source/i.test(text) ||
+    /data source not connected/i.test(text) ||
+    /not connected or unavailable/i.test(text)
+  );
+}
+
+function isIndirectSourceFailureBanner(message = "") {
+  return /some data sources failed/i.test(String(message || ""));
+}
+
+function prizePicksHasUsableProps(props = [], sourceStatus = {}) {
+  const list = props || [];
+  if (!list.length) return false;
+  if (MLB_ONLY_MODE) {
+    return list.some((prop) => guardMlbOnlyProp(prop)) || list.length > 0;
+  }
+  if (String(sourceStatus.PrizePicks || "").toLowerCase() === "failed") return false;
+  return list.some((prop) => normalize(prop.platform) === "prizepicks");
+}
+
+function shouldSuppressCriticalUiMessage(message = "", props = [], sourceStatus = {}) {
+  if (!message) return false;
+  if (isNonCriticalUnderdogFailure(message)) return true;
+  if (MLB_ONLY_MODE && prizePicksHasUsableProps(props, sourceStatus) && isIndirectSourceFailureBanner(message)) {
+    return true;
+  }
+  return false;
+}
+
+function filterCriticalUiMessages(messages = [], props = [], sourceStatus = {}) {
+  return unique((messages || []).filter((message) => !shouldSuppressCriticalUiMessage(message, props, sourceStatus)));
+}
+
+function resolveUiErrorMessage(message = "", props = [], sourceStatus = {}) {
+  if (!message) return "";
+  return shouldSuppressCriticalUiMessage(message, props, sourceStatus) ? "" : String(message);
+}
+
+function collectBoardWarningMessages(board = {}) {
+  return unique([
+    ...(board.criticalWarnings || []),
+    ...(board.warnings || []),
+    ...(board.degradedWarnings || []),
+  ]);
+}
+
+function sanitizeCriticalWarningsForDisplay(warnings = [], props = [], sourceStatus = {}) {
+  return filterCriticalUiMessages(warnings, props, sourceStatus);
+}
+
+function sanitizeDegradedWarningsForDisplay(warnings = [], props = [], sourceStatus = {}) {
+  if (MLB_ONLY_MODE && prizePicksHasUsableProps(props, sourceStatus)) return [];
+  return filterCriticalUiMessages(warnings, props, sourceStatus);
+}
+
+function isUnderdogOnlyFailure(...messages) {
+  const entries = messages.flat().filter(Boolean).map(String);
+  if (!entries.length) return false;
+  return entries.every((entry) => isNonCriticalUnderdogFailure(entry) || isIndirectSourceFailureBanner(entry));
+}
+
+function normalizeUnderdogStatusForMlb(status = "", fallback = "Unavailable") {
+  const text = String(status || "").trim();
+  if (!text || text === "Pending") return fallback;
+  if (["Connected", "Full", "Cached"].includes(text)) return text;
+  return "Unavailable";
+}
+
+function getErrorMessage(error) {
+  if (!error) return "Unknown error";
+  if (typeof error === "string") return error;
+  if (error.message) return error.message;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function sourceFailureMessage(label, error) {
+  const detail = getErrorMessage(error);
+  return detail && detail !== "Unknown error" && !detail.includes(label) ? `${label} ${detail}` : label;
+}
+
+function normalizeSourceState(status, fallback = "Failed") {
+  const text = String(status || "").trim();
+  if (!text || text === "Pending") return fallback;
+  if (text === "Connected" || text === "Full") return "Full";
+  if (text === "Cached") return "Cached";
+  if (text === "Unavailable") return "Unavailable";
+  if (/setup/i.test(text)) return "Fallback";
+  if (/partial/i.test(text)) return "Partial";
+  if (/fallback/i.test(text)) return "Fallback";
+  if (/failed|not connected|unavailable/i.test(text)) return "Failed";
+  return text;
+}
+
+function finalizeSourceStatus(sourceStatus, fallback = {}) {
+  const underdogFallback = MLB_ONLY_MODE ? fallback.Underdog || "Unavailable" : fallback.Underdog || "Failed";
+  return {
+    PrizePicks: normalizeSourceState(sourceStatus.PrizePicks, fallback.PrizePicks || "Failed"),
+    Underdog: MLB_ONLY_MODE
+      ? normalizeUnderdogStatusForMlb(sourceStatus.Underdog, underdogFallback)
+      : normalizeSourceState(sourceStatus.Underdog, underdogFallback),
+    "The Odds API": normalizeSourceState(sourceStatus["The Odds API"], fallback["The Odds API"] || "Partial"),
+  };
+}
 
 function buildSourceHealth(backgroundWarnings = [], sourceFailures = [], sourceStatus = {}) {
   const health = {
-    BallDontLie: "Connected",
-    "Soccer stats": "Connected",
-    "WNBA stats": "Connected",
+    PrizePicks: normalizeSourceState(sourceStatus.PrizePicks),
+    Underdog: normalizeSourceState(sourceStatus.Underdog),
+    BallDontLie: "Full",
+    "Soccer stats": "Full",
+    "WNBA stats": "Full",
   };
   const text = backgroundWarnings.join(" ").toLowerCase();
-  if (/balldontlie|nba stat/.test(text)) health.BallDontLie = "Partial/fallback";
-  if (/soccer player stats|soccer stat/.test(text)) health["Soccer stats"] = "Partial/fallback";
-  if (/wnba stat/.test(text)) health["WNBA stats"] = "Partial/fallback";
+  if (/balldontlie|nba stat/.test(text)) health.BallDontLie = "Fallback";
+  if (/soccer player stats|soccer stat/.test(text)) health["Soccer stats"] = "Fallback";
+  if (/wnba stat/.test(text)) health["WNBA stats"] = "Fallback";
+  if (sourceStatus.PrizePicks === "Fallback") health.PrizePicks = "Fallback";
+  if (sourceStatus.Underdog === "Fallback") health.Underdog = "Fallback";
   if (sourceFailures.length && sourceStatus.PrizePicks === "Failed") health.PrizePicks = "Failed";
-  if (sourceFailures.length && sourceStatus.Underdog === "Failed") health.Underdog = "Failed";
+  if (sourceFailures.length && sourceStatus.Underdog === "Failed") {
+    health.Underdog = MLB_ONLY_MODE ? "Partial" : "Failed";
+  }
   return health;
+}
+
+const API_TEST_ROUTES = [
+  "/api/health",
+  "/api/prizepicks",
+  "/api/underdog",
+  "/api/underdog/beta/v5/over_under_lines",
+];
+
+async function probeApiRoute(route) {
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(route, { cache: "no-store", signal: controller.signal });
+    const contentType = response.headers.get("content-type") || "no content-type";
+    const text = await response.text();
+    const trimmed = text.trim();
+    const looksJson =
+      /json/i.test(contentType) || trimmed.startsWith("{") || trimmed.startsWith("[");
+    const looksHtml = trimmed.startsWith("<") || /text\/html/i.test(contentType);
+    return {
+      route,
+      ok: response.ok && looksJson && !looksHtml,
+      status: response.status,
+      contentType,
+      preview: text.slice(0, 120).replace(/\s+/g, " ").trim() || "(empty)",
+      durationMs: Date.now() - startedAt,
+    };
+  } catch (error) {
+    const message = error?.message || "Failed to fetch";
+    return {
+      route,
+      ok: false,
+      status: "?",
+      contentType: "no content-type",
+      preview: /abort/i.test(message) ? "Request timed out after 15s" : message,
+      durationMs: Date.now() - startedAt,
+    };
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 function partitionWarnings(backgroundWarnings, sourceFailures, sourceStatus) {
   const criticalPatterns = [
     /could not load prizepicks/i,
-    /underdog unavailable/i,
-    /underdog data source not connected/i,
     /no active scheduled props/i,
   ];
-  const criticalWarnings = unique([
-    ...sourceFailures,
-    ...backgroundWarnings.filter((warning) => criticalPatterns.some((pattern) => pattern.test(warning))),
+  const underdogPattern = /underdog/i;
+  const degradedWarnings = unique([
+    ...backgroundWarnings.filter((warning) => underdogPattern.test(String(warning))),
+    ...sourceFailures.filter((warning) => underdogPattern.test(String(warning))),
   ]);
+  const criticalWarnings = unique([
+    ...sourceFailures.filter((warning) => !underdogPattern.test(String(warning))),
+    ...backgroundWarnings.filter(
+      (warning) =>
+        criticalPatterns.some((pattern) => pattern.test(warning)) && !underdogPattern.test(String(warning))
+    ),
+  ]);
+  if (MLB_ONLY_MODE) {
+    return {
+      criticalWarnings: filterCriticalUiMessages(criticalWarnings, [], sourceStatus),
+      degradedWarnings: filterCriticalUiMessages(degradedWarnings, [], sourceStatus),
+      sourceHealth: {
+        PrizePicks: normalizeSourceState(sourceStatus.PrizePicks),
+        Underdog: normalizeUnderdogStatusForMlb(sourceStatus.Underdog, "Unavailable"),
+        "The Odds API": normalizeSourceState(sourceStatus["The Odds API"], "Partial"),
+        injuries: backgroundWarnings.some((w) => /injury|news/i.test(w)) ? "Partial" : "Full",
+        ...buildSourceHealth(backgroundWarnings, sourceFailures, sourceStatus),
+      },
+    };
+  }
   const sourceHealth = {
-    PrizePicks: sourceStatus.PrizePicks || "Pending",
-    Underdog: sourceStatus.Underdog || "Pending",
-    "The Odds API": sourceStatus["The Odds API"] || "Pending",
+    PrizePicks: normalizeSourceState(sourceStatus.PrizePicks),
+    Underdog: normalizeSourceState(sourceStatus.Underdog),
+    "The Odds API": normalizeSourceState(sourceStatus["The Odds API"], "Partial"),
+    injuries: backgroundWarnings.some((w) => /injury|news/i.test(w)) ? "Partial" : "Full",
     ...buildSourceHealth(backgroundWarnings, sourceFailures, sourceStatus),
   };
-  return { criticalWarnings, sourceHealth };
+  return { criticalWarnings, degradedWarnings, sourceHealth };
 }
 
 const PLATFORM_OPTIONS = [
@@ -102,35 +507,52 @@ const EDGE_FILTER_OPTIONS = [
   { id: "all", label: "All Edges" },
   { id: "highConfidence", label: "High Confidence" },
   { id: "valuePlays", label: "Value Plays" },
+  { id: "safeFloor", label: "Safe Floor" },
+  { id: "boomUpside", label: "Boom/Upside" },
   { id: "earlyLines", label: "Early Lines" },
+];
+
+const DATE_FILTER_OPTIONS = [
+  { id: "allUpcoming", label: "All upcoming" },
+  { id: "today", label: "Today" },
+  { id: "tomorrow", label: "Tomorrow" },
 ];
 
 const BASE_SPORT_OPTIONS = [
   { value: "all", label: "All Sports" },
-  { value: "WNBA", label: "WNBA" },
-  { value: "NBA", label: "NBA" },
   { value: "MLB", label: "MLB" },
+  { value: "NBA", label: "NBA" },
+  { value: "WNBA", label: "WNBA" },
   { value: "Tennis", label: "Tennis" },
-  { value: "Soccer", label: "Soccer" },
 ];
 
-const STREAK_TAB_OPTIONS = [
+const ALL_STREAK_TAB_OPTIONS = [
   { value: "MLB", label: "MLB", type: "sport", always: true },
   { value: "WNBA", label: "WNBA", type: "sport", always: true },
   { value: "NBA", label: "NBA", type: "sport", always: true },
-  { value: "Soccer", label: "Soccer", type: "sport", always: true },
+  { value: "Tennis", label: "Tennis", type: "sport", always: true },
   { value: "goblins", label: "Goblins", type: "goblin", always: true },
   { value: "demons", label: "Demons", type: "demon", always: true },
 ];
 
-const SUPPORTED_SPORTS = new Set(["MLB", "NBA", "WNBA", "ATP Tennis", "WTA Tennis", "Tennis", "Soccer", "NFL", "NCAAF", "NHL"]);
+const STREAK_TAB_OPTIONS = getActiveStreakTabOptions(ALL_STREAK_TAB_OPTIONS);
 
-const PRIORITY_PROP_TYPES = [
+const SUPPORTED_SPORTS = MLB_ONLY_MODE
+  ? new Set(["MLB"])
+  : new Set(["MLB", "NBA", "WNBA", "ATP Tennis", "WTA Tennis", "Tennis", "NHL"]);
+
+const PRIORITY_PROP_TYPES = getActivePriorityPropTypes([
   "all",
   "Pitcher Strikeouts",
   "Pitches Thrown",
   "Hits+Runs+RBIs",
   "Total Bases",
+  "Singles",
+  "Doubles",
+  "Triples",
+  "Home Runs",
+  "Stolen Bases",
+  "Walks",
   "Hits",
   "RBIs",
   "Runs",
@@ -139,8 +561,11 @@ const PRIORITY_PROP_TYPES = [
   "Rebounds",
   "Assists",
   "Points + Rebounds + Assists",
+  "Rebounds + Assists",
   "3-Pointers Made",
   "Total Games",
+  "Total Sets",
+  "Total Tie Breaks",
   "Aces",
   "Double Faults",
   "Break Points",
@@ -149,152 +574,470 @@ const PRIORITY_PROP_TYPES = [
   "Goals Allowed",
   "Goalie Saves",
   "Passes Attempted",
-];
+  "Crosses",
+  "Time On Ice",
+]);
 
 const REALISTIC_PROJECTION_RANGES = [
   { sport: "MLB", match: (key) => key.includes("pitchesthrown") || key.includes("pitchcount"), label: "MLB Pitches Thrown", min: 40, max: 130 },
   { sport: "MLB", match: (key) => key.includes("strikeout") && !key.includes("hitter") && !key.includes("batter"), label: "MLB Strikeouts", min: 0, max: 15 },
   { sport: "MLB", match: (key) => key.includes("hitsrunsrbis") || key.includes("hrr"), label: "MLB Hits+Runs+RBIs", min: 0, max: 8 },
-  { sport: "MLB", match: (key) => key.includes("totalbases"), label: "MLB Total Bases", min: 0, max: 8 },
+  { sport: "MLB", match: (key) => key.includes("totalbases") || key === "tb", label: "MLB Total Bases", min: 0, max: 8 },
+  { sport: "MLB", match: (key) => key === "singles" || key.includes("single"), label: "MLB Singles", min: 0, max: 4 },
+  { sport: "MLB", match: (key) => key === "doubles" || key === "double", label: "MLB Doubles", min: 0, max: 3 },
+  { sport: "MLB", match: (key) => key === "triples" || key.includes("triple"), label: "MLB Triples", min: 0, max: 2 },
+  { sport: "MLB", match: (key) => key.includes("homerun") || key === "hr", label: "MLB Home Runs", min: 0, max: 3 },
+  { sport: "MLB", match: (key) => key.includes("stolenbase") || key === "sb", label: "MLB Stolen Bases", min: 0, max: 3 },
+  { sport: "MLB", match: (key) => key === "batterwalks" || key === "walks" || key === "bb", label: "MLB Walks", min: 0, max: 3 },
   { sport: "MLB", match: (key) => key === "hits", label: "MLB Hits", min: 0, max: 5 },
   { sport: "MLB", match: (key) => key === "rbis" || key === "rbi", label: "MLB RBIs", min: 0, max: 6 },
   { sport: "MLB", match: (key) => key === "runs", label: "MLB Runs", min: 0, max: 5 },
+  { sport: "MLB", match: (key) => key === "outs" || key.includes("pitchingout"), label: "MLB Pitching Outs", min: 0, max: 27 },
+  { sport: "MLB", match: (key) => key.includes("hitsallowed"), label: "MLB Hits Allowed", min: 0, max: 12 },
+  { sport: "MLB", match: (key) => key.includes("earnedrun"), label: "MLB Earned Runs Allowed", min: 0, max: 8 },
   { sport: "MLB", match: (key) => key.includes("fantasyscore"), label: "MLB Fantasy Score", min: 0, max: 70 },
   { sport: "NBA", match: (key) => key === "points", label: "NBA Points", min: 0, max: 60 },
   { sport: "NBA", match: (key) => key === "rebounds", label: "NBA Rebounds", min: 0, max: 25 },
   { sport: "NBA", match: (key) => key === "assists", label: "NBA Assists", min: 0, max: 20 },
+  { sport: "NBA", match: (key) => key === "pr" || key.includes("pointsrebounds"), label: "NBA PR", min: 0, max: 80 },
+  { sport: "NBA", match: (key) => key === "pa" || key.includes("pointsassists"), label: "NBA PA", min: 0, max: 80 },
+  { sport: "NBA", match: (key) => key === "ra" || key.includes("reboundsassists") || key.includes("rebsasts"), label: "NBA RA", min: 0, max: 35 },
   { sport: "NBA", match: (key) => key.includes("pointsreboundsassists") || key === "pra", label: "NBA PRA", min: 0, max: 100 },
-  { sport: "NBA", match: (key) => key.includes("3pointers") || key.includes("threepointers"), label: "NBA 3-Pointers Made", min: 0, max: 12 },
+  { sport: "NBA", match: (key) => key.includes("3pointers") || key.includes("threepointers") || key.includes("3ptmade") || key === "3pm" || key === "3pt", label: "NBA 3-Pointers Made", min: 0, max: 12 },
+  { sport: "NBA", match: (key) => key.includes("doubledouble"), label: "NBA Double-Double", min: 0, max: 1, step: 1 },
+  { sport: "NBA", match: (key) => key.includes("1st3min") || key.includes("first3min"), label: "NBA Points 1st 3 Minutes", min: 0, max: 20 },
+  { sport: "NBA", match: (key) => key.includes("quarter") && key.includes("3"), label: "NBA Quarter Props", min: 0, max: 4 },
   { sport: "WNBA", match: (key) => key === "points", label: "WNBA Points", min: 0, max: 60 },
   { sport: "WNBA", match: (key) => key === "rebounds", label: "WNBA Rebounds", min: 0, max: 25 },
   { sport: "WNBA", match: (key) => key === "assists", label: "WNBA Assists", min: 0, max: 20 },
+  { sport: "WNBA", match: (key) => key === "pr" || key.includes("pointsrebounds"), label: "WNBA PR", min: 0, max: 80 },
+  { sport: "WNBA", match: (key) => key === "pa" || key.includes("pointsassists"), label: "WNBA PA", min: 0, max: 80 },
+  { sport: "WNBA", match: (key) => key === "ra" || key.includes("reboundsassists") || key.includes("rebsasts"), label: "WNBA RA", min: 0, max: 35 },
   { sport: "WNBA", match: (key) => key.includes("pointsreboundsassists") || key === "pra", label: "WNBA PRA", min: 0, max: 100 },
-  { sport: "WNBA", match: (key) => key.includes("3pointers") || key.includes("threepointers"), label: "WNBA 3-Pointers Made", min: 0, max: 12 },
+  { sport: "WNBA", match: (key) => key.includes("3pointers") || key.includes("threepointers") || key.includes("3ptmade") || key === "3pm" || key === "3pt", label: "WNBA 3-Pointers Made", min: 0, max: 12 },
+  { sport: "WNBA", match: (key) => key.includes("doubledouble"), label: "WNBA Double-Double", min: 0, max: 1, step: 1 },
+  { sport: "WNBA", match: (key) => key.includes("1st3min") || key.includes("first3min"), label: "WNBA Points 1st 3 Minutes", min: 0, max: 20 },
+  { sport: "WNBA", match: (key) => key.includes("quarter") && key.includes("3"), label: "WNBA Quarter Props", min: 0, max: 4 },
   { sport: "Tennis", match: (key) => key.includes("gameswon") || key.includes("playergames"), label: "Tennis Games Won", min: 0, max: 30 },
   { sport: "Tennis", match: (key) => key.includes("totalgames"), label: "Tennis Total Games", min: 12, max: 65 },
   { sport: "Tennis", match: (key) => key.includes("fantasyscore"), label: "Tennis Fantasy Score", min: 0, max: 90 },
   { sport: "Tennis", match: (key) => key.includes("aces"), label: "Tennis Aces", min: 0, max: 40 },
   { sport: "Tennis", match: (key) => key.includes("doublefault"), label: "Tennis Double Faults", min: 0, max: 20 },
+  { sport: "Tennis", match: (key) => key.includes("totalsets"), label: "Tennis Total Sets", min: 2, max: 5 },
+  { sport: "Tennis", match: (key) => key.includes("totaltiebreak") || key.includes("tiebreak"), label: "Tennis Total Tie Breaks", min: 0, max: 4 },
+  { sport: "Tennis", match: (key) => key.includes("breakpoint"), label: "Tennis Break Points", min: 0, max: 20 },
+  { sport: "NHL", match: (key) => key.includes("timeonice") || key === "toi", label: "NHL Time On Ice", min: 8, max: 30 },
   { sport: "Soccer", match: (key) => key === "shots" || key.includes("shotsattempted"), label: "Soccer Shots", min: 0, max: 10 },
   { sport: "Soccer", match: (key) => key.includes("shotsontarget"), label: "Soccer Shots On Target", min: 0, max: 7 },
   { sport: "Soccer", match: (key) => key.includes("passesattempted") || key === "passes", label: "Soccer Passes Attempted", min: 0, max: 140 },
+  { sport: "Soccer", match: (key) => key.includes("crosses") || key === "cross", label: "Soccer Crosses", min: 0, max: 25 },
   { sport: "Soccer", match: (key) => key.includes("goalsallowed"), label: "Soccer Goals Allowed", min: 0, max: 8 },
   { sport: "Soccer", match: (key) => key.includes("goaliesaves") || key.includes("keepersaves") || key === "saves", label: "Soccer Goalie Saves", min: 0, max: 15 },
 ];
 
-async function fetchDFSProps({ platform = "both", sport = "all", statType = "all" } = {}) {
-  console.info("[DFS Source Audit] fetchDFSProps requested", { platform, sport, statType });
-  const sourceJobs = [];
-  if (platform === "both" || platform === "all" || platform === "prizepicks") {
-    sourceJobs.push({
-      label: "PrizePicks",
-      run: () => fetchPrizePicksProps({ sport, statType: "all" }),
-    });
+function readRuntimeSettings() {
+  return Object.fromEntries(
+    SETTINGS_KEYS.map((key) => {
+      try {
+        return [key, window.localStorage.getItem(key) || ""];
+      } catch {
+        return [key, ""];
+      }
+    })
+  );
+}
+
+function writeRuntimeSettings(settings = {}) {
+  SETTINGS_KEYS.forEach((key) => {
+    const value = String(settings[key] || "").trim();
+    try {
+      if (value) window.localStorage.setItem(key, value);
+      else window.localStorage.removeItem(key);
+    } catch {
+      // ignore private-mode storage errors
+    }
+  });
+  try {
+    const oddsKey = String(settings.VITE_ODDS_API_KEY || "").trim();
+    if (oddsKey) window.localStorage.setItem("odds-api-key", oddsKey);
+  } catch {
+    // ignore
   }
-  if (platform === "both" || platform === "all" || platform === "underdog") {
-    sourceJobs.push({
-      label: "Underdog",
-      run: () => fetchUnderdogProps({ sport, statType: "all" }),
+}
+
+function prizePicksSucceeded(result) {
+  const status = String(result?.status || "");
+  return Boolean(result?.props?.length) && !["Failed"].includes(status);
+}
+
+function countPropCacheLayers(props = []) {
+  let cached = 0;
+  let live = 0;
+  let stale = 0;
+  props.forEach((prop) => {
+    const badge = String(prop.lineSourceBadge || "LIVE").toUpperCase();
+    if (badge === "CACHED") cached += 1;
+    else if (badge === "STALE") stale += 1;
+    else live += 1;
+  });
+  return { cached, live, stale };
+}
+
+function buildApiHealthFromBoard(board, cacheLayer = "") {
+  const pp = board?.debugInfo?.sources?.PrizePicks || {};
+  const ud = board?.debugInfo?.sources?.Underdog || {};
+  const odds = board?.debugInfo?.sources?.["The Odds API"] || {};
+  const sourceSnapshot = buildSourceHealthSnapshot();
+  const boardTs = board?.updatedAt ? new Date(board.updatedAt).getTime() : 0;
+  const resolveBadge = (row, status, fallbackTs = boardTs) =>
+    resolveSourceHealthState({
+      status: status || row.status,
+      lineSourceBadge: row.lineSourceBadge || row.providerHealth || row.health,
+      lastFetchAt: row.lastSuccessfulFetchAt || fallbackTs,
+      hasData: Number(row.propsAfterParsing || row.rawPropsLoaded || 0) > 0,
     });
+  const cacheLayerLabel =
+    cacheLayer === "fresh"
+      ? "LIVE"
+      : boardTs
+        ? formatCacheLayerLabel(resolveCacheLayer(boardTs, CACHE_TTL.BOARD_MS))
+        : formatCacheLayerLabel(String(cacheLayer || "EMPTY").toUpperCase());
+  return {
+    PrizePicks: {
+      status: sourceSnapshot[SOURCE_IDS.PRIZEPICKS]?.status || board?.sourceStatus?.PrizePicks || pp.status || "Pending",
+      lastFetchAt: pp.lastSuccessfulFetchAt || sourceSnapshot.PrizePicks?.lastSuccessfulFetchAt || board?.updatedAt || "",
+      lineSourceBadge: resolveBadge(pp, board?.sourceStatus?.PrizePicks),
+      cooldownRemainingMs: sourceSnapshot.PrizePicks?.cooldownRemainingMs || 0,
+      cacheAge: sourceSnapshot.PrizePicks?.cacheAge || "",
+      requestCount: sourceSnapshot.PrizePicks?.requestCount || 0,
+      lastError: sourceSnapshot.PrizePicks?.lastError || pp.message || "",
+    },
+    Underdog: {
+      status: sourceSnapshot.Underdog?.status || board?.sourceStatus?.Underdog || ud.status || "Pending",
+      lastFetchAt: ud.lastSuccessfulFetchAt || sourceSnapshot.Underdog?.lastSuccessfulFetchAt || board?.updatedAt || "",
+      lineSourceBadge: resolveBadge(ud, board?.sourceStatus?.Underdog),
+      cooldownRemainingMs: sourceSnapshot.Underdog?.cooldownRemainingMs || 0,
+      cacheAge: sourceSnapshot.Underdog?.cacheAge || "",
+      requestCount: sourceSnapshot.Underdog?.requestCount || 0,
+      lastError:
+        MLB_ONLY_MODE && (board?.props?.length || 0) > 0
+          ? ""
+          : filterCriticalUiMessages(
+              [sourceSnapshot.Underdog?.lastError, ud.message].filter(Boolean),
+              board?.props || [],
+              board?.sourceStatus || {}
+            ).join(" | "),
+    },
+    OddsAPI: {
+      status: sourceSnapshot[SOURCE_IDS.ODDS_API]?.status || odds.status || board?.sourceStatus?.["The Odds API"] || "Pending",
+      lastFetchAt: odds.lastSuccessfulFetchAt || sourceSnapshot[SOURCE_IDS.ODDS_API]?.lastSuccessfulFetchAt || "",
+      lineSourceBadge: resolveBadge(odds, board?.sourceStatus?.["The Odds API"]),
+      cooldownRemainingMs: sourceSnapshot[SOURCE_IDS.ODDS_API]?.cooldownRemainingMs || 0,
+      cacheAge: sourceSnapshot.OddsAPI?.cacheAge || "",
+      requestCount: sourceSnapshot[SOURCE_IDS.ODDS_API]?.requestCount || 0,
+      lastError: sourceSnapshot[SOURCE_IDS.ODDS_API]?.lastError || odds.message || "",
+    },
+    cache: {
+      status: cacheLayerLabel,
+      lastFetchAt: board?.updatedAt || "",
+    },
+  };
+}
+
+function applySourceResult({
+  label,
+  result,
+  sourceWarnings,
+  sourceFailures,
+  rawProps,
+  sourceStatus,
+  debugInfo,
+}) {
+  const props = result.props || [];
+  const valueStatus = result.status || (label === "Underdog" ? "Connected" : "Full");
+  sourceStatus[label] = valueStatus;
+
+  if (label === "Underdog" && (valueStatus === "Failed" || valueStatus === "Unavailable")) {
+    const detailWarnings = result.warnings?.length ? result.warnings : [UNDERDOG_UNAVAILABLE_MESSAGE];
+    sourceStatus.Underdog = "Unavailable";
+    detailWarnings.forEach((warning) => {
+      if (!sourceWarnings.includes(warning)) sourceWarnings.push(warning);
+    });
+    debugInfo.sources[label] = {
+      ...debugInfo.sources[label],
+      status: "Unavailable",
+      apiStatus: result.debug?.apiStatus || "Unavailable",
+      apiUrl: result.debug?.apiUrl || "",
+      endpointsTried: result.debug?.endpointsTried || [],
+      rawPropsLoaded: 0,
+      propsAfterParsing: 0,
+      message: result.debug?.message || detailWarnings.join(" | "),
+      lastSuccessfulFetchAt: result.lastSuccessfulFetchAt || "",
+      lineSourceBadge: result.lineSourceBadge || result.health || "STALE",
+    };
+    return false;
   }
 
-  const settledSources = await Promise.allSettled(sourceJobs.map((job) => job.run()));
+  if (valueStatus === "Failed") {
+    const detailWarnings = result.warnings || [];
+    sourceWarnings.push(...detailWarnings);
+    if (label === "PrizePicks") {
+      sourceFailures.push(...(detailWarnings.length ? detailWarnings : ["PrizePicks data failed to load."]));
+    }
+    debugInfo.sources[label] = {
+      ...debugInfo.sources[label],
+      status: "Failed",
+      apiStatus: result.debug?.apiStatus || "Failed",
+      apiUrl: result.debug?.apiUrl || "",
+      endpointsTried: result.debug?.endpointsTried || [],
+      rawPropsLoaded: 0,
+      propsAfterParsing: 0,
+      message: result.debug?.message || detailWarnings.join(" | "),
+      lastSuccessfulFetchAt: result.lastSuccessfulFetchAt || "",
+      lineSourceBadge: result.lineSourceBadge || "",
+    };
+    return false;
+  }
+
+  if (label === "Underdog" && (!props.length || !["Connected", "Cached", "Full"].includes(valueStatus))) {
+    sourceStatus.Underdog = props.length ? valueStatus : "Unavailable";
+    if (!props.length && !sourceWarnings.includes(UNDERDOG_UNAVAILABLE_MESSAGE)) {
+      sourceWarnings.push(UNDERDOG_UNAVAILABLE_MESSAGE);
+    }
+  }
+
+  rawProps.push(...props);
+  sourceWarnings.push(...(result.warnings || []));
+  debugInfo.sources[label] = {
+    ...debugInfo.sources[label],
+    status: sourceStatus[label],
+    apiStatus: result.debug?.apiStatus || sourceStatus[label],
+    apiUrl: result.debug?.apiUrl || "",
+    endpointsTried: result.debug?.endpointsTried || [],
+    rawPropsLoaded: result.debug?.rawPropsLoaded ?? props.length,
+    propsAfterParsing: result.debug?.propsAfterParsing ?? props.length,
+    message: result.debug?.message || "",
+    lastSuccessfulFetchAt: result.lastSuccessfulFetchAt || "",
+    lineSourceBadge: result.lineSourceBadge || result.health || "LIVE",
+  };
+  return props.length > 0;
+}
+
+async function fetchDFSProps({ platform = "both", sport = "all", statType = "all" } = {}) {
+  const fetchSport = getActiveFetchSport(sport);
+  console.info("[DFS Source Audit] fetchDFSProps requested", {
+    platform,
+    sport: fetchSport,
+    statType,
+    mlbOnlyMode: MLB_ONLY_MODE,
+    devMode: isDevEnvironment(),
+  });
   const sourceWarnings = [];
   const sourceFailures = [];
   const rawProps = [];
   const sourceStatus = { ...DEFAULT_SOURCE_STATUS };
   const debugInfo = createDebugInfo(platform);
+  const wantsPrizePicks = platform === "both" || platform === "all" || platform === "prizepicks";
+  const wantsUnderdog = platform === "both" || platform === "all" || platform === "underdog";
 
-  settledSources.forEach((result, index) => {
-    const label = sourceJobs[index].label;
-    if (result.status === "fulfilled") {
-      const props = result.value.props || [];
-      sourceStatus[label] = result.value.status || "Connected";
-      if (label === "Underdog" && (!props.length || sourceStatus[label] !== "Connected")) {
-        sourceStatus.Underdog = sourceStatus[label] === "Connected" ? "Not Connected" : sourceStatus[label];
-        if (!sourceWarnings.includes(UNDERDOG_UNAVAILABLE_MESSAGE)) sourceWarnings.push(UNDERDOG_UNAVAILABLE_MESSAGE);
-      }
-      rawProps.push(...props);
-      sourceWarnings.push(...(result.value.warnings || []));
-      debugInfo.sources[label] = {
-        ...debugInfo.sources[label],
-        status: sourceStatus[label],
-        apiStatus: result.value.debug?.apiStatus || sourceStatus[label],
-        apiUrl: result.value.debug?.apiUrl || "",
-        endpointsTried: result.value.debug?.endpointsTried || [],
-        rawPropsLoaded: result.value.debug?.rawPropsLoaded ?? props.length,
-        propsAfterParsing: result.value.debug?.propsAfterParsing ?? props.length,
-        message: result.value.debug?.message || "",
-      };
-    } else if (label === "PrizePicks") {
+  let prizePicksResult = null;
+  let underdogResult = null;
+  if (wantsPrizePicks) {
+    try {
+      prizePicksResult = await fetchPrizePicksProps({ sport: fetchSport, statType: "all" });
+      console.info("[DFS Source Audit] PrizePicks result", {
+        status: prizePicksResult.status,
+        props: prizePicksResult.props?.length || 0,
+        lineSourceBadge: prizePicksResult.lineSourceBadge,
+      });
+      applySourceResult({
+        label: "PrizePicks",
+        result: prizePicksResult,
+        sourceWarnings,
+        sourceFailures,
+        rawProps,
+        sourceStatus,
+        debugInfo,
+      });
+    } catch (error) {
       sourceStatus.PrizePicks = "Failed";
-      console.warn("PrizePicks load failed", result.reason);
-      sourceFailures.push(errorWithDetail("Could not load PrizePicks lines.", result.reason));
+      console.warn("[DFS Source Audit] PrizePicks load failed", error);
+      sourceFailures.push(sourceFailureMessage("Could not load PrizePicks lines.", error));
       debugInfo.sources.PrizePicks = {
         ...debugInfo.sources.PrizePicks,
         status: "Failed",
         apiStatus: "Failed",
-        message: result.reason?.message || "Could not load PrizePicks lines.",
+        message: getErrorMessage(error) || "Could not load PrizePicks lines.",
+        lineSourceBadge: "",
       };
-    } else if (label === "Underdog") {
-      sourceStatus.Underdog = "Failed";
-      console.warn("Underdog load failed", result.reason);
-      sourceFailures.push(errorWithDetail("Underdog unavailable.", result.reason));
+    }
+  }
+
+  const needsUnderdogBackup = wantsUnderdog;
+
+  if (needsUnderdogBackup) {
+    try {
+      underdogResult = await fetchUnderdogProviderProps({ sport: fetchSport, statType: "all" });
+      console.info("[DFS Source Audit] Underdog backup result", {
+        status: underdogResult.status,
+        props: underdogResult.props?.length || 0,
+        lineSourceBadge: underdogResult.lineSourceBadge,
+        backup: Boolean(prizePicksResult && !prizePicksSucceeded(prizePicksResult)),
+      });
+      const underdogOk = applySourceResult({
+        label: "Underdog",
+        result: underdogResult,
+        sourceWarnings,
+        sourceFailures,
+        rawProps,
+        sourceStatus,
+        debugInfo,
+      });
+      applyUnderdogProviderToDebug(debugInfo, underdogResult);
+      if (!underdogOk && !rawProps.length && prizePicksResult?.props?.length) {
+        rawProps.push(...prizePicksResult.props);
+        sourceStatus.PrizePicks = prizePicksResult.status;
+      }
+    } catch (error) {
+      sourceStatus.Underdog = "Unavailable";
+      console.warn("[DFS Source Audit] Underdog backup failed", error);
       sourceWarnings.push(UNDERDOG_UNAVAILABLE_MESSAGE);
       debugInfo.sources.Underdog = {
         ...debugInfo.sources.Underdog,
-        ...(result.reason?.debug || {}),
-        status: "Failed",
-        apiStatus: result.reason?.debug?.apiStatus || "Failed",
-        message: result.reason?.debug?.message || UNDERDOG_UNAVAILABLE_MESSAGE,
+        ...(error?.debug || {}),
+        status: "Unavailable",
+        apiStatus: "Unavailable",
+        message: error?.debug?.message || UNDERDOG_UNAVAILABLE_MESSAGE,
+        lineSourceBadge: "STALE",
       };
+      if (prizePicksResult?.props?.length) {
+        rawProps.push(...prizePicksResult.props);
+      }
     }
-  });
+  } else if (wantsUnderdog && !wantsPrizePicks) {
+    try {
+      underdogResult = await fetchUnderdogProviderProps({ sport: fetchSport, statType: "all" });
+      applySourceResult({
+        label: "Underdog",
+        result: underdogResult,
+        sourceWarnings,
+        sourceFailures,
+        rawProps,
+        sourceStatus,
+        debugInfo,
+      });
+    } catch (error) {
+      sourceStatus.Underdog = "Unavailable";
+      sourceWarnings.push(UNDERDOG_UNAVAILABLE_MESSAGE);
+    }
+  }
 
-  const canonicalProps = rawProps.map(canonicalizeSportProp);
+  if (!rawProps.length && prizePicksResult?.warnings?.includes(PRIZEPICKS_RATE_LIMIT_MESSAGE)) {
+    sourceWarnings.unshift(PRIZEPICKS_RATE_LIMIT_MESSAGE);
+  }
 
-  const activeProps = canonicalProps
-    .filter((prop) => {
-      const filterReason = getBaseActiveFilterReason(prop);
-      if (filterReason) {
-        logFilteredProp(prop, filterReason);
-        return false;
-      }
-      return true;
-    })
-    .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-
-  const normalProps = activeProps
-    .filter((prop) => {
-      const filterReason = getPreScoringFilterReason(prop);
-      if (filterReason) {
-        logFilteredProp(prop, filterReason);
-        return false;
-      }
-      if (!matchesStatTypeFilter(prop, statType)) return false;
-      return true;
+  const scopedRawProps = filterActiveSportProps(rawProps);
+  if (MLB_ONLY_MODE && scopedRawProps.length !== rawProps.length) {
+    console.info("[DFS Pipeline] MLB-only scope removed non-MLB props", {
+      before: rawProps.length,
+      after: scopedRawProps.length,
     });
-  attachSourceFilterCounts(debugInfo, { rawProps: canonicalProps, activeProps, normalProps });
+  }
+  rawProps.length = 0;
+  rawProps.push(...scopedRawProps);
+
+  let pipelineAudit = safeCreateEmptyPipelineAudit();
+  try {
+    pipelineAudit = createEmptyPipelineAudit();
+  } catch (error) {
+    console.warn("[DFS Pipeline] audit initialization failed; using safe fallback", error);
+  }
+
+  pipelineAudit.fetched = rawProps.length;
+  // Source parser audits include non-MLB rejections — keep app audit MLB-only.
+  if (!MLB_ONLY_MODE) {
+    if (prizePicksResult?.pipelineAudit) {
+      const ppAudit = coercePipelineAudit(prizePicksResult.pipelineAudit);
+      pipelineAudit.normalized += ppAudit.normalized || 0;
+      Object.assign(pipelineAudit.filterReasons, ppAudit.filterReasons || {});
+    }
+    if (underdogResult?.pipelineAudit) {
+      const udAudit = coercePipelineAudit(underdogResult.pipelineAudit);
+      pipelineAudit.normalized += udAudit.normalized || 0;
+      Object.assign(pipelineAudit.filterReasons, udAudit.filterReasons || {});
+    }
+  }
+
+  const filterOptions = { includeUncertain: readIncludeUncertainPreference(), ...readFilterPrefs() };
+  const filtered = runFilterPipeline({
+    rawProps,
+    pipelineAudit,
+    recordFilterReason,
+    filterOptions,
+    filterUpcomingSlate,
+    validateAndFilterProps,
+    canonicalizeSportProp,
+    labelPartialIfMissingTime,
+    ensurePropStartTime,
+    getBaseActiveFilterReason,
+    getPreScoringFilterReason,
+    matchesStatTypeFilter,
+    prioritizePreScoringProps,
+    maxPreScoreProps: MAX_PRE_SCORE_PROPS,
+    statType,
+    logFilteredProp,
+  });
+  const { slateProps, canonicalProps, activeProps, normalProps } = filtered;
+  pipelineAudit.normalized = Math.max(pipelineAudit.normalized, canonicalProps.length);
+  pipelineAudit.active = activeProps.length;
+  pipelineAudit.preScoring = normalProps.length;
+  pipelineAudit.preScoringTotal = filtered.preScorePool.length;
+  attachSourceFilterCounts(debugInfo, { rawProps: canonicalProps, activeProps, normalProps, slateProps });
+  debugInfo.pipelineAudit = pipelineAudit;
+  debugInfo.upcomingSlateCount = pipelineAudit.upcomingSlate;
+  debugInfo.slateExcludedCount = pipelineAudit.slateExcluded;
+  debugInfo.pregameWindowHours = filterOptions.pregameWindowHours ?? DEFAULT_PREGAME_WINDOW_HOURS;
+  if (shouldLogVerbose()) logPipelineAudit("board", pipelineAudit);
 
   if (!activeProps.length) {
     debugInfo.totals = {
       rawPropsLoaded: canonicalProps.length,
+      upcomingSlateCount: pipelineAudit.upcomingSlate,
+      slateExcludedCount: pipelineAudit.slateExcluded,
       activeProps: activeProps.length,
       propsAfterFilters: normalProps.length,
       recommendedProps: 0,
       watchlistProps: 0,
       streakProps: 0,
     };
-    const emptyHealth = buildSourceHealth([], sourceFailures, sourceStatus);
+    const finalStatus = finalizeSourceStatus(sourceStatus, { "The Odds API": "Partial" });
+    const emptyPartition = partitionWarnings([], [...sourceFailures, NO_ACTIVE_SCHEDULED_PROPS_MESSAGE], finalStatus);
+    const emptyHealth = {
+      ...buildSourceHealth([], sourceFailures, finalStatus),
+      PrizePicks: finalStatus.PrizePicks,
+      Underdog: finalStatus.Underdog,
+      "The Odds API": finalStatus["The Odds API"],
+      injuries: "Partial",
+    };
+    pipelineAudit = coercePipelineAudit(pipelineAudit);
+    finalizePipelineCounters(pipelineAudit, {
+      displayed: [],
+      rejected: pipelineAudit.fetched || 0,
+      stale: 0,
+      cached: 0,
+      live: 0,
+    });
     return {
       props: [],
       watchlist: [],
       streakProps: [],
-      sourceStatus,
+      sourceStatus: finalStatus,
       sourceHealth: emptyHealth,
-      criticalWarnings: sourceFailures,
-      warnings: sourceFailures,
-      debugInfo,
+      criticalWarnings: emptyPartition.criticalWarnings,
+      degradedWarnings: emptyPartition.degradedWarnings,
+      warnings: unique([...emptyPartition.degradedWarnings, ...emptyPartition.criticalWarnings]),
+      debugInfo: attachDebugArtifacts(sanitizeDebugInfoForMlbOnly(debugInfo), pipelineAudit),
+      pipelineAudit: coercePipelineAudit(pipelineAudit),
     };
   }
 
@@ -308,6 +1051,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     comparisons: [],
     stats: new Map(),
     news: new Map(),
+    manualStatsMap: readManualStatsMap(),
   };
   const backgroundWarnings = [];
 
@@ -317,7 +1061,11 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       backgroundWarnings.push(...(result.value.warnings || []));
       if (label === "sportsbook") {
         background.comparisons = result.value.comparisons || [];
-        sourceStatus["The Odds API"] = sportsbookSourceStatus(result.value);
+        sourceStatus["The Odds API"] = result.value.cached
+          ? "Cached"
+          : result.value.rateLimited
+            ? "Cached"
+            : sportsbookSourceStatus(result.value);
         debugInfo.sources["The Odds API"] = {
           ...debugInfo.sources["The Odds API"],
           status: sourceStatus["The Odds API"],
@@ -326,6 +1074,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
           propsAfterParsing: background.comparisons.length,
           propsAfterFilters: background.comparisons.length,
           message: (result.value.warnings || []).join(" "),
+          lastSuccessfulFetchAt: result.value.lastSuccessfulFetchAt || "",
+          lineSourceBadge: result.value.cached || result.value.rateLimited ? "CACHED" : "LIVE",
         };
       }
       if (label === "stats") background.stats = result.value.stats || new Map();
@@ -354,146 +1104,465 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   const lineComparisonMap = buildLineComparisonMap(normalProps);
   const sportsbookComparisonMap = buildSportsbookComparisonMap(background.comparisons);
   const lineMovementMap = updateLineMovementMap(activeProps, sportsbookComparisonMap);
-  const scoredProps = normalProps
-    .map((prop) => scoreDFSProp(prop, { ...background, lineComparisonMap, sportsbookComparisonMap, lineMovementMap }))
-    .filter((prop) => {
-      const invalidReason = getFatalPropReason(prop);
-      if (invalidReason) {
-        logFilteredProp(prop, invalidReason);
-        return false;
+  const scoringContext = {
+    stats: background.stats,
+    news: background.news,
+    lineComparisonMap,
+    sportsbookComparisonMap,
+    lineMovementMap,
+    manualStatsMap: background.manualStatsMap,
+  };
+  const historyRows = readHistory();
+  scoringContext.historyRows = historyRows;
+  const historyWeights = buildHistoryAccuracyWeights(historyRows);
+  const scoredProps = [];
+  const scoreCache = new Map();
+  for (let index = 0; index < normalProps.length; index += 75) {
+    const batch = normalProps.slice(index, index + 75);
+    batch.forEach((prop) => {
+      const cacheKey = `${prop.id}|${prop.line}|${prop.statType}|${prop.platform}`;
+      let scored = scoreCache.get(cacheKey);
+      if (!scored) {
+        const persisted = readSmartCacheIfFresh("projection-score", cacheKey, CACHE_TTL.PROJECTIONS_MS);
+        if (persisted?.payload) {
+          scored = persisted.payload;
+        } else {
+          scored = scoreDFSProp(prop, {
+            ...background,
+            lineComparisonMap,
+            sportsbookComparisonMap,
+            lineMovementMap,
+            historyWeights,
+            historyRows,
+          });
+          if (scored) writeSmartCache("projection-score", cacheKey, scored, { savedAt: Date.now() });
+        }
+        scoreCache.set(cacheKey, scored);
       }
-      return true;
-    })
-    .map(applyRecommendationStatus);
+      if (!scored) return;
+      const invalidReason = getScoringRejectReason(scored);
+      if (invalidReason) {
+        recordFilterReason(pipelineAudit, invalidReason, prop, "scoring");
+        logFilteredProp(prop, invalidReason);
+        return;
+      }
+      scoredProps.push(scored);
+    });
+    if (index + 75 < normalProps.length) await yieldToMainThread();
+  }
+  pipelineAudit.scored = scoredProps.length;
+  pipelineAudit = attachDecisionDebug(pipelineAudit, scoredProps);
 
-  const recommendedProps = scoredProps
-    .filter((prop) => prop.recommendationStatus === "recommended")
-    .sort(sortRecommendedProps)
-    .slice(0, MAX_RANKED_PROPS);
+  let qualBoards = buildQualificationBoards(scoredProps.filter(isVerifiedSportsbookProp), pipelineAudit, historyRows);
 
-  const watchlistProps = scoredProps
-    .filter((prop) => prop.recommendationStatus === "watchlist")
-    .sort(sortWatchlistProps)
-    .slice(0, MAX_WATCHLIST_PROPS);
-  const modelSignalMap = buildModelSignalMap(scoredProps);
-  const streakProps = buildStreakFinderProps(activeProps, modelSignalMap, lineMovementMap).sort(sortStreakProps).slice(0, MAX_STREAK_PROPS);
-  attachScoredSourceCounts(debugInfo, { recommendedProps, watchlistProps, streakProps });
+  const displayProps = filterVerifiedSportsbookProps(qualBoards.allDisplayable).slice(0, MAX_RANKED_PROPS);
+  const watchlistProps = [];
+  const nearQualification = [];
+  const modelSignalMap = buildModelSignalMap(filterVerifiedSportsbookProps(qualBoards.allDisplayable));
+  const streakProps = filterVerifiedSportsbookProps(
+    buildStreakFinderProps(activeProps, modelSignalMap, lineMovementMap).sort(sortStreakProps)
+  ).slice(0, MAX_STREAK_PROPS);
+  attachScoredSourceCounts(debugInfo, {
+    recommendedProps: displayProps,
+    watchlistProps,
+    streakProps,
+  });
   debugInfo.totals = {
     rawPropsLoaded: canonicalProps.length,
+    upcomingSlateCount: pipelineAudit.upcomingSlate,
+    slateExcludedCount: pipelineAudit.slateExcluded,
     activeProps: activeProps.length,
     propsAfterFilters: normalProps.length,
-    recommendedProps: recommendedProps.length,
+    recommendedProps: displayProps.length,
     watchlistProps: watchlistProps.length,
+    nearQualification: nearQualification.length,
+    readyProps: qualBoards.ready.length,
     streakProps: streakProps.length,
   };
+  debugInfo.qualificationSummary = safeFormatRejectionSummary(pipelineAudit);
 
-  const { criticalWarnings, sourceHealth } = partitionWarnings(
+  const finalStatus = finalizeSourceStatus(sourceStatus);
+  const { criticalWarnings, degradedWarnings, sourceHealth } = partitionWarnings(
     unique([...sourceWarnings, ...backgroundWarnings]),
     sourceFailures,
-    sourceStatus
+    finalStatus
   );
 
-  return {
-    props: recommendedProps,
-    watchlist: watchlistProps,
+  pipelineAudit = coercePipelineAudit(pipelineAudit);
+  const cacheCounts = countPropCacheLayers(displayProps);
+  finalizePipelineCounters(pipelineAudit, {
+    displayed: displayProps,
+    rejected: Math.max(0, (pipelineAudit.fetched || 0) - (pipelineAudit.scored || 0)),
+    stale: cacheCounts.stale,
+    cached: cacheCounts.cached,
+    live: cacheCounts.live,
+  });
+  debugInfo.pipelineCounters = pipelineAudit.pipelineCounters;
+  if (isHeavyDebugEnabled()) {
+    Object.assign(debugInfo, attachDebugArtifacts(sanitizeDebugInfoForMlbOnly(debugInfo), pipelineAudit));
+    if (shouldLogVerbose()) logPipelineAudit("qualified", pipelineAudit);
+  } else {
+    debugInfo.pipelineAudit = {
+      scored: pipelineAudit.scored,
+      preScoring: pipelineAudit.preScoring,
+      active: pipelineAudit.active,
+      displayed: pipelineAudit.displayed,
+    };
+  }
+
+  const uiPayload = runUiPipeline({
+    displayProps,
     streakProps,
-    sourceStatus,
+    watchlist: watchlistProps,
+  });
+
+  return {
+    props: uiPayload.props,
+    watchlist: uiPayload.watchlist,
+    nearQualification,
+    displayPool: qualBoards.allDisplayable,
+    readyProps: qualBoards.ready.slice(0, RENDER_LIMITS.readyToBet),
+    streakProps: uiPayload.streakProps,
+    sourceStatus: finalStatus,
     sourceHealth,
     criticalWarnings,
-    warnings: criticalWarnings,
+    degradedWarnings,
+    warnings: unique([...degradedWarnings, ...sourceWarnings.filter((w) => !/underdog/i.test(String(w)))]),
     debugInfo,
+    pipelineAudit: isHeavyDebugEnabled() ? pipelineAudit : debugInfo.pipelineAudit,
+    scoringContext,
   };
 }
 
 export default function DFSPropsApp() {
   const [platform, setPlatform] = useState("all");
-  const [sport, setSport] = useState("all");
+  const [sport, setSport] = useState(MLB_ONLY_MODE ? "MLB" : "all");
   const [statType, setStatType] = useState("all");
   const [edgeFilter, setEdgeFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState("allUpcoming");
+  const [readyOnly, setReadyOnly] = useState(false);
+  const [compactMode, setCompactMode] = useState(() => readCompactModePreference());
+  const [searchText, setSearchText] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [visibleLimits, setVisibleLimits] = useState(() => ({
+    ready: INITIAL_VISIBLE_SECTION_LIMIT,
+    value: INITIAL_VISIBLE_SECTION_LIMIT,
+  }));
   const [props, setProps] = useState([]);
   const [watchlist, setWatchlist] = useState([]);
+  const [nearQualification, setNearQualification] = useState([]);
   const [streakProps, setStreakProps] = useState([]);
+  const [settingsDraft, setSettingsDraft] = useState(() => readRuntimeSettings());
+  const [settingsNotice, setSettingsNotice] = useState("");
   const [streakSport, setStreakSport] = useState("MLB");
   const [parlayRiskMode, setParlayRiskMode] = useState("balanced");
   const [selectedEvaluation, setSelectedEvaluation] = useState(null);
   const [learningSaveNotice, setLearningSaveNotice] = useState("");
   const [criticalWarnings, setCriticalWarnings] = useState([]);
+  const [degradedWarnings, setDegradedWarnings] = useState([]);
   const [sourceHealth, setSourceHealth] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [history, setHistory] = useState(() => readHistory());
-  const [parlayHistory, setParlayHistory] = useState(() => readParlayHistory());
+  const [history, setHistory] = useState(() => trimHistoryToLimit(readHistory()));
+  const [parlayHistory, setParlayHistory] = useState(() => trimHistoryToLimit(readParlayHistory()));
   const [lastUpdated, setLastUpdated] = useState("");
   const [cacheStatus, setCacheStatus] = useState("");
   const [sourceStatus, setSourceStatus] = useState(DEFAULT_SOURCE_STATUS);
   const [debugInfo, setDebugInfo] = useState(() => createDebugInfo("all"));
+  const [apiHealth, setApiHealth] = useState({
+    PrizePicks: { status: "Pending", lastFetchAt: "", lineSourceBadge: "" },
+    Underdog: { status: "Pending", lastFetchAt: "", lineSourceBadge: "" },
+    cache: { status: "empty", lastFetchAt: "" },
+  });
+  const [apiRouteTests, setApiRouteTests] = useState([]);
+  const [apiRouteTesting, setApiRouteTesting] = useState(false);
+  const [refreshCooldownSec, setRefreshCooldownSec] = useState(0);
+  const [sourceCooldownSec, setSourceCooldownSec] = useState(0);
+  const [includeUncertainProps, setIncludeUncertainProps] = useState(() => readIncludeUncertainPreference());
+  const [filterPrefs, setFilterPrefs] = useState(() => readFilterPrefs());
+  const [pipelineAudit, setPipelineAudit] = useState(() => safeCreateEmptyPipelineAudit());
+  const loadInFlightRef = useRef(false);
+  const initialLoadRef = useRef(false);
+  const lastRefreshAtRef = useRef(0);
+  const lastAutoRefreshRef = useRef(0);
+  const scoringContextRef = useRef(null);
 
-  const loadProps = useCallback(async ({ force = false } = {}) => {
-    setLoading(true);
-    setError("");
-    setLearningSaveNotice("");
-    try {
-      if (force) {
-        clearApiCache();
-        clearBoardCache();
-      }
-
-      if (!force) {
-        const cached = readCachedBoard(DEFAULT_SOURCE_STATUS);
-        if (cached) {
-          setProps(cached.props);
-          setWatchlist(cached.watchlist || []);
-          setStreakProps(cached.streakProps || []);
-          setCriticalWarnings(cached.warnings || []);
-          setSourceStatus(cached.sourceStatus || DEFAULT_SOURCE_STATUS);
-          setSourceHealth(cached.sourceHealth || {});
-          setDebugInfo(cached.debugInfo || createDebugInfo(platform));
-          setLastUpdated(cached.updatedAt);
-          setCacheStatus("cached");
-          return;
-        }
-      }
-
-      const result = await fetchDFSProps({ platform: "both", sport: "all", statType: "all" });
-      const board = {
-        props: result.props || [],
-        watchlist: result.watchlist || [],
-        streakProps: result.streakProps || [],
-        warnings: result.criticalWarnings || [],
-        sourceStatus: result.sourceStatus || DEFAULT_SOURCE_STATUS,
-        sourceHealth: result.sourceHealth || {},
-        debugInfo: result.debugInfo || createDebugInfo(platform),
-        updatedAt: new Date().toISOString(),
-      };
-      writeCachedBoard(board);
-      setProps(board.props);
-      setWatchlist(board.watchlist);
-      setStreakProps(board.streakProps);
-      setCriticalWarnings(board.warnings);
-      setSourceStatus(board.sourceStatus);
-      setSourceHealth(board.sourceHealth);
-      setDebugInfo(board.debugInfo);
-      setLastUpdated(board.updatedAt);
-      setCacheStatus("fresh");
-      const updatedHistory = savePropsOfDay(board.props);
-      setHistory(updatedHistory);
-    } catch (loadError) {
-      setError(loadError.message || "Could not load DFS lines.");
-      setProps([]);
-      setWatchlist([]);
-      setStreakProps([]);
-      setCriticalWarnings([]);
-      setSourceHealth({});
-      setSourceStatus(DEFAULT_SOURCE_STATUS);
-      setDebugInfo(createDebugInfo(platform));
-      setCacheStatus("");
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    const trimmedHistory = trimHistoryToLimit(readHistory());
+    const trimmedParlays = trimHistoryToLimit(readParlayHistory());
+    writeHistory(trimmedHistory);
+    writeParlayHistory(trimmedParlays);
   }, []);
 
   useEffect(() => {
+    if (refreshCooldownSec <= 0 && sourceCooldownSec <= 0) return undefined;
+    const timer = window.setInterval(() => {
+      const refreshRemaining = Math.max(0, Math.ceil((getRefreshCooldownMs() - (Date.now() - lastRefreshAtRef.current)) / 1000));
+      const sourceRemaining = Math.ceil(getMaxCooldownRemainingMs() / 1000);
+      setRefreshCooldownSec(refreshRemaining);
+      setSourceCooldownSec(sourceRemaining);
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [refreshCooldownSec, sourceCooldownSec]);
+
+  const applyBoardState = useCallback((board, cacheLayer = "fresh") => {
+    const scopedBoard = sanitizeBoardForMlbOnly(board || {});
+    const boardProps = scopedBoard.props || [];
+    const boardSourceStatus = finalizeSourceStatus(scopedBoard.sourceStatus || DEFAULT_SOURCE_STATUS);
+    setProps(boardProps);
+    setWatchlist(scopedBoard.watchlist || []);
+    setNearQualification(scopedBoard.nearQualification || []);
+    setStreakProps(scopedBoard.streakProps || []);
+    setCriticalWarnings(
+      sanitizeCriticalWarningsForDisplay(collectBoardWarningMessages(scopedBoard), boardProps, boardSourceStatus)
+    );
+    setDegradedWarnings(
+      sanitizeDegradedWarningsForDisplay(collectBoardWarningMessages(scopedBoard), boardProps, boardSourceStatus)
+    );
+    setSourceStatus(boardSourceStatus);
+    setSourceHealth(scopedBoard.sourceHealth || {});
+    setDebugInfo(sanitizeDebugInfoForMlbOnly(scopedBoard.debugInfo || createDebugInfo(platform)));
+    setLastUpdated(scopedBoard.updatedAt || "");
+    setCacheStatus(cacheLayer);
+    setPipelineAudit(coercePipelineAudit(scopedBoard.debugInfo?.pipelineAudit));
+    setApiHealth(buildApiHealthFromBoard(scopedBoard, cacheLayer));
+  }, [platform]);
+
+  const loadProps = useCallback(async ({ force = false, autoRefresh = false } = {}) => {
+    if (!force && !autoRefresh && !isTabActive()) {
+      console.info("[DFS Refresh] skipped — tab inactive");
+      return;
+    }
+    if (autoRefresh && !canAutoRefresh(Date.now(), lastAutoRefreshRef.current || lastRefreshAtRef.current)) {
+      console.info("[DFS Refresh] auto refresh skipped — cooldown active");
+      return;
+    }
+
+    return withBoardFetchLock(async () => {
+      const sourceCooldownRemaining = getMaxCooldownRemainingMs();
+      const refreshCooldownRemaining = getRefreshCooldownMs() - (Date.now() - lastRefreshAtRef.current);
+      if (force && (sourceCooldownRemaining > 0 || refreshCooldownRemaining > 0)) {
+        console.info("[DFS Refresh] blocked by cooldown", {
+          sourceRemainingMs: sourceCooldownRemaining,
+          refreshRemainingMs: refreshCooldownRemaining,
+        });
+        setSourceCooldownSec(Math.ceil(sourceCooldownRemaining / 1000));
+        setRefreshCooldownSec(Math.ceil(Math.max(0, refreshCooldownRemaining) / 1000));
+        return;
+      }
+
+      loadInFlightRef.current = true;
+      setLoading(true);
+      setError("");
+      setLearningSaveNotice("");
+      const fetchStartedAt = Date.now();
+      const previousBoard = readCachedBoard(DEFAULT_SOURCE_STATUS, { allowExpired: true });
+      try {
+        if (force) {
+          clearApiCache({ preserveLastGood: true });
+        }
+
+        if (!force && !autoRefresh) {
+          const cached = readCachedBoard(DEFAULT_SOURCE_STATUS);
+          if (cached && isBoardCacheFresh(cached.updatedAt, DFS_CACHE_TTL_MS)) {
+            const layer = resolveCacheLayer(new Date(cached.updatedAt).getTime(), DFS_CACHE_TTL_MS);
+            applyBoardState(cached, formatCacheLayerLabel(layer).toLowerCase());
+            console.info("[DFS Refresh] board cache served", { updatedAt: cached.updatedAt, durationMs: Date.now() - fetchStartedAt });
+            return;
+          }
+        }
+
+        const result = await fetchDFSProps({ platform: "both", sport: MLB_ONLY_MODE ? "MLB" : "all", statType: "all" });
+        scoringContextRef.current = result.scoringContext || null;
+        const boardSourceStatus = finalizeSourceStatus(result.sourceStatus || DEFAULT_SOURCE_STATUS);
+        const boardProps = result.props || [];
+        const routedCritical = sanitizeCriticalWarningsForDisplay(
+          unique([...(result.criticalWarnings || []), ...(result.warnings || []), ...(result.degradedWarnings || [])]),
+          boardProps,
+          boardSourceStatus
+        );
+        const board = {
+          props: boardProps,
+          watchlist: result.watchlist || [],
+          nearQualification: result.nearQualification || [],
+          streakProps: result.streakProps || [],
+          warnings: routedCritical,
+          degradedWarnings: sanitizeDegradedWarningsForDisplay(
+            result.degradedWarnings || [],
+            boardProps,
+            boardSourceStatus
+          ),
+          criticalWarnings: routedCritical,
+          sourceStatus: boardSourceStatus,
+          sourceHealth: result.sourceHealth || {},
+          debugInfo: result.debugInfo || createDebugInfo(platform),
+          updatedAt: new Date().toISOString(),
+        };
+        board.debugInfo = { ...(board.debugInfo || {}), pipelineAudit: result.pipelineAudit || board.debugInfo?.pipelineAudit };
+
+        const rateLimited =
+          getMaxCooldownRemainingMs() > 0 ||
+          (board.warnings || []).some((warning) => /rate limited|429|cooldown/i.test(String(warning)));
+
+        if (!board.props.length && previousBoard?.props?.length) {
+          applyBoardState(
+            {
+              ...previousBoard,
+              warnings: unique([
+                ...(rateLimited ? [RATE_LIMIT_COOLDOWN_MESSAGE] : []),
+                ...sanitizeCriticalWarningsForDisplay(board.warnings || [], previousBoard.props || [], board.sourceStatus || {}),
+                ...sanitizeCriticalWarningsForDisplay(previousBoard.warnings || [], previousBoard.props || [], previousBoard.sourceStatus || {}),
+              ]),
+            },
+            "cached"
+          );
+          const underdogOnlyEmptyFetch = isUnderdogOnlyFailure(
+            board.criticalWarnings,
+            board.degradedWarnings,
+            ...(result.degradedWarnings || []),
+            ...(result.criticalWarnings || [])
+          );
+          if (MLB_ONLY_MODE && previousBoard.props.length && underdogOnlyEmptyFetch) {
+            setError("");
+          } else {
+            setError(
+              resolveUiErrorMessage(
+                rateLimited ? "" : NO_VERIFIED_AFTER_COOLDOWN_MESSAGE,
+                previousBoard.props || [],
+                previousBoard.sourceStatus || {}
+              )
+            );
+          }
+          console.info("[DFS Refresh] kept previous cached board after empty fetch", {
+            durationMs: Date.now() - fetchStartedAt,
+            rateLimited,
+          });
+          return;
+        }
+
+        if (board.props.length) {
+          writeCachedBoard(sanitizeBoardForMlbOnly(board));
+        }
+        applyBoardState(board, board.props.length ? "fresh" : "cached");
+        if (board.props.length) {
+          setError((current) => resolveUiErrorMessage(current, board.props, board.sourceStatus));
+        } else {
+          const underdogOnlyEmptyBoard = isUnderdogOnlyFailure(board.criticalWarnings, board.degradedWarnings);
+          if (!(MLB_ONLY_MODE && underdogOnlyEmptyBoard)) {
+            setError(
+              resolveUiErrorMessage(
+                rateLimited ? RATE_LIMIT_COOLDOWN_MESSAGE : NO_VERIFIED_AFTER_COOLDOWN_MESSAGE,
+                board.props,
+                board.sourceStatus
+              )
+            );
+          }
+        }
+        lastRefreshAtRef.current = Date.now();
+        if (autoRefresh) {
+          lastAutoRefreshRef.current = Date.now();
+          markAutoRefresh();
+        }
+        setRefreshCooldownSec(Math.ceil(getRefreshCooldownMs() / 1000));
+        setSourceCooldownSec(Math.ceil(getMaxCooldownRemainingMs() / 1000));
+        console.info("[DFS Refresh] live fetch complete", {
+          durationMs: Date.now() - fetchStartedAt,
+          props: board.props.length,
+          sourceStatus: board.sourceStatus,
+          autoRefresh,
+        });
+        if (board.props.length) {
+          const updatedHistory = savePropsOfDay(board.props);
+          setHistory(updatedHistory);
+        }
+      } catch (loadError) {
+        const staleBoard = readCachedBoard(DEFAULT_SOURCE_STATUS, { allowExpired: true });
+        const errMsg = getErrorMessage(loadError);
+        const underdogOnlyFailure = isNonCriticalUnderdogFailure(errMsg) || isUnderdogOnlyFailure(errMsg);
+        if (staleBoard?.props?.length) {
+          applyBoardState(
+            {
+              ...staleBoard,
+              warnings: unique(
+                filterCriticalUiMessages(
+                  [RATE_LIMIT_COOLDOWN_MESSAGE, errMsg, ...(staleBoard.warnings || []), ...(staleBoard.criticalWarnings || [])],
+                  staleBoard.props || [],
+                  staleBoard.sourceStatus || {}
+                )
+              ),
+            },
+            "cached"
+          );
+          setError("");
+          console.warn("[DFS Refresh] served stale board after failure", {
+            durationMs: Date.now() - fetchStartedAt,
+            error: errMsg,
+          });
+        } else if (MLB_ONLY_MODE && underdogOnlyFailure) {
+          setError("");
+          setCriticalWarnings([]);
+          console.warn("[DFS Refresh] ignored Underdog-only failure in MLB-only mode", {
+            durationMs: Date.now() - fetchStartedAt,
+            error: errMsg,
+          });
+        } else if (!shouldSuppressCriticalUiMessage(errMsg, [], {})) {
+          setError(errMsg || NO_VERIFIED_AFTER_COOLDOWN_MESSAGE);
+          setCriticalWarnings(filterCriticalUiMessages([errMsg], [], {}));
+          setCacheStatus("");
+          setApiHealth({
+            PrizePicks: { status: "Failed", lastFetchAt: "", lineSourceBadge: "" },
+            Underdog: { status: "Unavailable", lastFetchAt: "", lineSourceBadge: "" },
+            OddsAPI: { status: "Failed", lastFetchAt: "", lineSourceBadge: "" },
+            cache: { status: "error", lastFetchAt: "" },
+          });
+          console.warn("[DFS Refresh] failed with no cache fallback", {
+            durationMs: Date.now() - fetchStartedAt,
+            error: errMsg,
+          });
+        } else {
+          setError("");
+          setCriticalWarnings([]);
+        }
+      } finally {
+        loadInFlightRef.current = false;
+        setLoading(false);
+      }
+    });
+  }, [applyBoardState, platform]);
+
+  useEffect(() => {
+    writeCompactModePreference(compactMode);
+  }, [compactMode]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(searchText.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [searchText]);
+
+  useEffect(() => {
+    if (initialLoadRef.current) return;
+    initialLoadRef.current = true;
     loadProps();
+  }, [loadProps]);
+
+  useEffect(() => {
+    const intervalMs = getAutoRefreshIntervalMs();
+    const timer = window.setInterval(() => {
+      if (!isTabActive()) return;
+      loadProps({ autoRefresh: true });
+    }, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [loadProps]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      if (canAutoRefresh(Date.now(), lastAutoRefreshRef.current || lastRefreshAtRef.current)) {
+        loadProps({ autoRefresh: true });
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [loadProps]);
 
   useEffect(() => {
@@ -505,28 +1574,39 @@ export default function DFSPropsApp() {
     }
   }, [platform, sourceStatus, debugInfo]);
 
+  const uiFilters = useMemo(
+    () => ({ platform, sport, statType, edgeFilter, dateFilter, readyOnly, searchTerm: debouncedSearch, ...filterPrefs }),
+    [platform, sport, statType, edgeFilter, dateFilter, readyOnly, debouncedSearch, filterPrefs]
+  );
   const filteredProps = useMemo(
-    () => props.filter((prop) => matchesUiFilters(prop, { platform, sport, statType, edgeFilter })),
-    [props, platform, sport, statType, edgeFilter]
-  );
-  const filteredWatchlist = useMemo(
-    () => watchlist.filter((prop) => matchesUiFilters(prop, { platform, sport, statType, edgeFilter })),
-    [watchlist, platform, sport, statType, edgeFilter]
-  );
-  const filteredStreakProps = useMemo(
-    () => streakProps.filter((prop) => matchesUiFilters(prop, { platform, sport, statType, edgeFilter })),
-    [streakProps, platform, sport, statType, edgeFilter]
+    () => filterVerifiedSportsbookProps(props.filter((prop) => matchesUiFilters(prop, uiFilters))),
+    [props, uiFilters]
   );
   const streakFinderProps = useMemo(
     () =>
-      streakProps.filter(
-        (prop) =>
-          matchesPlatformFilter(prop, platform) &&
-          matchesStatTypeFilter(prop, statType)
+      filterVerifiedSportsbookProps(
+        streakProps.filter(
+          (prop) =>
+            matchesPlatformFilter(prop, platform) &&
+            matchesStatTypeFilter(prop, statType) &&
+            matchesDateFilter(prop, dateFilter) &&
+            matchesSearchFilter(prop, debouncedSearch) &&
+            (!readyOnly || isReadyToBet(prop))
+        )
       ),
-    [streakProps, platform, statType]
+    [streakProps, platform, statType, dateFilter, readyOnly, debouncedSearch]
   );
-  const propsOfDay = useMemo(() => filteredProps.slice(0, PROPS_OF_DAY_LIMIT), [filteredProps]);
+  const readyToBetProps = useMemo(
+    () => sortDecisionBoard(filterReadyToBetProps(filteredProps)),
+    [filteredProps]
+  );
+  const bestValueProps = useMemo(
+    () =>
+      sortDecisionBoard(
+        filteredProps.filter(isBestValueEligible)
+      ).slice(0, VISIBLE_SECTION_LIMIT),
+    [filteredProps]
+  );
   const visibleHistory = useMemo(() => history.filter(isSupportedHistoryPick), [history]);
   const streakSportBoards = useMemo(
     () => buildStreakSportCategoryBoards(streakFinderProps, visibleHistory),
@@ -538,41 +1618,124 @@ export default function DFSPropsApp() {
   const currentCategoryLabel = currentStreakBoard.label || STREAK_TAB_OPTIONS.find((option) => option.value === streakSport)?.label || "MLB";
   const isGoblinTab = streakSport === "goblins";
   const isDemonTab = streakSport === "demons";
-  const propsOfDayPreview = propsOfDay.slice(0, 3);
-  const rankedPropsPreview = filteredProps.slice(0, 12);
-  const dashboard = useMemo(() => buildAccuracyDashboard(visibleHistory), [visibleHistory]);
+  const topPicksForTracking = useMemo(
+    () => sortDecisionBoard(filteredProps.filter(isEliteTopPickEligible)).slice(0, 2),
+    [filteredProps]
+  );
+  const goblinPropsForTracking = useMemo(
+    () => streakFinderProps.filter(isVerifiedSportsbookProp).filter(isGoblinProp),
+    [streakFinderProps]
+  );
+  const demonPropsForTracking = useMemo(
+    () =>
+      streakFinderProps
+        .filter(isVerifiedSportsbookProp)
+        .filter(isDemonProp)
+        .filter((prop) => Number(prop.confidenceScore || 0) >= CONFIDENCE_THRESHOLDS.DEMON && Number(prop.edge || 0) >= 1),
+    [streakFinderProps]
+  );
+  const visibleReadyProps = useMemo(
+    () => readyToBetProps.slice(0, Math.min(visibleLimits.ready, VISIBLE_SECTION_LIMIT)),
+    [readyToBetProps, visibleLimits.ready]
+  );
+  const visibleBestValueProps = useMemo(
+    () => bestValueProps.slice(0, Math.min(visibleLimits.value, VISIBLE_SECTION_LIMIT)),
+    [bestValueProps, visibleLimits.value]
+  );
+  const pipelineCounters = useMemo(
+    () => pipelineAudit.pipelineCounters || debugInfo.pipelineCounters || {},
+    [pipelineAudit.pipelineCounters, debugInfo.pipelineCounters]
+  );
+
+  const rejectedPropSamples = useMemo(
+    () =>
+      sortGroupedDebugEntries(
+        (debugInfo.rejectedProps?.length ? debugInfo.rejectedProps : pipelineAudit.groupedRejections || []).filter(
+          (sample) => sample?.reason
+        ),
+        pipelineAudit
+      )
+        .filter((sample) => !sample.inactive)
+        .slice(0, 40),
+    [debugInfo.rejectedProps, pipelineAudit]
+  );
+  const underdogDegraded = useMemo(
+    () => {
+      if (loading) return false;
+      if (MLB_ONLY_MODE && prizePicksHasUsableProps(props, sourceStatus)) return false;
+      return (
+        ["Unavailable", "Failed", "Not Connected", "DEGRADED", "OFFLINE"].includes(String(sourceStatus.Underdog)) ||
+        degradedWarnings.some(isNonCriticalUnderdogFailure)
+      );
+    },
+    [loading, sourceStatus, degradedWarnings, props]
+  );
+  const visibleCriticalWarnings = useMemo(
+    () => filterCriticalUiMessages(criticalWarnings, props, sourceStatus),
+    [criticalWarnings, props, sourceStatus]
+  );
+  const visibleError = useMemo(() => resolveUiErrorMessage(error, props, sourceStatus), [error, props, sourceStatus]);
+  const displaySourceStatus = useMemo(() => {
+    if (!MLB_ONLY_MODE) return sourceStatus;
+    return {
+      ...sourceStatus,
+      Underdog: normalizeUnderdogStatusForMlb(sourceStatus.Underdog, "Unavailable"),
+    };
+  }, [sourceStatus]);
+  const readyRenderCard = useCallback(
+    (prop, index) => (
+      <PlayerPropCard key={`ready-${prop.id}`} prop={prop} rank={index + 1} compact={compactMode} onOpen={setSelectedEvaluation} />
+    ),
+    [compactMode]
+  );
+  const valueRenderCard = useCallback(
+    (prop) => <PlayerPropCard key={`value-${prop.id}`} prop={prop} compact={compactMode} onOpen={setSelectedEvaluation} />,
+    [compactMode]
+  );
+  const dashboard = useMemo(() => buildOutcomeDashboard(visibleHistory), [visibleHistory]);
   const quickParlayPicks = useMemo(
     () => buildQuickParlayPicks(streakSportBoards, parlayRiskMode),
     [streakSportBoards, parlayRiskMode]
   );
   const parlayDashboard = useMemo(() => buildParlayDashboard(parlayHistory), [parlayHistory]);
+  const refreshBlocked = loading || refreshCooldownSec > 0 || sourceCooldownSec > 0;
+  const refreshCountdownSec = Math.max(refreshCooldownSec, sourceCooldownSec);
+  const rateLimitNotice =
+    sourceCooldownSec > 0
+      ? `${RATE_LIMIT_COOLDOWN_MESSAGE} (${formatCooldownRemaining(sourceCooldownSec * 1000)} remaining)`
+      : visibleCriticalWarnings.find((warning) => /rate limited|cached lines from/i.test(String(warning))) || "";
   const lastUpdatedLabel = lastUpdated ? `${formatDateTime(lastUpdated)}${cacheStatus === "cached" ? " (cached)" : ""}` : "Never";
-  const staleDataWarning = lastUpdated && Date.now() - new Date(lastUpdated).getTime() > DFS_CACHE_TTL_MS
-    ? "Stale data warning: refresh today's picks before using these lines."
-    : "";
-  const sportOptions = BASE_SPORT_OPTIONS;
-  const platformOptions = useMemo(() => platformOptionsForStatus(sourceStatus), [sourceStatus]);
-  const debugPanel = useMemo(
-    () =>
-      buildVisibleDebugPanel(debugInfo, {
-        platform,
-        props,
-        watchlist,
-        streakProps,
-        filteredProps,
-        filteredWatchlist,
-        filteredStreakProps,
-        streakSportBoards,
-        history: visibleHistory,
-        lastUpdated,
-        sourceStatus,
-      }),
-    [debugInfo, platform, props, watchlist, streakProps, filteredProps, filteredWatchlist, filteredStreakProps, streakSportBoards, visibleHistory, lastUpdated, sourceStatus]
+  const lastUpdatedMs = lastUpdated ? new Date(lastUpdated).getTime() : NaN;
+  const staleDataWarning =
+    Number.isFinite(lastUpdatedMs) && Date.now() - lastUpdatedMs > DFS_CACHE_TTL_MS
+      ? "Stale data warning: refresh today's picks before using these lines."
+      : "";
+  const historyResultByKey = useMemo(() => {
+    const map = new Map();
+    visibleHistory.forEach((pick) => {
+      map.set(pick.uniqueKey || generatedPickIdentity(pick), pickStatus(pick));
+    });
+    return map;
+  }, [visibleHistory]);
+  const prizePicksHtmlWarning = useMemo(
+    () => visibleCriticalWarnings.find((warning) => warning.includes(PRIZEPICKS_HTML_BANNER)) || "",
+    [visibleCriticalWarnings]
   );
-  const underdogUnavailable =
-    platform === "underdog" &&
-    !loading &&
-    (sourceStatus.Underdog !== "Connected" || Number(debugInfo.sources?.Underdog?.propsAfterParsing || 0) === 0);
+  const sportOptions = getActiveSportFilterOptions(BASE_SPORT_OPTIONS);
+  const platformOptions = useMemo(() => platformOptionsForStatus(sourceStatus), [sourceStatus]);
+
+  useEffect(() => {
+    if (!MLB_ONLY_MODE || loading || !prizePicksHasUsableProps(props, sourceStatus)) return;
+    setCriticalWarnings((current) => {
+      const next = filterCriticalUiMessages(current, props, sourceStatus);
+      return next.length === current.length ? current : next;
+    });
+    setDegradedWarnings((current) => (current.length ? [] : current));
+    setError((current) => {
+      const next = resolveUiErrorMessage(current, props, sourceStatus);
+      return next === current ? current : next;
+    });
+  }, [loading, props, sourceStatus]);
 
   useEffect(() => {
     if (!visibleStreakSports.some((option) => option.value === streakSport)) {
@@ -583,24 +1746,66 @@ export default function DFSPropsApp() {
   useEffect(() => {
     if (loading || !lastUpdated) return;
     const generatedPicks = [...generatedStreakPicks(streakSportBoards), ...quickParlayPicks];
-    if (!generatedPicks.length) return;
-    const updatedHistory = saveGeneratedCategoryPicks(generatedPicks);
+    let updatedHistory = persistBoardOutcomes(
+      {
+        topPicks: topPicksForTracking,
+        readyToBet: readyToBetProps,
+        bestValue: bestValueProps,
+        streakFinder: streakFinderProps.slice(0, 12),
+        goblins: goblinPropsForTracking,
+        demons: demonPropsForTracking,
+      },
+      readHistory()
+    );
+    if (generatedPicks.length) {
+      updatedHistory = saveGeneratedCategoryPicks(generatedPicks, updatedHistory);
+    }
+    const graded = autoGradePendingOutcomes(updatedHistory, scoringContextRef.current?.stats || new Map());
+    updatedHistory = graded.history;
+    if (graded.settledCount > 0) writeHistory(updatedHistory);
+    else if (updatedHistory.length !== history.length) writeHistory(updatedHistory);
+
     if (JSON.stringify(updatedHistory.slice(0, 40)) !== JSON.stringify(history.slice(0, 40))) {
       setHistory(updatedHistory);
       const added = Math.max(0, updatedHistory.length - history.length);
-      setLearningSaveNotice(added ? `${added} new generated picks saved for accuracy review.` : "Generated pick memory updated.");
+      const settleNote = graded.settledCount > 0 ? ` Auto-graded ${graded.settledCount} finished games.` : "";
+      setLearningSaveNotice(
+        added
+          ? `${added} board picks saved for outcome tracking.${settleNote}`
+          : `Outcome tracker updated.${settleNote}`
+      );
+    } else if (graded.settledCount > 0) {
+      setHistory(updatedHistory);
+      setLearningSaveNotice(`Auto-graded ${graded.settledCount} finished game results.`);
     }
     const updatedParlays = saveGeneratedParlay(quickParlayPicks, parlayHistory);
     if (updatedParlays.length !== parlayHistory.length) setParlayHistory(updatedParlays);
-  }, [loading, lastUpdated, streakSportBoards, quickParlayPicks, history.length, parlayHistory]);
+  }, [
+    loading,
+    lastUpdated,
+    streakSportBoards,
+    quickParlayPicks,
+    history.length,
+    parlayHistory,
+    topPicksForTracking,
+    readyToBetProps,
+    bestValueProps,
+    streakFinderProps,
+    goblinPropsForTracking,
+    demonPropsForTracking,
+  ]);
 
   function updatePickResult(id, resultStatus, actualStatResult = null) {
     const updated = history.map((pick) => {
       if (pick.id !== id) return pick;
+      if (actualStatResult != null && Number.isFinite(Number(actualStatResult))) {
+        return { ...pick, ...gradeOutcome(pick, Number(actualStatResult)), resultStatus, finalResult: resultStatus, result: resultStatus };
+      }
       return {
         ...pick,
         resultStatus,
         finalResult: resultStatus,
+        result: resultStatus,
         actualStatResult: actualStatResult ?? pick.actualStatResult ?? "",
         settledAt: resultStatus === "Pending" ? "" : new Date().toISOString(),
       };
@@ -629,6 +1834,112 @@ export default function DFSPropsApp() {
     URL.revokeObjectURL(url);
   }
 
+  function importHistoryJson(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result || "[]"));
+        const rows = Array.isArray(parsed) ? parsed : parsed?.history || [];
+        if (!rows.length) return;
+        const merged = mergeHistoryPicks(readHistory(), rows);
+        writeHistory(merged);
+        setHistory(merged);
+        setLearningSaveNotice(`Imported ${rows.length} history rows.`);
+      } catch {
+        setError("Could not import history JSON.");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function saveSettings() {
+    writeRuntimeSettings(settingsDraft);
+    clearApiCache({ preserveLastGood: true });
+    clearBoardCache();
+    setSettingsNotice("Settings saved. Refresh today's picks to use the updated values.");
+  }
+
+  async function testApiRoutes() {
+    setApiRouteTesting(true);
+    setApiRouteTests([]);
+    try {
+      const results = [];
+      for (const route of API_TEST_ROUTES) {
+        results.push(await probeApiRoute(route));
+      }
+      setApiRouteTests(results);
+    } finally {
+      setApiRouteTesting(false);
+    }
+  }
+
+  function showMoreSection(section) {
+    setVisibleLimits((current) => ({
+      ...current,
+      [section]: Math.min(VISIBLE_SECTION_LIMIT, Number(current[section] || INITIAL_VISIBLE_SECTION_LIMIT) + 8),
+    }));
+  }
+
+  function saveThisPick(prop) {
+    if (!prop || !isVerifiedSportsbookProp(prop)) {
+      setLearningSaveNotice("Only verified sportsbook picks can be saved.");
+      return;
+    }
+    const updated = saveLearningPicks([prop], "Manually Saved Pick", { allowResearch: true });
+    setHistory(updated);
+    setLearningSaveNotice("Pick saved for accuracy review.");
+  }
+
+  function clearOldResearchPicks() {
+    const updated = trimHistoryToLimit(
+      history.filter((pick) => {
+        const status = pick.resultStatus || pick.finalResult || "Pending";
+        const confidence = Number(pick.confidenceScore ?? pick.confidence ?? 0);
+        const dq = Number(pick.dataQualityScore ?? 0);
+        const sourceText = normalize(`${pick.categorySource || ""} ${pick.recommendationType || ""}`);
+        const researchLike =
+          sourceText.includes("research") ||
+          sourceText.includes("model") ||
+          confidence < READY_MIN_CONFIDENCE ||
+          dq < READY_MIN_DATA_QUALITY;
+        return status !== "Pending" || !researchLike;
+      })
+    );
+    writeHistory(updated);
+    setHistory(updated);
+    setLearningSaveNotice("Old pending research picks cleared; saved history capped to the latest 100.");
+  }
+
+  function handleManualStatsSave(propId, manualStats) {
+    writeManualStatsForProp(propId, manualStats);
+    const context = {
+      ...(scoringContextRef.current || {}),
+      manualStatsMap: { ...(scoringContextRef.current?.manualStatsMap || readManualStatsMap()), [propId]: manualStats },
+    };
+
+    const mergedMap = new Map();
+    [...props, ...watchlist, ...nearQualification].forEach((item) => {
+      if (item?.id) mergedMap.set(item.id, item);
+    });
+    const target = mergedMap.get(propId);
+    if (target) {
+      mergedMap.set(propId, applyQualificationLabels(scoreDFSProp({ ...target, manualStats }, context)));
+    }
+    const boards = buildQualificationBoards(Array.from(mergedMap.values()), safeCreateEmptyPipelineAudit(), readHistory());
+    setProps(boards.allDisplayable.slice(0, MAX_RANKED_PROPS));
+    setWatchlist(boards.research.slice(0, MAX_WATCHLIST_PROPS));
+    setNearQualification(boards.near);
+    setStreakProps((current) =>
+      current.map((item) => (item.id === propId ? mergedMap.get(propId) || item : item))
+    );
+    setSelectedEvaluation((current) => {
+      if (!current || current.id !== propId) return current;
+      return applyQualificationLabels(scoreDFSProp({ ...current, manualStats }, context));
+    });
+    setLearningSaveNotice("Manual stats saved — confidence recalculated.");
+  }
+
   return (
     <main style={styles.page}>
       <section style={styles.header}>
@@ -636,122 +1947,90 @@ export default function DFSPropsApp() {
           <p style={styles.eyebrow}>DFS pick'em analytics</p>
           <h1 style={styles.title}>PrizePicks + Underdog Pick'em Engine</h1>
           <p style={styles.subtitle}>
-            Real active lines only. Expired, locked, live, and already-started props are filtered out before scoring.
+            Verified PrizePicks and Underdog lines only — no mock, fallback, or generated props.
           </p>
           <p style={styles.lastUpdated}>Last updated: {lastUpdatedLabel}</p>
+          {rateLimitNotice ? <p style={{ ...styles.streakNotice, margin: "6px 0 0" }}>{rateLimitNotice}</p> : null}
         </div>
-        <button style={styles.refreshButton} onClick={() => loadProps({ force: true })} disabled={loading} title="Clears API cache and refetches all sources">
-          {loading ? "Loading" : "Refresh (clear cache)"}
-        </button>
+        <div style={{ display: "grid", gap: "8px", justifyItems: "end" }}>
+          <button
+            style={{
+              ...styles.refreshButton,
+              ...(refreshBlocked ? { opacity: 0.55, cursor: "not-allowed" } : {}),
+            }}
+            onClick={() => loadProps({ force: true })}
+            disabled={refreshBlocked}
+            title={
+              refreshCountdownSec > 0
+                ? `Refresh available in ${formatCooldownRemaining(refreshCountdownSec * 1000)}`
+                : "Refetch live lines (respects cooldown to avoid rate limits)"
+            }
+          >
+            {loading
+              ? "Loading…"
+              : refreshCountdownSec > 0
+                ? `Refresh (${formatCooldownRemaining(refreshCountdownSec * 1000)})`
+                : "Refresh lines"}
+          </button>
+          <label style={{ ...styles.selectLabel, alignItems: "center", flexDirection: "row", gap: "6px" }}>
+            <input
+              type="checkbox"
+              checked={compactMode}
+              onChange={(event) => setCompactMode(event.target.checked)}
+            />
+            Compact Mode
+          </label>
+        </div>
       </section>
 
-      <section style={styles.streakControls} aria-label="Streak Finder filters">
-        <div>
-          <p style={styles.eyebrow}>Reference tool only</p>
-          <h2 style={styles.streakTitle}>Streak Finder</h2>
-          <p style={styles.streakCopy}>
-            Pick one category and the app shows only its 2 strongest active streak picks.
-          </p>
-        </div>
-        <div style={styles.segmentGroup}>
-          <span style={styles.controlLabel}>Category Tabs</span>
-          <div style={styles.segmentRow}>
-            {visibleStreakSports.map((option) => (
-              <button
-                key={option.value}
-                style={streakSport === option.value ? styles.segmentActive : styles.segment}
-                onClick={() => setStreakSport(option.value)}
-              >
-                {option.label} ({streakSportBoards[option.value]?.generatedCount || 0})
-              </button>
+      <details style={styles.compactDetails}>
+        <summary style={styles.detailsSummary}>
+          <span>
+            <span style={styles.eyebrow}>Runtime setup</span>
+            <strong>Settings</strong>
+          </span>
+          <span style={styles.countPill}>localStorage</span>
+        </summary>
+        <div style={styles.compactPanel}>
+          <div style={styles.controls}>
+            {SETTINGS_KEYS.map((key) => (
+              <label key={key} style={styles.selectLabel}>
+                {key}
+                <input
+                  style={styles.textInput}
+                  value={settingsDraft[key] || ""}
+                  onChange={(event) => setSettingsDraft((current) => ({ ...current, [key]: event.target.value }))}
+                  placeholder={key.includes("URL") ? "Optional proxy URL" : "Optional Odds API key"}
+                />
+              </label>
             ))}
           </div>
-          {learningSaveNotice && <p style={styles.streakNotice}>{learningSaveNotice}</p>}
-        </div>
-      </section>
-
-      {criticalWarnings.length > 0 && (
-        <section style={styles.errorPanel}>
-          {criticalWarnings.map((warning) => (
-            <p key={warning}>{warning}</p>
-          ))}
-        </section>
-      )}
-
-      {underdogUnavailable && <section style={styles.errorPanel}>{UNDERDOG_UNAVAILABLE_MESSAGE}</section>}
-
-      {error && <section style={styles.errorPanel}>{error}</section>}
-
-      <section style={styles.section}>
-        <div style={styles.sectionHeading}>
-          <div>
-            <p style={styles.eyebrow}>{currentCategoryLabel}</p>
-            <h2 style={styles.sectionTitle}>2 Strongest App-Selected Picks</h2>
-          </div>
-          <p style={styles.countPill}>
-            {isGoblinTab ? `${currentCategoryPicks.length} Goblin Picks` : isDemonTab ? `${currentCategoryPicks.length} Demon Picks` : `${currentCategoryPicks.length}/2 picks`}
-          </p>
-        </div>
-
-        {loading ? (
-          <EmptyState text={`Finding the strongest ${currentCategoryLabel} streak picks.`} />
-        ) : isGoblinTab && currentCategoryPicks.length === 0 ? (
-          <EmptyState text="No verified Goblin props available right now." />
-        ) : isDemonTab && currentCategoryPicks.length === 0 ? (
-          <EmptyState text="No verified Demon props available right now." />
-        ) : currentCategoryPicks.length === 0 ? (
-          <EmptyState text={`No active scheduled props found for ${currentCategoryLabel}. Try Refresh or another category.`} />
-        ) : (
-          <>
-            <div style={styles.cardGrid}>
-              {currentCategoryPicks.map((prop) => (
-                <StreakCard key={prop.id} prop={prop} onOpen={setSelectedEvaluation} />
-              ))}
-            </div>
-            {isGoblinTab && <p style={styles.compactFlags}>Low payout does not guarantee hit.</p>}
-            {isDemonTab && <p style={styles.compactFlags}>Higher payout means higher variance. Verify before using aggressive props.</p>}
-          </>
-        )}
-      </section>
-
-      <section style={styles.section}>
-        <div style={styles.sectionHeading}>
-          <div>
-            <p style={styles.eyebrow}>Low correlation</p>
-            <h2 style={styles.sectionTitle}>Quick 4-Man Builder</h2>
-          </div>
-          <div style={styles.segmentRow}>
-            <button
-              style={parlayRiskMode === "balanced" ? styles.segmentActive : styles.segment}
-              onClick={() => setParlayRiskMode("balanced")}
-            >
-              Balanced
+          <div style={{ ...styles.segmentRow, marginTop: "8px" }}>
+            <button type="button" style={styles.secondaryButton} onClick={saveSettings}>
+              Save settings
             </button>
             <button
-              style={parlayRiskMode === "aggressive" ? styles.segmentActive : styles.segment}
-              onClick={() => setParlayRiskMode("aggressive")}
+              type="button"
+              style={styles.secondaryButton}
+              onClick={testApiRoutes}
+              disabled={apiRouteTesting}
             >
-              Aggressive
+              {apiRouteTesting ? "Testing API routes…" : "Test API Routes"}
             </button>
-            <p style={styles.countPill}>{quickParlayPicks.length}/4 picks</p>
+            {settingsNotice ? <p style={styles.compactFlags}>{settingsNotice}</p> : null}
           </div>
-        </div>
-
-        {quickParlayPicks.length < 4 ? (
-          <EmptyState text="Not enough qualified picks for a 4-man right now." />
-        ) : (
-          <>
-            <div style={styles.cardGridCompact}>
-              {quickParlayPicks.map((prop) => (
-                <ParlayLegCard key={prop.id} prop={prop} onOpen={setSelectedEvaluation} />
+          {apiRouteTests.length > 0 ? (
+            <div style={{ marginTop: "10px" }}>
+              {apiRouteTests.map((result) => (
+                <p key={result.route} style={styles.compactFlags}>
+                  <strong>{result.ok ? "OK" : "FAIL"}</strong> {result.route} — status {result.status} ·{" "}
+                  {result.contentType} · {result.durationMs}ms — {result.preview}
+                </p>
               ))}
             </div>
-            <p style={styles.compactFlags}>
-              Correlation check: {parlayCorrelationRisk(quickParlayPicks)}. This is a reference build, not guaranteed winnings.
-            </p>
-          </>
-        )}
-      </section>
+          ) : null}
+        </div>
+      </details>
 
       <details style={styles.compactDetails}>
         <summary style={styles.detailsSummary}>
@@ -761,484 +2040,235 @@ export default function DFSPropsApp() {
           </span>
           <span style={styles.countPill}>{sourceLabel(platform)} / {sport === "all" ? "All Sports" : sport}</span>
         </summary>
-        <div style={styles.compactPanel}>
-          <section style={styles.controls} aria-label="DFS filters">
-            <div style={styles.segmentGroup}>
-              <span style={styles.controlLabel}>Source Filter</span>
-              <div style={styles.segmentRow}>
-                {platformOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    style={platform === option.id ? styles.segmentActive : styles.segment}
-                    onClick={() => setPlatform(option.id)}
-                    title={option.statusMessage || option.label}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <label style={styles.selectLabel}>
-              Sport
-              <select style={styles.select} value={sport} onChange={(event) => setSport(event.target.value)}>
-                {sportOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label style={styles.selectLabel}>
-              Prop Type
-              <select style={styles.select} value={statType} onChange={(event) => setStatType(event.target.value)}>
-                {PRIORITY_PROP_TYPES.map((option) => (
-                  <option key={option} value={option}>
-                    {option === "all" ? "All Prop Types" : option}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </section>
-
-          <section style={styles.quickFilters} aria-label="Edge filters">
-            <span style={styles.controlLabel}>Edge Filters</span>
-            <div style={styles.segmentRow}>
-              {EDGE_FILTER_OPTIONS.map((option) => (
-                <button
-                  key={option.id}
-                  style={edgeFilter === option.id ? styles.segmentActive : styles.segment}
-                  onClick={() => setEdgeFilter(option.id)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </section>
-        </div>
+        <PropFilters
+          platform={platform}
+          setPlatform={setPlatform}
+          sport={sport}
+          setSport={setSport}
+          statType={statType}
+          setStatType={setStatType}
+          edgeFilter={edgeFilter}
+          setEdgeFilter={setEdgeFilter}
+          dateFilter={dateFilter}
+          setDateFilter={setDateFilter}
+          readyOnly={readyOnly}
+          setReadyOnly={setReadyOnly}
+          searchText={searchText}
+          setSearchText={setSearchText}
+          filterPrefs={filterPrefs}
+          setFilterPrefs={(next) => {
+            const merged = typeof next === "function" ? next(filterPrefs) : next;
+            setFilterPrefs(merged);
+            writeFilterPrefs(merged);
+          }}
+          platformOptions={platformOptions}
+          sportOptions={sportOptions}
+          propTypes={PRIORITY_PROP_TYPES}
+          edgeFilters={EDGE_FILTER_OPTIONS}
+          dateFilters={DATE_FILTER_OPTIONS}
+        />
       </details>
 
-      <SourceStatusBar sourceStatus={sourceStatus} sourceHealth={sourceHealth} cacheStatus={cacheStatus} stale={Boolean(staleDataWarning)} />
-
-      <section style={styles.summaryStrip} aria-label="Compact board summary">
-        <div style={styles.summaryCard}>
-          <span style={styles.metricLabel}>Saved Picks</span>
-          <strong>{visibleHistory.length}</strong>
-          <span style={styles.summaryHint}>accuracy review</span>
-        </div>
-        <div style={styles.summaryCard}>
-          <span style={styles.metricLabel}>Watchlist</span>
-          <strong>{filteredWatchlist.length} active</strong>
-          <span style={styles.summaryHint}>not shown on main page</span>
-        </div>
-        <div style={styles.summaryCard}>
-          <span style={styles.metricLabel}>Props of the Day</span>
-          <strong>{propsOfDay.length}</strong>
-          <span style={styles.summaryHint}>compact below</span>
-        </div>
-        <div style={styles.summaryCard}>
-          <span style={styles.metricLabel}>Ranked DFS</span>
-          <strong>{filteredProps.length}</strong>
-          <span style={styles.summaryHint}>secondary board</span>
-        </div>
-      </section>
-
-      <details style={styles.compactDetails}>
-        <summary style={styles.detailsSummary}>
-          <span>
-            <span style={styles.eyebrow}>Highest confidence</span>
-            <strong>Props of the Day</strong>
-          </span>
-          <span style={styles.countPill}>{propsOfDay.length} active picks</span>
-        </summary>
-        <div style={styles.compactPanel}>
-          {loading ? (
-            <EmptyState text="Loading active PrizePicks and Underdog lines." />
-          ) : propsOfDayPreview.length === 0 ? (
-            <EmptyState text="No active scheduled props found for this sport/platform." />
-          ) : (
-            <div style={styles.cardGridCompact}>
-              {propsOfDayPreview.map((prop) => (
-                <PropCard key={prop.id} prop={prop} compact onOpen={setSelectedEvaluation} />
-              ))}
-            </div>
-          )}
-        </div>
-      </details>
-
-      <details style={styles.compactDetails}>
-        <summary style={styles.detailsSummary}>
-          <span>
-            <span style={styles.eyebrow}>Active board</span>
-            <strong>Ranked DFS Props</strong>
-          </span>
-          <span style={styles.countPill}>{filteredProps.length} shown</span>
-        </summary>
-        <div style={styles.compactPanel}>
-          {loading ? (
-            <EmptyState text="Refreshing current lines." />
-          ) : rankedPropsPreview.length === 0 ? (
-            <EmptyState text="No active scheduled props found for this sport/platform." />
-          ) : (
-            <div style={styles.cardGridCompact}>
-              {rankedPropsPreview.map((prop) => (
-                <PropCard key={prop.id} prop={prop} onOpen={setSelectedEvaluation} />
-              ))}
-            </div>
-          )}
-        </div>
-      </details>
-
-      <section style={styles.watchlistSummary}>
-        <div style={styles.sectionHeading}>
-          <div>
-            <p style={styles.eyebrow}>No forced picks</p>
-            <h2 style={styles.sectionTitleSmall}>Watchlist</h2>
-          </div>
-          <p style={styles.countPill}>Watchlist: {filteredWatchlist.length} active</p>
-        </div>
-      </section>
-
-      <AccuracyDashboard
-        dashboard={dashboard}
-        history={visibleHistory}
-        updatePickResult={updatePickResult}
-        clearHistory={clearHistory}
-        exportHistoryCsv={exportHistoryCsv}
+      <SourceStatusBar
+        sourceStatus={displaySourceStatus}
+        sourceHealth={sourceHealth}
+        cacheStatus={cacheStatus}
+        stale={Boolean(staleDataWarning)}
+        apiHealth={apiHealth}
+        lastUpdated={lastUpdated}
+        devMode={isDevEnvironment()}
+        upcomingSlateCount={debugInfo.upcomingSlateCount ?? pipelineAudit.upcomingSlate ?? 0}
+        slateExcludedCount={debugInfo.slateExcludedCount ?? pipelineAudit.slateExcluded ?? 0}
+        pregameWindowHours={debugInfo.pregameWindowHours ?? filterPrefs.pregameWindowHours ?? DEFAULT_PREGAME_WINDOW_HOURS}
       />
 
-      <ParlayHistoryPanel history={parlayHistory} dashboard={parlayDashboard} />
-
-      <SourceDebugPanel debug={debugPanel} />
-
-      {selectedEvaluation && (
-        <EvaluationModal prop={selectedEvaluation} onClose={() => setSelectedEvaluation(null)} />
-      )}
-    </main>
-  );
-}
-
-function PropCard({ prop, watchlist = false, compact = false, onOpen }) {
-  const isWatchlist = watchlist || prop.recommendationStatus === "watchlist";
-  const tier = confidenceTier(prop);
-  const lean = isWatchlist ? "Watch" : formatLeanSide(prop.bestPick || "Watch");
-  const badge = prop.dataQualityBadge || dataQualityBadge(prop);
-
-  return (
-    <article
-      style={isWatchlist ? { ...styles.card, ...styles.watchlistCard } : styles.card}
-      role="button"
-      tabIndex={0}
-      onClick={() => onOpen?.(prop)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onOpen?.(prop);
-        }
-      }}
-    >
-      <div style={styles.compactCardTop}>
-        <PlayerImage prop={prop} compact />
-        <div style={styles.cardInfo}>
-          <div style={styles.cardTitleRow}>
-            <div>
-              <p style={styles.platform}>{prop.platform} · {displaySport(prop)}</p>
-              <h3 style={styles.playerName}>{prop.playerName}</h3>
-              <p style={styles.gameLine}>
-                {prop.team || "Team"} vs {prop.opponent || "Opponent"}
-              </p>
-            </div>
-            <div style={styles.cardBadgeColumn}>
-              <DataQualityBadge badge={badge} />
-              <span style={tierStyle(tier)}>{isWatchlist ? "Watch" : tier}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div style={compact ? styles.compactMetaGridTight : styles.compactMetaGrid}>
-        <Metric label="Prop" value={prop.statType} />
-        <Metric label="Line" value={formatNumber(prop.line)} />
-        <Metric label="Lean" value={lean} strong />
-        <Metric label="Confidence" value={`${prop.confidenceScore}%`} strong />
-        {!compact && <Metric label="Risk" value={prop.riskLevel || "Medium"} />}
-      </div>
-      <div style={styles.whyLink}>Why this pick?</div>
-    </article>
-  );
-}
-
-function StreakCard({ prop, avoid = false, ladder = false, onOpen }) {
-  const tier = avoid ? "Risky" : confidenceTier(prop);
-  const cardTone = prop.streakCategory === "goblins" || isGoblinProp(prop)
-    ? styles.goblinCard
-    : prop.streakCategory === "demons" || isDemonProp(prop)
-      ? styles.demonCard
-      : styles.streakCard;
-
-  return (
-    <article
-      style={{ ...styles.card, ...(avoid ? styles.avoidCard : ladder ? styles.ladderCard : cardTone) }}
-      role="button"
-      tabIndex={0}
-      onClick={() => onOpen?.(prop)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onOpen?.(prop);
-        }
-      }}
-    >
-      <div style={styles.compactCardTop}>
-        <PlayerImage prop={prop} />
-        <div style={styles.cardInfo}>
-          <div style={styles.cardTitleRow}>
-            <div>
-              <p style={styles.platform}>{prop.platform}</p>
-              <h3 style={styles.playerName}>{prop.playerName}</h3>
-              <p style={styles.gameLine}>
-                {prop.team || "Team"} vs {prop.opponent || "Opponent"}
-              </p>
-            </div>
-            <div style={styles.cardBadgeColumn}>
-              <DataQualityBadge badge={prop.dataQualityBadge || dataQualityBadge(prop)} />
-              <span style={tierStyle(tier)}>{avoid ? "Risky" : tier}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div style={styles.compactMetaGridTight}>
-        <Metric label="Prop" value={prop.statType} />
-        <Metric label="Line" value={formatNumber(prop.line)} />
-        <Metric label="Lean" value={formatLeanSide(prop.side || prop.bestPick)} strong />
-        <Metric label="Conf." value={`${prop.confidenceScore}%`} strong />
-        <Metric label="Type" value={prop.payoutLabel || propPayoutLabel(prop)} />
-        <Metric label="Risk" value={prop.riskLevel || "Medium"} />
-      </div>
-
-      <div style={styles.whyLink}>Why this pick?</div>
-    </article>
-  );
-}
-
-function ParlayLegCard({ prop, onOpen }) {
-  return (
-    <article
-      style={{ ...styles.card, ...styles.parlayCard }}
-      role="button"
-      tabIndex={0}
-      onClick={() => onOpen?.(prop)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onOpen?.(prop);
-        }
-      }}
-    >
-      <div style={styles.compactCardTop}>
-        <PlayerImage prop={prop} />
-        <div style={styles.cardInfo}>
-          <p style={styles.platform}>{prop.platform}</p>
-          <h3 style={styles.playerName}>{prop.playerName}</h3>
-          <p style={styles.gameLine}>{displaySport(prop)} - {prop.team || "Team"} vs {prop.opponent || "Opponent"}</p>
-        </div>
-        <span style={tierStyle(confidenceTier(prop))}>{confidenceTier(prop)}</span>
-      </div>
-      <div style={styles.compactMetaGrid}>
-        <Metric label="Prop" value={prop.statType} />
-        <Metric label="Line" value={formatNumber(prop.line)} />
-        <Metric label="Side" value={formatLeanSide(prop.side || prop.bestPick)} strong />
-        <Metric label="Confidence" value={`${prop.confidenceScore}%`} strong />
-        <Metric label="Risk" value={prop.riskLevel || "Medium"} />
-        <Metric label="Why included" value={parlayIncludeReason(prop)} />
-      </div>
-      {parlayLegWarning(prop) && <p style={styles.compactFlags}>{parlayLegWarning(prop)}</p>}
-    </article>
-  );
-}
-
-function EvaluationModal({ prop, onClose }) {
-  const lean = formatLeanSide(prop.bestPick || prop.side || "Watch");
-  const isWatchlist = prop.recommendationStatus === "watchlist";
-  const tier = confidenceTier(prop);
-  const explanation = buildPickExplanation({
-    ...prop,
-    dataQualityBadge: prop.dataQualityBadge || dataQualityBadge(prop),
-    dataSources: prop.dataSources || dataSourcesUsed(prop),
-  });
-  const badge = prop.dataQualityBadge || dataQualityBadge(prop);
-
-  useEffect(() => {
-    function handleKeyDown(event) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  return (
-    <div style={styles.modalBackdrop} role="presentation" onClick={onClose}>
-      <section
-        style={styles.modalPanel}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${prop.playerName} evaluation`}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div style={styles.modalHeader}>
-          <div style={styles.modalPlayer}>
-            <PlayerImage prop={prop} large />
-            <div>
-              <p style={styles.platform}>{prop.platform}</p>
-              <h2 style={styles.modalTitle}>{prop.playerName}</h2>
-              <p style={styles.gameLine}>
-                {displaySport(prop)} - {prop.team || "Team"} vs {prop.opponent || "Opponent"}
-              </p>
-            </div>
-          </div>
-          <button style={styles.closeButton} onClick={onClose}>
-            Close
-          </button>
-        </div>
-
-        <div style={styles.tagRow}>
-          <span style={tierStyle(tier)}>{tier}</span>
-          <span style={riskStyle(prop.riskLevel)}>{prop.riskLevel || "Medium"}</span>
-          <DataQualityBadge badge={badge} />
-          {(prop.payoutLabel || propPayoutLabel(prop)) !== "standard" && (
-            <span style={styles.valueTag}>{prop.payoutLabel || propPayoutLabel(prop)}</span>
-          )}
-          {prop.valueTags?.map((tag) => (
-            <span key={tag} style={styles.valueTag}>
-              {tag}
-            </span>
-          ))}
-        </div>
-
-        <div style={styles.modalGrid}>
-          <Metric label="Prop Type" value={prop.statType} />
-          <Metric label="Line" value={formatNumber(prop.line)} />
-          <Metric label="Final Over/Under Lean" value={isWatchlist ? "No Edge / Watch" : lean} strong />
-          <Metric label="Confidence Score" value={`${prop.confidenceScore ?? "-"}${prop.side ? "%" : "/100"}`} strong />
-          <Metric label="Model Projection" value={prop.projection == null ? "Needs stats" : formatNumber(prop.projection)} />
-          <Metric label="Stat Edge" value={formatSignedNumber(prop.edge)} strong />
-          <Metric label="Edge Percentage" value={formatSignedPercent(edgePercentForProp(prop))} />
-          <Metric label="Model Probability" value={formatPercent(prop.modelProbability)} />
-          <Metric label="Implied Probability" value={formatPercent(prop.impliedProbability)} />
-          <Metric label="Expected Value" value={formatSignedPercent(prop.expectedValue)} strong />
-          <Metric label="Last 5 Hit Rate" value={formatPercent(prop.last5HitRate || prop.modelSignal?.last5HitRate)} />
-          <Metric label="Last 10 Hit Rate" value={formatPercent(prop.last10HitRate || prop.modelSignal?.last10HitRate || prop.recentHitRate)} />
-          <Metric label="Risk Level" value={prop.riskLevel || "Medium"} />
-          <Metric label="Opponent/Matchup Ranking" value={prop.matchupRating || prop.modelSignal?.matchupRating || "Neutral"} />
-          <Metric label="Usage / Minutes / Pitch Count" value={usageContextForProp(prop)} />
-          <Metric label="Injury/News Notes" value={prop.injuryRisk || prop.modelSignal?.injuryRisk || "Low"} />
-          <Metric label="Opening Line" value={formatMaybeLine((prop.lineMovement || prop.modelSignal?.lineMovement)?.openingLine)} />
-          <Metric label="Current Line" value={formatMaybeLine((prop.lineMovement || prop.modelSignal?.lineMovement)?.currentLine)} />
-          <Metric label="Movement Amount" value={formatSignedNumber((prop.lineMovement || prop.modelSignal?.lineMovement)?.move)} />
-          <Metric label="Line Movement Status" value={lineMovementStatusText(prop)} />
-          <Metric label="Sharp Money" value={prop.sharpMoneyIndicator || prop.modelSignal?.sharpMoneyIndicator || "No sharp signal"} />
-          <Metric label="Data Sources Used" value={dataSourcesUsed(prop).join(", ")} />
-          <Metric label="Key Stats Used" value={keyStatsSummary(prop)} />
-          <Metric label="Warning Flags" value={warningFlags(prop).join(", ") || "None"} />
-          <Metric label="Risk Explanation" value={riskExplanation(prop)} />
-          <Metric label="Why It Made Top 2" value={prop.topTwoReason || "Ranked by confidence, probability, low volatility, and source agreement."} />
-          <Metric label="Start Time" value={formatDateTime(prop.startTime)} />
-        </div>
-
-        {(prop.lineComparison || prop.sportsbookComparison) && (
-          <div style={styles.comparisonBox}>
-            {prop.lineComparison && <span>PrizePicks: {formatMaybeLine(prop.lineComparison.prizePicksLine)}</span>}
-            {prop.lineComparison && <span>Underdog: {formatMaybeLine(prop.lineComparison.underdogLine)}</span>}
-            {prop.lineComparison && <span>Platform gap: {formatNumber(prop.lineComparison.difference)}</span>}
-            {prop.sportsbookComparison && <span>Sportsbook avg: {formatMaybeLine(prop.sportsbookComparison.marketAverageLine)}</span>}
-            {prop.sportsbookComparison && <span>Books: {prop.sportsbookComparison.books || 0}</span>}
-            {prop.sportsbookComparison && <span>DFS discrepancy: {formatSignedNumber(prop.sportsbookDiscrepancy)}</span>}
-          </div>
-        )}
-
-        {prop.whyNotElite?.length > 0 && (
-          <div style={styles.watchlistMessage}>
-            <strong>Why not Elite</strong>
-            <span>{prop.whyNotElite.join(", ")}.</span>
-          </div>
-        )}
-
-        <div style={styles.explanationSections}>
-          {explanation.map((section) => (
-            <div key={section.title} style={styles.explanationBlock}>
-              <strong>{section.title}</strong>
-              <ul style={styles.explanationList}>
-                {section.lines.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-
-        <div style={styles.evaluationText}>
-          <strong>Summary</strong>
-          <p>{isWatchlist ? prop.watchlistMessage || NO_EDGE_MESSAGE : prop.reasoningSummary}</p>
-          {prop.side && <p>{STREAK_WARNING}</p>}
-        </div>
+      <section style={styles.streakControls} aria-label="Sport category tabs">
+        <SportTabs options={visibleStreakSports} active={streakSport} onChange={setStreakSport} boards={streakSportBoards} />
+        {learningSaveNotice ? <p style={styles.streakNotice}>{learningSaveNotice}</p> : null}
       </section>
-    </div>
-  );
-}
 
-function PlayerImage({ prop, large = false, compact = false }) {
-  const initials = playerInitials(prop.playerName);
-  const avatarFallback = getPlayerImage(prop.playerName, prop.sport);
-  const remoteSrc = prop.playerImage || prop.headshot || prop.imageUrl || prop.image_url || prop.player_image || "";
-  const [imageSrc, setImageSrc] = useState(remoteSrc);
-  const [showInitials, setShowInitials] = useState(!remoteSrc);
+      {MLB_ONLY_MODE ? (
+        <section style={styles.compactPanel}>
+          <p style={styles.compactFlags}>
+            <strong>MLB-only mode</strong> — NBA, WNBA, Tennis, Soccer, and NHL are temporarily disabled while the engine focuses on MLB accuracy.
+          </p>
+        </section>
+      ) : null}
 
-  useEffect(() => {
-    setImageSrc(remoteSrc);
-    setShowInitials(!remoteSrc);
-  }, [remoteSrc]);
+      {prizePicksHtmlWarning && (
+        <section style={styles.errorPanel}>
+          <p>{prizePicksHtmlWarning}</p>
+        </section>
+      )}
 
-  const wrapStyle = large
-    ? { ...styles.playerImageWrap, ...styles.playerImageWrapLarge }
-    : compact
-      ? { ...styles.playerImageWrap, ...styles.playerImageWrapCompact }
-      : styles.playerImageWrap;
+      {visibleCriticalWarnings.length > 0 && (
+        <section style={styles.errorPanel}>
+          {visibleCriticalWarnings.map((warning) => (
+            <p key={warning}>{warning}</p>
+          ))}
+        </section>
+      )}
 
-  return (
-    <div style={wrapStyle} aria-hidden="true">
-      {showInitials ? (
-        <span style={styles.playerInitials}>{initials}</span>
+      {underdogDegraded ? (
+        <section style={styles.compactPanel}>
+          <p style={{ ...styles.compactFlags, color: "#fbbf24", margin: 0 }}>{UNDERDOG_DEGRADED_MESSAGE}</p>
+        </section>
+      ) : null}
+
+      {visibleError ? <section style={styles.errorPanel}>{visibleError}</section> : null}
+
+      {isDebugLoggingEnabled() && Object.keys(pipelineCounters).length > 0 ? (
+        <LazyDebugDetails
+          eyebrow="Pipeline"
+          title="Prop Counters"
+          countLabel={`${pipelineCounters.accepted ?? 0} accepted / ${pipelineCounters.rejected ?? 0} rejected`}
+        >
+          <p style={styles.compactFlags}>
+            accepted {pipelineCounters.accepted ?? 0} · rejected {pipelineCounters.rejected ?? 0} · live{" "}
+            {pipelineCounters.live ?? 0} · cached {pipelineCounters.cached ?? 0} · stale {pipelineCounters.stale ?? 0}
+          </p>
+        </LazyDebugDetails>
+      ) : null}
+
+      {isDebugLoggingEnabled() && rejectedPropSamples.length > 0 ? (
+        <LazyDebugDetails title="Rejected Props Debug" countLabel={`${rejectedPropSamples.length} groups`}>
+          {rejectedPropSamples.map((sample, index) => (
+            <p key={`${sample.stage}-${sample.sport}-${sample.market}-${sample.reason}-${index}`} style={styles.compactFlags}>
+              {formatGroupedDebugLine({ ...sample, stage: sample.stage || "filter" }, pipelineAudit)}
+            </p>
+          ))}
+        </LazyDebugDetails>
+      ) : null}
+
+      {isDebugLoggingEnabled() && (pipelineAudit.scoringDebug?.length > 0 || pipelineAudit.projectionDebug?.length > 0 || pipelineAudit.lineMovementDebug?.length > 0) ? (
+        <>
+          {pipelineAudit.scoringDebug?.length > 0 ? (
+            <LazyDebugDetails title="Scoring Debug" countLabel={`${pipelineAudit.scoringDebug.length} groups`}>
+              {pipelineAudit.scoringDebug.map((sample, index) => (
+                <p key={`scoring-${sample.sport}-${sample.market}-${sample.reason}-${index}`} style={styles.compactFlags}>
+                  {formatGroupedDebugLine({ ...sample, stage: sample.stage || "scoring" }, pipelineAudit)}
+                </p>
+              ))}
+            </LazyDebugDetails>
+          ) : null}
+          {pipelineAudit.projectionDebug?.length > 0 ? (
+            <LazyDebugDetails title="Projection Debug" countLabel={`${pipelineAudit.projectionDebug.length} groups`}>
+              {pipelineAudit.projectionDebug.map((sample, index) => (
+                <p key={`projection-${sample.sport}-${sample.market}-${sample.reason}-${index}`} style={styles.compactFlags}>
+                  {formatGroupedDebugLine({ ...sample, stage: sample.stage || "projection" }, pipelineAudit)}
+                </p>
+              ))}
+            </LazyDebugDetails>
+          ) : null}
+          {pipelineAudit.lineMovementDebug?.length > 0 ? (
+            <LazyDebugDetails title="Line Movement Debug" countLabel={`${pipelineAudit.lineMovementDebug.length} groups`}>
+              {pipelineAudit.lineMovementDebug.map((sample, index) => (
+                <p key={`movement-${sample.sport}-${sample.market}-${sample.reason}-${index}`} style={styles.compactFlags}>
+                  {formatGroupedDebugLine({ ...sample, stage: sample.stage || "lineMovement" }, pipelineAudit)}
+                </p>
+              ))}
+            </LazyDebugDetails>
+          ) : null}
+        </>
+      ) : null}
+
+      {isGoblinTab ? (
+        <GoblinBoard picks={streakFinderProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
+      ) : isDemonTab ? (
+        <DemonBoard picks={streakFinderProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
       ) : (
-        <img
-          src={imageSrc}
-          alt=""
-          style={styles.playerImage}
-          loading="lazy"
-          onError={() => {
-            setShowInitials(true);
-            setImageSrc(avatarFallback);
-          }}
+        <TopPicksBoard
+          label={currentCategoryLabel}
+          picks={currentCategoryPicks}
+          loading={loading}
+          onOpen={setSelectedEvaluation}
+          compactMode={compactMode}
         />
       )}
-    </div>
-  );
-}
 
-function playerInitials(name = "") {
-  const parts = String(name).trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0] || ""}${parts[parts.length - 1][0] || ""}`.toUpperCase();
-}
+      <section style={styles.section} aria-label="Ready to Bet board">
+        <div style={styles.sectionHeading}>
+          <div>
+            <p style={styles.eyebrow}>Qualified only</p>
+            <h2 style={styles.sectionTitle}>Ready to Bet</h2>
+            <p style={styles.streakCopy}>
+              Live lines only · confidence ≥ {READY_MIN_CONFIDENCE}, data quality ≥ {READY_MIN_DATA_QUALITY}, positive edge.
+            </p>
+          </div>
+          <p style={styles.countPill}>{readyToBetProps.length} qualified</p>
+        </div>
+        {loading ? (
+          <EmptyState text="Loading picks…" />
+        ) : readyToBetProps.length === 0 ? (
+          <EmptyState text={NO_VERIFIED_PROPS_MESSAGE} />
+        ) : (
+          <>
+            <VirtualCardList
+              items={visibleReadyProps}
+              renderCard={readyRenderCard}
+              initialVisible={INITIAL_VISIBLE_SECTION_LIMIT}
+            />
+            <LoadMoreButton visible={visibleReadyProps.length} total={readyToBetProps.length} onClick={() => showMoreSection("ready")} />
+          </>
+        )}
+      </section>
 
-function Metric({ label, value, strong = false }) {
-  return (
-    <div style={styles.metric}>
-      <span style={styles.metricLabel}>{label}</span>
-      <strong style={strong ? styles.metricValueStrong : styles.metricValue}>{value}</strong>
-    </div>
+      <section style={styles.section} aria-label="Best Value board">
+        <div style={styles.sectionHeading}>
+          <div>
+            <p style={styles.eyebrow}>Edge values</p>
+            <h2 style={styles.sectionTitleSmall}>Best Value</h2>
+            <p style={styles.streakCopy}>Strongest verified edges from live sportsbook lines.</p>
+          </div>
+          <p style={styles.countPill}>{bestValueProps.length} values</p>
+        </div>
+        {loading ? (
+          <EmptyState text="Loading value board…" />
+        ) : bestValueProps.length === 0 ? (
+          <EmptyState text={NO_VERIFIED_PROPS_MESSAGE} />
+        ) : (
+          <>
+            <VirtualCardList
+              items={visibleBestValueProps}
+              renderCard={valueRenderCard}
+              initialVisible={INITIAL_VISIBLE_SECTION_LIMIT}
+            />
+            <LoadMoreButton visible={visibleBestValueProps.length} total={bestValueProps.length} onClick={() => showMoreSection("value")} />
+          </>
+        )}
+      </section>
+
+      <details style={styles.compactDetails}>
+        <summary style={styles.detailsSummary}>
+          <span>
+            <span style={styles.eyebrow}>Accuracy</span>
+            <strong>Saved pick history</strong>
+          </span>
+          <span style={styles.countPill}>{visibleHistory.length} saved</span>
+        </summary>
+        <div style={styles.compactPanel}>
+          <AccuracyReview
+            dashboard={dashboard}
+            history={visibleHistory}
+            updatePickResult={updatePickResult}
+            clearHistory={clearHistory}
+            exportHistoryCsv={exportHistoryCsv}
+            importHistoryJson={importHistoryJson}
+            filterOptions={historyFilterOptions(visibleHistory)}
+            clearOldResearchPicks={clearOldResearchPicks}
+          />
+        </div>
+      </details>
+
+      {selectedEvaluation && (
+        <PickDetailModal
+          prop={selectedEvaluation}
+          onClose={() => setSelectedEvaluation(null)}
+          onSaveManualStats={handleManualStatsSave}
+          onSavePick={saveThisPick}
+        />
+      )}
+    </main>
   );
 }
 
@@ -1246,341 +2276,390 @@ function EmptyState({ text }) {
   return <div style={styles.emptyState}>{text}</div>;
 }
 
-function SourceStatusBar({ sourceStatus, sourceHealth = {}, cacheStatus = "", stale = false }) {
-  const items = [
-    ["PrizePicks", sourceStatus?.PrizePicks || "Pending"],
-    ["Underdog", sourceStatus?.Underdog || "Pending"],
-    ["Odds API", sourceStatus?.["The Odds API"] || "Pending"],
-    ["BallDontLie", sourceHealth.BallDontLie || "—"],
-    ["Soccer stats", sourceHealth["Soccer stats"] || "—"],
-    ["WNBA stats", sourceHealth["WNBA stats"] || "—"],
-  ];
-
+function LoadMoreButton({ visible, total, onClick }) {
+  if (visible >= total || visible >= VISIBLE_SECTION_LIMIT) return null;
   return (
-    <section style={styles.sourceStatusBar} aria-label="Source status">
-      {items.map(([source, status]) => (
-        <div key={source} style={styles.sourceStatusItem}>
-          <span style={styles.sourceName}>{source}</span>
-          <span style={sourceStatusStyle(status)}>{status}</span>
-        </div>
-      ))}
-      {cacheStatus && (
-        <div style={styles.sourceStatusItem}>
-          <span style={styles.sourceName}>Board cache</span>
-          <span style={sourceStatusStyle(stale ? "Partial/fallback" : cacheStatus === "fresh" ? "Connected" : "Cached")}>
-            {stale ? "Stale — refresh" : cacheStatus}
-          </span>
-        </div>
-      )}
-    </section>
+    <button type="button" style={{ ...styles.secondaryButton, marginTop: "8px" }} onClick={onClick}>
+      Load more ({visible}/{Math.min(total, VISIBLE_SECTION_LIMIT)})
+    </button>
   );
 }
 
-function DataQualityBadge({ badge }) {
-  if (!badge?.label) return null;
-  const toneStyle =
-    badge.tone === "full"
-      ? styles.dataBadgeFull
-      : badge.tone === "partial"
-        ? styles.dataBadgePartial
-        : badge.tone === "fallback"
-          ? styles.dataBadgeFallback
-          : styles.dataBadgeWeak;
-  return <span style={{ ...styles.dataQualityBadge, ...toneStyle }}>{badge.label}</span>;
-}
-
-function SourceDebugPanel({ debug }) {
-  const sources = debug?.sources || {};
-  const selected = debug?.selectedSource || "all";
-  const generatedBySport = debug?.generatedBySport || [];
-
+function ParlayLegCard({ prop, onOpen, compactMode = true }) {
+  const reason = parlayLegReason(prop);
   return (
-    <details style={styles.debugPanel} aria-label="Source debug panel">
-      <summary style={styles.detailsSummary}>
-        <span>
-          <span style={styles.eyebrow}>Data source audit</span>
-          <strong>Debug Panel</strong>
-        </span>
-        <span style={styles.countPill}>Selected source: {sourceLabel(selected)}</span>
-      </summary>
-
-      <div style={styles.debugGrid}>
-        {Object.entries(DEFAULT_SOURCE_STATUS).map(([source]) => {
-          const row = sources[source] || emptySourceDebug(source);
-          return (
-            <div key={source} style={styles.debugCard}>
-              <div style={styles.debugCardTop}>
-                <strong>{source}</strong>
-                <span style={sourceStatusStyle(row.status || "Pending")}>{row.status || "Pending"}</span>
-              </div>
-              <div style={styles.debugRows}>
-                <DebugRow label="API status" value={row.apiStatus || row.status || "Pending"} />
-                <DebugRow label="API/proxy URL" value={row.apiUrl || "Not called"} />
-                <DebugRow label="Raw props loaded" value={row.rawPropsLoaded ?? 0} />
-                <DebugRow label="Props after parsing" value={row.propsAfterParsing ?? 0} />
-                <DebugRow label="Props after filters" value={row.propsAfterFilters ?? 0} />
-                {row.visibleAfterCurrentFilters != null && (
-                  <DebugRow label="Visible now" value={row.visibleAfterCurrentFilters} />
-                )}
-                {row.message && <DebugRow label="Message" value={row.message} />}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div style={styles.debugSummaryGrid}>
-        <DebugRow label="Last refresh" value={debug?.lastRefresh ? formatDateTime(debug.lastRefresh) : "Never"} />
-        <DebugRow label="Saved picks" value={debug?.savedPicks ?? 0} />
-        <DebugRow label="Generated by category" value={generatedBySport.map((row) => `${row.sport}: ${row.count}`).join(" | ") || "None"} />
-        <DebugRow label="Source mix" value={debug?.sourceMix || "No visible picks"} />
-      </div>
-    </details>
-  );
-}
-
-function DebugRow({ label, value }) {
-  return (
-    <div style={styles.debugRow}>
-      <span>{label}</span>
-      <strong>{String(value)}</strong>
+    <div>
+      <PlayerPropCard prop={prop} onOpen={onOpen} compact={compactMode} cardStyle={styles.parlayCard} />
+      {reason ? <p style={{ ...styles.compactFlags, margin: "4px 0 0", paddingLeft: "2px" }}>{reason}</p> : null}
     </div>
   );
 }
 
-function AccuracyDashboard({ dashboard, history, updatePickResult, clearHistory, exportHistoryCsv }) {
-  const [historyFilter, setHistoryFilter] = useState({ date: "all", sport: "all", categorySource: "all", result: "all", platform: "all" });
-  const filteredHistory = history.filter((pick) => matchesHistoryFilter(pick, historyFilter));
-  const recent = filteredHistory.slice(0, 12);
-  const filterOptions = historyFilterOptions(history);
+function boardEmptyMessage({ loading, sport = "all", sourceStatus = {}, platform = "all", criticalWarnings = [] }) {
+  if (loading) return "Loading active PrizePicks and Underdog lines.";
+  const sportLabel = sport === "all" ? "any sport" : sport;
+  const htmlIssue = criticalWarnings.some((warning) => /html|non-json|javascript/i.test(warning));
+  const ppFailed = sourceStatus.PrizePicks === "Failed";
+  const udFailed = sourceStatus.Underdog === "Failed";
 
-  return (
-    <details style={styles.compactDetails}>
-      <summary style={styles.detailsSummary}>
-        <div>
-          <p style={styles.eyebrow}>Saved picks</p>
-          <strong>Saved Picks / Accuracy Review</strong>
-        </div>
-        <div style={styles.dashboardActions}>
-          <button style={styles.secondaryButton} onClick={exportHistoryCsv} disabled={history.length === 0}>
-            Export CSV
-          </button>
-          <button style={styles.secondaryButton} onClick={clearHistory} disabled={history.length === 0}>
-            Clear History
-          </button>
-          <p style={styles.countPill}>{dashboard.total} saved</p>
-        </div>
-      </summary>
-
-      <div style={{ ...styles.dashboardGrid, marginTop: "12px" }}>
-        <MetricCard label="Generated Today" value={dashboard.generatedToday} />
-        <MetricCard label="Total Picks" value={dashboard.total} />
-        <MetricCard label="Pending" value={dashboard.pending} />
-        <MetricCard label="Wins" value={dashboard.wins} />
-        <MetricCard label="Losses" value={dashboard.losses} />
-        <MetricCard label="Hit Rate" value={`${dashboard.winPercentage}%`} />
-        <MetricCard label="Goblin Hit Rate" value={`${dashboard.goblinHitRate}%`} />
-        <MetricCard label="Demon Hit Rate" value={`${dashboard.demonHitRate}%`} />
-        <MetricCard label="Streak Starter Hit Rate" value={`${dashboard.streakStarterHitRate}%`} />
-        <MetricCard label="4-Man Builder Hit Rate" value={`${dashboard.parlayBuilderHitRate}%`} />
-      </div>
-
-      <div style={styles.historyFilters}>
-        <FilterSelect label="Date" value={historyFilter.date} options={["all", "today"]} onChange={(value) => setHistoryFilter((current) => ({ ...current, date: value }))} />
-        <FilterSelect label="Sport" value={historyFilter.sport} options={filterOptions.sports} onChange={(value) => setHistoryFilter((current) => ({ ...current, sport: value }))} />
-        <FilterSelect label="Category Source" value={historyFilter.categorySource} options={filterOptions.categories} onChange={(value) => setHistoryFilter((current) => ({ ...current, categorySource: value }))} />
-        <FilterSelect label="Result" value={historyFilter.result} options={["all", "Pending", "Win", "Loss", "Push"]} onChange={(value) => setHistoryFilter((current) => ({ ...current, result: value }))} />
-        <FilterSelect label="Platform" value={historyFilter.platform} options={filterOptions.platforms} onChange={(value) => setHistoryFilter((current) => ({ ...current, platform: value }))} />
-      </div>
-
-      <div style={styles.breakdownGrid}>
-        <Breakdown title="Accuracy by sport" rows={dashboard.bySport} />
-        <Breakdown title="Accuracy by prop type" rows={dashboard.byStatType} />
-        <Breakdown title="Accuracy by platform" rows={dashboard.byPlatform} />
-        <Breakdown title="Accuracy by category source" rows={dashboard.byCategorySource} />
-        <Breakdown title="Accuracy by confidence range" rows={dashboard.byConfidenceRange} />
-        <Breakdown title="Accuracy by risk level" rows={dashboard.byRiskLevel} />
-      </div>
-
-      {recent.length > 0 && (
-        <div style={styles.historyList}>
-          {recent.map((pick) => (
-            <div key={pick.id} style={styles.historyRow}>
-              <div>
-                <strong>{pick.playerName || pick.player}</strong>
-                <p style={styles.historyMeta}>
-                  {pick.recommendationType || "Model Recommendation"} - {pick.platform || "Platform"} - {displaySport(pick)} - {pick.statType || pick.market} - {pick.pickDirection || pick.pick} {formatNumber(pick.line)}
-                </p>
-              </div>
-              <div style={styles.resultButtons}>
-                {["Win", "Loss", "Push", "Pending", "Manual"].map((result) => (
-                  <button
-                    key={result}
-                    style={(pick.resultStatus || pick.finalResult) === result ? styles.resultButtonActive : styles.resultButton}
-                    onClick={() => updatePickResult(pick.id, result)}
-                  >
-                    {result}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </details>
-  );
-}
-
-function ParlayHistoryPanel({ history, dashboard }) {
-  const recent = history.slice(0, 8);
-  return (
-    <details style={styles.compactDetails}>
-      <summary style={styles.detailsSummary}>
-        <span>
-          <span style={styles.eyebrow}>Parlay memory</span>
-          <strong>4-Man Builder History</strong>
-        </span>
-        <span style={styles.countPill}>{dashboard.total} saved</span>
-      </summary>
-      <div style={{ ...styles.dashboardGrid, marginTop: "12px" }}>
-        <MetricCard label="Total Parlays" value={dashboard.total} />
-        <MetricCard label="Pending" value={dashboard.pending} />
-        <MetricCard label="Wins" value={dashboard.wins} />
-        <MetricCard label="Losses" value={dashboard.losses} />
-        <MetricCard label="Avg Confidence" value={`${dashboard.averageConfidence}%`} />
-      </div>
-      {recent.length > 0 && (
-        <div style={styles.historyList}>
-          {recent.map((record) => (
-            <div key={record.id} style={styles.historyRow}>
-              <div>
-                <strong>{record.parlayResult} - {record.averageConfidence}% avg confidence</strong>
-                <p style={styles.historyMeta}>
-                  {formatDateTime(record.generatedAt)} - {record.picks.map((pick) => `${pick.playerName} ${pick.side} ${formatNumber(pick.line)}`).join(" | ")}
-                </p>
-              </div>
-              <p style={styles.countPill}>{record.correlationRisk}</p>
-            </div>
-          ))}
-        </div>
-      )}
-    </details>
-  );
-}
-
-function MetricCard({ label, value }) {
-  return (
-    <div style={styles.metricCard}>
-      <span style={styles.metricLabel}>{label}</span>
-      <strong style={styles.dashboardValue}>{value}</strong>
-    </div>
-  );
-}
-
-function FilterSelect({ label, value, options, onChange }) {
-  return (
-    <label style={styles.selectLabel}>
-      {label}
-      <select style={styles.select} value={value} onChange={(event) => onChange(event.target.value)}>
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option === "all" ? "All" : option === "today" ? "Today" : option}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function Breakdown({ title, rows }) {
-  return (
-    <div style={styles.breakdownCard}>
-      <h3 style={styles.breakdownTitle}>{title}</h3>
-      {rows.length === 0 ? (
-        <p style={styles.breakdownEmpty}>No settled picks yet.</p>
-      ) : (
-        rows.map((row) => (
-          <div key={row.key} style={styles.breakdownRow}>
-            <span>{row.key}</span>
-            <strong>
-              {row.winPercentage}% ({row.wins}-{row.losses}-{row.pushes})
-            </strong>
-          </div>
-        ))
-      )}
-    </div>
-  );
+  if (htmlIssue) return "API returned non-JSON/HTML response. Check proxy routes and run dev with API proxy enabled.";
+  if (ppFailed && platform !== "underdog") return `PrizePicks data failed to load${sport !== "all" ? ` for ${sportLabel}` : ""}. See warnings above for status/content-type details.`;
+  if (udFailed && platform === "underdog") return `Underdog data failed to load${sport !== "all" ? ` for ${sportLabel}` : ""}. See warnings above.`;
+  if (ppFailed || udFailed) {
+    const failed = [ppFailed ? "PrizePicks" : null, udFailed ? "Underdog" : null].filter(Boolean).join(" + ");
+    return `${failed} data failed to load. Refresh or check the API proxy.`;
+  }
+  if (sport !== "all") return `No active ${sport} props scheduled today for ${platform === "all" ? "these platforms" : platform}.`;
+  return "No active scheduled props found.";
 }
 
 function scoreDFSProp(prop, context) {
-  const profile = context.stats.get(statLookupKey(prop));
+  const scopedProp = guardMlbOnlyProp(prop);
+  if (!scopedProp) return null;
+  prop = scopedProp;
+  const manualStats = context.manualStatsMap?.[prop.id] || prop.manualStats || null;
+  const baseProfile = findStatProfile(context.stats, prop) || context.stats.get(statLookupKey(prop));
+  const profile = mergeManualStatsIntoProfile(baseProfile || {}, manualStats);
   const injury = context.news.get(statLookupKey(prop));
   const lineComparison = context.lineComparisonMap.get(sharedLineKey(prop));
   const sportsbookComparison = context.sportsbookComparisonMap.get(sportsbookComparisonKey(prop));
   const lineMovement = context.lineMovementMap?.get(lineMovementKey(prop));
-  const projectionResult = resolveProjection(prop, profile, lineComparison, sportsbookComparison);
-  const projection = projectionResult.value;
+  const enriched = enrichPlayerProfile(profile, prop, { injuryClean: !injury || injury.risk === "Low" });
+  const verifiedStats = hasVerifiedStats(enriched);
   const line = Number(prop.line);
+  const statModel = projectPlayerProp(
+    { ...prop, line },
+    { profile: enriched, injury, lineComparison, sportsbookComparison }
+  );
+  const projectionResult = resolveProjection(prop, enriched, lineComparison, sportsbookComparison);
+  let projection = Number.isFinite(statModel.projectedValue) ? statModel.projectedValue : projectionResult.value;
+  let projectionSource = Number.isFinite(statModel.projectedValue)
+    ? statModel.projectionSource
+    : projectionResult.source;
+  const projectionReasoning = statModel.projectionReasoning || [];
+  if (!Number.isFinite(projection) && verifiedStats) {
+    if (Number.isFinite(enriched?.last5Average)) {
+      projection = enriched.last5Average;
+      projectionSource = "player-stats-estimate";
+    } else if (Number.isFinite(enriched?.seasonAverage)) {
+      projection = enriched.seasonAverage;
+      projectionSource = "player-stats-estimate";
+    }
+  }
+  if (!verifiedStats && !manualStats) {
+    projection = Number.isFinite(projection) && projectionSource !== "line-neutral" ? projection : null;
+    if (!Number.isFinite(projection)) projectionSource = "missing";
+  }
+
+  const sportsbookLine = Number(sportsbookComparison?.marketAverageLine);
+  const projectedValue = Number.isFinite(projection) ? round(projection) : null;
+  let edgeResult = resolveProjectionEdge(projectedValue, {
+    dfsLine: line,
+    sportsbookLine: Number.isFinite(sportsbookLine) && sportsbookLine > 0 ? sportsbookLine : null,
+  });
+
+  if (!edgeResult.bestPick && !edgeResult.edge) {
+    const edgeResolved = resolvePickEdge({
+      prop,
+      projection: projectedValue,
+      line,
+      projectionSource,
+      sportsbookComparison,
+      lineComparison,
+    });
+    projection = edgeResolved.projection;
+    projectionSource = edgeResolved.projectionSource;
+    edgeResult = {
+      edge: edgeResolved.edge || 0,
+      bestPick: edgeResolved.bestPick || "",
+      rawEdge: edgeResolved.edge || 0,
+      sportsbookEdge: null,
+      dfsEdge: null,
+      edgeLine: Number.isFinite(sportsbookLine) ? sportsbookLine : line,
+    };
+  }
+
+  projection = projectedValue ?? projection;
   const hasProjection = Number.isFinite(projection);
-  const projectionEdge = hasProjection ? projection - line : 0;
-  const bestPick = hasProjection && projectionEdge > 0 ? "More" : hasProjection && projectionEdge < 0 ? "Less" : "";
-  const edge = bestPick ? Math.abs(projectionEdge) : 0;
+  const bestPick = edgeResult.bestPick || "";
+  let edge = edgeResult.edge || 0;
+  if (edge <= 0 && hasProjection && Number.isFinite(line)) {
+    const fallbackDiff = Math.abs(projection - line);
+    if (fallbackDiff >= 0.01) {
+      edge = round(fallbackDiff);
+    }
+  }
   const absoluteEdge = Math.abs(edge);
   const lineValueBoost = lineComparison ? Math.min(10, Math.abs(lineComparison.difference) * 4) : 0;
   const sportsbookBoost = sportsbookValueBoost(prop, bestPick, sportsbookComparison);
-  const recentHitRate = Number.isFinite(profile?.recentHitRate) ? profile.recentHitRate : null;
-  const volatility = Number.isFinite(profile?.volatility) ? profile.volatility : null;
-  const sampleSize = Number(profile?.sampleSize || 0);
-  const profileIsFallback = Boolean(profile?.fallback);
-  const dataQualityScore = dataQualityFromSignals({ profile, injury, lineComparison, sportsbookComparison, projection, projectionSource: projectionResult.source });
+  const recentHitRate = Number.isFinite(enriched?.recentHitRate) ? enriched.recentHitRate : null;
+  const volatility = Number.isFinite(enriched?.volatility) ? enriched.volatility : null;
+  const sampleSize = Number(enriched?.sampleSize || 0);
+  const profileIsFallback = Boolean(enriched?.fallback || enriched?.sparse);
+  const historicalHitRateSignal = historicalHitRateForProp(prop, context.historyRows || []);
+  const sportsbookDiscrepancyEarly = sportsbookDiscrepancyForPick(prop, bestPick, sportsbookComparison);
+  const movementEarly = lineMovementForPick(lineMovement, bestPick);
+  const movementBoost = movementEarly?.supportsPick ? 7 : movementEarly?.againstPick ? -8 : 0;
+  const dataQualityScore = Math.max(
+    22,
+    dataQualityFromSignals({
+      profile: enriched,
+      injury,
+      lineComparison,
+      sportsbookComparison,
+      projection,
+      projectionSource,
+      edge: absoluteEdge,
+      lineMovement: movementEarly,
+      prop: { ...prop, manualStats, historicalHitRate: historicalHitRateSignal.hitRate, bestPick },
+    })
+  );
+  const research = assessResearchGaps({ prop, profile: enriched, injury, lineComparison, sportsbookComparison });
+  const dataCompleteness = buildDataCompletenessScore({
+    profile: enriched,
+    injury,
+    lineComparison,
+    sportsbookComparison,
+    prop: { ...prop, manualStats },
+    research,
+  });
+  const lineOnly = isLineOnlyData(prop, {
+    profile: enriched,
+    lineComparison,
+    sportsbookComparison,
+    injury,
+    projectionSource,
+  });
+  const statAdj = computeStatConfidenceAdjustments({
+    profile: enriched,
+    prop: { ...prop, projectionSource, sportsbookComparison, lineComparison },
+    bestPick,
+    injury,
+  });
+  const sportsbookDiscrepancy = sportsbookDiscrepancyEarly;
+  const movement = movementEarly;
+  const sharpMoneyIndicator = sharpMoneyForProp({ sportsbookDiscrepancy, sportsbookComparison, movement, bestPick });
+  const matchupRating = matchupRatingFromSignals({ profile: enriched, injury, sportsbookDiscrepancy, lineComparison });
+  const hitterResearchOnly = shouldRouteMlbHitterToResearch(
+    {
+      ...prop,
+      sampleSize,
+      sparseProfile: profileIsFallback,
+      fallbackProfile: profileIsFallback,
+      lineOnlyData: lineOnly,
+      manualEnriched: Boolean(enriched?.manualEnriched || manualStats),
+    },
+    enriched,
+    { lineOnly }
+  );
+  const marketResearchOnly = Boolean(
+    prop.marketResearchOnly || prop.marketSupportTier === 2 || prop.noveltyMarket || hitterResearchOnly
+  );
+  const confidenceResult = calculateProjectionConfidence(
+    {
+      ...prop,
+      sport: prop.sport,
+      statType: prop.statType,
+      projectedValue,
+      projection,
+      projectionSource,
+      line,
+      edge: round(edge),
+      bestPick,
+      last5Average: enriched?.last5Average,
+      last10Average: enriched?.last10Average,
+      seasonAverage: enriched?.seasonAverage,
+      last5HitRate: enriched?.last5HitRate,
+      last10HitRate: enriched?.last10HitRate,
+      recentHitRate,
+      volatility,
+      sampleSize,
+      opponentAllowed: enriched?.opponentAllowed,
+      opponentRank: enriched?.opponentRank,
+      handednessMatchup: enriched?.handednessMatchup,
+      strikeoutTrend: enriched?.strikeoutTrend,
+      matchupNote: enriched?.matchupNote,
+      pitchCountTrend: enriched?.pitchCountTrend,
+      roleContext: enriched?.roleContext,
+      projectedMinutes: enriched?.projectedMinutes,
+      usageAdjustment: enriched?.usageAdjustment,
+      minutesTrend: enriched?.minutesTrend,
+      usageTrend: enriched?.usageTrend,
+      parkFactorNote: enriched?.parkFactorNote,
+      battingOrderNote: enriched?.battingOrderNote,
+      barrelRateEstimate: enriched?.barrelRateEstimate,
+      gapPowerRate: enriched?.gapPowerRate,
+      extraBaseHitRate: enriched?.extraBaseHitRate,
+      recentStolenBaseRate: enriched?.recentStolenBaseRate,
+      last5FantasyScores: enriched?.last5FantasyScores,
+      holdPct: enriched?.holdPct,
+      breakPct: enriched?.breakPct,
+      aceRate: enriched?.aceRate,
+      h2hEdge: enriched?.h2hEdge,
+      firstServePct: enriched?.firstServePct,
+      expectedSets: enriched?.expectedSets,
+      opponentReturnPct: enriched?.opponentReturnPct,
+      pace: enriched?.pace,
+      paceRating: enriched?.paceRating,
+      impliedRuns: enriched?.impliedRuns ?? enriched?.totalImpliedRuns,
+      dataQualityScore,
+      dataCompleteness,
+      hasVerifiedStats: verifiedStats,
+      lineComparison,
+      sportsbookComparison,
+      sportsbookDiscrepancy,
+      lineMovement: movement,
+      sharpMoneyIndicator,
+      matchupRating,
+      injuryRisk: injury?.risk,
+      fallbackProfile: profileIsFallback,
+      marketResearchOnly,
+      marketSupportTier: prop.marketSupportTier,
+      noveltyMarket: prop.noveltyMarket,
+      historicalHitRate: historicalHitRateSignal.hitRate,
+      historicalSampleSize: historicalHitRateSignal.sampleSize,
+      profile: enriched,
+    },
+    {
+      lineOnly,
+      statCap: statAdj.cap,
+      statCapReason: statAdj.capReason,
+      historyRows: context.historyRows || [],
+    }
+  );
+  let confidenceScore = Math.max(confidenceResult.score, Number.isFinite(line) && line > 0 ? 28 : 0);
+  const confidenceBreakdown = confidenceResult.explanation;
+  const manualConfidenceAdjustment = clamp(Number(manualStats?.confidenceAdjustment || 0), -15, 15);
+  if (Number.isFinite(manualConfidenceAdjustment) && manualConfidenceAdjustment !== 0) {
+    confidenceScore = Math.round(clamp(confidenceScore + manualConfidenceAdjustment, 25, 92));
+  }
+  if (marketResearchOnly) {
+    confidenceScore = Math.min(confidenceScore, 55);
+  }
+  const sportCapResult = applySportMarketConfidenceCaps(
+    { ...prop, marketResearchOnly, marketSupportTier: prop.marketSupportTier },
+    confidenceScore,
+    enriched
+  );
+  confidenceScore = sportCapResult.score;
+  const sportCapReason = sportCapResult.capReason || "";
+  const strongData = confidenceResult.strongData;
+  const verifiedHistory = confidenceResult.verifiedHistory;
+  const statsMissingExplanation = buildStatsMissingExplanation(research, enriched);
+  const statsMissingBadge =
+    !verifiedStats || research.showBadge || dataQualityScore < READY_MIN_DATA_QUALITY
+      ? { label: "Stats Missing", tone: "weak" }
+      : null;
+  const { edgeScore, edgeRating } = computeEdgeScore({
+    ...prop,
+    projection,
+    edge: absoluteEdge,
+    lineComparison,
+    sportsbookComparison,
+    sportsbookDiscrepancy,
+    lineMovement: movement,
+    injuryRisk: injury?.risk,
+    dataQualityScore,
+    fallbackProfile: profileIsFallback,
+    projectionSource,
+    recentHitRate,
+    volatility,
+    last5Average: enriched?.last5Average,
+    seasonAverage: enriched?.seasonAverage,
+    multiplier: Number(prop.multiplier) || 1,
+  });
   const projectionScore = Number.isFinite(projection)
     ? Math.min(26, (absoluteEdge / Math.max(1, Math.abs(line))) * 70)
     : 0;
-  const consistencyScore = recentHitRate == null ? 4 : clamp((recentHitRate - 0.45) * 38, 0, 13);
-  const sampleScore = sampleSize >= 10 ? 7 : sampleSize >= 5 ? 4 : 0;
-  const volatilityPenalty = volatility == null ? 4 : clamp(volatility * 1.8, 0, 12);
-  const injuryPenalty = injury?.risk === "High" ? 18 : injury?.risk === "Medium" ? 8 : 0;
-  const { score: confidenceScore } = computeConfidence({
-    edge: absoluteEdge,
-    line,
-    projectionScore,
-    consistencyScore,
-    sampleScore,
-    lineValueBoost,
-    sportsbookBoost,
-    dataQualityScore,
-    volatilityPenalty,
-    injuryPenalty,
-    projectionSource: projectionResult.source,
-    profileIsFallback,
-    recentHitRate,
-    sampleSize,
-    multiplier: 1,
-    profile,
-  });
-  const edgeRating = Math.round(clamp(projectionScore * 2.1 + lineValueBoost * 2.2 + sportsbookBoost * 2 + consistencyScore, 0, 100));
-  const riskLevel = riskFromSignals({ confidenceScore, volatility, injury, projection, lineComparison, sportsbookComparison });
-  const sportsbookDiscrepancy = sportsbookDiscrepancyForPick(prop, bestPick, sportsbookComparison);
+  const projectionEdge = hasProjection ? projection - line : 0;
+  const consistencyScore = recentHitRate == null ? 0 : clamp((recentHitRate - 0.45) * 38, 0, 13);
+  const edgeRatingFinal = edgeRating ?? Math.round(clamp(projectionScore * 2.1 + lineValueBoost * 2.2 + sportsbookBoost * 2 + consistencyScore, 0, 100));
   const sportsbookImpliedProbability = sportsbookImpliedForPick(bestPick, sportsbookComparison);
   const sportsbookAveragePrice = sportsbookPriceForPick(bestPick, sportsbookComparison);
+  const impliedProbability = Number.isFinite(sportsbookImpliedProbability) ? sportsbookImpliedProbability : 0.5;
   const modelProbability = estimateModelProbability({ edge, line, confidenceScore, dataQualityScore, volatility });
+  const probabilityEdge = Number.isFinite(modelProbability) ? round(modelProbability - impliedProbability) : null;
+  const riskLevel = computeProjectionRiskLevel({
+    confidenceScore,
+    calibratedConfidence: confidenceResult.calibratedConfidence,
+    volatility,
+    injury,
+    projectedValue,
+    edge: absoluteEdge,
+    hasVerifiedStats: verifiedStats,
+    sampleSize,
+    lineMovement: movement,
+    lineMovementTrustScore: confidenceResult.lineMovementTrustScore,
+    dataQualityScore,
+  });
   const qualityBadge = dataQualityBadge({
+    sportsbookVerified: prop.sportsbookVerified,
+    verifiedBadge: prop.verifiedBadge,
     projection,
-    projectionSource: projectionResult.source,
+    projectionSource,
     fallbackProfile: profileIsFallback,
     sampleSize,
     dataQualityScore,
     recentHitRate,
-    last5HitRate: profile?.last5HitRate,
-    last10HitRate: profile?.last10HitRate,
+    last5HitRate: enriched?.last5HitRate,
+    last10HitRate: enriched?.last10HitRate,
+    statsMissingExplanation,
   });
-  const impliedProbability = Number.isFinite(sportsbookImpliedProbability) ? sportsbookImpliedProbability : 0.5;
-  const probabilityEdge = Number.isFinite(modelProbability) ? round(modelProbability - impliedProbability) : null;
   const expectedValue = expectedValueFromProbability(modelProbability, sportsbookAveragePrice);
-  const movement = lineMovementForPick(lineMovement, bestPick);
-  const sharpMoneyIndicator = sharpMoneyForProp({ sportsbookDiscrepancy, sportsbookComparison, movement, bestPick });
-  const matchupRating = matchupRatingFromSignals({ profile, injury, sportsbookDiscrepancy, lineComparison });
-  const usageAdjustment = usageAdjustmentFromSignals({ prop, profile });
+  const priorityScore = computePropPriorityScore({
+    ...prop,
+    marketResearchOnly,
+    confidenceScore,
+    dataQualityScore,
+    edge: round(edge),
+    expectedValue,
+    sharpMoneyIndicator,
+    lineMovement: movement,
+    matchupRating,
+    volatility,
+    sampleSize,
+    recentHitRate,
+    last10HitRate: enriched?.last10HitRate,
+    sportsbookDiscrepancy,
+    sportsbookComparison,
+  });
+  const priorityTier = classifyPriorityTier({
+    ...prop,
+    marketResearchOnly,
+    priorityScore,
+    sampleSize,
+    confidenceScore,
+  });
+  const researchMissingBadge = statsMissingBadge;
+  const lowConfidenceReasons = buildLowConfidenceReasons(
+    {
+      ...prop,
+      confidenceScore,
+      dataQualityScore,
+      edge: round(edge),
+      lineOnlyData: lineOnly,
+      fallbackProfile: profileIsFallback,
+      projectionSource,
+      confidenceCapReason: confidenceResult.capReason || statAdj.capReason || sportCapReason,
+      statsMissingExplanation,
+    },
+    research
+  );
+  const bettingLabel = isReadyToBet({
+    ...prop,
+    marketResearchOnly,
+    sampleSize,
+    confidenceScore,
+    dataQualityScore,
+    edge: round(edge),
+    bestPick,
+    fallbackProfile: profileIsFallback,
+    projectionSource,
+    lineOnlyData: lineOnly,
+  })
+    ? "Ready to Bet"
+    : "Research only";
+  const usageAdjustment = usageAdjustmentFromSignals({ prop, profile: enriched });
   const valueTags = valueTagsForProp({
     prop,
     confidenceScore,
@@ -1599,11 +2678,11 @@ function scoreDFSProp(prop, context) {
     lineComparison,
     sportsbookComparison,
     sportsbookDiscrepancy,
-    profile,
+    profile: enriched,
     injury,
     confidenceScore,
     edge,
-    projectionSource: projectionResult.source,
+    projectionSource,
     modelProbability,
     impliedProbability,
     expectedValue,
@@ -1613,21 +2692,75 @@ function scoreDFSProp(prop, context) {
     usageAdjustment,
   });
 
-  return {
+  const timeBadge =
+    prop.timeUncertainty && prop.timeUncertainty !== "ok"
+      ? { label: "Time uncertain", tone: "partial" }
+      : null;
+
+  const qualificationReason = buildQualificationReason({
     ...prop,
-    id: makePropId(prop),
-    playerImage: prop.playerImage || profile?.playerImage || profile?.headshot || profile?.imageUrl || "",
-    headshot: prop.headshot || profile?.headshot || profile?.playerImage || "",
-    imageUrl: prop.imageUrl || profile?.imageUrl || profile?.playerImage || "",
+    projectedValue,
     projection,
-    projectionSource: projectionResult.source,
-    statProfileSource: profile?.source || "",
-    fallbackProfile: profileIsFallback,
-    confidenceScore,
-    edgeRating,
     edge: round(edge),
+    bestPick,
+    confidenceScore,
+    volatility,
+    riskLevel,
+  });
+
+  return (() => {
+    const decision = enrichPropDecision(
+    {
+    ...prop,
+    marketResearchOnly,
+    lineSourceBadge: prop.lineSourceBadge || "LIVE",
+    verifiedBadge: prop.sportsbookVerified ? "VERIFIED" : prop.verifiedBadge || null,
+    timeBadge: prop.timeBadge || timeBadge,
+    propType: prop.propType || prop.statType,
+    id: makePropId(prop),
+    playerImage: prop.playerImage || enriched?.playerImage || enriched?.headshot || enriched?.imageUrl || "",
+    headshot: prop.headshot || enriched?.headshot || enriched?.playerImage || "",
+    imageUrl: prop.imageUrl || enriched?.imageUrl || enriched?.playerImage || "",
+    projection,
+    projectedValue: Number.isFinite(projection) ? round(projection) : null,
+    projectionSource,
+    projectionReasoning,
+    statProfileSource: enriched?.source || "",
+    statEnrichmentSources: enriched?.statSources || [],
+    fallbackProfile: profileIsFallback,
+    hasVerifiedStats: verifiedStats,
+    sparseProfile: Boolean(enriched?.sparse),
+    manualEnriched: Boolean(enriched?.manualEnriched || manualStats),
+    confidenceScore,
+    confidence: confidenceScore,
+    calibratedConfidence: confidenceResult.calibratedConfidence,
+    calibrationAdjustment: confidenceResult.calibrationAdjustment,
+    calibrationNote: confidenceResult.calibrationNote,
+    tierActualHitRate: confidenceResult.tierActualHitRate,
+    marketHistoricalHitRate: confidenceResult.marketHistoricalHitRate,
+    marketHistoricalSample: confidenceResult.marketHistoricalSample,
+    lineMovementTrustScore: confidenceResult.lineMovementTrustScore,
+    lineMovementTrustLabel: confidenceResult.lineMovementTrustLabel,
+    confidenceBreakdown,
+    confidenceCapReason: confidenceResult.capReason || statAdj.capReason || sportCapReason || "",
+    marketModel: confidenceResult.marketModel || null,
+    marketModelLabel: confidenceResult.marketModelLabel || null,
+    volatilityTier: confidenceResult.volatilityTier || null,
+    projectionAgreement: confidenceResult.projectionAgreement ?? null,
+    meetsVolatilityRequirements: confidenceResult.meetsVolatilityRequirements ?? true,
+    strongData,
+    verifiedHistory,
+    historicalHitRate: historicalHitRateSignal.hitRate,
+    historicalSampleSize: historicalHitRateSignal.sampleSize,
+    historicalHitRateNote: historicalHitRateSignal.note,
+    edgeScore,
+    edgeRating: edgeRatingFinal,
+    edge: round(edge),
+    sportsbookEdge: edgeResult.sportsbookEdge,
+    dfsEdge: edgeResult.dfsEdge,
     dataQualityScore: Math.round(dataQualityScore),
     riskLevel,
+    qualificationReason,
     bestPick,
     lineComparison,
     sportsbookComparison,
@@ -1638,11 +2771,11 @@ function scoreDFSProp(prop, context) {
     recentHitRate,
     volatility,
     sampleSize,
-    last5HitRate: Number.isFinite(profile?.last5HitRate) ? profile.last5HitRate : null,
-    last10HitRate: Number.isFinite(profile?.last10HitRate) ? profile.last10HitRate : null,
-    last5Average: Number.isFinite(profile?.last5Average) ? profile.last5Average : null,
-    last10Average: Number.isFinite(profile?.last10Average) ? profile.last10Average : null,
-    seasonAverage: Number.isFinite(profile?.seasonAverage) ? profile.seasonAverage : null,
+    last5HitRate: Number.isFinite(enriched?.last5HitRate) ? enriched.last5HitRate : null,
+    last10HitRate: Number.isFinite(enriched?.last10HitRate) ? enriched.last10HitRate : null,
+    last5Average: Number.isFinite(enriched?.last5Average) ? enriched.last5Average : null,
+    last10Average: Number.isFinite(enriched?.last10Average) ? enriched.last10Average : null,
+    seasonAverage: Number.isFinite(enriched?.seasonAverage) ? enriched.seasonAverage : null,
     injuryRisk: injury?.risk || "Low",
     modelProbability,
     impliedProbability,
@@ -1650,6 +2783,7 @@ function scoreDFSProp(prop, context) {
     expectedValue,
     sportsbookAveragePrice,
     lineMovement: movement,
+    lineMovementTag: movement?.tag || confidenceResult.lineMovementTrustLabel || null,
     sharpMoneyIndicator,
     matchupRating,
     usageAdjustment,
@@ -1658,16 +2792,41 @@ function scoreDFSProp(prop, context) {
     generatedAt: new Date().toISOString(),
     reasoningSummary,
     dataQualityBadge: qualityBadge,
+    manualStats,
+    dataCompleteness,
+    lineOnlyData: lineOnly,
+    researchGaps: research.gaps,
+    researchMissingBadge,
+    statsMissingExplanation,
+    statsMissingBadge,
+    lowConfidenceReasons,
+    priorityScore,
+    priorityTier,
+    deprioritized: priorityTier === "deprioritized",
+    bettingLabel,
+    minutesTrend: enriched?.minutesTrend?.label || null,
+    usageTrend: enriched?.usageTrend?.label || null,
+    pitchCountTrend: enriched?.pitchCountTrend || enriched?.roleContext || null,
+    matchupNote: enriched?.matchupNote || null,
+    manualConfidenceAdjustment,
+    last5FantasyScores: enriched?.last5FantasyScores || null,
+    strikeoutTrend: enriched?.strikeoutTrend || null,
+    handednessMatchup: enriched?.handednessMatchup || null,
+    crossesAverage: enriched?.crossesAverage ?? null,
     dataSources: dataSourcesUsed({
       ...prop,
       lineComparison,
       sportsbookComparison,
       statProfileSource: profile?.source || "",
+      statEnrichmentSources: enriched?.statSources || [],
+      historicalHitRate: historicalHitRateSignal.hitRate,
       injuryRisk: injury?.risk,
       lineMovement: movement,
     }),
     payoutLabel: propPayoutLabel(prop),
-  };
+  }, { historyRows: context.historyRows || [] });
+    return isEliteTopPickEligible(decision) ? attachElitePickExplanation(decision) : decision;
+  })();
 }
 
 function resolveProjection(prop, profile, lineComparison, sportsbookComparison) {
@@ -1678,6 +2837,16 @@ function resolveProjection(prop, profile, lineComparison, sportsbookComparison) 
   if (profile?.projection != null && profile.projection !== "") {
     const profiled = Number(profile.projection);
     if (Number.isFinite(profiled) && profiled >= 0) return { value: round(profiled), source: profile.projectionSource || "player-stats" };
+  }
+
+  const sportsbookMarketLine = Number(sportsbookComparison?.marketAverageLine);
+  if (Number.isFinite(sportsbookMarketLine) && sportsbookMarketLine > 0) {
+    return { value: round(sportsbookMarketLine), source: "sportsbook-market" };
+  }
+
+  const peerMarketLine = Number(lineComparison?.marketAverageLine);
+  if (Number.isFinite(peerMarketLine) && peerMarketLine > 0) {
+    return { value: round(peerMarketLine), source: "platform-line-comparison" };
   }
 
   return { value: null, source: "missing" };
@@ -1752,6 +2921,14 @@ function buildReason({
     parts.push(`Matchup rating: ${matchupRating}.`);
   }
 
+  if (profile?.matchupNote) {
+    parts.push(`Manual matchup context: ${profile.matchupNote}.`);
+  }
+
+  if (Number.isFinite(Number(profile?.confidenceAdjustment))) {
+    parts.push(`Manual confidence override: ${formatSignedNumber(profile.confidenceAdjustment)} points.`);
+  }
+
   if (usageAdjustment) {
     parts.push(`Usage adjustment: ${usageAdjustment}.`);
   }
@@ -1774,6 +2951,7 @@ function buildSportsbookComparisonMap(comparisons = []) {
 }
 
 function createDebugInfo(selectedSource = "all") {
+  const pipelineAudit = safeCreateEmptyPipelineAudit();
   return {
     selectedSource,
     sources: {
@@ -1783,12 +2961,22 @@ function createDebugInfo(selectedSource = "all") {
     },
     totals: {
       rawPropsLoaded: 0,
+      upcomingSlateCount: 0,
+      slateExcludedCount: 0,
       activeProps: 0,
       propsAfterFilters: 0,
       recommendedProps: 0,
       watchlistProps: 0,
       streakProps: 0,
     },
+    upcomingSlateCount: 0,
+    slateExcludedCount: 0,
+    pregameWindowHours: DEFAULT_PREGAME_WINDOW_HOURS,
+    pipelineAudit,
+    rejectedProps: [],
+    pipelineStats: createEmptyPipelineStats(pipelineAudit),
+    validationSummary: createEmptyValidationSummary(),
+    qualificationSummary: createEmptyValidationSummary(),
   };
 }
 
@@ -1807,21 +2995,24 @@ function emptySourceDebug(source) {
   };
 }
 
-function attachSourceFilterCounts(debugInfo, { rawProps, activeProps, normalProps }) {
+function attachSourceFilterCounts(debugInfo, { rawProps, activeProps, normalProps, slateProps = rawProps }) {
   Object.keys(debugInfo.sources).forEach((source) => {
     if (source === "The Odds API") return;
     const platform = source;
     const rawCount = rawProps.filter((prop) => prop.platform === platform).length;
+    const slateCount = slateProps.filter((prop) => prop.platform === platform).length;
     const activeCount = activeProps.filter((prop) => prop.platform === platform).length;
     const filteredCount = normalProps.filter((prop) => prop.platform === platform).length;
     debugInfo.sources[source] = {
       ...debugInfo.sources[source],
       rawPropsLoaded: Math.max(Number(debugInfo.sources[source].rawPropsLoaded || 0), rawCount),
       propsAfterParsing: Math.max(Number(debugInfo.sources[source].propsAfterParsing || 0), rawCount),
+      upcomingSlateCount: slateCount,
       activeProps: activeCount,
       propsAfterFilters: filteredCount,
     };
   });
+  debugInfo.upcomingSlateCount = slateProps.length;
 }
 
 function attachScoredSourceCounts(debugInfo, { recommendedProps, watchlistProps, streakProps }) {
@@ -1894,7 +3085,7 @@ function platformOptionsForStatus(sourceStatus = {}) {
   return PLATFORM_OPTIONS.map((option) => {
     if (option.id !== "underdog") return option;
     const status = sourceStatus.Underdog || "Pending";
-    if (status === "Connected") return option;
+    if (status === "Connected" || status === "Full") return option;
     return {
       ...option,
       label: `Underdog (${status === "Pending" ? "Checking" : "Not Connected"})`,
@@ -1912,6 +3103,7 @@ function sourceLabel(source) {
 }
 
 function sportsbookSourceStatus(result = {}) {
+  if (result.cached || result.rateLimited) return "Cached";
   const warnings = result.warnings || [];
   if (
     warnings.some((warning) =>
@@ -1942,6 +3134,8 @@ function buildModelSignalMap(props = []) {
         last10HitRate: prop.last10HitRate,
         volatility: prop.volatility,
         sampleSize: prop.sampleSize,
+        historicalHitRate: prop.historicalHitRate,
+        historicalSampleSize: prop.historicalSampleSize,
         injuryRisk: prop.injuryRisk,
         sportsbookDiscrepancy: prop.sportsbookDiscrepancy,
         sportsbookAveragePrice: prop.sportsbookAveragePrice,
@@ -2003,37 +3197,66 @@ function buildLineComparisonMap(props) {
   return comparisons;
 }
 
-function isActiveUpcomingProp(prop) {
-  const start = new Date(prop.startTime).getTime();
-  const liveLabel = normalize(`${prop.league || ""} ${prop.status || ""}`);
-  if (liveLabel.includes("live")) return false;
-  return prop.status === "upcoming" && Number.isFinite(start) && start > Date.now() + MIN_START_BUFFER_MS;
+function isActiveUpcomingProp(prop, options = {}) {
+  return isUpcomingSlateProp(prop, options);
 }
 
 function isSupportedAppSport(prop) {
+  if (prop.sport === APP_SPORTS.Unsupported || prop.unsupportedSport) return false;
   return SUPPORTED_SPORTS.has(prop.sport);
 }
 
 function isAllowedAppMarket(prop) {
-  if (prop.sport !== "Soccer") return true;
-  return ["shots", "shotsOnTarget", "goalsAllowed", "goalieSaves", "passesAttempted"].includes(
-    canonicalStatType(prop.statType)
-  );
+  return isApprovedMarket(prop);
 }
 
-function getBaseActiveFilterReason(prop) {
-  if (!isSupportedAppSport(prop)) return `unsupported sport: ${prop.sport || "Unknown"}`;
-  if (!isActiveUpcomingProp(prop)) return "stale, locked, expired, live, or already-started game time";
+function getBaseActiveFilterReason(prop, options = {}) {
+  const sport = canonicalSportFromProp(prop);
+  if (options.excludeUnsupportedMarkets !== false) {
+    if (prop.unsupportedSport || sport === APP_SPORTS.Unsupported) {
+      return `unsupported sport: ${sport || prop.sport || "Unknown"}`;
+    }
+    if (!isApprovedMarket({ ...prop, sport })) {
+      return `unapproved market: ${prop.marketLabel || prop.statType || "Unknown"}`;
+    }
+    if (options.hideEsports && (prop.esports || sport === APP_SPORTS.Esports)) {
+      return "esports excluded by filter";
+    }
+  }
+  if (!isSupportedAppSport({ ...prop, sport })) return `unsupported sport: ${sport || prop.sport || "Unknown"}`;
+  if (!options.includeUncertain) {
+    const stale = getStaleFilterReason(prop, options);
+    if (stale) return stale;
+  } else if (prop.status === "locked" || prop.status === "expired") {
+    return "locked or expired";
+  }
   return "";
 }
 
-function getPreScoringFilterReason(prop) {
-  if (!isSupportedAppSport(prop)) return `unsupported sport: ${prop.sport || "Unknown"}`;
-  if (!isAllowedAppMarket(prop)) return `unsupported market: ${prop.statType || "Unknown"}`;
-  if (isMultiPlayerComboProp(prop)) return "combo props are not supported";
-  if (isAdjustedOddsProp(prop)) return "adjusted odds prop handled by Streak Finder";
-  if (!isActiveUpcomingProp(prop)) return "stale, locked, expired, live, or already-started game time";
+function getPreScoringFilterReason(prop, options = {}) {
+  const sport = canonicalSportFromProp(prop);
+  if (!isSupportedAppSport({ ...prop, sport })) return `unsupported sport: ${sport || prop.sport || "Unknown"}`;
+  if (!isApprovedMarket({ ...prop, sport })) return `unapproved market: ${prop.marketLabel || prop.statType || "Unknown"}`;
+  if (!options.includeUncertain && isAdjustedOddsProp(prop)) return "adjusted odds prop handled by Streak Finder";
+  if (!isUpcomingSlateProp(prop, options)) return getSlateFilterReason(prop, options) || "not an upcoming slate prop";
   return "";
+}
+
+function prioritizePreScoringProps(props = []) {
+  return [...props].sort((a, b) => {
+    const aPriority = computePreScorePriority(a);
+    const bPriority = computePreScorePriority(b);
+    if (aPriority !== bPriority) return bPriority - aPriority;
+    const aStart = new Date(a.startTime).getTime();
+    const bStart = new Date(b.startTime).getTime();
+    const safeA = Number.isFinite(aStart) ? aStart : Number.MAX_SAFE_INTEGER;
+    const safeB = Number.isFinite(bStart) ? bStart : Number.MAX_SAFE_INTEGER;
+    return safeA - safeB;
+  });
+}
+
+function preScoringPriority(prop) {
+  return computePreScorePriority(prop);
 }
 
 function matchesStatTypeFilter(prop, statType) {
@@ -2041,13 +3264,57 @@ function matchesStatTypeFilter(prop, statType) {
 }
 
 function matchesUiFilters(prop, filters) {
+  if (filters.sharpOnly && !isSharpOnlyCandidate(prop)) return false;
+  if (filters.hideResearchOnly && !isReadyToBet(prop)) return false;
+  if (filters.hideUnsupportedMarkets && (prop.marketUnsupported || prop.unsupportedSport)) return false;
+  if (filters.hideEsports && (prop.esports || prop.sport === APP_SPORTS.Esports)) return false;
   return (
     matchesPlatformFilter(prop, filters.platform) &&
     matchesSportFilter(prop, filters.sport) &&
     matchesStatTypeFilter(prop, filters.statType) &&
-    matchesEdgeFilter(prop, filters.edgeFilter)
+    matchesEdgeFilter(prop, filters.edgeFilter) &&
+    matchesDateFilter(prop, filters.dateFilter) &&
+    matchesSearchFilter(prop, filters.searchTerm) &&
+    (!filters.readyOnly || isReadyToBet(prop))
   );
 }
+
+function matchesSearchFilter(prop, searchTerm = "") {
+  const term = String(searchTerm || "").trim().toLowerCase();
+  if (!term) return true;
+  const haystack = [
+    prop.playerName,
+    prop.player,
+    prop.team,
+    prop.opponent,
+    prop.platform,
+    prop.sport,
+    prop.league,
+    prop.statType,
+    prop.propType,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(term);
+}
+
+function matchesDateFilter(prop, dateFilter = "allUpcoming") {
+  if (!dateFilter || dateFilter === "allUpcoming") return true;
+  const start = new Date(prop.startTime).getTime();
+  if (!Number.isFinite(start)) return false;
+  const propDay = dateKey(new Date(start));
+  const now = new Date();
+  const today = dateKey(now);
+  const tomorrowDate = new Date(now);
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrow = dateKey(tomorrowDate);
+  if (dateFilter === "today") return propDay === today;
+  if (dateFilter === "tomorrow") return propDay === tomorrow;
+  return true;
+}
+
+// isReadyToBet imported from pickScoring.js
 
 function matchesPlatformFilter(prop, platform) {
   if (platform === "both" || platform === "all") return true;
@@ -2056,11 +3323,7 @@ function matchesPlatformFilter(prop, platform) {
 }
 
 function matchesSportFilter(prop, sport) {
-  if (sport === "all") return true;
-  if (sport === "Tennis") return isTennisSport(prop.sport);
-  if (sport === "WNBA") return displaySport(prop) === "WNBA";
-  if (sport === "NBA") return displaySport(prop) === "NBA";
-  return prop.sport === sport;
+  return matchesSelectedSportFilter(prop, sport);
 }
 
 function hasSportsbookEdge(prop) {
@@ -2078,15 +3341,57 @@ function matchesEdgeFilter(prop, edgeFilter) {
   const hoursUntilStart = Number.isFinite(start) ? (start - Date.now()) / (60 * 60 * 1000) : 0;
   if (edgeFilter === "highConfidence") return confidence >= 68;
   if (edgeFilter === "valuePlays") return hasSportsbookEdge(prop) || (Number.isFinite(expectedValue) && expectedValue > 0.02) || Number(prop.edge || prop.modelSignal?.edge || 0) >= 1;
+  if (edgeFilter === "safeFloor") return isSafeFloorProp(prop);
+  if (edgeFilter === "boomUpside") return isBoomUpsideProp(prop);
   if (edgeFilter === "earlyLines") return hoursUntilStart >= 2;
   if (edgeFilter === "streakSafe") return confidence >= 65 && !["Risky", "High Risk", "Low Data Confidence"].includes(prop.riskLevel) && (!Number.isFinite(multiplier) || multiplier <= 1);
   return true;
 }
 
+function isBestValueCandidate(prop) {
+  if (!isVerifiedSportsbookProp(prop)) return false;
+  if (!isGameNotExpired(prop) || prop.status === "live" || prop.status === "locked" || prop.status === "expired") return false;
+  const edge = Number(prop.edge || prop.modelSignal?.edge || 0);
+  if (!Number.isFinite(edge) || edge <= 0) return false;
+  if (!Boolean(prop.bestPick || prop.modelSignal?.modelSide)) return false;
+  const dq = Number(prop.dataQualityScore || prop.modelSignal?.dataQualityScore || 0);
+  const confidence = Number(prop.confidenceScore || prop.modelSignal?.confidenceScore || 0);
+  return dq >= 40 && confidence >= 50;
+}
+
+function isSafeFloorProp(prop) {
+  const confidence = Number(prop.confidenceScore || prop.modelSignal?.confidenceScore || 0);
+  const dq = Number(prop.dataQualityScore || prop.modelSignal?.dataQualityScore || 0);
+  const volatility = Number(prop.volatility || prop.modelSignal?.volatility);
+  const hitRate = Number(prop.last10HitRate || prop.recentHitRate || prop.modelSignal?.recentHitRate);
+  const multiplier = Number(prop.multiplier);
+  const risk = String(prop.riskLevel || "").toLowerCase();
+  return (
+    confidence >= 62 &&
+    dq >= 45 &&
+    !risk.includes("risk") &&
+    (!Number.isFinite(volatility) || volatility <= 2.75) &&
+    (!Number.isFinite(hitRate) || hitRate >= 0.58) &&
+    (!Number.isFinite(multiplier) || multiplier <= 1)
+  );
+}
+
+function isBoomUpsideProp(prop) {
+  const confidence = Number(prop.confidenceScore || prop.modelSignal?.confidenceScore || 0);
+  const edge = Number(prop.edge || prop.modelSignal?.edge || 0);
+  const volatility = Number(prop.volatility || prop.modelSignal?.volatility);
+  const multiplier = Number(prop.multiplier);
+  const projectionEdge = Math.abs(Number(prop.projectionEdge || 0));
+  const line = Math.max(1, Math.abs(Number(prop.line || 1)));
+  return (
+    confidence >= 55 &&
+    (edge >= 1 || projectionEdge / line >= 0.15 || isDemonProp(prop) || (Number.isFinite(multiplier) && multiplier > 1)) &&
+    (Number.isFinite(volatility) ? volatility >= 1.8 : true)
+  );
+}
+
 function isMultiPlayerComboProp(prop) {
-  const statText = String(prop.statType || "").toLowerCase();
-  const playerText = String(prop.playerName || "");
-  return statText.includes("(combo)") || statText.includes(" combo") || playerText.includes(" + ");
+  return isParserMergeComboBug(prop);
 }
 
 function isAdjustedOddsProp(prop) {
@@ -2095,25 +3400,10 @@ function isAdjustedOddsProp(prop) {
 }
 
 function isVerifiedAdjustedOddsProp(prop) {
-  const descriptor = [
-    prop.adjustedOddsType,
-    prop.oddsType,
-    prop.odds_type,
-    prop.multiplierSource,
-    prop.optionLabel,
-  ]
-    .map(normalize)
-    .join(" ");
-  return Boolean(prop.verifiedAdjustedOdds) || /demon|goblin|green goblin|higher payout|lower payout|verified adjusted/.test(descriptor);
+  return Boolean(prop.verifiedAdjustedOdds);
 }
 
-function isGoblinProp(prop) {
-  return propPayoutLabel(prop) === "Goblin";
-}
 
-function isDemonProp(prop) {
-  return propPayoutLabel(prop) === "Demon";
-}
 
 function adjustedDescriptor(prop) {
   return [
@@ -2128,26 +3418,41 @@ function adjustedDescriptor(prop) {
 }
 
 function applyRecommendationStatus(prop) {
+  const ready = isReadyToBet(prop);
+  if (ready) {
+    return {
+      ...prop,
+      recommendationStatus: "ready",
+      bettingLabel: "Ready to Bet",
+      watchlistMessage: "",
+    };
+  }
+
   if (isRecommendedPick(prop)) {
     return {
       ...prop,
       recommendationStatus: "recommended",
-      watchlistMessage: "",
+      bettingLabel: "Research only",
+      watchlistMessage: prop.lowConfidenceReasons?.[0] || watchlistMessageForProp(prop),
     };
   }
 
   const watchlistMessage = watchlistMessageForProp(prop);
   return {
     ...prop,
-    bestPick: "",
-    recommendationStatus: "watchlist",
+    bestPick: prop.bestPick || "",
+    recommendationStatus: "research",
+    bettingLabel: "Research only",
     watchlistMessage,
     reasoningSummary: watchlistReasonSummary(prop, watchlistMessage),
   };
 }
 
 function isRecommendedPick(prop) {
+  if (isReadyToBet(prop)) return true;
   return (
+    !prop.fallbackProfile &&
+    !prop.isDemoData &&
     prop.projectionSource !== "missing" &&
     Number.isFinite(prop.projection) &&
     Number.isFinite(prop.edge) &&
@@ -2212,7 +3517,8 @@ function sortWatchlistProps(a, b) {
 }
 
 function buildStreakFinderProps(props, modelSignalMap = new Map(), lineMovementMap = new Map()) {
-  const rawCandidates = props.filter((prop) => !isMultiPlayerComboProp(prop)).flatMap((prop) => {
+  const scopedProps = filterActiveSportProps(props);
+  const rawCandidates = scopedProps.filter((prop) => !isMultiPlayerComboProp(prop)).flatMap((prop) => {
     const options = Array.isArray(prop.streakOptions) && prop.streakOptions.length ? prop.streakOptions : defaultStreakOptions(prop);
     const modelSignal = modelSignalMap.get(streakModelSignalKey(prop)) || null;
     const rawMovement = lineMovementMap.get(lineMovementKey(prop)) || null;
@@ -2257,7 +3563,8 @@ function defaultStreakOptions(prop) {
 }
 
 function buildStreakSportCategoryBoards(props, history) {
-  const enriched = strongestSideOnly(props)
+  const scopedProps = filterActiveSportProps(props);
+  const enriched = strongestSideOnly(scopedProps)
     .map((prop) => enrichStreakCandidate(prop, history))
     .sort((a, b) => streakLifeScore(b, "safest", history) - streakLifeScore(a, "safest", history));
   const { mainCandidates, ladderPlays } = splitLadderCandidates(enriched);
@@ -2308,14 +3615,16 @@ function visibleStreakSportOptions(boards) {
 
 function streakTabCandidates(tabOption, mainCandidates, ladderPlays) {
   if (tabOption.type === "goblin") {
-    return mainCandidates.filter(isGoblinCandidate);
+    const strict = mainCandidates.filter(isGoblinCandidate);
+    return strict.length ? strict : mainCandidates.filter(isGoblinProp).slice(0, 12);
   }
   if (tabOption.type === "demon") {
-    return [...mainCandidates, ...ladderPlays].filter(isDemonCandidate);
+    const strict = [...mainCandidates, ...ladderPlays].filter(isDemonCandidate);
+    return strict.length ? strict : [...mainCandidates, ...ladderPlays].filter(isDemonProp).slice(0, 12);
   }
-  return mainCandidates
-    .filter((prop) => streakSportKey(prop) === tabOption.value)
-    .filter(meetsStandardStreakRules);
+  const sportMatches = mainCandidates.filter((prop) => streakSportKey(prop) === tabOption.value);
+  const strict = sportMatches.filter(meetsStandardStreakRules);
+  return strict.length >= 2 ? strict : sportMatches.slice(0, 24);
 }
 
 function meetsStandardStreakRules(prop) {
@@ -2335,8 +3644,7 @@ function isGoblinCandidate(prop) {
     hasPositiveStreakEdge(prop, 0) &&
     hasEnoughStreakData(prop) &&
     !isStaleOrStarted(prop) &&
-    !["Risky", "High Risk", "Low Data Confidence"].includes(prop.riskLevel) &&
-    Number(prop.multiplier) <= 1
+    !["Risky", "High Risk", "Low Data Confidence"].includes(prop.riskLevel)
   );
 }
 
@@ -2344,6 +3652,7 @@ function isDemonCandidate(prop) {
   return (
     isDemonProp(prop) &&
     Number(prop.confidenceScore) >= MIN_DEMON_CONFIDENCE &&
+    Number(prop.edge || prop.modelSignal?.edge || 0) >= 1 &&
     hasPositiveStreakEdge(prop, 0.25) &&
     hasEnoughStreakData(prop) &&
     !isStaleOrStarted(prop) &&
@@ -2353,6 +3662,7 @@ function isDemonCandidate(prop) {
 
 function hasEnoughStreakData(prop) {
   const signal = prop.modelSignal || {};
+  if (prop.fallbackProfile || signal.fallbackProfile) return false;
   const dataQuality = Number(prop.dataQualityScore || signal.dataQualityScore);
   const sampleSize = Number(prop.sampleSize || signal.sampleSize || 0);
   const projection = Number(prop.projection ?? signal.projection);
@@ -2408,7 +3718,7 @@ function isStaleOrStarted(prop) {
 }
 
 function buildQuickParlayPicks(boards, riskMode = "balanced") {
-  const allowedTabs = new Set(["MLB", "WNBA", "NBA", "Soccer", "goblins"]);
+  const allowedTabs = MLB_ONLY_MODE ? new Set(["MLB"]) : new Set(["MLB", "WNBA", "NBA", "Soccer", "goblins"]);
   if (riskMode === "aggressive") allowedTabs.add("demons");
 
   const candidates = uniqueByGeneratedPick(
@@ -2496,13 +3806,19 @@ function parlayCorrelationRisk(picks) {
 function selectTopStreakPicks(candidates, category, history) {
   const limit = category.type === "goblin" || category.type === "demon" ? 6 : 2;
   const primary = selectUncorrelatedPicks(candidates, limit, [], { avoidSameGame: category.type === "sport" });
-  const selected = primary.length >= limit ? primary : selectUncorrelatedPicks(candidates, limit, [], { avoidSameGame: false });
-  return selected.slice(0, limit).map((prop, index) => annotateTopTwoPick(prop, category.value, category, index, history, false));
+  let selected = primary.length >= limit ? primary : selectUncorrelatedPicks(candidates, limit, [], { avoidSameGame: false });
+  if (selected.length < limit && candidates.length) {
+    const relaxed = [...candidates]
+      .sort((a, b) => Number(b.confidenceScore || 0) - Number(a.confidenceScore || 0))
+      .slice(0, limit);
+    selected = relaxed;
+  }
+  return selected.slice(0, limit).map((prop, index) => annotateTopTwoPick(prop, category.value, category, index, history));
 }
 
-function annotateTopTwoPick(prop, sport, category, index, history, fallbackUsed = false) {
+function annotateTopTwoPick(prop, sport, category, index, history) {
   const categoryLabel = category.label;
-  const reason = topTwoReason(prop, categoryLabel, index, history, fallbackUsed);
+  const reason = topTwoReason(prop, categoryLabel, index, history);
   return {
     ...prop,
     streakTab: sport,
@@ -2511,12 +3827,11 @@ function annotateTopTwoPick(prop, sport, category, index, history, fallbackUsed 
     streakCategoryLabel: categoryLabel,
     recommendationType: `Streak Finder - ${categoryLabel}`,
     topTwoReason: reason,
-    categoryFallback: fallbackUsed,
     notes: reason,
   };
 }
 
-function topTwoReason(prop, categoryLabel, index, history, fallbackUsed = false) {
+function topTwoReason(prop, categoryLabel, index, history) {
   const categoryKey = normalize(categoryLabel);
   const categoryPurpose = categoryKey.includes("goblin")
     ? "safe streak profile, verified lower-payout pricing, positive projection edge, and low volatility"
@@ -2526,7 +3841,6 @@ function topTwoReason(prop, categoryLabel, index, history, fallbackUsed = false)
   const pieces = [
     `Top ${index + 1} ${categoryLabel.toLowerCase()} because it grades highest on ${categoryPurpose}.`,
     isVerifiedAdjustedOddsProp(prop) ? `${prop.multiplierSource || "Adjusted payout label"} is verified from the source feed.` : "",
-    fallbackUsed ? `This sport did not have two perfect ${categoryLabel.toLowerCase()} matches, so the app used the two safest available candidates and kept warning flags visible.` : "",
     `Confidence ${prop.confidenceScore}% with model probability ${formatPercent(prop.modelProbability)} and EV ${formatSignedPercent(prop.expectedValue)}.`,
     keyStatsSummary(prop),
   ];
@@ -2580,7 +3894,8 @@ function streakLifeScore(prop, categoryId, history) {
 
 function streakSportKey(prop) {
   const sport = displaySport(prop);
-  if (isTennisSport(prop.sport) || sport === "Tennis") return "Tennis";
+  if (isTennisSport(prop.sport) || sport === APP_SPORTS.Tennis) return APP_SPORTS.Tennis;
+  if (prop.sport === APP_SPORTS.Esports || prop.esports) return APP_SPORTS.Esports;
   return sport;
 }
 
@@ -2822,23 +4137,30 @@ function enrichStreakCandidate(prop, history) {
     sideConflict,
     multiplier,
   });
-  const confidenceScore = computeStreakConfidence({
-    multiplierScore,
-    probabilityScore,
-    modelScore,
-    sideScore,
-    hitRateScore,
-    qualityScore,
-    sampleScore,
-    volatilityScore,
-    sportsbookScore,
-    injuryScore,
-    highMultiplierPenalty,
-    historyAdjustment: historySignal.adjustment,
-    recentHitRate,
-    sampleSize,
-    profile: signal,
-  });
+  const profileIsFallback = Boolean(signal.fallbackProfile || prop.fallbackProfile);
+  let confidenceScore =
+    hasModelSignal && Number(signal.confidenceScore) > 0
+      ? Number(signal.confidenceScore)
+      : computeStreakConfidence({
+          multiplierScore,
+          probabilityScore,
+          modelScore,
+          sideScore,
+          hitRateScore,
+          qualityScore,
+          sampleScore,
+          volatilityScore,
+          sportsbookScore,
+          injuryScore,
+          highMultiplierPenalty,
+          historyAdjustment: historySignal.adjustment,
+          recentHitRate,
+          sampleSize,
+          profileIsFallback,
+          profile: signal,
+        });
+  if (sideConflict) confidenceScore = Math.max(35, confidenceScore - 8);
+  if (highMultiplierPenalty) confidenceScore = Math.max(35, confidenceScore + highMultiplierPenalty);
   const signalModelProbability = Number(signal.modelProbability);
   const impliedProbability = Number.isFinite(multiplier) ? round(1 / (1 + multiplier)) : null;
   const modelProbability = Number.isFinite(signalModelProbability)
@@ -2995,6 +4317,38 @@ function historicalSignalForProp(prop, history) {
   };
 }
 
+function historicalHitRateForProp(prop, history = []) {
+  const propRange = confidenceRange(Number(prop.confidenceScore ?? prop.modelSignal?.confidenceScore ?? 0));
+  const settled = history.filter((pick) => {
+    const status = pickStatus(pick);
+    if (!["Win", "Loss"].includes(status)) return false;
+    const sameSport = normalize(pick.sport || pick.category) === normalize(prop.sport);
+    const sameProp = normalize(pick.statType || pick.propType || pick.market) === normalize(prop.statType);
+    const sameRange =
+      propRange === "Unknown" ||
+      confidenceRange(Number(pick.confidenceScore ?? pick.confidence ?? 0)) === propRange;
+    return sameSport && sameProp && sameRange;
+  });
+  const wins = settled.filter((pick) => pickStatus(pick) === "Win").length;
+  const losses = settled.filter((pick) => pickStatus(pick) === "Loss").length;
+  const sampleSize = wins + losses;
+  if (sampleSize < 4) {
+    return {
+      hitRate: null,
+      sampleSize,
+      adjustment: 0,
+      note: sampleSize ? "Historical hit-rate sample is still too small." : "",
+    };
+  }
+  const hitRate = wins / sampleSize;
+  return {
+    hitRate,
+    sampleSize,
+    adjustment: clamp((hitRate - 0.55) * 18, -6, 7),
+    note: `Historical hit rate for similar sport/prop/confidence picks is ${Math.round(hitRate * 100)}% over ${sampleSize} decisions.`,
+  };
+}
+
 function sortStreakProps(a, b) {
   return (
     Number(b.modelSignal?.confidenceScore || 0) - Number(a.modelSignal?.confidenceScore || 0) ||
@@ -3049,15 +4403,31 @@ function riskFromSignals({ confidenceScore, volatility, injury, projection, line
   return "Risky";
 }
 
-function getFatalPropReason(prop) {
-  if (!prop.playerName || prop.playerName === "Unknown Player") return "missing player name";
+function getScoringRejectReason(prop) {
+  const validation = validateProp(prop);
+  if (!validation.valid) return validation.reason;
+  const player = String(prop.playerName || "").trim();
+  if (!player || player === "Unknown Player") return "missing player name";
   if (!prop.statType) return "missing prop type";
-  if (!isActiveUpcomingProp(prop)) return "stale or already-started game time";
+  const line = Number(prop.line);
+  if (!Number.isFinite(line) || line <= 0) return "missing or invalid line";
+  const sport = String(prop.sport || "");
+  if (!SUPPORTED_SPORTS.has(sport)) return `unsupported sport: ${sport || "Unknown"}`;
+  return "";
+}
+
+function getFatalPropReason(prop, options = {}) {
+  if (!prop.playerName || prop.playerName === "Unknown Player") return options.relaxed ? "" : "missing player name";
+  if (!prop.statType) return "missing prop type";
+  if (!options.relaxed && !isActiveUpcomingProp(prop, { includeUncertain: readIncludeUncertainPreference() })) {
+    return "stale or already-started game time";
+  }
   if (!Number.isFinite(Number(prop.line))) return "missing or invalid line";
-  if (!Number.isFinite(prop.edge)) return "missing edge calculation";
+  if (!options.relaxed && !Number.isFinite(prop.edge)) return "missing edge calculation";
+  if (options.relaxed) return "";
 
   const range = projectionRangeForProp(prop);
-  if (!range) return `unsupported market: ${prop.statType}`;
+  if (!range) return "";
   if (Number(prop.line) < range.min || Number(prop.line) > range.max) {
     return `${range.label} line ${formatNumber(prop.line)} outside realistic range ${range.min}-${range.max}`;
   }
@@ -3073,22 +4443,28 @@ function getFatalPropReason(prop) {
 }
 
 function logFilteredProp(prop, reason) {
-  if (!isDebugLoggingEnabled()) return;
-  console.warn("Filtered invalid DFS prop", {
-    playerName: prop.playerName,
-    propType: prop.statType,
-    line: prop.line,
-    projection: prop.projection,
+  if (!shouldLogVerbose()) return;
+  if (
+    reason === "game is live" ||
+    reason === "game already started" ||
+    reason === "game is final" ||
+    reason === "game is postponed" ||
+    reason === "outside pregame window" ||
+    reason === "adjusted odds prop handled by Streak Finder" ||
+    String(reason || "").startsWith("unsupported market:") ||
+    String(reason || "").startsWith("unapproved market:")
+  ) {
+    return;
+  }
+  console.warn("Filtered verified DFS prop", {
+    market: prop.statType,
+    sport: prop.sport,
     reason,
   });
 }
 
 function isDebugLoggingEnabled() {
-  try {
-    return window.localStorage.getItem("dfs-debug-filtered-props") === "1";
-  } catch {
-    return false;
-  }
+  return isDebugPanelEnabled();
 }
 
 function projectionRangeForProp(prop) {
@@ -3103,7 +4479,7 @@ function projectionRangeForProp(prop) {
 }
 
 function isTennisSport(sport) {
-  return sport === "ATP Tennis" || sport === "WTA Tennis" || sport === "Tennis";
+  return sport === APP_SPORTS.ATP || sport === APP_SPORTS.WTA || sport === APP_SPORTS.Tennis;
 }
 
 function isBasketballSport(sport) {
@@ -3116,8 +4492,16 @@ function canonicalizeSportProp(prop) {
 }
 
 function canonicalSportFromProp(prop) {
+  if (prop?.classifiedSport) return prop.classifiedSport;
   const league = normalize(prop?.league);
   const sportText = normalize(prop?.sport);
+  const inferred = inferSportFromText(`${prop?.league || ""} ${prop?.sport || ""} ${prop?.statType || ""}`, {
+    description: prop?.opponent || prop?.description,
+    playerName: prop?.playerName,
+    opponent: prop?.opponent,
+    statType: prop?.statType,
+  });
+  if (inferred) return inferred;
   if (league.includes("wnba") || sportText === "wnba" || sportText.includes("women")) return "WNBA";
   if (
     (league === "nba" || league.includes("nationalbasketballassociation") || sportText === "nba") &&
@@ -3126,32 +4510,40 @@ function canonicalSportFromProp(prop) {
   ) {
     return "NBA";
   }
-  return prop?.sport || "Other";
+  if (league.includes("mlb") || sportText === "mlb" || sportText.includes("baseball")) return "MLB";
+  if (sportText.includes("soccer") || league.includes("soccer") || league.includes("epl") || league.includes("mls")) {
+    return "Soccer";
+  }
+  if (prop?.sport && prop.sport !== "Other") return prop.sport;
+  return APP_SPORTS.Unsupported;
 }
 
-function displaySport(propOrSport) {
-  if (typeof propOrSport === "string") return propOrSport;
-  return canonicalSportFromProp(propOrSport) === "Other"
-    ? isTennisSport(propOrSport?.sport)
-      ? "Tennis"
-      : propOrSport?.sport || "Sport"
-    : canonicalSportFromProp(propOrSport);
+function ensurePropStartTime(prop) {
+  const normalized = normalizeGameStartTime(prop.startTime, { allowFallback: Boolean(prop.partialTimeLabel) });
+  if (!normalized) return prop;
+  return { ...prop, startTime: normalized };
 }
 
-function confidenceTier(prop) {
-  const score = Number(prop.confidenceScore || prop.modelSignal?.confidenceScore || 0);
-  return confidenceTierLabel(score, prop.riskLevel || "");
+function readIncludeUncertainPreference() {
+  try {
+    return window.localStorage.getItem(INCLUDE_UNCERTAIN_KEY) === "1";
+  } catch {
+    return false;
+  }
 }
 
-function dataSourcesUsed(prop) {
-  return unique([
-    prop.platform,
-    prop.lineComparison ? "PrizePicks/Underdog line comparison" : "",
-    prop.sportsbookComparison || prop.modelSignal?.sportsbookDiscrepancy ? "Sportsbook comparison" : "",
-    prop.statProfileSource || prop.modelSignal?.statProfileSource || (prop.sampleSize || prop.modelSignal?.sampleSize ? "Player stats" : ""),
-    prop.injuryRisk || prop.modelSignal?.injuryRisk ? "Injury/news" : "",
-    prop.lineMovement || prop.modelSignal?.lineMovement ? "Line movement" : "",
-  ]);
+function writeIncludeUncertainPreference(value) {
+  try {
+    window.localStorage.setItem(INCLUDE_UNCERTAIN_KEY, value ? "1" : "0");
+  } catch {
+    // ignore
+  }
+}
+
+function formatTopFilterReasons(audit = {}) {
+  const entries = Object.entries(audit.filterReasons || {}).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  if (!entries.length) return "none";
+  return entries.map(([reason, count]) => `${reason} (${count})`).join(" · ");
 }
 
 function keyStatsSummary(prop) {
@@ -3291,9 +4683,10 @@ function americanProfit(americanPrice) {
 function updateLineMovementMap(props, sportsbookComparisonMap) {
   const previous = readLineMovement();
   const now = new Date().toISOString();
-  const next = { ...previous };
+  const next = MLB_ONLY_MODE ? { ...previous } : { ...previous };
 
   props.forEach((prop) => {
+    if (!guardMlbOnlyProp(prop)) return;
     const key = lineMovementKey(prop);
     const sportsbookComparison = sportsbookComparisonMap.get(sportsbookComparisonKey(prop));
     const currentLine = Number(prop.line);
@@ -3306,11 +4699,10 @@ function updateLineMovementMap(props, sportsbookComparisonMap) {
       openingMarketLine: Number.isFinite(marketLine) ? marketLine : null,
     };
 
+    const enriched = enrichLineMovementRecord(existing, currentLine, now);
     next[key] = {
-      ...existing,
-      currentLine,
-      currentMarketLine: Number.isFinite(marketLine) ? marketLine : existing.currentMarketLine ?? null,
-      lastSeenAt: now,
+      ...enriched,
+      currentMarketLine: Number.isFinite(marketLine) ? marketLine : enriched.currentMarketLine ?? existing.currentMarketLine ?? null,
     };
   });
 
@@ -3328,16 +4720,24 @@ function lineMovementForPick(movement, bestPick) {
   const againstPick = bestPick === "More" ? move > 0 : move < 0;
   const direction = move === 0 ? "flat" : move > 0 ? "up" : "down";
   const lineQuality = supportsPick ? "better" : againstPick ? "worse" : "neutral";
+  const enriched = enrichLineMovementWithTags(
+    {
+      openingLine,
+      currentLine,
+      previousLine: Number.isFinite(Number(movement.previousLine)) ? Number(movement.previousLine) : openingLine,
+      supportsPick,
+      againstPick,
+      firstSeenAt: movement.firstSeenAt || "",
+      lastSeenAt: movement.lastSeenAt || "",
+    },
+    bestPick
+  );
   return {
-    openingLine,
-    currentLine,
+    ...enriched,
     move,
+    amount: Math.abs(move),
     direction,
     lineQuality,
-    supportsPick,
-    againstPick,
-    firstSeenAt: movement.firstSeenAt || "",
-    lastSeenAt: movement.lastSeenAt || "",
     label:
       move === 0
         ? "No movement yet"
@@ -3390,7 +4790,7 @@ function valueTagsForProp({ prop, confidenceScore, sportsbookDiscrepancy, lineCo
 }
 
 function savePropsOfDay(props) {
-  return saveLearningPicks(props.slice(0, PROPS_OF_DAY_LIMIT), "Props of the Day");
+  return saveLearningPicks(props.slice(0, PROPS_OF_DAY_LIMIT).filter(isAutoSavablePick), "Props of the Day");
 }
 
 function generatedStreakPicks(boards) {
@@ -3403,24 +4803,39 @@ function generatedStreakPicks(boards) {
   });
 }
 
-function saveGeneratedCategoryPicks(props) {
-  const existing = readHistory();
+function saveGeneratedCategoryPicks(props, existing = readHistory()) {
   const today = dateKey(new Date());
-  const additions = props.map((prop) =>
+  const additions = props.filter(isAutoSavablePick).map((prop) =>
     toHistoryPick(prop, today, prop.recommendationType || `Streak Finder - ${prop.streakSport || displaySport(prop)} - ${prop.streakCategoryLabel || "Top 2"}`)
   );
+  if (!additions.length) {
+    const trimmed = trimHistoryToLimit(existing);
+    if (trimmed.length !== existing.length) writeHistory(trimmed);
+    return trimmed;
+  }
   const updated = mergeHistoryPicks(existing, additions);
   writeHistory(updated);
   return updated;
 }
 
-function saveLearningPicks(props, recommendationType = "Model Recommendation") {
+function saveLearningPicks(props, recommendationType = "Model Recommendation", options = {}) {
   const existing = readHistory();
   const today = dateKey(new Date());
-  const additions = props.map((prop) => toHistoryPick({ ...prop, categorySource: categorySourceFromRecommendation(recommendationType) }, today, recommendationType));
+  const additions = props
+    .filter((prop) => options.allowResearch || isAutoSavablePick(prop))
+    .map((prop) => toHistoryPick({ ...prop, categorySource: categorySourceFromRecommendation(recommendationType) }, today, recommendationType));
+  if (!additions.length) {
+    const trimmed = trimHistoryToLimit(existing);
+    if (trimmed.length !== existing.length) writeHistory(trimmed);
+    return trimmed;
+  }
   const updated = mergeHistoryPicks(existing, additions);
   writeHistory(updated);
   return updated;
+}
+
+function isAutoSavablePick(prop) {
+  return Boolean(prop) && isReadyToBet(prop) && !prop.isDemoData && !prop.fallbackProfile && !prop.manualEntry;
 }
 
 function toHistoryPick(prop, today, recommendationType = "Model Recommendation") {
@@ -3546,7 +4961,13 @@ function mergeHistoryPicks(existing, additions) {
       sportsbookComparison: pick.sportsbookComparison || current.sportsbookComparison || null,
     });
   });
-  return Array.from(byKey.values()).sort((a, b) => new Date(b.generatedAt || b.createdAt || 0) - new Date(a.generatedAt || a.createdAt || 0));
+  return trimHistoryToLimit(Array.from(byKey.values()));
+}
+
+function trimHistoryToLimit(rows = []) {
+  return [...rows]
+    .sort((a, b) => new Date(b.generatedAt || b.createdAt || 0) - new Date(a.generatedAt || a.createdAt || 0))
+    .slice(0, HISTORY_LIMIT);
 }
 
 function mergeCategorySources(a = "", b = "") {
@@ -3567,13 +4988,17 @@ function settlePickFromActual(prop, pickDirection) {
 
 function saveGeneratedParlay(picks, existing = readParlayHistory()) {
   if (!Array.isArray(picks) || picks.length !== 4) return existing;
+  if (!picks.every(isAutoSavablePick)) return existing;
   const record = toParlayRecord(picks);
   const currentIndex = existing.findIndex((item) => item.id === record.id);
   const updated = currentIndex >= 0
     ? existing.map((item, index) => (index === currentIndex ? { ...item, ...record, updatedAt: new Date().toISOString() } : item))
     : [record, ...existing];
-  writeParlayHistory(updated);
-  return updated;
+  const trimmed = updated
+    .sort((a, b) => new Date(b.generatedAt || 0) - new Date(a.generatedAt || 0))
+    .slice(0, HISTORY_LIMIT);
+  writeParlayHistory(trimmed);
+  return trimmed;
 }
 
 function toParlayRecord(picks) {
@@ -3641,12 +5066,23 @@ function average(values) {
   return valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : 0;
 }
 
+function confidenceRange(value) {
+  const confidence = Number(value);
+  if (!Number.isFinite(confidence) || confidence <= 0) return "Unknown";
+  if (confidence >= 80) return "80+";
+  if (confidence >= 70) return "70-79";
+  if (confidence >= 60) return "60-69";
+  if (confidence >= 50) return "50-59";
+  return "Under 50";
+}
+
 function buildAccuracyDashboard(history) {
   const total = history.length;
   const pending = history.filter((pick) => pickStatus(pick) === "Pending").length;
   const wins = history.filter((pick) => pickStatus(pick) === "Win").length;
   const losses = history.filter((pick) => pickStatus(pick) === "Loss").length;
   const pushes = history.filter((pick) => pickStatus(pick) === "Push").length;
+  const voids = history.filter((pick) => pickStatus(pick) === "Void").length;
   const settledDecisionCount = wins + losses;
   const winPercentage = settledDecisionCount ? Math.round((wins / settledDecisionCount) * 100) : 0;
 
@@ -3656,6 +5092,7 @@ function buildAccuracyDashboard(history) {
     wins,
     losses,
     pushes,
+    voids,
     winPercentage,
     generatedToday: history.filter((pick) => pick.slateDate === dateKey(new Date()) || pick.date === dateKey(new Date())).length,
     goblinHitRate: hitRateFor(history, (pick) => String(pick.categorySource || pick.category || "").includes("goblin")),
@@ -3675,7 +5112,7 @@ function buildAccuracyDashboard(history) {
 
 function hitRateFor(history, filterFn, winFn = (pick) => pickStatus(pick) === "Win") {
   const matches = history.filter(filterFn).filter((pick) => pickStatus(pick) !== "Pending" && pickStatus(pick) !== "Push");
-  if (!matches.length) return 0;
+  if (matches.length < 3) return "—";
   return Math.round((matches.filter(winFn).length / matches.length) * 100);
 }
 
@@ -3713,7 +5150,7 @@ function breakdown(history, selector) {
       const decisions = row.wins + row.losses;
       return {
         ...row,
-        winPercentage: decisions ? Math.round((row.wins / decisions) * 100) : 0,
+        winPercentage: decisions < 3 ? "—" : Math.round((row.wins / decisions) * 100),
       };
     })
     .sort((a, b) => b.wins + b.losses - (a.wins + a.losses));
@@ -3780,33 +5217,6 @@ function sportsbookComparisonKey(prop) {
   return [prop.sport, prop.playerName, canonicalStatType(prop.statType)].map(normalize).join("|");
 }
 
-function canonicalStatType(statType) {
-  const key = normalize(statType);
-  if (key.includes("pitchesthrown") || key.includes("pitchcount")) return "pitchesThrown";
-  if (key.includes("strikeout")) return "strikeouts";
-  if (key.includes("hitsrunsrbis") || key.includes("hrr")) return "hitsRunsRbis";
-  if (key.includes("totalbases")) return "totalBases";
-  if (key === "hits") return "hits";
-  if (key === "rbis" || key === "rbi") return "rbis";
-  if (key === "runs") return "runs";
-  if (key.includes("pointsreboundsassists") || key === "pra") return "pra";
-  if (key === "points") return "points";
-  if (key === "rebounds") return "rebounds";
-  if (key === "assists") return "assists";
-  if (key.includes("3pointers") || key.includes("threepointers")) return "threes";
-  if (key.includes("gameswon") || key.includes("playergames")) return "gamesWon";
-  if (key.includes("totalgames")) return "totalGames";
-  if (key.includes("aces")) return "aces";
-  if (key.includes("doublefault")) return "doubleFaults";
-  if (key.includes("shotsontarget")) return "shotsOnTarget";
-  if (key === "shots" || key.includes("shotsattempted")) return "shots";
-  if (key.includes("passesattempted") || key === "passes") return "passesAttempted";
-  if (key.includes("goalsallowed")) return "goalsAllowed";
-  if (key.includes("goaliesaves") || key.includes("keepersaves") || key === "saves") return "goalieSaves";
-  if (key.includes("fantasyscore")) return "fantasyScore";
-  return key;
-}
-
 function statLookupKey(prop) {
   return [prop.platform, prop.sport, prop.playerName, prop.statType, prop.startTime]
     .map(normalize)
@@ -3823,116 +5233,6 @@ function lineMovementKey(prop) {
   return [prop.platform, prop.sport, prop.playerName, canonicalStatType(prop.statType), prop.startTime]
     .map(normalize)
     .join("|");
-}
-
-function normalize(value) {
-  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function unique(values) {
-  return Array.from(new Set(values.filter(Boolean)));
-}
-
-function countBy(items, selector) {
-  return items.reduce((counts, item) => {
-    const key = selector(item);
-    counts[key] = (counts[key] || 0) + 1;
-    return counts;
-  }, {});
-}
-
-function errorWithDetail(label, error) {
-  const detail = error?.message;
-  return detail && !detail.includes(label) ? `${label} ${detail}` : label;
-}
-
-function confidenceRange(score) {
-  if (score >= 80) return "80-100";
-  if (score >= 70) return "70-79";
-  if (score >= 60) return "60-69";
-  if (score >= 50) return "50-59";
-  return "Below 50";
-}
-
-function dateKey(date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function round(value) {
-  return Number(value.toFixed(2));
-}
-
-function formatNumber(value) {
-  if (value == null || value === "") return "-";
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "-";
-  return Number.isInteger(number) ? String(number) : number.toFixed(1);
-}
-
-function formatMaybeLine(value) {
-  return value != null && value !== "" && Number.isFinite(Number(value)) ? formatNumber(value) : "-";
-}
-
-function formatSignedNumber(value) {
-  if (value == null || value === "") return "-";
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "-";
-  const formatted = Number.isInteger(number) ? String(number) : number.toFixed(1);
-  return number > 0 ? `+${formatted}` : formatted;
-}
-
-function formatLeanSide(value) {
-  const side = normalizeStreakSide(value);
-  if (side === "Higher") return "Over";
-  if (side === "Lower") return "Under";
-  if (normalize(value) === "more") return "Over";
-  if (normalize(value) === "less") return "Under";
-  return String(value || "Watch");
-}
-
-function formatPercent(value) {
-  if (value == null || value === "") return "-";
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "-";
-  return `${Math.round(number * 100)}%`;
-}
-
-function formatSignedPercent(value) {
-  if (value == null || value === "") return "-";
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "-";
-  const formatted = `${Math.round(number * 100)}%`;
-  return number > 0 ? `+${formatted}` : formatted;
-}
-
-function formatAmericanPrice(value) {
-  if (value == null || value === "") return "-";
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "-";
-  const rounded = Math.round(number);
-  return rounded > 0 ? `+${rounded}` : String(rounded);
-}
-
-function formatMultiplier(value) {
-  if (value == null || value === "") return "-";
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "-";
-  return `${number.toFixed(2)}x`;
-}
-
-function formatDateTime(value) {
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "-";
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
 }
 
 function getPlayerImage(playerName, sport) {
@@ -3997,882 +5297,3 @@ function sourceStatusStyle(status) {
   if (status === "Failed" || status === "Not Connected") return { ...base, color: "#fecaca", background: "#450a0a", borderColor: "#991b1b" };
   return { ...base, color: "#cbd5e1", background: "#111827", borderColor: "#334155" };
 }
-
-const styles = {
-  page: {
-    minHeight: "100vh",
-    padding: "28px",
-    background: "#0a0f1a",
-    color: "#f8fafc",
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: "18px",
-    alignItems: "flex-start",
-    marginBottom: "18px",
-  },
-  eyebrow: {
-    margin: "0 0 6px",
-    color: "#38bdf8",
-    fontSize: "12px",
-    fontWeight: 800,
-    textTransform: "uppercase",
-    letterSpacing: "0",
-  },
-  title: {
-    margin: 0,
-    fontSize: "clamp(28px, 4vw, 48px)",
-    lineHeight: 1.02,
-    letterSpacing: "0",
-  },
-  subtitle: {
-    margin: "12px 0 0",
-    color: "#b6c2d2",
-    maxWidth: "760px",
-    lineHeight: 1.55,
-  },
-  lastUpdated: {
-    margin: "8px 0 0",
-    color: "#7dd3fc",
-    fontSize: "13px",
-    fontWeight: 800,
-  },
-  refreshButton: {
-    border: "1px solid #38bdf8",
-    background: "#0e7490",
-    color: "#ecfeff",
-    padding: "12px 16px",
-    borderRadius: "8px",
-    fontWeight: 800,
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-  },
-  sourceStatusBar: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
-    gap: "10px",
-    marginBottom: "18px",
-  },
-  sourceStatusItem: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "10px",
-    padding: "10px 12px",
-    border: "1px solid #263449",
-    background: "#0f172a",
-    borderRadius: "8px",
-  },
-  sourceName: {
-    color: "#dbeafe",
-    fontWeight: 900,
-    fontSize: "13px",
-  },
-  sourceStatusPill: {
-    border: "1px solid #334155",
-    borderRadius: "999px",
-    padding: "5px 9px",
-    fontSize: "12px",
-    fontWeight: 900,
-  },
-  debugPanel: {
-    display: "grid",
-    gap: "10px",
-    marginBottom: "18px",
-    padding: "12px",
-    border: "1px solid #263449",
-    background: "#0b1220",
-    borderRadius: "8px",
-  },
-  debugHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "12px",
-  },
-  debugTitle: {
-    margin: 0,
-    fontSize: "18px",
-    letterSpacing: "0",
-  },
-  debugGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: "10px",
-  },
-  debugSummaryGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-    gap: "8px",
-    paddingTop: "10px",
-    borderTop: "1px solid #1f2937",
-  },
-  debugCard: {
-    minWidth: 0,
-    border: "1px solid #1f2937",
-    background: "#0f172a",
-    borderRadius: "8px",
-    padding: "10px",
-  },
-  debugCardTop: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "8px",
-    marginBottom: "8px",
-  },
-  debugRows: {
-    display: "grid",
-    gap: "6px",
-  },
-  debugRow: {
-    display: "grid",
-    gridTemplateColumns: "minmax(82px, .7fr) minmax(0, 1.3fr)",
-    gap: "8px",
-    alignItems: "baseline",
-    color: "#94a3b8",
-    fontSize: "12px",
-  },
-  controls: {
-    display: "grid",
-    gridTemplateColumns: "minmax(260px, 1.4fr) minmax(180px, .6fr) minmax(220px, .8fr)",
-    gap: "14px",
-    alignItems: "end",
-    marginBottom: "18px",
-  },
-  quickFilters: {
-    display: "grid",
-    gap: "8px",
-    marginBottom: "18px",
-    padding: "12px",
-    border: "1px solid #1f2937",
-    background: "#0b1220",
-    borderRadius: "8px",
-  },
-  streakControls: {
-    display: "grid",
-    gridTemplateColumns: "minmax(260px, 1fr) minmax(320px, 1.2fr)",
-    gap: "14px",
-    alignItems: "end",
-    marginBottom: "18px",
-    padding: "14px",
-    border: "1px solid #263449",
-    background: "#0f172a",
-    borderRadius: "8px",
-  },
-  streakTitle: {
-    margin: 0,
-    fontSize: "20px",
-    letterSpacing: "0",
-  },
-  streakCopy: {
-    margin: "8px 0 0",
-    color: "#94a3b8",
-    lineHeight: 1.45,
-    fontSize: "14px",
-  },
-  streakControlGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(180px, 1fr))",
-    gap: "10px",
-    alignItems: "end",
-  },
-  streakNotice: {
-    gridColumn: "1 / -1",
-    margin: 0,
-    color: "#bae6fd",
-    fontSize: "13px",
-    lineHeight: 1.4,
-  },
-  segmentGroup: {
-    display: "grid",
-    gap: "8px",
-  },
-  controlLabel: {
-    color: "#cbd5e1",
-    fontSize: "12px",
-    fontWeight: 800,
-    textTransform: "uppercase",
-  },
-  segmentRow: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "8px",
-  },
-  segment: {
-    border: "1px solid #334155",
-    background: "#111827",
-    color: "#cbd5e1",
-    borderRadius: "8px",
-    padding: "10px 12px",
-    cursor: "pointer",
-    fontWeight: 700,
-  },
-  segmentActive: {
-    border: "1px solid #22c55e",
-    background: "#14532d",
-    color: "#dcfce7",
-    borderRadius: "8px",
-    padding: "10px 12px",
-    cursor: "pointer",
-    fontWeight: 800,
-  },
-  selectLabel: {
-    display: "grid",
-    gap: "8px",
-    color: "#cbd5e1",
-    fontSize: "12px",
-    fontWeight: 800,
-    textTransform: "uppercase",
-  },
-  select: {
-    width: "100%",
-    minHeight: "42px",
-    borderRadius: "8px",
-    border: "1px solid #334155",
-    background: "#111827",
-    color: "#f8fafc",
-    padding: "0 12px",
-    fontSize: "14px",
-  },
-  input: {
-    width: "100%",
-    minHeight: "42px",
-    borderRadius: "8px",
-    border: "1px solid #334155",
-    background: "#111827",
-    color: "#f8fafc",
-    padding: "0 12px",
-    fontSize: "14px",
-    boxSizing: "border-box",
-  },
-  warningPanel: {
-    display: "grid",
-    gap: "6px",
-    padding: "12px",
-    border: "1px solid #854d0e",
-    background: "#1c1917",
-    borderRadius: "8px",
-    marginBottom: "18px",
-  },
-  warningText: {
-    margin: 0,
-    color: "#fde68a",
-    fontSize: "14px",
-  },
-  errorPanel: {
-    padding: "12px",
-    border: "1px solid #991b1b",
-    background: "#450a0a",
-    color: "#fecaca",
-    borderRadius: "8px",
-    marginBottom: "18px",
-  },
-  section: {
-    marginTop: "22px",
-  },
-  sectionHeading: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "14px",
-    marginBottom: "12px",
-  },
-  sectionTitle: {
-    margin: 0,
-    fontSize: "24px",
-    letterSpacing: "0",
-  },
-  sectionTitleSmall: {
-    margin: 0,
-    fontSize: "18px",
-    letterSpacing: "0",
-  },
-  countPill: {
-    margin: 0,
-    padding: "8px 10px",
-    borderRadius: "999px",
-    background: "#111827",
-    color: "#cbd5e1",
-    border: "1px solid #334155",
-    fontSize: "13px",
-    fontWeight: 800,
-  },
-  cardGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-    gap: "10px",
-  },
-  cardGridCompact: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: "8px",
-  },
-  summaryStrip: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-    gap: "8px",
-    marginTop: "16px",
-  },
-  summaryCard: {
-    display: "grid",
-    gap: "4px",
-    border: "1px solid #1f2937",
-    background: "#0b1220",
-    borderRadius: "8px",
-    padding: "10px",
-  },
-  summaryHint: {
-    color: "#94a3b8",
-    fontSize: "11px",
-  },
-  compactDetails: {
-    marginTop: "12px",
-    border: "1px solid #1f2937",
-    background: "#0b1220",
-    borderRadius: "8px",
-    padding: "10px",
-  },
-  detailsSummary: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "12px",
-    cursor: "pointer",
-    listStyle: "none",
-  },
-  compactPanel: {
-    marginTop: "10px",
-  },
-  watchlistSummary: {
-    marginTop: "12px",
-    padding: "10px",
-    border: "1px solid #1f2937",
-    background: "#0b1220",
-    borderRadius: "8px",
-  },
-  card: {
-    border: "1px solid #243244",
-    background: "#0f172a",
-    borderRadius: "8px",
-    padding: "10px",
-    minWidth: 0,
-    cursor: "pointer",
-  },
-  watchlistCard: {
-    borderColor: "#3f3f46",
-    background: "#111827",
-  },
-  streakCard: {
-    borderColor: "#164e63",
-    background: "#0c1826",
-  },
-  goblinCard: {
-    borderColor: "#15803d",
-    background: "#071a12",
-  },
-  demonCard: {
-    borderColor: "#b45309",
-    background: "#1f1308",
-  },
-  parlayCard: {
-    borderColor: "#4f46e5",
-    background: "#11152a",
-  },
-  ladderCard: {
-    borderColor: "#854d0e",
-    background: "#1c1917",
-  },
-  avoidCard: {
-    borderColor: "#7f1d1d",
-    background: "#1f1418",
-  },
-  cardTop: {
-    display: "flex",
-    gap: "12px",
-    alignItems: "flex-start",
-    marginBottom: "12px",
-  },
-  compactCardTop: {
-    display: "flex",
-    gap: "9px",
-    alignItems: "flex-start",
-    marginBottom: "8px",
-  },
-  cardInfo: {
-    minWidth: 0,
-    flex: 1,
-  },
-  cardTitleRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: "12px",
-    alignItems: "flex-start",
-  },
-  tagRow: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "6px",
-    marginBottom: "12px",
-  },
-  valueTag: {
-    display: "inline-flex",
-    alignItems: "center",
-    border: "1px solid #0e7490",
-    background: "#082f49",
-    color: "#bae6fd",
-    borderRadius: "999px",
-    padding: "5px 8px",
-    fontSize: "11px",
-    fontWeight: 900,
-    textTransform: "uppercase",
-  },
-  playerImageWrap: {
-    position: "relative",
-    flex: "0 0 48px",
-    width: "48px",
-    aspectRatio: "1 / 1",
-    borderRadius: "8px",
-    overflow: "hidden",
-    background: "#111827",
-    border: "1px solid #263449",
-  },
-  playerImageWrapLarge: {
-    flexBasis: "74px",
-    width: "74px",
-  },
-  playerImage: {
-    width: "100%",
-    height: "100%",
-    display: "block",
-    objectFit: "cover",
-    transition: "opacity 160ms ease",
-  },
-  imageLoading: {
-    position: "absolute",
-    inset: 0,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    color: "#94a3b8",
-    fontSize: "11px",
-    fontWeight: 800,
-    textTransform: "uppercase",
-    background: "#111827",
-  },
-  platform: {
-    margin: "0 0 6px",
-    color: "#22c55e",
-    fontWeight: 900,
-    fontSize: "10px",
-    textTransform: "uppercase",
-  },
-  playerName: {
-    margin: 0,
-    fontSize: "17px",
-    lineHeight: 1.15,
-  },
-  gameLine: {
-    margin: "4px 0 0",
-    color: "#94a3b8",
-    fontSize: "12px",
-  },
-  riskPill: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: "999px",
-    padding: "6px 10px",
-    fontSize: "12px",
-    fontWeight: 900,
-    minWidth: "64px",
-  },
-  multiplierPill: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: "999px",
-    padding: "6px 10px",
-    fontSize: "12px",
-    fontWeight: 900,
-    minWidth: "64px",
-    color: "#083344",
-    background: "#67e8f9",
-  },
-  metricGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    gap: "10px",
-  },
-  compactMetaGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    gap: "7px",
-  },
-  compactMetaGridTight: {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-    gap: "6px",
-  },
-  cardBadgeColumn: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "flex-end",
-    gap: "6px",
-  },
-  dataQualityBadge: {
-    display: "inline-block",
-    fontSize: "10px",
-    fontWeight: 800,
-    padding: "3px 7px",
-    borderRadius: "999px",
-    border: "1px solid transparent",
-  },
-  dataBadgeFull: { color: "#052e16", background: "#86efac", borderColor: "#22c55e" },
-  dataBadgePartial: { color: "#422006", background: "#fde68a", borderColor: "#ca8a04" },
-  dataBadgeFallback: { color: "#431407", background: "#fdba74", borderColor: "#ea580c" },
-  dataBadgeWeak: { color: "#450a0a", background: "#fca5a5", borderColor: "#ef4444" },
-  playerImageWrapCompact: {
-    width: "40px",
-    height: "40px",
-    minWidth: "40px",
-  },
-  playerInitials: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "100%",
-    height: "100%",
-    borderRadius: "999px",
-    background: "#1e293b",
-    color: "#e2e8f0",
-    fontWeight: 900,
-    fontSize: "13px",
-  },
-  explanationSections: {
-    display: "grid",
-    gap: "10px",
-    marginTop: "12px",
-  },
-  explanationBlock: {
-    border: "1px solid #263449",
-    background: "#0b1220",
-    borderRadius: "8px",
-    padding: "10px",
-    color: "#dbeafe",
-    fontSize: "13px",
-  },
-  explanationList: {
-    margin: "6px 0 0",
-    paddingLeft: "18px",
-    lineHeight: 1.45,
-  },
-  compactReason: {
-    margin: "8px 0 0",
-    color: "#dbeafe",
-    fontSize: "12px",
-    lineHeight: 1.35,
-    display: "-webkit-box",
-    WebkitLineClamp: 2,
-    WebkitBoxOrient: "vertical",
-    overflow: "hidden",
-  },
-  compactFlags: {
-    margin: "6px 0 0",
-    color: "#94a3b8",
-    fontSize: "11px",
-    lineHeight: 1.35,
-  },
-  whyLink: {
-    marginTop: "8px",
-    paddingTop: "8px",
-    borderTop: "1px solid #1f2937",
-    color: "#7dd3fc",
-    fontSize: "12px",
-    fontWeight: 900,
-  },
-  metric: {
-    minWidth: 0,
-    borderTop: "1px solid #1f2937",
-    paddingTop: "6px",
-  },
-  metricLabel: {
-    display: "block",
-    color: "#94a3b8",
-    fontSize: "10px",
-    marginBottom: "3px",
-  },
-  metricValue: {
-    display: "block",
-    color: "#e2e8f0",
-    fontSize: "13px",
-    overflowWrap: "anywhere",
-  },
-  metricValueStrong: {
-    display: "block",
-    color: "#f8fafc",
-    fontSize: "14px",
-    overflowWrap: "anywhere",
-  },
-  comparisonBox: {
-    display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    gap: "8px",
-    marginTop: "12px",
-    padding: "10px",
-    background: "#111827",
-    border: "1px solid #263449",
-    borderRadius: "8px",
-    color: "#cbd5e1",
-    fontSize: "13px",
-  },
-  reason: {
-    margin: "12px 0 0",
-    color: "#dbeafe",
-    lineHeight: 1.55,
-    fontSize: "14px",
-  },
-  watchlistMessage: {
-    display: "grid",
-    gap: "4px",
-    marginTop: "12px",
-    padding: "10px",
-    border: "1px solid #334155",
-    background: "#0b1220",
-    borderRadius: "8px",
-    color: "#cbd5e1",
-    fontSize: "13px",
-    lineHeight: 1.45,
-  },
-  modalBackdrop: {
-    position: "fixed",
-    inset: 0,
-    zIndex: 50,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "18px",
-    background: "rgba(2, 6, 23, 0.78)",
-  },
-  modalPanel: {
-    width: "min(940px, 100%)",
-    maxHeight: "min(86vh, 920px)",
-    overflowY: "auto",
-    border: "1px solid #334155",
-    background: "#0f172a",
-    borderRadius: "8px",
-    padding: "16px",
-    boxShadow: "0 24px 80px rgba(0,0,0,.45)",
-  },
-  modalHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: "12px",
-    marginBottom: "14px",
-  },
-  modalPlayer: {
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-    minWidth: 0,
-  },
-  modalTitle: {
-    margin: 0,
-    fontSize: "26px",
-    lineHeight: 1.1,
-    letterSpacing: "0",
-  },
-  modalGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
-    gap: "10px",
-  },
-  closeButton: {
-    border: "1px solid #334155",
-    background: "#111827",
-    color: "#e2e8f0",
-    borderRadius: "8px",
-    padding: "8px 10px",
-    cursor: "pointer",
-    fontWeight: 900,
-  },
-  evaluationText: {
-    display: "grid",
-    gap: "8px",
-    marginTop: "12px",
-    padding: "12px",
-    border: "1px solid #263449",
-    background: "#0b1220",
-    borderRadius: "8px",
-    color: "#dbeafe",
-    fontSize: "14px",
-    lineHeight: 1.55,
-  },
-  streakWarning: {
-    display: "grid",
-    gap: "4px",
-    marginTop: "12px",
-    padding: "10px",
-    border: "1px solid #155e75",
-    background: "#082f49",
-    borderRadius: "8px",
-    color: "#cffafe",
-    fontSize: "13px",
-    lineHeight: 1.45,
-  },
-  ladderWarning: {
-    display: "grid",
-    gap: "4px",
-    marginTop: "12px",
-    padding: "10px",
-    border: "1px solid #854d0e",
-    background: "#451a03",
-    borderRadius: "8px",
-    color: "#fde68a",
-    fontSize: "13px",
-    lineHeight: 1.45,
-  },
-  avoidWarning: {
-    display: "grid",
-    gap: "4px",
-    marginTop: "12px",
-    padding: "10px",
-    border: "1px solid #7f1d1d",
-    background: "#450a0a",
-    borderRadius: "8px",
-    color: "#fecaca",
-    fontSize: "13px",
-    lineHeight: 1.45,
-  },
-  generated: {
-    margin: "10px 0 0",
-    color: "#64748b",
-    fontSize: "12px",
-  },
-  emptyState: {
-    minHeight: "120px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "18px",
-    border: "1px dashed #334155",
-    borderRadius: "8px",
-    color: "#cbd5e1",
-    background: "#0f172a",
-    textAlign: "center",
-  },
-  dashboardGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-    gap: "12px",
-    marginBottom: "14px",
-  },
-  historyFilters: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-    gap: "10px",
-    margin: "12px 0",
-  },
-  metricCard: {
-    border: "1px solid #243244",
-    background: "#0f172a",
-    borderRadius: "8px",
-    padding: "14px",
-  },
-  dashboardValue: {
-    display: "block",
-    marginTop: "4px",
-    fontSize: "28px",
-  },
-  breakdownGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: "12px",
-  },
-  breakdownCard: {
-    border: "1px solid #243244",
-    background: "#0f172a",
-    borderRadius: "8px",
-    padding: "14px",
-  },
-  breakdownTitle: {
-    margin: "0 0 10px",
-    fontSize: "16px",
-  },
-  breakdownEmpty: {
-    margin: 0,
-    color: "#94a3b8",
-    fontSize: "13px",
-  },
-  breakdownRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: "10px",
-    padding: "7px 0",
-    borderTop: "1px solid #1f2937",
-    color: "#cbd5e1",
-    fontSize: "13px",
-  },
-  historyList: {
-    display: "grid",
-    gap: "10px",
-    marginTop: "14px",
-  },
-  historyRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: "12px",
-    alignItems: "center",
-    border: "1px solid #243244",
-    background: "#0f172a",
-    borderRadius: "8px",
-    padding: "12px",
-  },
-  historyMeta: {
-    margin: "5px 0 0",
-    color: "#94a3b8",
-    fontSize: "13px",
-  },
-  resultButtons: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "6px",
-    justifyContent: "flex-end",
-  },
-  dashboardActions: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    gap: "8px",
-    flexWrap: "wrap",
-  },
-  secondaryButton: {
-    border: "1px solid #334155",
-    background: "#111827",
-    color: "#cbd5e1",
-    borderRadius: "8px",
-    padding: "8px 10px",
-    cursor: "pointer",
-    fontWeight: 800,
-  },
-  resultButton: {
-    border: "1px solid #334155",
-    background: "#111827",
-    color: "#cbd5e1",
-    borderRadius: "8px",
-    padding: "8px 9px",
-    cursor: "pointer",
-    fontWeight: 800,
-  },
-  resultButtonActive: {
-    border: "1px solid #22c55e",
-    background: "#14532d",
-    color: "#dcfce7",
-    borderRadius: "8px",
-    padding: "8px 9px",
-    cursor: "pointer",
-    fontWeight: 900,
-  },
-};

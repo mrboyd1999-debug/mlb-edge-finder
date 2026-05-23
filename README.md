@@ -1,32 +1,86 @@
-# MLB Edge Finder
+# DFS Pick'em Analytics
 
-A Vite + React app that pulls today's MLB games from the MLB Stats API and analyzes prop markets through an Anthropic Claude proxy.
+PrizePicks + Underdog reference tool for finding safer streak picks and tracking saved results. The app is a reference tool only; it does not place picks or manage a real streak.
 
-## Setup
+## Install
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
+```bash
+npm install
+```
 
-2. Copy the example env file and add your API key locally:
-   ```bash
-   cp .env.example .env
-   ```
+## Run Locally
 
-3. Run locally:
-   ```bash
-   npm run dev
-   ```
+```bash
+npm run dev -- --host 0.0.0.0
+```
 
-4. Add your API key in Vercel as `OPENAI_API_KEY` or `ANTHROPIC_KEY`.
+Open:
 
-If your OpenAI key is rate limited or has insufficient quota, the app will now fall back to Anthropic if `ANTHROPIC_KEY` is available.
+```text
+http://localhost:5173
+```
 
-> If the site returns `API error: 429`, that means your OpenAI key was rate limited or exceeded quota. Wait a minute and try again, or switch to a lower-cost model such as `gpt-3.5-turbo`.
+## Settings
 
-## Deployment
+Open the Settings panel at the top of the app and paste any values you want to use at runtime:
 
-Deploy this repo to Vercel with the framework preset `Vite`.
+- `VITE_ODDS_API_KEY`
+- `PRIZEPICKS_PROXY_URL`
+- `UNDERDOG_PROXY_URL`
 
-Place the `api/analyze.js` file in the root `api/` folder so Vercel can use it as a serverless function.
+These are saved in `localStorage`, so normal local use does not require editing `.env`. After saving settings, click `Refresh (clear cache)`.
+
+## Manual Paste Lines
+
+If live APIs fail, open `Manual Paste Lines` and paste one prop per line.
+
+Example:
+
+```text
+PrizePicks MLB Aaron Judge Total Bases 1.5 More vs BOS 2026-05-22 7:05 PM
+Underdog WNBA A'ja Wilson Rebounds 9.5 Less vs NY 2026-05-22 8:00 PM
+```
+
+Manual pasted lines are parsed into cards, but they are marked `Fallback / demo data - not bettable` until real stats/model data are available.
+
+## API Route Checks
+
+These local routes should return JSON only:
+
+```text
+http://localhost:5173/api/prizepicks
+http://localhost:5173/api/prizepicks/projections
+http://localhost:5173/api/underdog
+http://localhost:5173/api/underdog/beta/v3/over_under_lines
+```
+
+If an upstream service is blocked or a proxy is misconfigured, the route should still return JSON with a readable error, such as:
+
+```json
+{
+  "ok": false,
+  "error": true,
+  "message": "API route is serving source/HTML instead of JSON. Check proxy/backend routing.",
+  "props": []
+}
+```
+
+If you see raw JavaScript source code or HTML in the browser, the dev proxy/backend route is not being used. Start the app with:
+
+```bash
+npm run dev -- --host 0.0.0.0
+```
+
+Then refresh the API route.
+
+## Result Tracking
+
+Generated top picks are saved to localStorage for model review. In `Accuracy Review`, manually mark results:
+
+- Win
+- Loss
+- Push
+- Void
+- Pending
+
+The dashboard tracks total picks, wins, losses, pushes, hit rate, and breakdowns by sport/category/platform.

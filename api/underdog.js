@@ -6,65 +6,72 @@ export default async function handler(req, res) {
   }
 
   try {
-    const providerUrl = process.env.UNDERDOG_PROXY_URL;
+    const providerUrl = req.query?.proxyUrl || process.env.UNDERDOG_PROXY_URL;
     const apifyToken = process.env.APIFY_TOKEN;
     const apifyActor = process.env.UNDERDOG_APIFY_ACTOR;
-    const url = providerUrl || apifyActorUrl(apifyActor, apifyToken);
+    const url = providerUrl || apifyActorUrl(apifyActor, apifyToken) || "https://api.underdogfantasy.com/beta/v3/over_under_lines";
 
-    if (!url) {
-      return res.status(200).json({
-        error: true,
-        needsSetup: true,
-        source: "Underdog",
-        message: "Underdog proxy is ready. Add UNDERDOG_PROXY_URL or APIFY_TOKEN plus UNDERDOG_APIFY_ACTOR to load live lines.",
-        data: [],
-      });
-    }
-
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        Accept: "application/json",
-      },
-    });
+    const response = await fetch(url, { headers: underdogHeaders() });
     const text = await response.text();
+    const parsed = parseJsonOrError(text, "Underdog");
 
-    if (!response.ok) {
+    console.info("[Underdog API] upstream", {
+      status: response.status,
+      contentType: response.headers.get("content-type") || "",
+      ok: response.ok,
+    });
+
+    if (!response.ok || !parsed.ok) {
       return res.status(200).json({
-        error: true,
+        ok: false,
         source: "Underdog",
-        status: response.status,
-        message: `Underdog provider returned status ${response.status}.`,
+        status: "failed",
+        error: !response.ok ? `Underdog provider returned status ${response.status}.` : parsed.error,
         preview: text.slice(0, 300),
+        props: [],
         data: [],
       });
     }
 
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      return res.status(200).json({
-        error: true,
-        source: "Underdog",
-        message: "Underdog provider did not return valid JSON.",
-        preview: text.slice(0, 300),
-        data: [],
-      });
-    }
-
+    const props = underdogPropsFromPayload(parsed.data);
     return res.status(200).json({
+      ok: true,
       error: false,
       source: "Underdog",
-      data,
+      props,
+      data: parsed.data,
     });
   } catch (error) {
     return res.status(200).json({
-      error: true,
+      ok: false,
       source: "Underdog",
-      message: error.message || "Underdog proxy failed.",
+      status: "failed",
+      error: error.message || "upstream fetch failed",
+      props: [],
       data: [],
     });
+  }
+}
+
+function underdogPropsFromPayload(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.props)) return payload.props;
+  if (Array.isArray(payload?.over_under_lines)) return payload.over_under_lines;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload?.results)) return payload.results;
+  return [];
+}
+
+function parseJsonOrError(text, source) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed || trimmed.startsWith("<") || /^export\s+default\b/.test(trimmed) || trimmed.includes("export default async function")) {
+    return { ok: false, error: "API route is serving source/HTML instead of JSON. Check proxy/backend routing." };
+  }
+  try {
+    return { ok: true, data: JSON.parse(trimmed) };
+  } catch {
+    return { ok: false, error: `${source} returned invalid JSON.` };
   }
 }
 
@@ -73,8 +80,20 @@ function apifyActorUrl(actor, token) {
   return `https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}`;
 }
 
+function underdogHeaders() {
+  return {
+    accept: "application/json, text/plain, */*",
+    "accept-language": "en-US,en;q=0.9",
+    origin: "https://underdogfantasy.com",
+    referer: "https://underdogfantasy.com/",
+    "x-requested-with": "XMLHttpRequest",
+    "user-agent":
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36",
+  };
+}
+
 function setCorsHeaders(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept");
 }

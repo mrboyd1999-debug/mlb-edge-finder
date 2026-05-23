@@ -12,6 +12,17 @@ body,
   box-sizing: border-box;
 }
 
+@media (max-width: 640px) {
+  #root main {
+    padding-left: 6px !important;
+    padding-right: 6px !important;
+  }
+
+  #root article[style*="cursor: pointer"] {
+    font-size: 13px;
+  }
+}
+
 @keyframes spin {
   from {
     transform: rotate(0deg);

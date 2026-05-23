@@ -1,14 +1,48 @@
-import { cachedFetch } from "./fetchUtil.js";
+import { getShortCacheTtlMs, resilientFetch } from "./fetchUtil.js";
+import { normalizeGameStartTime, startTimeUncertainty } from "../utils/normalizeGameStartTime.js";
+import { inferSportFromText, sportFromPrizePicksLeague } from "../utils/sportMappings.js";
+import { filterApprovedMarketsOnly } from "../utils/approvedMarkets.js";
+import { normalizeMarketStatType } from "../utils/marketNormalization.js";
+import { applySportClassification } from "../utils/marketClassification.js";
+import { applyParsedPlayerResolution } from "../utils/comboMarkets.js";
+import {
+  buildPrizePicksFlatIngestionContext,
+  buildPrizePicksProjectionIngestionContext,
+  filterIngestionProps,
+  rejectIngestionAtSource,
+  sanitizePrizePicksPayloadForCache,
+  shouldParseIngestionContext,
+} from "../utils/ingestionFilter.js";
+import { attachSportsbookVerifiedFields, isMalformedPlayerName } from "../utils/propValidation.js";
+import { attachNormalizedGameStatus } from "../utils/slateFilter.js";
+import {
+  coercePipelineAudit,
+  createEmptyPipelineAudit,
+  logPipelineAudit,
+  recordFilterReason,
+  recordNormalizedSample,
+  safeCreateEmptyPipelineAudit,
+} from "../utils/propPipelineDebug.js";
+import { safeParse } from "../utils/safeEngine.js";
+import { MLB_ONLY_MODE, emptySourcePipelineAudit } from "../utils/mlbOnlyMode.js";
+import {
+  SOURCE_IDS,
+  RATE_LIMIT_COOLDOWN_MESSAGE,
+  cachedLinesMessage,
+  isSourceInCooldown,
+  recordSource429,
+  recordSourceSuccess,
+  recordSourceFailure,
+  markSourceCached,
+  withSourceRequestLock,
+} from "./sourceRateLimit.js";
 
-const PRIZEPICKS_URLS = [
-  "/api/prizepicks/projections?per_page=250&single_stat=true&game_mode=pickem",
-  "/api/prizepicks/projections?per_page=100&single_stat=true&game_mode=pickem",
-  "/api/prizepicks/projections?single_stat=true&game_mode=pickem",
-  "/api/prizepicks/projections",
-  "/api/prizepicks",
-];
+export const PRIZEPICKS_HTML_BANNER = "API route is serving source/HTML instead of JSON. Check proxy/backend routing.";
+export const PRIZEPICKS_RATE_LIMIT_MESSAGE = "Rate limited. Showing cached lines until cooldown ends.";
+
+const PRIZEPICKS_ENDPOINTS = ["/api/prizepicks"];
 const PRIZEPICKS_CACHE_KEY = "dfs-prizepicks-last-good-payload";
-const PRIZEPICKS_CACHE_MAX_MS = 5 * 60 * 1000;
+const PRIZEPICKS_CACHE_MAX_MS = 60 * 60 * 1000;
 
 const SPORT_ALIASES = {
   mlb: "MLB",
@@ -54,92 +88,377 @@ const WTA_NAME_HINTS = new Set([
 ]);
 
 export async function fetchPrizePicksProps({ sport = "all", statType = "all" } = {}) {
-  let lastError = null;
+  return withSourceRequestLock(SOURCE_IDS.PRIZEPICKS, () => fetchPrizePicksPropsInternal({ sport, statType }));
+}
 
-  for (const url of PRIZEPICKS_URLS) {
-    try {
-      const response = await cachedFetch(url, {
-        cache: "no-store",
-        credentials: "omit",
-        headers: {
-          accept: "application/json",
-        },
-      });
+async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all" } = {}) {
+  if (isSourceInCooldown(SOURCE_IDS.PRIZEPICKS)) {
+    const cachedResult = buildCachedPrizePicksResult({
+      sport,
+      statType,
+      attempts: [],
+      endpoint: "cooldown",
+      reason: "cooldown",
+    });
+    if (cachedResult) return cachedResult;
+    return failedPrizePicksResult({
+      endpoint: prizePicksEndpoints()[0],
+      message: "PrizePicks is in cooldown and no cached lines are available.",
+      attempts: [],
+      htmlError: false,
+    });
+  }
 
-      if (!response.ok) {
-        lastError = new Error(`PrizePicks returned status ${response.status}.`);
-        if (response.status === 429) break;
-        continue;
-      }
+  const attempts = [];
+  const fetchInit = {
+    cache: "no-store",
+    credentials: "omit",
+    headers: { accept: "application/json" },
+  };
 
-      const payload = await response.json();
-      const setupWarning = setupWarningFromPayload(payload, "PrizePicks");
-      if (payload?.error && payload?.needsSetup) {
-        return {
-          source: "PrizePicks",
-          status: "Setup Needed",
-          props: [],
-          warnings: [],
-        };
-      }
-      if (payload?.error) {
+  for (const endpoint of prizePicksEndpoints()) {
+    const parsed = await fetchPrizePicksEndpoint(endpoint, fetchInit);
+    attempts.push(parsed.attempt);
+
+    if (parsed.ok && parsed.payload) {
+      const setupWarning = setupWarningFromPayload(parsed.payload, "PrizePicks");
+      if (parsed.payload?.error && parsed.payload?.needsSetup) {
         return {
           source: "PrizePicks",
           status: "Failed",
           props: [],
-          warnings: setupWarning ? [setupWarning] : ["PrizePicks unavailable."],
+          warnings: [setupWarning || "PrizePicks setup needed."],
+          lineSourceBadge: "",
+          debug: buildDebug(endpoint, "Failed", 0, 0, setupWarning || "PrizePicks setup needed.", attempts),
         };
       }
+      if (parsed.payload?.error) {
+        return failedPrizePicksResult({
+          endpoint,
+          message: setupWarning || parsed.payload.message || parsed.payload.errorMessage || "PrizePicks unavailable.",
+          attempts,
+          htmlError: parsed.htmlError,
+        });
+      }
 
-      writeCachedPayload(payload);
+      writeCachedPayload(sanitizePrizePicksPayloadForCache(parsed.payload));
+      recordSourceSuccess(SOURCE_IDS.PRIZEPICKS);
+      const { props, audit } = normalizePrizePicksPayload(parsed.payload, sport, statType, "LIVE");
+      logPipelineAudit("PrizePicks", audit);
+      const warnings = setupWarning ? [setupWarning] : [];
+      if (parsed.htmlError) warnings.push(PRIZEPICKS_HTML_BANNER);
 
       return {
         source: "PrizePicks",
-        status: "Connected",
-        props: normalizePrizePicksPayload(payload, sport, statType),
-        warnings: setupWarning ? [setupWarning] : [],
+        status: props.length ? "Full" : "Partial",
+        props,
+        pipelineAudit: audit,
+        warnings,
+        lineSourceBadge: "LIVE",
+        lastSuccessfulFetchAt: new Date().toISOString(),
+        debug: buildDebug(endpoint, props.length ? "Full" : "Partial", audit.fetched, props.length, "", attempts),
       };
-    } catch (error) {
-      lastError = error;
+    }
+
+    if (parsed.rateLimited) {
+      recordSource429(SOURCE_IDS.PRIZEPICKS);
+      const cachedResult = buildCachedPrizePicksResult({ sport, statType, attempts, endpoint, reason: "rate-limit" });
+      if (cachedResult) return cachedResult;
     }
   }
 
+  recordSourceFailure(SOURCE_IDS.PRIZEPICKS, "PrizePicks live fetch failed");
+
+  const cachedResult = buildCachedPrizePicksResult({ sport, statType, attempts, endpoint: attempts.at(-1)?.url || prizePicksEndpoints()[0], reason: "fetch-failed" });
+  if (cachedResult) return cachedResult;
+
+  return failedPrizePicksResult({
+    endpoint: attempts.at(-1)?.url || prizePicksEndpoints()[0],
+    message: "PrizePicks data failed to load.",
+    attempts,
+    htmlError: attempts.some((item) => item.htmlError),
+  });
+}
+
+function buildCachedPrizePicksResult({ sport, statType, attempts, endpoint, reason }) {
   const cachedPayload = readCachedPayload();
-  if (cachedPayload) {
-    return {
+  if (!cachedPayload) return null;
+  const savedAt = readCachedPayloadSavedAt();
+  const { props, audit } = normalizePrizePicksPayload(cachedPayload, sport, statType, "CACHED");
+  logPipelineAudit("PrizePicks-cached", audit);
+  markSourceCached(SOURCE_IDS.PRIZEPICKS, savedAt);
+  const warning =
+    reason === "rate-limit" || reason === "cooldown"
+      ? cachedLinesMessage(savedAt) || RATE_LIMIT_COOLDOWN_MESSAGE
+      : "PrizePicks live fetch failed; showing last cached real lines.";
+  return {
+    source: "PrizePicks",
+    status: "Cached",
+    props,
+    pipelineAudit: audit,
+    lineSourceBadge: "CACHED",
+    lastSuccessfulFetchAt: savedAt,
+    rateLimited: reason === "rate-limit" || reason === "cooldown",
+    warnings: [warning, ...formatAttemptWarnings(attempts)],
+    debug: buildDebug(
+      "localStorage:last-good-prizepicks",
+      "Cached",
+      rawPrizePicksRecordCount(cachedPayload),
+      props.length,
+      warning,
+      attempts
+    ),
+  };
+}
+
+async function fetchPrizePicksEndpoint(endpoint, init) {
+  const attempt = {
+    url: absoluteUrl(endpoint),
+    status: null,
+    contentType: "",
+    preview: "",
+    error: "",
+    htmlError: false,
+    retries: 0,
+    durationMs: 0,
+  };
+  const startedAt = Date.now();
+
+  try {
+    const response = await resilientFetch(endpoint, init, {
       source: "PrizePicks",
-      status: "Connected",
-      props: normalizePrizePicksPayload(cachedPayload, sport, statType),
-      warnings: ["PrizePicks is rate-limited; showing last cached real lines."],
-    };
-  }
+      ttlMs: getShortCacheTtlMs(),
+      timeoutMs: 15_000,
+      maxRetries: 0,
+      skip429Retry: true,
+    });
+    attempt.status = response.status;
+    attempt.contentType = response.headers.get("content-type") || "";
+    attempt.durationMs = Date.now() - startedAt;
+    attempt.rateLimited = response.status === 429;
 
-  throw lastError || new Error("Could not load PrizePicks lines.");
+    const text = await response.text();
+    attempt.preview = text.slice(0, 200).replace(/\s+/g, " ").trim();
+
+    console.info("[PrizePicks] fetch attempt", {
+      url: attempt.url,
+      status: attempt.status,
+      contentType: attempt.contentType,
+      durationMs: attempt.durationMs,
+      preview: attempt.preview,
+      rateLimited: attempt.rateLimited,
+    });
+
+    if (!response.ok) {
+      attempt.error =
+        response.status === 403
+          ? "PrizePicks blocked the request (403)"
+          : response.status === 429
+            ? "PrizePicks rate limited (429)"
+            : `HTTP ${response.status}`;
+      return { ok: false, attempt, htmlError: attempt.preview.startsWith("<"), rateLimited: response.status === 429 };
+    }
+
+    const trimmed = text.trim();
+    if (!trimmed) {
+      attempt.error = "Empty response body";
+      return { ok: false, attempt, htmlError: false, rateLimited: false };
+    }
+
+    if (
+      /javascript/i.test(attempt.contentType) ||
+      trimmed.includes("const APIFY_PRIZEPICKS_ACTOR") ||
+      trimmed.startsWith("<") ||
+      /^export\s+default\b/.test(trimmed) ||
+      trimmed.includes("export default async function")
+    ) {
+      attempt.error = trimmed.startsWith("<")
+        ? "PrizePicks returned HTML instead of JSON"
+        : "PrizePicks returned JavaScript instead of JSON";
+      attempt.htmlError = true;
+      return { ok: false, attempt, htmlError: true, rateLimited: false };
+    }
+
+    let payload;
+    try {
+      payload = JSON.parse(trimmed);
+    } catch (parseError) {
+      attempt.error = `JSON parse failed: ${parseError.message || "invalid JSON"}`;
+      return { ok: false, attempt, htmlError: false, rateLimited: false };
+    }
+
+    if (payload?.ok === false || payload?.status === "failed") {
+      attempt.error = payload.error || payload.message || payload.errorMessage || "Proxy error payload";
+      return { ok: false, attempt, htmlError: /html|non-json/i.test(attempt.error), payload, rateLimited: false };
+    }
+
+    return { ok: true, attempt, payload, htmlError: false, rateLimited: false };
+  } catch (error) {
+    const message = error?.message || String(error);
+    attempt.error = /timed out|abort/i.test(message) ? `Request timed out after 15s` : message || "Failed to fetch";
+    attempt.durationMs = Date.now() - startedAt;
+    attempt.networkError = true;
+    return { ok: false, attempt, htmlError: false, rateLimited: false, networkError: true };
+  }
 }
 
-function normalizePrizePicksPayload(payload, sport, statType) {
+function prizePicksEndpoints() {
+  const proxyUrl = localSetting("PRIZEPICKS_PROXY_URL");
+  if (!proxyUrl) return PRIZEPICKS_ENDPOINTS;
+  const url = new URL("/api/prizepicks", window.location.origin);
+  url.searchParams.set("proxyUrl", proxyUrl);
+  return [url.pathname + url.search, ...PRIZEPICKS_ENDPOINTS];
+}
+
+function localSetting(key) {
+  try {
+    return String(window.localStorage.getItem(key) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function formatAttemptWarnings(attempts = []) {
+  if (!attempts.length) return ["PrizePicks returned non-JSON response."];
+  const last = attempts[attempts.length - 1];
+  const lines = attempts.map(
+    (item) =>
+      `${item.url} → status ${item.status ?? "?"} · ${item.contentType || "no content-type"} · ${item.error || item.preview || "no body"}`
+  );
+  if (last?.htmlError || (last?.preview || "").startsWith("<")) {
+    lines.unshift(PRIZEPICKS_HTML_BANNER);
+    lines.push(`API returned non-JSON/HTML response. First 200 chars: ${last.preview || ""}`);
+  } else {
+    lines.push(`PrizePicks returned non-JSON response. First 200 chars: ${last.preview || ""}`);
+  }
+  return lines;
+}
+
+function failedPrizePicksResult({ endpoint, message, attempts = [], htmlError = false }) {
+  const warnings = formatAttemptWarnings(attempts);
+  if (message && !warnings.includes(message)) warnings.unshift(message);
+  return {
+    source: "PrizePicks",
+    status: "Failed",
+    props: [],
+    lineSourceBadge: "",
+    warnings,
+    debug: buildDebug(endpoint, "Failed", 0, 0, warnings.join(" | "), attempts),
+    htmlError,
+  };
+}
+
+function buildDebug(apiUrl, apiStatus, rawPropsLoaded, propsAfterParsing, message, attempts = []) {
+  return {
+    apiUrl: absoluteUrl(apiUrl),
+    apiStatus,
+    endpointsTried: attempts.map((item) => item.url),
+    rawPropsLoaded,
+    propsAfterParsing,
+    message: message || attempts.map((item) => item.error || item.preview).filter(Boolean).join(" | "),
+    attempts,
+    lastAttemptStatus: attempts.at(-1)?.status ?? null,
+    lastAttemptDurationMs: attempts.at(-1)?.durationMs ?? null,
+  };
+}
+
+function rawPrizePicksRecordCount(payload) {
   const normalizedPayload = unwrapProxyPayload(payload);
-  if (Array.isArray(normalizedPayload)) {
-    return normalizedPayload
-      .map((item) => normalizeFlatPrizePicksItem(item))
-      .filter(Boolean)
-      .filter((prop) => matchesFilter(prop, sport, statType));
-  }
-
-  const includedRecords = buildIncludedMap(normalizedPayload.included || []);
-  return (normalizedPayload.data || [])
-    .map((item) => normalizePrizePicksProjection(item, includedRecords))
-    .filter(Boolean)
-    .filter((prop) => matchesFilter(prop, sport, statType));
+  if (Array.isArray(normalizedPayload)) return normalizedPayload.length;
+  const rows = normalizedPayload.data || normalizedPayload.items || normalizedPayload.results || [];
+  return Array.isArray(rows) ? rows.length : 0;
 }
 
-function unwrapProxyPayload(payload) {
-  if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.data) && !payload.data.some((item) => item?.type === "projection" || item?.attributes)) return payload.data;
-  if (payload?.data && payload?.included) return payload;
-  if (Array.isArray(payload?.items)) return payload.items;
-  if (Array.isArray(payload?.results)) return payload.results;
-  return payload || {};
+function absoluteUrl(endpoint) {
+  try {
+    return new URL(endpoint, window.location.origin).toString();
+  } catch {
+    return endpoint;
+  }
+}
+
+function normalizePrizePicksPayload(payload, sport, statType, lineSourceBadge = "LIVE") {
+  return safeParse(
+    "PrizePicks.normalizePayload",
+    () => normalizePrizePicksPayloadInternal(payload, sport, statType, lineSourceBadge),
+    { props: [], audit: coercePipelineAudit(safeCreateEmptyPipelineAudit()) }
+  );
+}
+
+function normalizePrizePicksPayloadInternal(payload, sport, statType, lineSourceBadge = "LIVE") {
+  let audit = safeCreateEmptyPipelineAudit();
+  try {
+    audit = createEmptyPipelineAudit();
+    const normalizedPayload = unwrapProxyPayload(payload);
+    const rows = Array.isArray(normalizedPayload)
+      ? normalizedPayload
+      : normalizedPayload.data || normalizedPayload.props || [];
+    const includedRecords = Array.isArray(normalizedPayload)
+      ? new Map()
+      : buildIncludedMap(normalizedPayload.included || []);
+    const scopedRows = MLB_ONLY_MODE
+      ? rows.filter((item) =>
+          shouldParseIngestionContext(
+            Array.isArray(normalizedPayload)
+              ? buildPrizePicksFlatIngestionContext(item)
+              : buildPrizePicksProjectionIngestionContext(item, includedRecords)
+          )
+        )
+      : rows;
+    audit.fetched = scopedRows.length;
+
+    let props = [];
+    if (Array.isArray(normalizedPayload)) {
+      props = scopedRows.map((item) => normalizeFlatPrizePicksItem(item, lineSourceBadge, audit)).filter(Boolean);
+    } else {
+      props = scopedRows
+        .map((item) => normalizePrizePicksProjection(item, includedRecords, lineSourceBadge, audit))
+        .filter(Boolean);
+    }
+
+    audit.normalized = props.length;
+    props.forEach((prop) => recordNormalizedSample(audit, prop));
+    props = filterIngestionProps(props, audit, recordFilterReason);
+    props = filterApprovedMarketsOnly(props);
+    const filtered = props.filter((prop) => matchesFilter(prop, sport, statType));
+    if (filtered.length < props.length) {
+      recordFilterReason(audit, "sport/stat filter at source", props[0]);
+    }
+    return {
+      props: filtered,
+      audit: MLB_ONLY_MODE ? coercePipelineAudit(emptySourcePipelineAudit()) : coercePipelineAudit(audit),
+    };
+  } catch (error) {
+    console.warn("[PrizePicks] normalize payload failed; returning empty audit-safe result", error);
+    return { props: [], audit: coercePipelineAudit(audit) };
+  }
+}
+
+function unwrapProxyPayload(payload, depth = 0) {
+  if (depth > 5 || !payload || typeof payload !== "object") return { data: [], included: [] };
+  if (Array.isArray(payload)) return { data: payload, included: [] };
+
+  if (payload?.source === "PrizePicks") {
+    if (payload.data?.data && Array.isArray(payload.data.data)) {
+      return { data: payload.data.data, included: payload.data.included || [] };
+    }
+    if (Array.isArray(payload.props) && payload.props[0]?.type === "projection") {
+      return { data: payload.props, included: payload.data?.included || [] };
+    }
+    if (payload.data && !Array.isArray(payload.data)) return unwrapProxyPayload(payload.data, depth + 1);
+    if (Array.isArray(payload.data)) return { data: payload.data, included: payload.included || [] };
+  }
+
+  if (Array.isArray(payload.data) && payload.included) {
+    return { data: payload.data, included: payload.included };
+  }
+  if (Array.isArray(payload.data)) {
+    return { data: payload.data, included: payload.included || [] };
+  }
+  if (Array.isArray(payload.props)) return { data: payload.props, included: payload.included || [] };
+  if (Array.isArray(payload.items)) return { data: payload.items, included: [] };
+  if (Array.isArray(payload.results)) return { data: payload.results, included: [] };
+  return { data: [], included: [] };
 }
 
 function setupWarningFromPayload(payload, source) {
@@ -147,25 +466,43 @@ function setupWarningFromPayload(payload, source) {
   return payload.message || `${source} proxy needs setup.`;
 }
 
-function normalizeFlatPrizePicksItem(item = {}) {
-  const line = Number(
-    item.line_score ??
-      item.line ??
-      item.projection ??
-      item.stat_value ??
-      item.value
-  );
+function normalizeFlatPrizePicksItem(item = {}, lineSourceBadge = "LIVE", audit = null) {
+  if (rejectIngestionAtSource(buildPrizePicksFlatIngestionContext(item), audit, recordFilterReason, item)) {
+    return null;
+  }
+  const line = Number(item.line_score ?? item.line ?? item.projection ?? item.stat_value ?? item.value);
   const statType = normalizeStatType(item.stat_type || item.statType || item.market || item.description || item.name);
-  const startTime = item.start_time || item.startTime || item.game_time || item.scheduled_at || item.commence_time;
-  if (!Number.isFinite(line) || !statType || !startTime) return null;
+  if (!Number.isFinite(line) || !statType) {
+    if (audit) recordFilterReason(audit, "missing line or statType (flat)", item);
+    return null;
+  }
+  const startTime = normalizeGameStartTime(
+    item.start_time || item.startTime || item.game_time || item.scheduled_at || item.commence_time || item.board_time,
+    { allowFallback: true }
+  );
+  const timeUncertainty = startTimeUncertainty(item.start_time || item.startTime || item.board_time);
 
-  const playerName = item.player_name || item.playerName || item.name || item.display_name || item.player || "Unknown Player";
+  const playerName =
+    item.player_name || item.playerName || item.name || item.display_name || item.player || "";
+  if (isMalformedPlayerName(playerName)) {
+    if (audit) recordFilterReason(audit, "malformed player name (flat)", item);
+    return null;
+  }
+  const explicitSources = [
+    item.player_name,
+    item.playerName,
+    item.display_name,
+    item.name,
+  ];
   const playerImage = item.playerImage || item.player_image || item.imageUrl || item.image_url || item.headshot || item.headshot_url || "";
   const oddsType = item.odds_type || item.oddsType || "standard";
+  const verifiedAdjustedOdds = oddsType === "goblin" || oddsType === "demon";
 
-  return {
+  return finalizeNormalizedProp(
+    {
     platform: "PrizePicks",
-    sport: normalizeSport(item.league || item.sport || statType, { playerName, opponent: item.opponent || "" }),
+    lineSourceBadge,
+    sport: normalizeSport(item.league || item.sport || statType, { playerName, opponent: item.opponent || "", description: item.description }),
     league: item.league || item.sport || "",
     playerName,
     team: item.team || item.team_abbr || item.teamAbbr || "",
@@ -179,9 +516,10 @@ function normalizeFlatPrizePicksItem(item = {}) {
     statType,
     line,
     directionOptions: ["More", "Less"],
-    isAdjustedOdds: Boolean(item.adjusted_odds || item.isAdjustedOdds) || oddsType !== "standard",
+    isAdjustedOdds: verifiedAdjustedOdds,
     oddsType,
     odds_type: oddsType,
+    verifiedAdjustedOdds,
     streakOptions: buildPrizePicksStreakOptions(item),
     projection: null,
     confidenceScore: 0,
@@ -189,23 +527,36 @@ function normalizeFlatPrizePicksItem(item = {}) {
     riskLevel: "High",
     status: normalizeStatus(item.status || item.state, startTime, item),
     sourceId: item.id || item.projection_id || "",
+    timeUncertainty,
     raw: item,
-  };
+  },
+    { raw: item, explicitSources, audit }
+  );
 }
 
-function normalizePrizePicksProjection(item, included) {
+function normalizePrizePicksProjection(item, included, lineSourceBadge = "LIVE", audit = null) {
   const attributes = item.attributes || {};
 
   const relationships = item.relationships || {};
   const player = relatedRecord(included, relationships.new_player || relationships.player);
   const league = relatedRecord(included, relationships.league);
   const game = relatedRecord(included, relationships.game);
+  if (rejectIngestionAtSource(buildPrizePicksProjectionIngestionContext(item, included), audit, recordFilterReason, item)) {
+    return null;
+  }
   const line = Number(attributes.line_score ?? attributes.line ?? attributes.projection);
   const statType = normalizeStatType(attributes.stat_type || attributes.stat_display_name || attributes.description);
-  const startTime = attributes.start_time || attributes.board_time || attributes.game_time || game?.attributes?.start_time;
+  const startTime = normalizeGameStartTime(
+    attributes.start_time || attributes.board_time || attributes.game_time || game?.attributes?.start_time,
+    { allowFallback: true }
+  );
+  const timeUncertainty = startTimeUncertainty(attributes.start_time || attributes.board_time);
   const status = normalizeStatus(attributes.status || attributes.state, startTime, attributes);
 
-  if (!Number.isFinite(line) || !statType || !startTime) return null;
+  if (!Number.isFinite(line) || !statType) {
+    if (audit) recordFilterReason(audit, "missing line or statType", attributes);
+    return null;
+  }
 
   const playerAttributes = player?.attributes || {};
   const gameAttributes = game?.attributes || {};
@@ -213,10 +564,20 @@ function normalizePrizePicksProjection(item, included) {
     playerAttributes.display_name ||
     playerAttributes.name ||
     playerAttributes.full_name ||
-    attributes.name ||
     attributes.player_name ||
-    attributes.description ||
-    "Unknown Player";
+    attributes.name ||
+    "";
+  const explicitSources = [
+    playerAttributes.display_name,
+    playerAttributes.name,
+    playerAttributes.full_name,
+    attributes.player_name,
+    attributes.name,
+  ];
+  if (isMalformedPlayerName(playerName)) {
+    if (audit) recordFilterReason(audit, "malformed player name", attributes);
+    return null;
+  }
   const playerImage =
     playerAttributes.image_url ||
     playerAttributes.headshot_url ||
@@ -229,6 +590,7 @@ function normalizePrizePicksProjection(item, included) {
     attributes.player_image ||
     "";
   const oddsType = attributes.odds_type || "standard";
+  const verifiedAdjustedOdds = oddsType === "goblin" || oddsType === "demon";
   const streakOptions = buildPrizePicksStreakOptions(attributes);
   const team =
     playerAttributes.team_abbr ||
@@ -248,14 +610,20 @@ function normalizePrizePicksProjection(item, included) {
     attributes.description ||
     gameAttributes.opponent ||
     "";
-  const sport = normalizeSport(league?.attributes?.name || league?.attributes?.display_name || attributes.league || statType, {
-    playerName,
-    opponent,
-  });
+  const leagueId = relationships.league?.data?.id;
+  const sport =
+    sportFromPrizePicksLeague(league, leagueId) ||
+    normalizeSport(league?.attributes?.name || league?.attributes?.display_name || attributes.league || statType, {
+      playerName,
+      opponent,
+      description: attributes.description,
+    });
 
-  return {
+  return finalizeNormalizedProp(
+    {
     platform: "PrizePicks",
-    sport,
+    lineSourceBadge,
+    sport: sport || inferSportFromText(statType, { description: attributes.description }) || "",
     league: league?.attributes?.name || attributes.league || sport,
     playerName,
     team,
@@ -269,9 +637,10 @@ function normalizePrizePicksProjection(item, included) {
     statType,
     line,
     directionOptions: ["More", "Less"],
-    isAdjustedOdds: Boolean(attributes.adjusted_odds) || oddsType !== "standard",
+    isAdjustedOdds: verifiedAdjustedOdds,
     oddsType,
     odds_type: oddsType,
+    verifiedAdjustedOdds,
     streakOptions,
     projection: null,
     confidenceScore: 0,
@@ -279,8 +648,33 @@ function normalizePrizePicksProjection(item, included) {
     riskLevel: "High",
     status,
     sourceId: item.id,
+    timeUncertainty,
     raw: item,
-  };
+  },
+    { raw: { ...item, attributes, over_under: attributes }, explicitSources, audit }
+  );
+}
+
+function finalizeNormalizedProp(prop, { raw = {}, explicitSources = [], audit = null } = {}) {
+  const resolved = applyParsedPlayerResolution(prop, { raw, explicitSources });
+  if (!resolved) {
+    if (audit) recordFilterReason(audit, "merged multi-player name (parser bug)", raw);
+    return null;
+  }
+  const playerName = String(resolved.playerName || "").trim();
+  if (isMalformedPlayerName(playerName)) return null;
+  return attachNormalizedGameStatus(
+    applySportClassification(
+      attachSportsbookVerifiedFields(
+        {
+          ...resolved,
+          playerName,
+          propType: resolved.statType || resolved.propType || "Prop",
+        },
+        "PrizePicks"
+      )
+    )
+  );
 }
 
 function buildPrizePicksStreakOptions(attributes = {}) {
@@ -337,14 +731,12 @@ function relatedRecord(included, relationship) {
 }
 
 function normalizeSport(value, context = {}) {
+  const inferred = inferSportFromText(value, context);
+  if (inferred) return inferred;
   const key = String(value || "").toLowerCase();
-  if (key.includes("wnba") || key.includes("women's basketball") || key.includes("womens basketball")) return "WNBA";
-  if (key.includes("nba") && !key.includes("wnba")) return "NBA";
-  if (key.includes("wta") || key.includes("women")) return "WTA Tennis";
-  if (key.includes("atp") || key.includes("men")) return "ATP Tennis";
   if (key.includes("tennis")) return classifyTennisSport(context);
   const match = Object.entries(SPORT_ALIASES).find(([alias]) => key.includes(alias));
-  return match ? match[1] : "Other";
+  return match ? match[1] : inferSportFromText(context.description || "") || "";
 }
 
 function classifyTennisSport({ playerName = "", opponent = "" } = {}) {
@@ -353,26 +745,7 @@ function classifyTennisSport({ playerName = "", opponent = "" } = {}) {
 }
 
 function normalizeStatType(value) {
-  const text = String(value || "")
-    .replace(/\s+/g, " ")
-    .trim();
-  const key = normalizeKey(text);
-  if (key.includes("pitchesthrown") || key.includes("pitchcount")) return "Pitches Thrown";
-  if (key.includes("strikeout")) return "Pitcher Strikeouts";
-  if (key.includes("hitsrunsrbis") || key.includes("hrr")) return "Hits+Runs+RBIs";
-  if (key.includes("totalbases")) return "Total Bases";
-  if (key.includes("pointsreboundsassists") || key === "pra") return "Points + Rebounds + Assists";
-  if (key.includes("3pointers") || key.includes("threepointers")) return "3-Pointers Made";
-  if (key.includes("shotsontarget")) return "Shots On Target";
-  if (key === "shots" || key.includes("shotsattempted")) return "Shots";
-  if (key.includes("passesattempted") || key === "passes") return "Passes Attempted";
-  if (key.includes("goalsallowed")) return "Goals Allowed";
-  if (key.includes("goaliesaves") || key.includes("keepersaves") || key === "saves") return "Goalie Saves";
-  if (key.includes("fantasyscore")) return "Fantasy Score";
-  if (key.includes("gameswon") || key.includes("playergames")) return "Player Games Won";
-  if (key.includes("totalgames")) return "Total Games";
-  if (key.includes("doublefault")) return "Double Faults";
-  return text;
+  return normalizeMarketStatType(value);
 }
 
 function normalizeStatus(status, startTime, attributes = {}) {
@@ -381,6 +754,9 @@ function normalizeStatus(status, startTime, attributes = {}) {
   if (attributes.is_live || attributes.in_game) return "live";
   if (lower.includes("locked")) return "locked";
   if (lower.includes("expired") || lower.includes("closed")) return "expired";
+  if (lower.includes("pregame") || lower.includes("pre_game") || lower.includes("scheduled") || lower.includes("open")) {
+    return "upcoming";
+  }
   if (Number.isFinite(start) && start <= Date.now()) return "live";
   return "upcoming";
 }
@@ -410,8 +786,18 @@ function readCachedPayload() {
   try {
     const cached = JSON.parse(window.localStorage.getItem(PRIZEPICKS_CACHE_KEY) || "null");
     if (!cached?.payload || Date.now() - cached.savedAt > PRIZEPICKS_CACHE_MAX_MS) return null;
-    return cached.payload;
+    return sanitizePrizePicksPayloadForCache(cached.payload);
   } catch {
     return null;
+  }
+}
+
+function readCachedPayloadSavedAt() {
+  try {
+    const cached = JSON.parse(window.localStorage.getItem(PRIZEPICKS_CACHE_KEY) || "null");
+    if (!cached?.savedAt) return "";
+    return new Date(cached.savedAt).toISOString();
+  } catch {
+    return "";
   }
 }
