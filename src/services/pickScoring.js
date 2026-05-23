@@ -24,7 +24,9 @@ import { getPropVolatilityTier, meetsVolatilityTierRequirements } from "./market
 import { hasNegativeEv } from "./propQualityGates.js";
 
 const READY_MIN_CONFIDENCE = CONFIDENCE_THRESHOLDS.READY;
-const READY_MIN_DATA_QUALITY = 45;
+// Verification floor relaxed (was 45 → now 38) so the board doesn't wipe out when stat
+// providers return thin context. Verified-only enforcement still happens upstream.
+const READY_MIN_DATA_QUALITY = 38;
 
 export { CONFIDENCE_THRESHOLDS, PROJECTION_CONFIDENCE_THRESHOLDS, isDemonPickConfidence, isTopPickConfidence, isTopPickEligible, isEliteTopPickEligible, isDemonEligible, isReadyToBetEligible, selectTopPicks, computeTopPickWeightedScore, DECISION_THRESHOLDS };
 

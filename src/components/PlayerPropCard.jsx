@@ -6,8 +6,29 @@ import { confidenceTier, displayMarketLabel, displaySport } from "../utils/propL
 import { lineMovementArrow, lineSourceBadgeStyle, resultStatusBadge, sportsbookCardTag } from "../utils/cardSignals.js";
 import { dataBadgeStyle, styles, tierStyle } from "../theme/styles.js";
 import { isReadyToBet } from "../services/pickScoring.js";
-import { getVolatilityLabel } from "../services/propQualityGates.js";
+import { dynamicAcceptanceTier, getVolatilityLabel } from "../services/propQualityGates.js";
 import { formatDateTime } from "../utils/formatters.js";
+
+const DYNAMIC_TIER_STYLE = {
+  SAFE: { border: "#22c55e", background: "#052e16", color: "#bbf7d0" },
+  PLAYABLE: { border: "#0ea5e9", background: "#082f49", color: "#bae6fd" },
+  VALUE: { border: "#a855f7", background: "#3b0764", color: "#e9d5ff" },
+  RESEARCH: { border: "#475569", background: "#1e293b", color: "#cbd5e1" },
+};
+
+function dynamicTierBadgeStyle(tierKey) {
+  const colors = DYNAMIC_TIER_STYLE[tierKey] || DYNAMIC_TIER_STYLE.RESEARCH;
+  return {
+    fontSize: "10px",
+    fontWeight: 800,
+    padding: "2px 6px",
+    borderRadius: "6px",
+    border: `1px solid ${colors.border}`,
+    background: colors.background,
+    color: colors.color,
+    letterSpacing: "0.04em",
+  };
+}
 
 function bettingLabelStyle(label) {
   const key = String(label || "").toLowerCase();
@@ -64,6 +85,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
     .slice(0, 3);
   const lowReasons = prop.lowConfidenceReasons || [];
   const volatilityLabel = getVolatilityLabel(prop);
+  const dynamicTier = prop.dynamicAcceptanceTier || dynamicAcceptanceTier(prop);
   const movementTag = prop.lineMovementTag || prop.lineMovement?.tag || "";
   const bookLine = prop.sportsbookLine ?? prop.sportsbookComparison?.marketAverageLine;
   const lastUpdated = prop.updatedAt || prop.lastFetchAt || prop.cacheMetadata?.verifiedAt || "";
@@ -118,6 +140,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
             <div style={styles.cardBadgeColumn}>
               {verifiedBadge ? <span style={lineSourceBadgeStyle("VERIFIED")}>VERIFIED</span> : null}
               <span style={bettingLabelStyle(statusLabel)}>{compact ? statusLabel : bettingLabel}</span>
+              {dynamicTier ? <span style={dynamicTierBadgeStyle(dynamicTier)}>{dynamicTier}</span> : null}
               {!compact && sourceBadge ? <span style={lineSourceBadgeStyle(sourceBadge)}>{String(sourceBadge).toUpperCase()}</span> : null}
               {!compact && prop.timeBadge?.label ? (
                 <span style={dataBadgeStyle(prop.timeBadge.tone || "partial")}>{prop.timeBadge.label}</span>

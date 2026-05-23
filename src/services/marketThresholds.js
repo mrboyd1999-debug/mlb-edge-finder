@@ -6,29 +6,30 @@ export const NEAR_MISS_CONFIDENCE_GAP = 5;
 export const NEAR_MISS_DQ_GAP = 5;
 
 const DEFAULT_READY = {
-  confidence: CONFIDENCE_THRESHOLDS.READY + 5,
-  dataQuality: 48,
-  minEdge: 0.5,
+  confidence: CONFIDENCE_THRESHOLDS.READY,
+  dataQuality: 40,
+  minEdge: 0.3,
 };
 
-/** Dynamic ready thresholds by MLB market — stable markets slightly softer edge, volatile markets stricter. */
+/** Dynamic ready thresholds by MLB market — relaxed to align with VALUE/PLAYABLE/SAFE tiers. */
 const MARKET_READY_THRESHOLDS = {
-  strikeouts: { confidence: 65, dataQuality: 45, minEdge: 0.55 },
-  outs: { confidence: 66, dataQuality: 46, minEdge: 0.6 },
-  pitchesThrown: { confidence: 66, dataQuality: 46, minEdge: 0.6 },
-  hrr: { confidence: 64, dataQuality: 44, minEdge: 0.5 },
-  hits: { confidence: 63, dataQuality: 44, minEdge: 0.5 },
-  rbis: { confidence: 63, dataQuality: 44, minEdge: 0.5 },
-  runs: { confidence: 63, dataQuality: 44, minEdge: 0.5 },
-  totalBases: { confidence: 64, dataQuality: 44, minEdge: 0.55 },
-  hitsAllowed: { confidence: 65, dataQuality: 45, minEdge: 0.6 },
-  earnedRuns: { confidence: 65, dataQuality: 44, minEdge: 0.5 },
-  fantasyScore: { confidence: 68, dataQuality: 46, minEdge: 0.85 },
-  singles: { confidence: 66, dataQuality: 45, minEdge: 0.75 },
-  doubles: { confidence: 66, dataQuality: 45, minEdge: 0.8 },
-  homeRuns: { confidence: 70, dataQuality: 48, minEdge: 1.1 },
-  stolenBases: { confidence: 70, dataQuality: 48, minEdge: 1.2 },
-  batterWalks: { confidence: 68, dataQuality: 46, minEdge: 0.9 },
+  strikeouts: { confidence: 58, dataQuality: 40, minEdge: 0.35 },
+  outs: { confidence: 58, dataQuality: 40, minEdge: 0.4 },
+  pitchesThrown: { confidence: 58, dataQuality: 40, minEdge: 0.4 },
+  hrr: { confidence: 56, dataQuality: 38, minEdge: 0.3 },
+  hits: { confidence: 56, dataQuality: 38, minEdge: 0.3 },
+  rbis: { confidence: 56, dataQuality: 38, minEdge: 0.3 },
+  runs: { confidence: 56, dataQuality: 38, minEdge: 0.3 },
+  totalBases: { confidence: 56, dataQuality: 38, minEdge: 0.35 },
+  hitsAllowed: { confidence: 58, dataQuality: 40, minEdge: 0.4 },
+  earnedRuns: { confidence: 58, dataQuality: 40, minEdge: 0.35 },
+  // Fantasy score relaxed — strong projection edge can carry it even if volatility exists.
+  fantasyScore: { confidence: 58, dataQuality: 40, minEdge: 0.5 },
+  singles: { confidence: 58, dataQuality: 40, minEdge: 0.5 },
+  doubles: { confidence: 58, dataQuality: 40, minEdge: 0.55 },
+  homeRuns: { confidence: 62, dataQuality: 42, minEdge: 0.75 },
+  stolenBases: { confidence: 62, dataQuality: 42, minEdge: 0.8 },
+  batterWalks: { confidence: 60, dataQuality: 40, minEdge: 0.6 },
 };
 
 export function getMarketReadyThreshold(prop = {}) {

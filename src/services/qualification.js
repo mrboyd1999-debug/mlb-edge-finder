@@ -12,7 +12,11 @@ import {
   QUALIFICATION_TIERS,
   selectDiverseAcceptedProps,
 } from "./adaptiveQualification.js";
-import { filterReadyQualityProps, meetsAcceptedPropQuality } from "./propQualityGates.js";
+import {
+  dynamicAcceptanceTier,
+  filterReadyQualityProps,
+  meetsAcceptedPropQuality,
+} from "./propQualityGates.js";
 import { RENDER_LIMITS } from "../utils/approvedMarkets.js";
 
 export const DISPLAY_MIN_CONFIDENCE = 40;
@@ -87,7 +91,7 @@ export function applyQualificationLabels(prop, evaluation = {}) {
         ? "near"
         : "research";
 
-  return {
+  const labeledProp = {
     ...prop,
     ...evaluation,
     qualificationTier: tier,
@@ -102,6 +106,8 @@ export function applyQualificationLabels(prop, evaluation = {}) {
     penaltyStack: evaluation.penaltyStack || prop.penaltyStack || [],
     softPenaltyTotal: evaluation.softPenaltyTotal ?? prop.softPenaltyTotal ?? 0,
   };
+  labeledProp.dynamicAcceptanceTier = dynamicAcceptanceTier(labeledProp);
+  return labeledProp;
 }
 
 export function buildHistoryAccuracyWeights(history = []) {
@@ -242,16 +248,23 @@ export function buildQualificationBoards(scoredProps = [], audit, history = []) 
     }
   });
 
-  const acceptedPool = selectDiverseAcceptedProps(
-    [
-      ...elite.filter(meetsAcceptedPropQuality),
-      ...strong.filter(meetsAcceptedPropQuality),
-      ...near.filter((prop) => isAcceptedQualificationTier(prop.qualificationTier, prop)),
-      ...rejected
-        .filter((prop) => !prop.hardFail && isSmartAcceptanceEligible(prop) && meetsAcceptedPropQuality(prop)),
-    ],
-    RENDER_LIMITS.readyToBet
-  );
+  // Accepted pool — keep verified-only protection, allow VALUE/PLAYABLE/SAFE props through.
+  // Watchlist with positive edge is now eligible (handled by isAcceptedQualificationTier).
+  const acceptedCandidates = [
+    ...elite,
+    ...strong,
+    ...near,
+    ...watchlist.filter((prop) => isAcceptedQualificationTier(prop.qualificationTier, prop)),
+    ...rejected.filter((prop) => !prop.hardFail && isSmartAcceptanceEligible(prop)),
+  ].filter((prop) => meetsAcceptedPropQuality(prop));
+
+  let acceptedPool = selectDiverseAcceptedProps(acceptedCandidates, RENDER_LIMITS.readyToBet);
+
+  // Safety net: if diversity filter wiped the pool, fall back to the raw accepted candidates.
+  if (acceptedPool.length < 3 && acceptedCandidates.length) {
+    acceptedPool = acceptedCandidates.slice(0, RENDER_LIMITS.readyToBet);
+  }
+
   const readyDisplay = avoidCorrelatedProps(
     filterReadyQualityProps(
       acceptedPool.sort(

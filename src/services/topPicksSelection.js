@@ -46,11 +46,12 @@ export function explainTopPickRejection(prop = {}) {
   if (!meetsReadyToBetQuality(prop)) return "below ready quality bar";
   if (prop.freshnessTier === "EXPIRED") return "stale";
   if (!hasUsableProjection(prop)) return "broken projection";
-  if (getVolatilityLabel(prop) === "HIGH") return "high volatility";
+  // HIGH volatility only blocks Top Picks when confidence is also weak.
+  if (getVolatilityLabel(prop) === "HIGH" && confidenceValue(prop) < CONFIDENCE_THRESHOLDS.ELITE) return "high volatility";
   const movementTag = prop.lineMovementTag || prop.lineMovement?.tag;
   if (prop.lineMovement?.againstPick && movementTag === "steamed") {
     const delta = Math.abs(Number(prop.lineMovement?.delta ?? prop.lineMovement?.change ?? 0));
-    if (delta >= 0.75) return "catastrophic line movement";
+    if (delta >= 1.25) return "catastrophic line movement";
   }
   return "";
 }
@@ -62,18 +63,19 @@ export function isTopPickOutputEligible(prop = {}) {
 function volatilityPenalty(prop = {}) {
   const vol = finiteNumber(prop.volatility);
   if (!Number.isFinite(vol)) return 0;
-  if (vol >= 4) return 10;
-  if (vol >= 3.5) return 7;
-  if (vol >= 3) return 4;
-  if (vol >= 2.75) return 2;
+  // Halved from the strict pass — high-volatility props can still rank well when edge is large.
+  if (vol >= 4) return 5;
+  if (vol >= 3.5) return 3.5;
+  if (vol >= 3) return 2;
+  if (vol >= 2.75) return 1;
   return 0;
 }
 
 function lineMovementPenalty(prop = {}) {
   const movementTag = prop.lineMovementTag || prop.lineMovement?.tag;
-  if (prop.lineMovement?.againstPick) return 6;
-  if (movementTag === "steamed") return 5;
-  if (movementTag === "volatile") return 3;
+  if (prop.lineMovement?.againstPick && movementTag === "steamed") return 3;
+  if (movementTag === "steamed") return 2.5;
+  if (movementTag === "volatile") return 1.5;
   return 0;
 }
 

@@ -8,7 +8,11 @@ import {
 } from "./pickScoring.js";
 import { shouldRouteMlbHitterToResearch } from "./mlbHitterConfidence.js";
 import { getMlbQualityTier } from "../utils/mlbOnlyMode.js";
-import { meetsAcceptedPropQuality, hasPositiveEv, hasMatchupData } from "./propQualityGates.js";
+import {
+  hasMatchupData,
+  hasNegativeEv,
+  meetsAcceptedPropQuality,
+} from "./propQualityGates.js";
 
 export const QUALIFICATION_TIERS = {
   ELITE: "elite",
@@ -27,18 +31,18 @@ export const QUALIFICATION_TIER_LABELS = {
 };
 
 const DEFAULT_TIER_THRESHOLDS = {
-  elite: 75,
-  strong: 65,
-  nearMiss: 58,
-  watchlist: 50,
+  elite: 70,
+  strong: 58,
+  nearMiss: 50,
+  watchlist: 44,
 };
 
 /** Playable confidence floor for accepted props. */
-export const PLAYABLE_CONFIDENCE_MIN = 60;
-export const TIER3_CONFIDENCE_MIN = 68;
+export const PLAYABLE_CONFIDENCE_MIN = 48;
+export const TIER3_CONFIDENCE_MIN = 58;
 
 /** Soft penalties stack — concerns reduce score; only extreme stacks cap to watchlist. */
-const SOFT_PENALTY_HARD_REJECT = 32;
+const SOFT_PENALTY_HARD_REJECT = 42;
 
 const METRIC_WEIGHTS = {
   matchupQuality: 0.18,
@@ -82,17 +86,23 @@ const MARKET_QUALIFICATION_RULES = {
     minEdgeScale: 0.85,
   },
   hitsAllowed: { minMatchupQuality: 52, requiresStableMatchup: false, volatilityTolerance: 1.0 },
-  fantasyScore: { volatilityTolerance: 1.05, minConfidenceFloor: TIER3_CONFIDENCE_MIN },
-  batterWalks: { volatilityTolerance: 1.0, minConfidenceFloor: TIER3_CONFIDENCE_MIN },
-  homeRuns: { volatilityTolerance: 0.95, minMatchupQuality: 55, minConfidenceFloor: TIER3_CONFIDENCE_MIN },
-  stolenBases: { volatilityTolerance: 0.9, minMatchupQuality: 54, minConfidenceFloor: TIER3_CONFIDENCE_MIN },
+  // Fantasy score: still volatile but no longer requires Tier3 floor — projection edge can carry it.
+  fantasyScore: {
+    volatilityTolerance: 1.3,
+    volatilityWeight: 0.7,
+    matchupEdgeBoost: 5,
+    minConfidenceFloor: PLAYABLE_CONFIDENCE_MIN,
+  },
+  batterWalks: { volatilityTolerance: 1.05, minConfidenceFloor: PLAYABLE_CONFIDENCE_MIN },
+  homeRuns: { volatilityTolerance: 1.0, minMatchupQuality: 52, minConfidenceFloor: TIER3_CONFIDENCE_MIN },
+  stolenBases: { volatilityTolerance: 0.95, minMatchupQuality: 52, minConfidenceFloor: TIER3_CONFIDENCE_MIN },
 };
 
-const RECOVERY_GAP = 4;
-const MAX_RECOVERY_BOOST = 5;
-const TARGET_ACCEPTED_MIN = 8;
-const TARGET_ACCEPTED_MAX = 20;
-const MAX_PER_MARKET_RATIO = 0.5;
+const RECOVERY_GAP = 6;
+const MAX_RECOVERY_BOOST = 7;
+const TARGET_ACCEPTED_MIN = 5;
+const TARGET_ACCEPTED_MAX = 15;
+const MAX_PER_MARKET_RATIO = 0.55;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -131,13 +141,16 @@ export function checkQualificationHardGates(prop = {}) {
     return { pass: false, reason: "expired verified cache", gate: "stale" };
   }
   const vol = finiteNumber(prop.volatility);
-  if (Number.isFinite(vol) && vol >= 5) {
+  if (Number.isFinite(vol) && vol >= 5.5) {
     return { pass: false, reason: "severe volatility", gate: "volatility" };
   }
   const movementTag = prop.lineMovementTag || prop.lineMovement?.tag;
+  // Only block on catastrophic movement (≥1.25) AND no offsetting edge — slight downward
+  // movement no longer auto-rejects a prop that still has positive projection edge.
   if (prop.lineMovement?.againstPick && movementTag === "steamed") {
     const delta = Math.abs(Number(prop.lineMovement?.delta ?? prop.lineMovement?.change ?? 0));
-    if (delta >= 1) {
+    const edge = Number(prop.edge || 0);
+    if (delta >= 1.25 && !(edge > 0 && edge >= 0.6)) {
       return { pass: false, reason: "catastrophic line movement against pick", gate: "lineMovement" };
     }
   }
@@ -155,6 +168,7 @@ export function checkQualificationHardGates(prop = {}) {
 export function acceptanceConfidenceFloor(prop = {}) {
   const rules = getMarketRules(prop);
   const tier3 = getMlbQualityTier(prop) === "C";
+  // Floor at 48 — value tier — and let market rules raise it for risky markets.
   return Math.max(rules.minConfidenceFloor || 0, tier3 ? TIER3_CONFIDENCE_MIN : PLAYABLE_CONFIDENCE_MIN);
 }
 
@@ -164,8 +178,6 @@ export function isSmartAcceptanceEligible(prop = {}) {
   if (prop.freshnessTier === "EXPIRED") return false;
   if (!hasProjectionIntegrity(prop)) return false;
   if (!isPositiveEdge(prop)) return false;
-  if (!hasPositiveEv(prop)) return false;
-  if (!hasMatchupData(prop)) return false;
   const status = String(prop.status || "").toLowerCase();
   if (["locked", "expired", "live"].includes(status)) return false;
   const start = new Date(prop.startTime).getTime();
@@ -173,13 +185,17 @@ export function isSmartAcceptanceEligible(prop = {}) {
   const confidence = Number(prop.calibratedConfidence ?? prop.confidenceScore ?? prop.confidence ?? 0);
   if (confidence < acceptanceConfidenceFloor(prop)) return false;
   const vol = finiteNumber(prop.volatility);
-  if (Number.isFinite(vol) && vol >= 5) return false;
+  if (Number.isFinite(vol) && vol >= 5.5) return false;
   const movementTag = prop.lineMovementTag || prop.lineMovement?.tag;
   if (prop.lineMovement?.againstPick && movementTag === "steamed") {
     const delta = Math.abs(Number(prop.lineMovement?.delta ?? prop.lineMovement?.change ?? 0));
-    if (delta >= 1) return false;
+    const edge = Number(prop.edge || 0);
+    if (delta >= 1.25 && !(edge > 0 && edge >= 0.6)) return false;
   }
-  if (prop.bookDisagreement?.sharpDisagreement && prop.bookDisagreement?.staleLine) return false;
+  // Soft EV/matchup preferences instead of hard rejects — high-volatility props with strong
+  // projection edge still survive, satisfying the "VALUE" tier intent.
+  if (hasNegativeEv(prop) && confidence < 65 && !hasMatchupData(prop)) return false;
+  if (prop.bookDisagreement?.sharpDisagreement && prop.bookDisagreement?.staleLine && confidence < 65) return false;
   return true;
 }
 
@@ -347,18 +363,18 @@ function applyMarketQualificationAdjustments(prop = {}, metrics = {}, rules = {}
   const penaltyStack = [];
 
   if (rules.minVerifiedStatsScore && metrics.verifiedStatsQuality < rules.minVerifiedStatsScore) {
-    penaltyStack.push({ key: "verificationDepth", label: "Verification depth penalty", penalty: 5 });
-    score -= 5;
+    penaltyStack.push({ key: "verificationDepth", label: "Verification depth penalty", penalty: 3 });
+    score -= 3;
     notes.push("verification depth below market minimum");
   }
   if (rules.minMatchupQuality && metrics.matchupQuality < rules.minMatchupQuality) {
-    penaltyStack.push({ key: "matchupQuality", label: "Matchup quality penalty", penalty: 6 });
-    score -= 6;
+    penaltyStack.push({ key: "matchupQuality", label: "Matchup quality penalty", penalty: 3 });
+    score -= 3;
     notes.push("matchup quality below market minimum");
   }
-  if (rules.requiresStableMatchup && metrics.lineStability < 52) {
-    penaltyStack.push({ key: "lineStability", label: "Line stability penalty", penalty: 5 });
-    score -= 5;
+  if (rules.requiresStableMatchup && metrics.lineStability < 45) {
+    penaltyStack.push({ key: "lineStability", label: "Line stability penalty", penalty: 3 });
+    score -= 3;
     notes.push("unstable line for matchup-sensitive market");
   }
 
@@ -372,69 +388,75 @@ export function computeSoftConcernPenalties(prop = {}, metrics = {}, rules = get
   const movementTag = prop.lineMovementTag || prop.lineMovement?.tag;
   const movementScale = rules.lineMovementPenaltyScale ?? 1;
 
-  if (prop.lineMovement?.againstPick) {
-    const penalty = Math.round(6 * movementScale);
-    stack.push({ key: "lineMovement", label: "Line movement penalty", penalty });
-    totalPenalty += penalty;
-  } else if (movementTag === "volatile" || movementTag === "steamed") {
-    const penalty = Math.round(4 * movementScale);
-    stack.push({ key: "lineMovement", label: "Line movement penalty", penalty });
+  const edge = Number(prop.edge || 0);
+  const marketThresholds = getMarketReadyThreshold(prop);
+  const minEdge = marketThresholds.minEdge * (rules.minEdgeScale || 1);
+
+  // Only penalise line movement against the pick when the move is meaningful AND edge is weak.
+  // Slight downward movement is allowed when projection edge stays positive.
+  if (prop.lineMovement?.againstPick && movementTag === "steamed") {
+    const delta = Math.abs(Number(prop.lineMovement?.delta ?? prop.lineMovement?.change ?? 0));
+    const edgeHolds = edge > 0 && edge >= minEdge * 0.7;
+    if (delta >= 0.5 && !edgeHolds) {
+      const penalty = Math.round(3 * movementScale);
+      stack.push({ key: "lineMovement", label: "Steamed against pick penalty", penalty });
+      totalPenalty += penalty;
+    }
+  } else if (movementTag === "volatile") {
+    const penalty = Math.round(2 * movementScale);
+    stack.push({ key: "lineMovement", label: "Volatile line movement penalty", penalty });
     totalPenalty += penalty;
   }
 
+  // Volatility penalty strength halved across the board.
   const vol = finiteNumber(prop.volatility);
   const volTolerance = rules.volatilityTolerance || 1;
   if (Number.isFinite(vol)) {
     const adjustedVol = vol / volTolerance;
-    if (adjustedVol >= 3.75) {
-      stack.push({ key: "volatility", label: "Volatility penalty", penalty: 8 });
-      totalPenalty += 8;
-    } else if (adjustedVol >= 3.25) {
-      stack.push({ key: "volatility", label: "Volatility penalty", penalty: 5 });
-      totalPenalty += 5;
-    } else if (adjustedVol >= 2.85) {
-      stack.push({ key: "volatility", label: "Volatility penalty", penalty: 3 });
-      totalPenalty += 3;
+    if (adjustedVol >= 4.25) {
+      stack.push({ key: "volatility", label: "Volatility penalty", penalty: 4 });
+      totalPenalty += 4;
+    } else if (adjustedVol >= 3.5) {
+      stack.push({ key: "volatility", label: "Volatility penalty", penalty: 2 });
+      totalPenalty += 2;
     }
   } else if (prop.meetsVolatilityRequirements === false) {
-    stack.push({ key: "volatility", label: "Volatility penalty", penalty: 4 });
-    totalPenalty += 4;
+    stack.push({ key: "volatility", label: "Volatility penalty", penalty: 2 });
+    totalPenalty += 2;
   }
 
-  const edge = Number(prop.edge || 0);
-  const marketThresholds = getMarketReadyThreshold(prop);
-  const minEdge = marketThresholds.minEdge * (rules.minEdgeScale || 1);
   if (edge <= 0) {
-    stack.push({ key: "weakEdge", label: "Non-positive edge penalty", penalty: 8 });
-    totalPenalty += 8;
-  } else if (edge < minEdge * 0.85) {
-    stack.push({ key: "weakEdge", label: "Weak edge penalty", penalty: 4 });
-    totalPenalty += 4;
-  }
-
-  if (prop.marketResearchOnly || prop.marketSupportTier === 2 || prop.noveltyMarket) {
-    stack.push({ key: "researchMarket", label: "Research-only market penalty", penalty: 5 });
-    totalPenalty += 5;
-  }
-
-  if (prop.bookDisagreement?.sharpDisagreement && prop.bookDisagreement?.staleLine) {
-    stack.push({ key: "bookDisagreement", label: "Conflicting sportsbook data penalty", penalty: 6 });
+    stack.push({ key: "weakEdge", label: "Non-positive edge penalty", penalty: 6 });
     totalPenalty += 6;
-  }
-
-  if (metrics.lineStability != null && metrics.lineStability < 48) {
-    stack.push({ key: "lineStability", label: "Line stability penalty", penalty: 4 });
-    totalPenalty += 4;
-  }
-
-  if (prop.freshnessTier === "STALE_WARNING") {
-    stack.push({ key: "cacheAge", label: "Stale cache penalty", penalty: 3 });
+  } else if (edge < minEdge * 0.65) {
+    stack.push({ key: "weakEdge", label: "Weak edge penalty", penalty: 3 });
     totalPenalty += 3;
   }
 
+  if (prop.marketResearchOnly || prop.marketSupportTier === 2 || prop.noveltyMarket) {
+    stack.push({ key: "researchMarket", label: "Research-only market penalty", penalty: 4 });
+    totalPenalty += 4;
+  }
+
+  if (prop.bookDisagreement?.sharpDisagreement && prop.bookDisagreement?.staleLine) {
+    stack.push({ key: "bookDisagreement", label: "Conflicting sportsbook data penalty", penalty: 4 });
+    totalPenalty += 4;
+  }
+
+  if (metrics.lineStability != null && metrics.lineStability < 40) {
+    stack.push({ key: "lineStability", label: "Line stability penalty", penalty: 3 });
+    totalPenalty += 3;
+  }
+
+  if (prop.freshnessTier === "STALE_WARNING") {
+    stack.push({ key: "cacheAge", label: "Stale cache penalty", penalty: 2 });
+    totalPenalty += 2;
+  }
+
+  // Verification penalty cut from 6 → 3 so unverified props can still reach playable/value tiers.
   if (!prop.hasVerifiedStats && !prop.manualEnriched) {
-    stack.push({ key: "verification", label: "Unverified stats penalty", penalty: 6 });
-    totalPenalty += 6;
+    stack.push({ key: "verification", label: "Unverified stats penalty", penalty: 3 });
+    totalPenalty += 3;
   }
 
   if (
@@ -449,8 +471,8 @@ export function computeSoftConcernPenalties(prop = {}, metrics = {}, rules = get
       { lineOnly: prop.lineOnlyData }
     )
   ) {
-    stack.push({ key: "hitterData", label: "Thin hitter data penalty", penalty: 5 });
-    totalPenalty += 5;
+    stack.push({ key: "hitterData", label: "Thin hitter data penalty", penalty: 3 });
+    totalPenalty += 3;
   }
 
   return { stack, totalPenalty };
@@ -580,22 +602,34 @@ export function evaluateAdaptiveQualification(prop = {}, options = {}) {
 export function resolveAdaptiveTierThresholds(acceptedCount = 0) {
   if (acceptedCount >= TARGET_ACCEPTED_MIN) return { ...DEFAULT_TIER_THRESHOLDS, adaptive: false };
   const deficit = Math.max(0, TARGET_ACCEPTED_MIN - acceptedCount);
-  const loosen = Math.min(6, Math.ceil(deficit / 2));
+  // More aggressive when accepted < 3 — guarantees the board attempts to populate 5–15 props.
+  const aggressive = acceptedCount < 3;
+  const loosen = aggressive ? Math.min(10, deficit + 4) : Math.min(6, Math.ceil(deficit / 2));
   return {
-    elite: DEFAULT_TIER_THRESHOLDS.elite - Math.min(3, loosen),
-    strong: DEFAULT_TIER_THRESHOLDS.strong - loosen,
-    nearMiss: DEFAULT_TIER_THRESHOLDS.nearMiss - Math.min(4, loosen + 1),
-    watchlist: DEFAULT_TIER_THRESHOLDS.watchlist,
+    elite: DEFAULT_TIER_THRESHOLDS.elite - Math.min(4, loosen),
+    strong: DEFAULT_TIER_THRESHOLDS.strong - Math.min(8, loosen),
+    nearMiss: DEFAULT_TIER_THRESHOLDS.nearMiss - Math.min(6, loosen + 1),
+    watchlist: Math.max(40, DEFAULT_TIER_THRESHOLDS.watchlist - Math.min(4, loosen)),
     adaptive: true,
+    aggressive,
   };
 }
 
 export function isAcceptedQualificationTier(tier = "", prop = {}) {
-  if (tier === QUALIFICATION_TIERS.REJECT || tier === QUALIFICATION_TIERS.WATCHLIST) return false;
+  if (tier === QUALIFICATION_TIERS.REJECT) return false;
   const confidence = Number(prop.calibratedConfidence ?? prop.confidenceScore ?? prop.confidence ?? 0);
   if (confidence < acceptanceConfidenceFloor(prop)) return false;
   if (!meetsAcceptedPropQuality(prop)) return false;
-  return tier === QUALIFICATION_TIERS.ELITE || tier === QUALIFICATION_TIERS.STRONG || tier === QUALIFICATION_TIERS.NEAR_MISS;
+  if (tier === QUALIFICATION_TIERS.WATCHLIST) {
+    // Watchlist props can still enter the accepted queue when they meet the relaxed quality bar
+    // (positive edge + confidence ≥ 48). Extremely bad props are filtered upstream.
+    return isPositiveEdge(prop);
+  }
+  return (
+    tier === QUALIFICATION_TIERS.ELITE ||
+    tier === QUALIFICATION_TIERS.STRONG ||
+    tier === QUALIFICATION_TIERS.NEAR_MISS
+  );
 }
 
 export function qualificationTierToDisplayTier(tier = "", prop = {}) {
@@ -712,7 +746,8 @@ export function evaluateQualificationPool(props = [], options = {}) {
 
   let acceptedCount = evaluated.filter((row) => isAcceptedQualificationTier(row.qualificationTier, row.prop)).length;
 
-  for (let pass = 0; pass < 4 && acceptedCount < TARGET_ACCEPTED_MIN; pass += 1) {
+  // Up to 6 adaptive passes — aggressive softening when accepted count drops below 3.
+  for (let pass = 0; pass < 6 && acceptedCount < TARGET_ACCEPTED_MIN; pass += 1) {
     tierThresholds = resolveAdaptiveTierThresholds(acceptedCount);
     evaluated = props.map((prop) => {
       const result = evaluateAdaptiveQualification(prop, { tierThresholds, ...options });

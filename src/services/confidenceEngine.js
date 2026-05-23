@@ -37,14 +37,14 @@ function componentScore(score, max, label, detail) {
 }
 
 export const CONFIDENCE_THRESHOLDS = {
-  REJECT: 55,
-  RESEARCH: 55,
-  PLAYABLE: 55,
-  READY: 60,
+  REJECT: 48,
+  RESEARCH: 48,
+  PLAYABLE: 52,
+  READY: 58,
   STRONG: 65,
-  TOP_PICKS: 72,
-  ELITE: 75,
-  DEMON: 80,
+  TOP_PICKS: 68,
+  ELITE: 72,
+  DEMON: 78,
 };
 
 /** MLB weighted confidence pillars — normalized 0-100 output. */
@@ -419,16 +419,16 @@ function scoreHistoricalAccuracy(prop = {}) {
 function scoreVolatilityFactor(prop = {}) {
   const vol = finiteNumber(prop.volatility);
   const tier = getMlbQualityTier(prop) || "UNKNOWN";
-  let score = tier === "S" ? 8 : tier === "A" ? 7 : tier === "B" ? 5 : 3;
+  let score = tier === "S" ? 8 : tier === "A" ? 7 : tier === "B" ? 6 : 4;
   const parts = [`quality ${tier}`];
   if (Number.isFinite(vol)) {
     if (vol <= 2) score += 2;
-    else if (vol >= 4) score -= 4;
+    else if (vol >= 4) score -= 2;
     parts.push(`vol ${round(vol)}`);
   }
   const tag = prop.lineMovementTag || prop.lineMovement?.tag;
   if (tag === "volatile" || tag === "steamed") {
-    score -= 3;
+    score -= 1.5;
     parts.push(tag);
   }
   return componentScore(score, 8, "Volatility Score", parts.join(" · "));
@@ -454,8 +454,10 @@ function applyMlbConfidencePenalties(score, prop = {}) {
     items.push({ amount: 5, label: "low sample size" });
   }
   const movementTag = prop.lineMovementTag || prop.lineMovement?.tag;
-  if (movementTag === "volatile" || (movementTag === "steamed" && prop.lineMovement?.againstPick)) {
-    items.push({ amount: movementTag === "volatile" ? 5 : 7, label: "volatile line movement" });
+  if (movementTag === "steamed" && prop.lineMovement?.againstPick) {
+    items.push({ amount: 4, label: "steamed against pick" });
+  } else if (movementTag === "volatile") {
+    items.push({ amount: 2, label: "volatile line movement" });
   }
   const tier = getMlbQualityTier(prop);
   if (tier) {

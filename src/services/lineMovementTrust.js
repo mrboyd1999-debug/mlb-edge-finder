@@ -115,10 +115,14 @@ export function lineMovementTrustScore(prop = {}, movement = null) {
     score = 50;
     notes.push("flat line");
   } else if (absMove < MEANINGFUL_MOVE) {
-    score += supportsPick ? 5 : againstPick ? -5 : 0;
+    // Slight downward (or upward) movement is fine — minor moves no longer drop trust
+    // much when projection edge still favours the pick.
+    const edge = Number(prop.edge || 0);
+    const edgeHolds = edge > 0;
+    score += supportsPick ? 4 : againstPick ? (edgeHolds ? -2 : -4) : 0;
     notes.push("minor move");
   } else {
-    score += supportsPick ? 16 : againstPick ? -18 : 0;
+    score += supportsPick ? 14 : againstPick ? -12 : 0;
     notes.push(`${direction} ${absMove}`);
   }
 
@@ -148,13 +152,14 @@ export function lineMovementTrustScore(prop = {}, movement = null) {
   });
 
   if (tag === "steamed" && againstPick) {
-    score -= 10;
+    // Halved from -10. Catastrophic moves are blocked separately via the line-movement gate.
+    score -= 5;
     notes.push("steamed against pick");
   } else if (tag === "reverse") {
-    score += againstPick ? -8 : supportsPick ? 6 : -2;
+    score += againstPick ? -4 : supportsPick ? 6 : -1;
     notes.push("reverse line movement");
   } else if (tag === "volatile") {
-    score -= 4;
+    score -= 2;
     notes.push("volatile line");
   } else if (tag === "falling" && supportsPick) {
     score += 3;
