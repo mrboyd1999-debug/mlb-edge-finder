@@ -72,6 +72,9 @@ export function slimPropForUi(prop = {}) {
     manualEnriched: rest.manualEnriched,
     displayTier: rest.displayTier,
     recommendationStatus: rest.recommendationStatus,
+    isQualificationAccepted: rest.isQualificationAccepted,
+    qualificationTier: rest.qualificationTier,
+    qualificationLabel: rest.qualificationLabel,
     generatedAt: rest.generatedAt,
   };
 

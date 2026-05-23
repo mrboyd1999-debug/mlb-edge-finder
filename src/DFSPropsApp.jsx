@@ -159,8 +159,11 @@ import PropFilters from "./components/PropFilters.jsx";
 import PlayerPropCard from "./components/PlayerPropCard.jsx";
 import PickDetailModal from "./components/PickDetailModal.jsx";
 import AcceptedPropsPanel from "./components/AcceptedPropsPanel.jsx";
+import SimplePropCard from "./components/SimplePropCard.jsx";
 import AccuracyReview from "./components/AccuracyReview.jsx";
 import SourceStatusBar from "./components/SourceStatusBar.jsx";
+import { normalizePropsForCards } from "./utils/normalizePropForCard.js";
+import { isUpstreamAcceptedProp, resolveAcceptedPropsForRender } from "./utils/resolveAcceptedPropsForRender.js";
 import { styles } from "./theme/styles.js";
 import {
   formatDateTime, formatLeanSide, formatMultiplier, formatNumber, formatMaybeLine,
@@ -1367,13 +1370,16 @@ export default function DFSPropsApp() {
     setProps(boardProps);
     setWatchlist(scopedBoard.watchlist || []);
     setNearQualification(scopedBoard.nearQualification || []);
-    const renderAccepted =
+    let renderAccepted =
       scopedBoard.acceptedPropsForRender ||
       scopedBoard.debugInfo?.acceptedPropsForRender ||
       scopedBoard.debugInfo?.pipelineAudit?.acceptedPropsForRender ||
       scopedBoard.qualifiedReadyProps ||
       scopedBoard.readyProps ||
       [];
+    if (!renderAccepted.length && boardProps.length) {
+      renderAccepted = boardProps.filter(isUpstreamAcceptedProp);
+    }
     setQualifiedReadyProps(scopedBoard.qualifiedReadyProps || scopedBoard.readyProps || renderAccepted);
     setAcceptedPropsForRender(Array.isArray(renderAccepted) ? renderAccepted : []);
     setStreakProps(scopedBoard.streakProps || []);
@@ -1388,6 +1394,7 @@ export default function DFSPropsApp() {
     setDebugInfo(
       sanitizeDebugInfoForMlbOnly({
         ...(scopedBoard.debugInfo || createDebugInfo(platform)),
+        acceptedPropsForRender: renderAccepted,
         cacheAnalytics: scopedBoard.cacheAnalytics || scopedBoard.cacheMetadata?.cacheAnalytics || scopedBoard.debugInfo?.cacheAnalytics || null,
       })
     );
@@ -1749,33 +1756,33 @@ export default function DFSPropsApp() {
       [],
     [pipelineAudit?.acceptedPropsForRender, debugInfo?.acceptedPropsForRender, debugInfo?.pipelineAudit?.acceptedPropsForRender]
   );
-  const acceptedProps = useMemo(() => {
-    const source =
-      acceptedPropsForRender.length > 0
-        ? acceptedPropsForRender
-        : counterAcceptedSource.length > 0
-          ? counterAcceptedSource
-          : qualifiedReadyProps;
-    const pool = sortDecisionBoard((source || []).filter(Boolean));
-    console.log("COUNTER ACCEPTED SOURCE", pipelineCounters.accepted ?? counterAcceptedSource.length);
-    console.log("ACCEPTED ARRAY LENGTH", pool.length);
-    console.log("ACCEPTED PROPS", pool);
+  const resolvedAcceptedProps = useMemo(() => {
+    const acceptedCount = Number(pipelineCounters.accepted ?? 0);
+    const pool = resolveAcceptedPropsForRender({
+      acceptedPropsForRender,
+      counterAcceptedSource,
+      qualifiedReadyProps,
+      allProps: props,
+      acceptedCount,
+    });
+    console.log("PIPELINE ACCEPTED COUNT", acceptedCount);
+    console.log("ACCEPTED PROPS FOR RENDER", pool);
     return pool;
-  }, [acceptedPropsForRender, counterAcceptedSource, qualifiedReadyProps, pipelineCounters.accepted]);
+  }, [acceptedPropsForRender, counterAcceptedSource, qualifiedReadyProps, props, pipelineCounters.accepted]);
+  const normalizedAcceptedProps = useMemo(() => {
+    const normalized = normalizePropsForCards(resolvedAcceptedProps);
+    console.log("NORMALIZED ACCEPTED PROPS", normalized);
+    return normalized;
+  }, [resolvedAcceptedProps]);
   const topPicksDisplay = useMemo(() => {
-    const topPicks = acceptedProps
-      .filter(Boolean)
-      .sort(
-        (a, b) =>
-          (b.weightedScore || b.confidenceScore || b.confidence || 0) -
-          (a.weightedScore || a.confidenceScore || a.confidence || 0)
-      )
-      .slice(0, 2);
-    console.log("TOP PICKS SOURCE", topPicks);
-    console.log("TOP PICKS", topPicks);
+    const topPicks = [...normalizedAcceptedProps].sort((a, b) => b.weightedScore - a.weightedScore).slice(0, 2);
+    console.log("FINAL TOP PICKS", topPicks);
     return topPicks;
-  }, [acceptedProps]);
-  const topPicksForTracking = useMemo(() => topPicksDisplay, [topPicksDisplay]);
+  }, [normalizedAcceptedProps]);
+  const topPicksForTracking = useMemo(
+    () => topPicksDisplay.map((prop) => prop._raw || prop),
+    [topPicksDisplay]
+  );
   const goblinPropsForTracking = useMemo(
     () => streakFinderProps.filter(isVerifiedSportsbookProp).filter(isGoblinProp),
     [streakFinderProps]
@@ -1789,8 +1796,8 @@ export default function DFSPropsApp() {
     [streakFinderProps]
   );
   const visibleAcceptedProps = useMemo(
-    () => acceptedProps.slice(0, Math.min(visibleLimits.ready, VISIBLE_SECTION_LIMIT)),
-    [acceptedProps, visibleLimits.ready]
+    () => normalizedAcceptedProps.slice(0, Math.min(visibleLimits.ready, VISIBLE_SECTION_LIMIT)),
+    [normalizedAcceptedProps, visibleLimits.ready]
   );
   const visibleBestValueProps = useMemo(
     () => bestValueProps.slice(0, Math.min(visibleLimits.value, VISIBLE_SECTION_LIMIT)),
@@ -2289,7 +2296,12 @@ export default function DFSPropsApp() {
         </section>
       ) : null}
 
-      <AcceptedPropsPanel props={acceptedProps} loading={loading} onOpen={setSelectedEvaluation} />
+      <AcceptedPropsPanel
+        props={normalizedAcceptedProps}
+        loading={loading}
+        onOpen={setSelectedEvaluation}
+        acceptedCount={pipelineCounters.accepted ?? 0}
+      />
 
       {visibleError ? <section style={styles.errorPanel}>{visibleError}</section> : null}
 
@@ -2358,6 +2370,7 @@ export default function DFSPropsApp() {
           picks={topPicksDisplay}
           loading={loading}
           onOpen={setSelectedEvaluation}
+          acceptedCount={pipelineCounters.accepted ?? 0}
         />
       )}
 
@@ -2370,28 +2383,32 @@ export default function DFSPropsApp() {
             Weighted qualification · market-aware thresholds · verified stats · positive edge · target 15–30 per cycle.
           </p>
           </div>
-          <p style={styles.countPill}>{acceptedProps.length} qualified</p>
+          <p style={styles.countPill}>{normalizedAcceptedProps.length || pipelineCounters.accepted || 0} qualified</p>
         </div>
         {loading ? (
           <EmptyState text="Loading picks…" />
-        ) : acceptedProps.length === 0 ? (
+        ) : normalizedAcceptedProps.length === 0 && !Number(pipelineCounters.accepted) ? (
           <EmptyState text={NO_VERIFIED_PROPS_MESSAGE} />
+        ) : normalizedAcceptedProps.length === 0 ? (
+          <EmptyState text={`Pipeline reports ${pipelineCounters.accepted} accepted props — cards will appear once objects hydrate.`} />
         ) : (
           <>
             <div className="accepted-props-grid">
               {visibleAcceptedProps.map((prop, idx) => (
-                <div key={prop.id || idx} className="accepted-prop-card">
-                  <div className="prop-card-player">{prop.playerName || prop.player}</div>
-                  <div className="prop-card-market">{prop.market || prop.statType}</div>
-                  <div className="prop-card-pick">{prop.pick || prop.bestPick || prop.pickDirection}</div>
-                  <div className="prop-card-line">{prop.line}</div>
-                  <div className="prop-card-confidence">
-                    Confidence: {Math.round(prop.confidenceScore || prop.confidence || 0)}%
-                  </div>
-                </div>
+                <SimplePropCard
+                  key={prop.id || idx}
+                  prop={prop}
+                  index={idx}
+                  className="accepted-prop-card"
+                  onOpen={setSelectedEvaluation}
+                />
               ))}
             </div>
-            <LoadMoreButton visible={visibleAcceptedProps.length} total={acceptedProps.length} onClick={() => showMoreSection("ready")} />
+            <LoadMoreButton
+              visible={visibleAcceptedProps.length}
+              total={normalizedAcceptedProps.length}
+              onClick={() => showMoreSection("ready")}
+            />
           </>
         )}
       </section>

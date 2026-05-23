@@ -2,8 +2,9 @@ import { memo } from "react";
 import SimplePropCard from "./SimplePropCard.jsx";
 import { styles } from "../theme/styles.js";
 
-function TopPicksBoard({ label = "Sport", picks = [], loading, onOpen }) {
+function TopPicksBoard({ label = "Sport", picks = [], loading, onOpen, acceptedCount = 0 }) {
   const topPicks = (picks || []).filter(Boolean).slice(0, 2);
+  const hasAccepted = topPicks.length > 0 || Number(acceptedCount) > 0;
 
   return (
     <section className="top-picks-section" style={styles.section}>
@@ -22,11 +23,14 @@ function TopPicksBoard({ label = "Sport", picks = [], loading, onOpen }) {
             <SimplePropCard
               key={prop.id || `top-pick-${idx}`}
               prop={prop}
+              index={idx}
               className="top-pick-card"
               onOpen={onOpen}
             />
           ))}
         </div>
+      ) : hasAccepted ? (
+        <div style={styles.emptyState}>Accepted props are loading — check Accepted Props above.</div>
       ) : (
         <div style={styles.emptyState}>No accepted props available for Top 2 yet.</div>
       )}

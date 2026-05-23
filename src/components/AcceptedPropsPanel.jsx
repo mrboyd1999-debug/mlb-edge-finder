@@ -2,7 +2,7 @@ import { memo } from "react";
 import SimplePropCard from "./SimplePropCard.jsx";
 import { styles } from "../theme/styles.js";
 
-function AcceptedPropsPanel({ props = [], loading = false, onOpen }) {
+function AcceptedPropsPanel({ props = [], loading = false, onOpen, acceptedCount = 0 }) {
   const rows = (props || []).filter(Boolean);
 
   if (loading) {
@@ -14,24 +14,29 @@ function AcceptedPropsPanel({ props = [], loading = false, onOpen }) {
     );
   }
 
-  if (!rows.length) return null;
+  if (!rows.length && !Number(acceptedCount)) return null;
 
   return (
     <section className="accepted-props-section" style={styles.section} aria-label="Accepted props">
       <div style={styles.sectionHeading}>
         <h2 style={styles.sectionTitle}>Accepted Props</h2>
-        <p style={styles.countPill}>{rows.length} accepted</p>
+        <p style={styles.countPill}>{rows.length || acceptedCount} accepted</p>
       </div>
-      <div className="accepted-props-grid" style={styles.cardGridCompact}>
-        {rows.map((prop, idx) => (
-          <SimplePropCard
-            key={prop.id || `accepted-${idx}`}
-            prop={prop}
-            className="accepted-prop-card"
-            onOpen={onOpen}
-          />
-        ))}
-      </div>
+      {rows.length ? (
+        <div className="accepted-props-grid" style={styles.cardGridCompact}>
+          {rows.map((prop, idx) => (
+            <SimplePropCard
+              key={prop.id || `accepted-${idx}`}
+              prop={prop}
+              index={idx}
+              className="accepted-prop-card"
+              onOpen={onOpen}
+            />
+          ))}
+        </div>
+      ) : (
+        <p style={styles.streakCopy}>Pipeline reports {acceptedCount} accepted — waiting for prop objects to hydrate.</p>
+      )}
     </section>
   );
 }
