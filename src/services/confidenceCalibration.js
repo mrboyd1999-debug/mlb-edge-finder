@@ -1,4 +1,4 @@
-import { confidenceTierLabel, computeOutcomeAnalytics, pickStatus } from "./outcomeTracking.js";
+import { confidenceTierLabel, computeOutcomeAnalytics, pickStatus, MIN_NO_ADJUSTMENT_SAMPLE, MIN_STRONG_ADJUSTMENT_SAMPLE } from "./outcomeTracking.js";
 
 /** Baseline expected hit rates by confidence tier (not guaranteed probability). */
 export const TIER_BASELINE_HIT_RATES = {
@@ -11,8 +11,14 @@ export const TIER_BASELINE_HIT_RATES = {
   Unknown: 0.5,
 };
 
-const MIN_CALIBRATION_SAMPLE = 8;
+const MIN_CALIBRATION_SAMPLE = MIN_NO_ADJUSTMENT_SAMPLE;
 const MAX_CALIBRATION_ADJUST = 12;
+
+function calibrationWeight(sample = 0) {
+  if (sample < MIN_NO_ADJUSTMENT_SAMPLE) return 0;
+  if (sample < MIN_STRONG_ADJUSTMENT_SAMPLE) return 0.55;
+  return 1;
+}
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -42,7 +48,8 @@ export function buildCalibrationMap(history = []) {
     }
     const actual = bucket.hitRate;
     const delta = actual - baseline;
-    const adjustment = clamp(delta * -40, -MAX_CALIBRATION_ADJUST, MAX_CALIBRATION_ADJUST);
+    const weight = calibrationWeight(bucket.sample);
+    const adjustment = clamp(delta * -40 * weight, -MAX_CALIBRATION_ADJUST, MAX_CALIBRATION_ADJUST);
     map[tier] = {
       tier,
       baseline,

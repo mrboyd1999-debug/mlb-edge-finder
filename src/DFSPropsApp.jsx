@@ -122,9 +122,11 @@ import { enrichLineMovementRecord } from "./services/lineMovementTrust.js";
 import { projectPlayerProp, resolveProjectionEdge, computeProjectionRiskLevel, buildQualificationReason, PROJECTION_CONFIDENCE_THRESHOLDS } from "./services/propProjection.js";
 import {
   persistBoardOutcomes,
-  autoGradePendingOutcomes,
   buildOutcomeDashboard,
+  gradeCompletedProps,
   gradeOutcome,
+  pickStatus,
+  scheduleOutcomeGrading,
 } from "./services/outcomeTracking.js";
 import {
   buildStatsMissingExplanation,
@@ -1835,40 +1837,51 @@ export default function DFSPropsApp() {
   useEffect(() => {
     if (loading || !lastUpdated) return;
     const generatedPicks = [...generatedStreakPicks(streakSportBoards), ...quickParlayPicks];
-    let updatedHistory = persistBoardOutcomes(
-      {
-        topPicks: topPicksForTracking,
-        readyToBet: readyToBetProps,
-        bestValue: bestValueProps,
-        streakFinder: streakFinderProps.slice(0, 12),
-        goblins: goblinPropsForTracking,
-        demons: demonPropsForTracking,
-      },
-      readHistory()
-    );
-    if (generatedPicks.length) {
-      updatedHistory = saveGeneratedCategoryPicks(generatedPicks, updatedHistory);
-    }
-    const graded = autoGradePendingOutcomes(updatedHistory, scoringContextRef.current?.stats || new Map());
-    updatedHistory = graded.history;
-    if (graded.settledCount > 0) writeHistory(updatedHistory);
-    else if (updatedHistory.length !== history.length) writeHistory(updatedHistory);
+    const statsMap = scoringContextRef.current?.stats || new Map();
+    let cancelled = false;
 
-    if (JSON.stringify(updatedHistory.slice(0, 40)) !== JSON.stringify(history.slice(0, 40))) {
-      setHistory(updatedHistory);
-      const added = Math.max(0, updatedHistory.length - history.length);
-      const settleNote = graded.settledCount > 0 ? ` Auto-graded ${graded.settledCount} finished games.` : "";
-      setLearningSaveNotice(
-        added
-          ? `${added} board picks saved for outcome tracking.${settleNote}`
-          : `Outcome tracker updated.${settleNote}`
+    scheduleOutcomeGrading(() => {
+      if (cancelled) return;
+      let updatedHistory = persistBoardOutcomes(
+        {
+          topPicks: topPicksForTracking,
+          readyToBet: readyToBetProps,
+          bestValue: bestValueProps,
+          streakFinder: streakFinderProps.slice(0, 12),
+          goblins: goblinPropsForTracking,
+          demons: demonPropsForTracking,
+        },
+        readHistory()
       );
-    } else if (graded.settledCount > 0) {
-      setHistory(updatedHistory);
-      setLearningSaveNotice(`Auto-graded ${graded.settledCount} finished game results.`);
-    }
-    const updatedParlays = saveGeneratedParlay(quickParlayPicks, parlayHistory);
-    if (updatedParlays.length !== parlayHistory.length) setParlayHistory(updatedParlays);
+      if (generatedPicks.length) {
+        updatedHistory = saveGeneratedCategoryPicks(generatedPicks, updatedHistory);
+      }
+      const graded = gradeCompletedProps(updatedHistory, statsMap);
+      updatedHistory = graded.history;
+
+      if (graded.settledCount > 0) writeHistory(updatedHistory);
+      else if (updatedHistory.length !== history.length) writeHistory(updatedHistory);
+
+      if (JSON.stringify(updatedHistory.slice(0, 40)) !== JSON.stringify(history.slice(0, 40))) {
+        setHistory(updatedHistory);
+        const added = Math.max(0, updatedHistory.length - history.length);
+        const settleNote = graded.settledCount > 0 ? ` Auto-graded ${graded.settledCount} finished games.` : "";
+        setLearningSaveNotice(
+          added
+            ? `${added} board picks saved for outcome tracking.${settleNote}`
+            : `Outcome tracker updated.${settleNote}`
+        );
+      } else if (graded.settledCount > 0) {
+        setHistory(updatedHistory);
+        setLearningSaveNotice(`Auto-graded ${graded.settledCount} finished game results.`);
+      }
+      const updatedParlays = saveGeneratedParlay(quickParlayPicks, parlayHistory);
+      if (updatedParlays.length !== parlayHistory.length) setParlayHistory(updatedParlays);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     loading,
     lastUpdated,
@@ -1895,6 +1908,7 @@ export default function DFSPropsApp() {
         resultStatus,
         finalResult: resultStatus,
         result: resultStatus,
+        status: resultStatus.toLowerCase() === "pending" ? "pending" : resultStatus.toLowerCase(),
         actualStatResult: actualStatResult ?? pick.actualStatResult ?? "",
         settledAt: resultStatus === "Pending" ? "" : new Date().toISOString(),
       };
@@ -5304,10 +5318,6 @@ function historyToCsv(history) {
 function csvCell(value) {
   const text = String(value).replaceAll('"', '""');
   return `"${text}"`;
-}
-
-function pickStatus(pick) {
-  return pick.resultStatus || pick.finalResult || "Pending";
 }
 
 function isSupportedHistoryPick(pick) {

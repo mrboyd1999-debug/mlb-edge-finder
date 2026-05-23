@@ -24,12 +24,42 @@ function isMlbLineMovementKey(key = "") {
   return parts[1] === "mlb";
 }
 
+function normalizeStoredOutcomeRow(row = {}) {
+  if (!row || typeof row !== "object") return null;
+  const playerName = String(row.playerName || row.player || "").trim();
+  if (!playerName) return null;
+  const resultStatus = String(row.resultStatus || row.finalResult || row.result || "Pending");
+  const statusText = String(row.status || resultStatus).toLowerCase();
+  const status =
+    statusText === "win" || statusText === "loss" || statusText === "push" || statusText === "void"
+      ? statusText
+      : resultStatus.toLowerCase() === "win"
+        ? "win"
+        : resultStatus.toLowerCase() === "loss"
+          ? "loss"
+          : resultStatus.toLowerCase() === "push"
+            ? "push"
+            : resultStatus.toLowerCase() === "void"
+              ? "void"
+              : "pending";
+  return {
+    ...row,
+    playerName,
+    player: playerName,
+    resultStatus,
+    finalResult: row.finalResult || resultStatus,
+    result: row.result || resultStatus,
+    status,
+  };
+}
+
 export function readHistory() {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(HISTORY_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) throw new Error("invalid history shape");
+    return parsed.map(normalizeStoredOutcomeRow).filter(Boolean);
   } catch (error) {
-    console.warn("[DFS Pick'em] History corrupted — resetting safely.", error);
+    console.warn("[DFS Pick'em] Outcome history corrupted — resetting safely.", error);
     try {
       window.localStorage.removeItem(HISTORY_KEY);
     } catch {

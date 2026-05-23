@@ -50,6 +50,35 @@ export function pickStatus(pick = {}) {
   return String(pick.resultStatus || pick.finalResult || pick.result || "Pending");
 }
 
+export function normalizeOutcomeStatus(resultStatus = "Pending") {
+  const text = String(resultStatus || "Pending").toLowerCase();
+  if (text === "win") return "win";
+  if (text === "loss") return "loss";
+  if (text === "push") return "push";
+  if (text === "void") return "void";
+  return "pending";
+}
+
+function compactSportsbookSnapshot(comparison = null) {
+  if (!comparison || typeof comparison !== "object") return null;
+  return {
+    books: Number(comparison.books || 0) || null,
+    marketAverageLine: Number(comparison.marketAverageLine),
+    discrepancy: Number(comparison.discrepancy ?? comparison.difference),
+  };
+}
+
+function compactLineMovementSnapshot(movement = null) {
+  if (!movement || typeof movement !== "object") return null;
+  return {
+    tag: movement.tag || movement.lineMovementTag || null,
+    openingLine: movement.openingLine ?? null,
+    currentLine: movement.currentLine ?? movement.line ?? null,
+    delta: movement.delta ?? movement.change ?? null,
+    againstPick: Boolean(movement.againstPick),
+  };
+}
+
 export function confidenceTierLabel(confidence = 0) {
   const value = Number(confidence);
   if (!Number.isFinite(value) || value <= 0) return "Unknown";
@@ -108,6 +137,7 @@ function isReadyToBetProp(prop = {}) {
   if (["live", "expired", "locked"].includes(status)) return false;
   const start = new Date(prop.startTime).getTime();
   if (!Number.isFinite(start) || start <= Date.now()) return false;
+  if (prop.isQualificationAccepted) return true;
   const confidence = Number(prop.calibratedConfidence ?? prop.confidenceScore ?? prop.confidence ?? 0);
   return confidence >= READY_MIN;
 }
@@ -152,6 +182,7 @@ export function toOutcomeRecord(prop = {}, recommendation = BOARD_RECOMMENDATION
   const confidence = Number(prop.confidenceScore ?? prop.confidence ?? 0);
   const pickDirection = prop.bestPick || prop.side || "";
   const uniqueKey = outcomeIdentity({ ...prop, recommendation, slateDate });
+  const resultStatus = pickStatus(prop);
 
   return {
     id: uniqueKey,
@@ -194,15 +225,16 @@ export function toOutcomeRecord(prop = {}, recommendation = BOARD_RECOMMENDATION
     side: pickDirection,
     pick: pickDirection,
     startTime: prop.startTime,
-    result: pickStatus(prop),
-    resultStatus: pickStatus(prop),
-    finalResult: pickStatus(prop),
+    result: resultStatus,
+    resultStatus,
+    finalResult: resultStatus,
+    status: normalizeOutcomeStatus(resultStatus),
     actualResult: prop.actualStatResult ?? prop.actualResult ?? null,
     actualStatResult: prop.actualStatResult ?? prop.actualResult ?? null,
     settledAt: prop.settledAt || null,
     dataQualityScore: prop.dataQualityScore ?? null,
-    sportsbookComparison: prop.sportsbookComparison || null,
-    lineMovementData: prop.lineMovement || null,
+    sportsbookComparison: compactSportsbookSnapshot(prop.sportsbookComparison),
+    lineMovementData: compactLineMovementSnapshot(prop.lineMovement),
     reasoningSummary: prop.qualificationReason || prop.reasoningSummary || "",
     notes: prop.qualificationReason || prop.topTwoReason || prop.reasoningSummary || "",
   };
@@ -370,7 +402,9 @@ export function gradeOutcome(pick = {}, actualStatResult = null) {
     resultStatus,
     finalResult: resultStatus,
     result: resultStatus,
+    status: normalizeOutcomeStatus(resultStatus),
     actualStatResult: actual,
+    actualResult: actual,
     settledAt: new Date().toISOString(),
   };
   if (["Win", "Loss", "Push"].includes(resultStatus)) {
@@ -397,6 +431,16 @@ export function autoGradePendingOutcomes(history = [], statsMap = new Map()) {
 /** Alias for auto-grading completed games. */
 export function gradeCompletedProps(history = [], statsMap = new Map()) {
   return autoGradePendingOutcomes(history, statsMap);
+}
+
+/** Non-blocking wrapper for UI threads. */
+export function scheduleOutcomeGrading(onComplete = () => {}) {
+  const run = () => onComplete();
+  if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(run, { timeout: 1200 });
+    return;
+  }
+  setTimeout(run, 0);
 }
 
 function settledDecisions(rows = []) {
@@ -708,6 +752,9 @@ export function buildOutcomeDashboard(history = []) {
   const losses = settled.filter((row) => pickStatus(row) === "Loss").length;
   const pushes = history.filter((row) => pickStatus(row) === "Push").length;
   const voids = history.filter((row) => pickStatus(row) === "Void").length;
+  const byMarketRows = mapBreakdown(analytics.byMarket);
+  const bestMarket = pickExtremeMarket(byMarketRows, "best");
+  const worstMarket = pickExtremeMarket(byMarketRows, "worst");
 
   return {
     total: history.length,
@@ -717,7 +764,10 @@ export function buildOutcomeDashboard(history = []) {
     pushes,
     voids,
     winPercentage: settled.length ? Math.round((wins / settled.length) * 100) : 0,
+    overallHitRate: settled.length ? Math.round((wins / settled.length) * 100) : 0,
     analytics,
+    bestMarket,
+    worstMarket,
     topPicksHitRate: formatHitRate(analytics.streakAccuracy.topPicks),
     readyToBetHitRate: formatHitRate(analytics.streakAccuracy.readyToBet),
     bestValueHitRate: formatHitRate(analytics.streakAccuracy.bestValue),
@@ -751,6 +801,24 @@ function mapBreakdown(group = {}) {
       losses: stats.losses,
       pushes: stats.pushes,
       winPercentage: stats.winPercentage,
+      sample: stats.sample,
+      hitRate: stats.hitRate,
     }))
     .sort((a, b) => b.wins + b.losses - (a.wins + a.losses));
+}
+
+function pickExtremeMarket(rows = [], mode = "best") {
+  const eligible = rows.filter((row) => Number(row.sample || row.wins + row.losses) >= MIN_ANALYTICS_SAMPLE);
+  if (!eligible.length) return null;
+  const sorted = [...eligible].sort((a, b) => {
+    const aRate = a.hitRate != null ? a.hitRate : Number(a.winPercentage) / 100;
+    const bRate = b.hitRate != null ? b.hitRate : Number(b.winPercentage) / 100;
+    return mode === "best" ? bRate - aRate : aRate - bRate;
+  });
+  const top = sorted[0];
+  return {
+    key: top.key,
+    hitRate: top.hitRate != null ? Math.round(top.hitRate * 100) : top.winPercentage,
+    sample: top.sample || top.wins + top.losses,
+  };
 }

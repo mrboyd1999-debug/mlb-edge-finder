@@ -119,20 +119,24 @@ export default function AccuracyReview({
       </summary>
 
       <div style={styles.dashboardGrid}>
-        <MetricCard label="Total" value={dashboard.total} />
+        <MetricCard label="Tracked props" value={dashboard.total} />
         <MetricCard label="Pending" value={dashboard.pending} />
         <MetricCard label="Wins" value={dashboard.wins} />
         <MetricCard label="Losses" value={dashboard.losses} />
         <MetricCard label="Pushes" value={dashboard.pushes ?? 0} />
-        <MetricCard label="Voids" value={dashboard.voids ?? 0} />
-        <MetricCard label="Hit rate" value={`${dashboard.winPercentage}%`} />
+        <MetricCard label="Overall hit rate" value={`${dashboard.overallHitRate ?? dashboard.winPercentage}%`} />
+        <MetricCard
+          label="Best market"
+          value={dashboard.bestMarket ? `${dashboard.bestMarket.key} ${dashboard.bestMarket.hitRate}%` : "—"}
+        />
+        <MetricCard
+          label="Worst market"
+          value={dashboard.worstMarket ? `${dashboard.worstMarket.key} ${dashboard.worstMarket.hitRate}%` : "—"}
+        />
+        <MetricCard label="Top 2 HR" value={formatHitRate(dashboard.topPicksHitRate)} />
+        <MetricCard label="Ready HR" value={formatHitRate(dashboard.readyToBetHitRate)} />
         <MetricCard label="Best Value HR" value={formatHitRate(dashboard.bestValueHitRate)} />
         <MetricCard label="Streak HR" value={formatHitRate(dashboard.streakFinderHitRate)} />
-        <MetricCard label="By sport (top)" value={dashboard.bySport?.[0]?.key ? `${dashboard.bySport[0].key} ${dashboard.bySport[0].winPercentage}%` : "—"} />
-        <MetricCard label="Top Picks HR" value={formatHitRate(dashboard.topPicksHitRate)} />
-        <MetricCard label="Ready HR" value={formatHitRate(dashboard.readyToBetHitRate)} />
-        <MetricCard label="Goblin HR" value={formatHitRate(dashboard.goblinHitRate)} />
-        <MetricCard label="Demon HR" value={formatHitRate(dashboard.demonHitRate)} />
       </div>
 
       <div style={styles.historyFilters}>
@@ -144,14 +148,12 @@ export default function AccuracyReview({
       </div>
 
       <div style={styles.breakdownGrid}>
+        <Breakdown title="By confidence tier" rows={dashboard.byConfidenceRange} />
         <Breakdown title="By market" rows={dashboard.byMarket || []} />
-        <Breakdown title="By prop type" rows={dashboard.byStatType} />
-        <Breakdown title="By platform" rows={dashboard.byPlatform} />
-        <Breakdown title="By confidence" rows={dashboard.byConfidenceRange} />
-        <Breakdown title="By line range" rows={dashboard.byLineRange || []} />
+        <Breakdown title="By pick type" rows={dashboard.byCategorySource} />
         <Breakdown title="By source" rows={dashboard.bySource || []} />
         <Breakdown title="By player" rows={dashboard.byPlayer} />
-        <Breakdown title="By recommendation" rows={dashboard.byCategorySource} />
+        <Breakdown title="By line range" rows={dashboard.byLineRange || []} />
       </div>
 
       {recent.length > 0 && (

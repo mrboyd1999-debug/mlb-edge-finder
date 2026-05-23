@@ -50,6 +50,8 @@ import {
   persistBoardOutcomes,
   gradeOutcome,
   gradeCompletedProps,
+  buildOutcomeDashboard,
+  normalizeOutcomeStatus,
   computeOutcomeAnalytics,
   historicalConfidenceBoost,
   historicalVolatilityPenalty,
@@ -796,9 +798,12 @@ assert.equal(outcome.confidence, 74);
 assert.equal(outcome.edge, 2.1);
 assert.equal(outcome.recommendation, BOARD_RECOMMENDATIONS.TOP_PICKS);
 assert.equal(outcome.result, "Pending");
+assert.equal(outcome.status, "pending");
+assert.equal(normalizeOutcomeStatus("Win"), "win");
 
 const graded = gradeOutcome(outcome, 25.5);
 assert.equal(graded.resultStatus, "Win");
+assert.equal(graded.status, "win");
 
 const history = [
   { ...outcome, resultStatus: "Win", finalResult: "Win", sport: "NBA", statType: "Points", confidenceScore: 74, confidenceTier: "72-79" },
@@ -832,6 +837,22 @@ const persisted = persistBoardOutcomes(
   []
 );
 assert.equal(persisted.length, 1);
+
+const dashboard = buildOutcomeDashboard([
+  { ...outcome, resultStatus: "Win", finalResult: "Win", statType: "Pitcher Strikeouts", sport: "MLB", confidenceScore: 76, confidenceTier: "72-79" },
+  { ...outcome, id: "m2", uniqueKey: "m2", playerName: "Pitcher B", player: "Pitcher B", resultStatus: "Win", finalResult: "Win", statType: "Pitcher Strikeouts", sport: "MLB", confidenceScore: 76, confidenceTier: "72-79" },
+  { ...outcome, id: "m3", uniqueKey: "m3", playerName: "Pitcher C", player: "Pitcher C", resultStatus: "Win", finalResult: "Win", statType: "Pitcher Strikeouts", sport: "MLB", confidenceScore: 76, confidenceTier: "72-79" },
+  { ...outcome, id: "m4", uniqueKey: "m4", playerName: "Pitcher D", player: "Pitcher D", resultStatus: "Win", finalResult: "Win", statType: "Pitcher Strikeouts", sport: "MLB", confidenceScore: 76, confidenceTier: "72-79" },
+  { ...outcome, id: "m5", uniqueKey: "m5", playerName: "Pitcher E", player: "Pitcher E", resultStatus: "Win", finalResult: "Win", statType: "Pitcher Strikeouts", sport: "MLB", confidenceScore: 76, confidenceTier: "72-79" },
+  { ...outcome, id: "h1", uniqueKey: "h1", playerName: "Hitter A", player: "Hitter A", resultStatus: "Loss", finalResult: "Loss", statType: "Hits", sport: "MLB", confidenceScore: 60, confidenceTier: "58-64" },
+  { ...outcome, id: "h2", uniqueKey: "h2", playerName: "Hitter B", player: "Hitter B", resultStatus: "Loss", finalResult: "Loss", statType: "Hits", sport: "MLB", confidenceScore: 60, confidenceTier: "58-64" },
+  { ...outcome, id: "h3", uniqueKey: "h3", playerName: "Hitter C", player: "Hitter C", resultStatus: "Loss", finalResult: "Loss", statType: "Hits", sport: "MLB", confidenceScore: 60, confidenceTier: "58-64" },
+  { ...outcome, id: "h4", uniqueKey: "h4", playerName: "Hitter D", player: "Hitter D", resultStatus: "Loss", finalResult: "Loss", statType: "Hits", sport: "MLB", confidenceScore: 60, confidenceTier: "58-64" },
+  { ...outcome, id: "h5", uniqueKey: "h5", playerName: "Hitter E", player: "Hitter E", resultStatus: "Loss", finalResult: "Loss", statType: "Hits", sport: "MLB", confidenceScore: 60, confidenceTier: "58-64" },
+]);
+assert.ok(dashboard.bestMarket);
+assert.ok(dashboard.worstMarket);
+assert.ok(dashboard.total >= 10);
 
 const decisionProp = enrichPropDecision({
   ...trackedProp,
