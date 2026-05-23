@@ -7,6 +7,7 @@ export const SOURCE_IDS = {
 };
 
 export const RATE_LIMIT_COOLDOWN_MESSAGE = "Rate limited. Showing cached lines until cooldown ends.";
+export const VERIFIED_CACHE_FALLBACK_MESSAGE = "Using recently verified cached MLB props.";
 export const NO_VERIFIED_AFTER_COOLDOWN_MESSAGE =
   "No verified sportsbook props available. Try again after cooldown.";
 

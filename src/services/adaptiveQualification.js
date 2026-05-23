@@ -136,8 +136,14 @@ export function checkQualificationHardGates(prop = {}) {
   if (!hasProjectionIntegrity(prop)) {
     return { pass: false, reason: "projection integrity — missing projection context", gate: "projection" };
   }
-  if (prop.lineSourceBadge === "STALE" || prop.lineSourceBadge === "CACHED") {
-    return { pass: false, reason: "stale data protection", gate: "stale" };
+  if (prop.lineSourceBadge === "STALE" && prop.freshnessTier === "EXPIRED") {
+    return { pass: false, reason: "expired verified cache", gate: "stale" };
+  }
+  if (prop.freshnessTier === "EXPIRED") {
+    return { pass: false, reason: "expired verified cache", gate: "stale" };
+  }
+  if (prop.freshnessScore != null && Number(prop.freshnessScore) > 0 && Number(prop.freshnessScore) < 45) {
+    return { pass: false, reason: "cache freshness too low", gate: "stale" };
   }
   const status = String(prop.status || "").toLowerCase();
   if (status === "locked" || status === "expired" || status === "live") {

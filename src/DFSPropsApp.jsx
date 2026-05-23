@@ -34,8 +34,15 @@ import {
   getMaxCooldownRemainingMs,
   NO_VERIFIED_AFTER_COOLDOWN_MESSAGE,
   RATE_LIMIT_COOLDOWN_MESSAGE,
+  VERIFIED_CACHE_FALLBACK_MESSAGE,
   SOURCE_IDS,
 } from "./services/sourceRateLimit.js";
+import {
+  buildBoardCacheMetaFromFetch,
+  buildCacheAnalytics,
+  prepareVerifiedCacheBoard,
+  VERIFIED_CACHE_COOLDOWN_MESSAGE,
+} from "./services/verifiedCacheFallback.js";
 import { normalizeGameStartTime } from "./utils/normalizeGameStartTime.js";
 import { inferSportFromText } from "./utils/sportMappings.js";
 import {
@@ -77,6 +84,7 @@ import {
   DFS_CACHE_TTL_MS,
   clearBoardCache,
   readCachedBoard,
+  readVerifiedCacheBoard,
   readHistory,
   readLineMovement,
   readParlayHistory,
@@ -140,6 +148,7 @@ import TopPicksBoard from "./components/TopPicksBoard.jsx";
 import NearMissBoard from "./components/NearMissBoard.jsx";
 import RejectionAnalyticsPanel from "./components/RejectionAnalyticsPanel.jsx";
 import QualificationAnalyticsPanel from "./components/QualificationAnalyticsPanel.jsx";
+import CacheAnalyticsPanel from "./components/CacheAnalyticsPanel.jsx";
 import LazyDebugDetails from "./components/LazyDebugDetails.jsx";
 import GoblinBoard from "./components/GoblinBoard.jsx";
 import DemonBoard from "./components/DemonBoard.jsx";
@@ -312,6 +321,10 @@ function prizePicksHasUsableProps(props = [], sourceStatus = {}) {
 function shouldSuppressCriticalUiMessage(message = "", props = [], sourceStatus = {}) {
   if (!message) return false;
   if (isNonCriticalUnderdogFailure(message)) return true;
+  if (prizePicksHasUsableProps(props, sourceStatus)) {
+    if (/no verified sportsbook props/i.test(message)) return true;
+    if (/try again after cooldown/i.test(message)) return true;
+  }
   if (MLB_ONLY_MODE && prizePicksHasUsableProps(props, sourceStatus) && isIndirectSourceFailureBanner(message)) {
     return true;
   }
@@ -675,16 +688,33 @@ function prizePicksSucceeded(result) {
 }
 
 function countPropCacheLayers(props = []) {
-  let cached = 0;
-  let live = 0;
-  let stale = 0;
-  props.forEach((prop) => {
-    const badge = String(prop.lineSourceBadge || "LIVE").toUpperCase();
-    if (badge === "CACHED") cached += 1;
-    else if (badge === "STALE") stale += 1;
-    else live += 1;
-  });
-  return { cached, live, stale };
+  const analytics = buildCacheAnalytics(props, { verifiedAt: new Date().toISOString(), boardUpdatedAt: new Date().toISOString() });
+  return {
+    cached: analytics.cached,
+    live: analytics.live,
+    stale: analytics.stale + analytics.expired,
+  };
+}
+
+function applyVerifiedCacheFallbackBoard(applyBoardState, fallbackBoard, { notice = VERIFIED_CACHE_FALLBACK_MESSAGE, rateLimited = false } = {}) {
+  const prepared = prepareVerifiedCacheBoard(fallbackBoard) || fallbackBoard;
+  if (!prepared?.props?.length && !prepared?.qualifiedReadyProps?.length) return false;
+  const layer = String(prepared.cacheMetadata?.freshnessTier || "VERIFIED_CACHE").toLowerCase();
+  applyBoardState(
+    {
+      ...prepared,
+      cacheNotice: prepared.cacheNotice || notice,
+      warnings: unique(
+        filterCriticalUiMessages(
+          [notice, rateLimited ? RATE_LIMIT_COOLDOWN_MESSAGE : "", ...(prepared.warnings || [])].filter(Boolean),
+          prepared.props || prepared.qualifiedReadyProps || [],
+          prepared.sourceStatus || {}
+        )
+      ),
+    },
+    layer
+  );
+  return true;
 }
 
 function buildApiHealthFromBoard(board, cacheLayer = "") {
@@ -1279,6 +1309,7 @@ export default function DFSPropsApp() {
   const [parlayHistory, setParlayHistory] = useState(() => trimHistoryToLimit(readParlayHistory()));
   const [lastUpdated, setLastUpdated] = useState("");
   const [cacheStatus, setCacheStatus] = useState("");
+  const [cacheNotice, setCacheNotice] = useState("");
   const [sourceStatus, setSourceStatus] = useState(DEFAULT_SOURCE_STATUS);
   const [debugInfo, setDebugInfo] = useState(() => createDebugInfo("all"));
   const [apiHealth, setApiHealth] = useState({
@@ -1334,9 +1365,15 @@ export default function DFSPropsApp() {
     );
     setSourceStatus(boardSourceStatus);
     setSourceHealth(scopedBoard.sourceHealth || {});
-    setDebugInfo(sanitizeDebugInfoForMlbOnly(scopedBoard.debugInfo || createDebugInfo(platform)));
+    setDebugInfo(
+      sanitizeDebugInfoForMlbOnly({
+        ...(scopedBoard.debugInfo || createDebugInfo(platform)),
+        cacheAnalytics: scopedBoard.cacheAnalytics || scopedBoard.cacheMetadata?.cacheAnalytics || scopedBoard.debugInfo?.cacheAnalytics || null,
+      })
+    );
     setLastUpdated(scopedBoard.updatedAt || "");
     setCacheStatus(cacheLayer);
+    setCacheNotice(scopedBoard.cacheNotice || "");
     setPipelineAudit(coercePipelineAudit(scopedBoard.debugInfo?.pipelineAudit));
     setApiHealth(buildApiHealthFromBoard(scopedBoard, cacheLayer));
   }, [platform]);
@@ -1355,7 +1392,24 @@ export default function DFSPropsApp() {
       const sourceCooldownRemaining = getMaxCooldownRemainingMs();
       const refreshCooldownRemaining = getRefreshCooldownMs() - (Date.now() - lastRefreshAtRef.current);
       if (force && (sourceCooldownRemaining > 0 || refreshCooldownRemaining > 0)) {
-        console.info("[DFS Refresh] blocked by cooldown", {
+        const cooldownFallback =
+          readVerifiedCacheBoard(DEFAULT_SOURCE_STATUS) || readCachedBoard(DEFAULT_SOURCE_STATUS, { allowExpired: true });
+        if (
+          applyVerifiedCacheFallbackBoard(applyBoardState, cooldownFallback, {
+            notice: VERIFIED_CACHE_COOLDOWN_MESSAGE,
+            rateLimited: true,
+          })
+        ) {
+          setError("");
+          setSourceCooldownSec(Math.ceil(sourceCooldownRemaining / 1000));
+          setRefreshCooldownSec(Math.ceil(Math.max(0, refreshCooldownRemaining) / 1000));
+          console.info("[DFS Refresh] served verified cache during cooldown", {
+            sourceRemainingMs: sourceCooldownRemaining,
+            refreshRemainingMs: refreshCooldownRemaining,
+          });
+          return;
+        }
+        console.info("[DFS Refresh] blocked by cooldown with no verified cache fallback", {
           sourceRemainingMs: sourceCooldownRemaining,
           refreshRemainingMs: refreshCooldownRemaining,
         });
@@ -1369,16 +1423,18 @@ export default function DFSPropsApp() {
       setError("");
       setLearningSaveNotice("");
       const fetchStartedAt = Date.now();
-      const previousBoard = readCachedBoard(DEFAULT_SOURCE_STATUS, { allowExpired: true });
+      const previousBoard =
+        readVerifiedCacheBoard(DEFAULT_SOURCE_STATUS, { allowExpired: true }) ||
+        readCachedBoard(DEFAULT_SOURCE_STATUS, { allowExpired: true });
       try {
         if (force) {
           clearApiCache({ preserveLastGood: true });
         }
 
         if (!force && !autoRefresh) {
-          const cached = readCachedBoard(DEFAULT_SOURCE_STATUS);
-          if (cached && isBoardCacheFresh(cached.updatedAt, DFS_CACHE_TTL_MS)) {
-            const layer = resolveCacheLayer(new Date(cached.updatedAt).getTime(), DFS_CACHE_TTL_MS);
+          const cached = readCachedBoard(DEFAULT_SOURCE_STATUS) || readVerifiedCacheBoard(DEFAULT_SOURCE_STATUS);
+          if (cached?.props?.length || cached?.qualifiedReadyProps?.length) {
+            const layer = cached.cacheMetadata?.freshnessTier || resolveCacheLayer(new Date(cached.updatedAt).getTime(), DFS_CACHE_TTL_MS);
             applyBoardState(cached, formatCacheLayerLabel(layer).toLowerCase());
             console.info("[DFS Refresh] board cache served", { updatedAt: cached.updatedAt, durationMs: Date.now() - fetchStartedAt });
             return;
@@ -1413,41 +1469,28 @@ export default function DFSPropsApp() {
           updatedAt: new Date().toISOString(),
         };
         board.debugInfo = { ...(board.debugInfo || {}), pipelineAudit: result.pipelineAudit || board.debugInfo?.pipelineAudit };
+        if (boardProps.length) {
+          const cacheMeta = buildBoardCacheMetaFromFetch(board);
+          board.verifiedAt = cacheMeta.verifiedAt;
+          board.cacheMetadata = cacheMeta;
+          board.cacheAnalytics = cacheMeta.cacheAnalytics;
+          board.debugInfo = { ...board.debugInfo, cacheAnalytics: cacheMeta.cacheAnalytics };
+        }
 
         const rateLimited =
           getMaxCooldownRemainingMs() > 0 ||
           (board.warnings || []).some((warning) => /rate limited|429|cooldown/i.test(String(warning)));
 
-        if (!board.props.length && previousBoard?.props?.length) {
-          applyBoardState(
-            {
-              ...previousBoard,
-              warnings: unique([
-                ...(rateLimited ? [RATE_LIMIT_COOLDOWN_MESSAGE] : []),
-                ...sanitizeCriticalWarningsForDisplay(board.warnings || [], previousBoard.props || [], board.sourceStatus || {}),
-                ...sanitizeCriticalWarningsForDisplay(previousBoard.warnings || [], previousBoard.props || [], previousBoard.sourceStatus || {}),
-              ]),
-            },
-            "cached"
-          );
-          const underdogOnlyEmptyFetch = isUnderdogOnlyFailure(
-            board.criticalWarnings,
-            board.degradedWarnings,
-            ...(result.degradedWarnings || []),
-            ...(result.criticalWarnings || [])
-          );
-          if (MLB_ONLY_MODE && previousBoard.props.length && underdogOnlyEmptyFetch) {
+        if (!board.props.length && (previousBoard?.props?.length || previousBoard?.qualifiedReadyProps?.length)) {
+          if (
+            applyVerifiedCacheFallbackBoard(applyBoardState, previousBoard, {
+              notice: rateLimited ? VERIFIED_CACHE_COOLDOWN_MESSAGE : VERIFIED_CACHE_FALLBACK_MESSAGE,
+              rateLimited,
+            })
+          ) {
             setError("");
-          } else {
-            setError(
-              resolveUiErrorMessage(
-                rateLimited ? "" : NO_VERIFIED_AFTER_COOLDOWN_MESSAGE,
-                previousBoard.props || [],
-                previousBoard.sourceStatus || {}
-              )
-            );
           }
-          console.info("[DFS Refresh] kept previous cached board after empty fetch", {
+          console.info("[DFS Refresh] kept verified cached board after empty fetch", {
             durationMs: Date.now() - fetchStartedAt,
             rateLimited,
           });
@@ -1456,11 +1499,17 @@ export default function DFSPropsApp() {
 
         if (board.props.length) {
           writeCachedBoard(sanitizeBoardForMlbOnly(board));
+          setCacheNotice("");
         }
         applyBoardState(board, board.props.length ? "fresh" : "cached");
         if (board.props.length) {
           setError((current) => resolveUiErrorMessage(current, board.props, board.sourceStatus));
-        } else {
+        } else if (
+          !applyVerifiedCacheFallbackBoard(applyBoardState, previousBoard, {
+            notice: rateLimited ? VERIFIED_CACHE_COOLDOWN_MESSAGE : VERIFIED_CACHE_FALLBACK_MESSAGE,
+            rateLimited,
+          })
+        ) {
           const underdogOnlyEmptyBoard = isUnderdogOnlyFailure(board.criticalWarnings, board.degradedWarnings);
           if (!(MLB_ONLY_MODE && underdogOnlyEmptyBoard)) {
             setError(
@@ -1471,6 +1520,8 @@ export default function DFSPropsApp() {
               )
             );
           }
+        } else {
+          setError("");
         }
         lastRefreshAtRef.current = Date.now();
         if (autoRefresh) {
@@ -1490,25 +1541,19 @@ export default function DFSPropsApp() {
           setHistory(updatedHistory);
         }
       } catch (loadError) {
-        const staleBoard = readCachedBoard(DEFAULT_SOURCE_STATUS, { allowExpired: true });
+        const staleBoard =
+          readVerifiedCacheBoard(DEFAULT_SOURCE_STATUS, { allowExpired: true }) ||
+          readCachedBoard(DEFAULT_SOURCE_STATUS, { allowExpired: true });
         const errMsg = getErrorMessage(loadError);
         const underdogOnlyFailure = isNonCriticalUnderdogFailure(errMsg) || isUnderdogOnlyFailure(errMsg);
-        if (staleBoard?.props?.length) {
-          applyBoardState(
-            {
-              ...staleBoard,
-              warnings: unique(
-                filterCriticalUiMessages(
-                  [RATE_LIMIT_COOLDOWN_MESSAGE, errMsg, ...(staleBoard.warnings || []), ...(staleBoard.criticalWarnings || [])],
-                  staleBoard.props || [],
-                  staleBoard.sourceStatus || {}
-                )
-              ),
-            },
-            "cached"
-          );
+        if (
+          applyVerifiedCacheFallbackBoard(applyBoardState, staleBoard, {
+            notice: VERIFIED_CACHE_COOLDOWN_MESSAGE,
+            rateLimited: getMaxCooldownRemainingMs() > 0,
+          })
+        ) {
           setError("");
-          console.warn("[DFS Refresh] served stale board after failure", {
+          console.warn("[DFS Refresh] served verified cache after failure", {
             durationMs: Date.now() - fetchStartedAt,
             error: errMsg,
           });
@@ -1639,6 +1684,10 @@ export default function DFSPropsApp() {
   const qualificationAnalytics = useMemo(
     () => debugInfo.qualificationAnalytics || pipelineAudit.qualificationAnalytics || null,
     [debugInfo.qualificationAnalytics, pipelineAudit.qualificationAnalytics]
+  );
+  const cacheAnalytics = useMemo(
+    () => debugInfo.cacheAnalytics || pipelineAudit.cacheAnalytics || null,
+    [debugInfo.cacheAnalytics, pipelineAudit.cacheAnalytics]
   );
   const bestValueProps = useMemo(
     () =>
@@ -2160,6 +2209,12 @@ export default function DFSPropsApp() {
         </section>
       ) : null}
 
+      {cacheNotice ? (
+        <section style={styles.compactPanel}>
+          <p style={{ ...styles.compactFlags, color: "#fde68a", margin: 0 }}>{cacheNotice}</p>
+        </section>
+      ) : null}
+
       {visibleError ? <section style={styles.errorPanel}>{visibleError}</section> : null}
 
       {isDebugLoggingEnabled() && Object.keys(pipelineCounters).length > 0 ? (
@@ -2261,6 +2316,8 @@ export default function DFSPropsApp() {
       <NearMissBoard picks={nearMissProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
 
       <QualificationAnalyticsPanel analytics={qualificationAnalytics} loading={loading} />
+
+      <CacheAnalyticsPanel analytics={cacheAnalytics} cacheNotice={cacheNotice} loading={loading} />
 
       <RejectionAnalyticsPanel summary={rejectionAnalytics} samples={rejectionSamples} loading={loading} />
 

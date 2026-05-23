@@ -1,14 +1,23 @@
+import { slimPropForUi } from "../utils/renderProp.js";
+import { MLB_ONLY_MODE, sanitizeBoardForMlbOnly } from "../utils/mlbOnlyMode.js";
+import {
+  MLB_CACHE_EXPIRED_MS,
+  attachCacheMetadata,
+  buildBoardCacheMetaFromFetch,
+  prepareVerifiedCacheBoard,
+  resolveBoardFreshnessTier,
+  FRESHNESS_TIERS,
+} from "./verifiedCacheFallback.js";
+
 const HISTORY_KEY = "props-of-the-day-history";
 const PARLAY_HISTORY_KEY = "dfs-pickem-parlay-history";
 const DFS_CACHE_KEY = "dfs-pickem-active-board-cache-v18";
 const LINE_MOVEMENT_KEY = "dfs-pickem-line-movement";
 const MANUAL_STATS_KEY = "dfs-pick-manual-stats";
 const PROP_HISTORY_KEY = "dfs-prop-history-v1";
-export const DFS_CACHE_TTL_MS = 3 * 60 * 1000;
+export const DFS_CACHE_TTL_MS = 8 * 60 * 1000;
+export const DFS_CACHE_VERIFIED_MAX_MS = MLB_CACHE_EXPIRED_MS;
 export const MAX_PROP_HISTORY = 500;
-
-import { slimPropForUi } from "../utils/renderProp.js";
-import { MLB_ONLY_MODE, sanitizeBoardForMlbOnly } from "../utils/mlbOnlyMode.js";
 
 function isMlbLineMovementKey(key = "") {
   const parts = String(key).split("|");
@@ -55,27 +64,59 @@ export function writeParlayHistory(history) {
   }
 }
 
-export function readCachedBoard(defaultSourceStatus = {}, { allowExpired = false } = {}) {
+function readRawCachedBoard(defaultSourceStatus = {}) {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(DFS_CACHE_KEY) || "null");
     if (!parsed || typeof parsed !== "object") return null;
     const updatedAt = new Date(parsed.updatedAt).getTime();
     if (!Number.isFinite(updatedAt)) return null;
-    if (!allowExpired && Date.now() - updatedAt > DFS_CACHE_TTL_MS) return null;
     if (isFailedEmptyBoard(parsed)) return null;
     return sanitizeBoardForMlbOnly({
       props: Array.isArray(parsed.props) ? parsed.props : [],
       watchlist: Array.isArray(parsed.watchlist) ? parsed.watchlist : [],
+      nearQualification: Array.isArray(parsed.nearQualification) ? parsed.nearQualification : [],
+      qualifiedReadyProps: Array.isArray(parsed.qualifiedReadyProps)
+        ? parsed.qualifiedReadyProps
+        : Array.isArray(parsed.readyProps)
+          ? parsed.readyProps
+          : [],
       streakProps: Array.isArray(parsed.streakProps) ? parsed.streakProps : [],
       warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
+      degradedWarnings: Array.isArray(parsed.degradedWarnings) ? parsed.degradedWarnings : [],
+      criticalWarnings: Array.isArray(parsed.criticalWarnings) ? parsed.criticalWarnings : [],
       sourceStatus: parsed.sourceStatus && typeof parsed.sourceStatus === "object" ? parsed.sourceStatus : defaultSourceStatus,
       sourceHealth: parsed.sourceHealth && typeof parsed.sourceHealth === "object" ? parsed.sourceHealth : {},
       debugInfo: parsed.debugInfo && typeof parsed.debugInfo === "object" ? parsed.debugInfo : null,
       updatedAt: parsed.updatedAt,
+      verifiedAt: parsed.verifiedAt || parsed.cacheMetadata?.verifiedAt || parsed.updatedAt,
+      cacheMetadata: parsed.cacheMetadata || null,
+      cacheAnalytics: parsed.cacheAnalytics || parsed.cacheMetadata?.cacheAnalytics || null,
+      cacheNotice: parsed.cacheNotice || "",
     });
   } catch {
     return null;
   }
+}
+
+export function readCachedBoard(defaultSourceStatus = {}, { allowExpired = false } = {}) {
+  const raw = readRawCachedBoard(defaultSourceStatus);
+  if (!raw) return null;
+  const ageMs = Date.now() - new Date(raw.updatedAt).getTime();
+  if (!allowExpired && ageMs > DFS_CACHE_TTL_MS) {
+    const prepared = readVerifiedCacheBoard(defaultSourceStatus, { allowExpired: false });
+    return prepared;
+  }
+  return prepareVerifiedCacheBoard(raw) || (allowExpired ? raw : null);
+}
+
+export function readVerifiedCacheBoard(defaultSourceStatus = {}, { allowExpired = false } = {}) {
+  const raw = readRawCachedBoard(defaultSourceStatus);
+  if (!raw) return null;
+  const ageMs = Date.now() - new Date(raw.updatedAt).getTime();
+  if (!allowExpired && ageMs > DFS_CACHE_VERIFIED_MAX_MS) return null;
+  const tier = resolveBoardFreshnessTier(raw.updatedAt, raw.props?.[0]);
+  if (!allowExpired && tier === FRESHNESS_TIERS.EXPIRED) return null;
+  return prepareVerifiedCacheBoard(raw);
 }
 
 export function compactPropForStorage(prop) {
@@ -87,11 +128,29 @@ export function writeCachedBoard(board) {
   try {
     if (isFailedEmptyBoard(board)) return;
     const scopedBoard = sanitizeBoardForMlbOnly(board);
+    const hasAccepted =
+      (scopedBoard.qualifiedReadyProps || []).length > 0 ||
+      (scopedBoard.props || []).some((prop) => prop.isQualificationAccepted);
+    const cacheMeta = buildBoardCacheMetaFromFetch({
+      ...scopedBoard,
+      updatedAt: scopedBoard.updatedAt || new Date().toISOString(),
+    });
+    const verifiedAt = cacheMeta.verifiedAt;
+    const enrichList = (rows = []) =>
+      rows.slice(0, 120).map((prop) => attachCacheMetadata(compactPropForStorage(prop), { verifiedAt, boardUpdatedAt: cacheMeta.updatedAt }));
     const compactBoard = {
       ...scopedBoard,
-      props: (scopedBoard.props || []).slice(0, 100).map(compactPropForStorage),
-      watchlist: (scopedBoard.watchlist || []).slice(0, 60).map(compactPropForStorage),
-      streakProps: (scopedBoard.streakProps || []).slice(0, 180).map(compactPropForStorage),
+      verifiedAt,
+      cacheMetadata: cacheMeta,
+      cacheAnalytics: cacheMeta.cacheAnalytics,
+      props: enrichList(scopedBoard.props || []),
+      qualifiedReadyProps: enrichList(scopedBoard.qualifiedReadyProps || scopedBoard.readyProps || []),
+      nearQualification: enrichList(scopedBoard.nearQualification || []),
+      watchlist: enrichList(scopedBoard.watchlist || []).slice(0, 60),
+      streakProps: enrichList(scopedBoard.streakProps || []).slice(0, 180),
+      acceptedPropsCount: hasAccepted
+        ? (scopedBoard.qualifiedReadyProps || scopedBoard.readyProps || scopedBoard.props || []).length
+        : 0,
     };
     window.localStorage.setItem(DFS_CACHE_KEY, JSON.stringify(compactBoard));
   } catch (error) {
@@ -102,6 +161,8 @@ export function writeCachedBoard(board) {
 function isFailedEmptyBoard(board = {}) {
   const hasVisibleProps =
     (Array.isArray(board.props) && board.props.length > 0) ||
+    (Array.isArray(board.qualifiedReadyProps) && board.qualifiedReadyProps.length > 0) ||
+    (Array.isArray(board.readyProps) && board.readyProps.length > 0) ||
     (Array.isArray(board.watchlist) && board.watchlist.length > 0) ||
     (Array.isArray(board.streakProps) && board.streakProps.length > 0);
   if (hasVisibleProps) return false;

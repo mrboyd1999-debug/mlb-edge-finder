@@ -298,6 +298,9 @@ export function sanitizeBoardForMlbOnly(board = {}) {
     qualifiedReadyProps: filterActiveSportProps(board.qualifiedReadyProps || board.readyProps || []),
     readyProps: filterActiveSportProps(board.readyProps || board.qualifiedReadyProps || []),
     streakProps: filterActiveSportProps(board.streakProps || []),
+    cacheNotice: board.cacheNotice || "",
+    cacheAnalytics: board.cacheAnalytics || board.cacheMetadata?.cacheAnalytics || null,
+    verifiedAt: board.verifiedAt || board.updatedAt || "",
     debugInfo: sanitizeDebugInfoForMlbOnly(board.debugInfo),
   };
 }

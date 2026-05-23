@@ -5,6 +5,10 @@ export const CACHE_TTL = {
   PROJECTIONS_MS: 10 * 60 * 1000,
   STATS_MS: 30 * 60 * 1000,
   BOARD_MS: 3 * 60 * 1000,
+  MLB_BOARD_MS: 8 * 60 * 1000,
+  MLB_VERIFIED_CACHE_MS: 8 * 60 * 1000,
+  MLB_STALE_WARNING_MS: 12 * 60 * 1000,
+  MLB_EXPIRED_MS: 15 * 60 * 1000,
   STALE_MULTIPLIER: 2,
 };
 
@@ -45,8 +49,11 @@ export function resolveCacheLayer(savedAt = 0, ttlMs = CACHE_TTL.PROPS_MS) {
 export function formatCacheLayerLabel(layer = "") {
   const key = String(layer || "").toUpperCase();
   if (key === "LIVE" || key === "FRESH") return "LIVE";
+  if (key === "VERIFIED_CACHE" || key === "VERIFIED-CACHE" || key === "VERIFIED CACHE") return "VERIFIED CACHE";
   if (key === "CACHED") return "CACHED";
+  if (key === "STALE_WARNING" || key === "STALE-WARNING") return "STALE WARNING";
   if (key === "STALE") return "STALE";
+  if (key === "EXPIRED") return "EXPIRED";
   if (key === "EMPTY") return "—";
   return key || "—";
 }

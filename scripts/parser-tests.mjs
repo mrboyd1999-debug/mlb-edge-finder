@@ -77,6 +77,14 @@ import {
   selectDiverseAcceptedProps,
 } from "../src/services/adaptiveQualification.js";
 import { buildQualificationBoards } from "../src/services/qualification.js";
+import {
+  attachCacheMetadata,
+  computeFreshnessScore,
+  FRESHNESS_TIERS,
+  isPropCacheUsable,
+  prepareVerifiedCacheBoard,
+  resolveFreshnessTier,
+} from "../src/services/verifiedCacheFallback.js";
 import { computeDataQualityFromEnrichment } from "../src/services/statEnrichment.js";
 import {
   attachDebugArtifacts,
@@ -967,9 +975,9 @@ const adaptiveProp = {
 const adaptiveEval = evaluateAdaptiveQualification(adaptiveProp);
 assert.ok(adaptiveEval.qualificationScore >= 65);
 assert.ok(Object.keys(adaptiveEval.metrics).length >= 6);
-assert.equal(checkQualificationHardGates({ ...adaptiveProp, lineSourceBadge: "STALE" }).pass, false);
+assert.equal(checkQualificationHardGates({ ...adaptiveProp, freshnessTier: "EXPIRED", lineSourceBadge: "STALE" }).pass, false);
 
-const adaptivePool = evaluateQualificationPool([adaptiveProp, { ...adaptiveProp, id: "qual-stale", lineSourceBadge: "STALE" }]);
+const adaptivePool = evaluateQualificationPool([adaptiveProp, { ...adaptiveProp, id: "qual-stale", freshnessTier: "EXPIRED", lineSourceBadge: "STALE" }]);
 assert.ok(adaptivePool.analytics.avgQualificationScore > 0);
 assert.ok(adaptivePool.analytics.topRejectionCauses.length >= 1);
 
@@ -986,5 +994,17 @@ const diverse = selectDiverseAcceptedProps(
   3
 );
 assert.equal(diverse.length, 3);
+
+const cachedMeta = attachCacheMetadata(adaptiveProp, { verifiedAt: new Date().toISOString() });
+assert.ok(cachedMeta.freshnessScore >= 80);
+assert.equal(resolveFreshnessTier(2 * 60 * 1000, adaptiveProp), FRESHNESS_TIERS.LIVE);
+assert.ok(isPropCacheUsable(adaptiveProp, { verifiedAt: new Date().toISOString() }));
+const preparedBoard = prepareVerifiedCacheBoard({
+  props: [adaptiveProp],
+  qualifiedReadyProps: [adaptiveProp],
+  updatedAt: new Date().toISOString(),
+});
+assert.ok(preparedBoard?.props?.length >= 1);
+assert.ok(computeFreshnessScore(adaptiveProp, 4 * 60 * 1000) > 0);
 
 console.log("Parser smoke tests passed.");
