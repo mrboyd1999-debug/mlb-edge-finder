@@ -1,4 +1,4 @@
-import { getOddsApiKey, getProxyUrl, getSportsDataApiKey, getStatmuseApiKey } from "./runtimeSettings.js";
+import { getOddsApiKey, getProxyUrl, getSportsDataApiKey, getStatmuseApiKey } from "../config/apiConfig.js";
 import { getSourceState, isSourceInCooldown, SOURCE_IDS } from "./sourceRateLimit.js";
 import { readCachedBoard, readVerifiedCacheBoard } from "./pickStore.js";
 
@@ -212,39 +212,61 @@ async function testOddsApi() {
 
 async function testSportsDataProvider() {
   const sportsDataKey = getSportsDataApiKey();
-  const mlbProbe = await probeFetch("https://statsapi.mlb.com/api/v1/sports/1/leaders?leaderCategories=homeRuns&season=2024&limit=1");
+  const mlbProbe = await probeFetch(
+    "https://statsapi.mlb.com/api/v1/sports/1/leaders?leaderCategories=homeRuns&season=2024&limit=1"
+  );
   const mlbOk = mlbProbe.ok && mlbProbe.payload;
 
-  if (sportsDataKey) {
-    const bdl = await probeFetch("/api/balldontlie/v1/teams?per_page=1", {
-      headers: { Authorization: sportsDataKey },
-    });
-    const classified = bdl.unauthorized
-      ? { status: CONNECTION_STATUS.FAILED, message: CONNECTION_MESSAGES.INVALID }
-      : bdl.ok
-        ? { status: CONNECTION_STATUS.LIVE, message: CONNECTION_MESSAGES.CONNECTED }
-        : mlbOk
-          ? { status: CONNECTION_STATUS.DEGRADED, message: CONNECTION_MESSAGES.DEGRADED }
-          : { status: CONNECTION_STATUS.FAILED, message: CONNECTION_MESSAGES.FAILED };
+  if (!sportsDataKey) {
     return {
-      provider: "SportsData / Stats",
-      route: "/api/balldontlie/v1/teams",
-      keyConfigured: true,
-      mlbStatsApi: mlbOk ? CONNECTION_STATUS.LIVE : CONNECTION_STATUS.DEGRADED,
-      ...classified,
-      ...bdl,
-      preview: bdl.preview || mlbProbe.preview,
+      provider: "SportsDataIO",
+      route: "https://statsapi.mlb.com (public MLB API fallback)",
+      keyConfigured: false,
+      status: mlbOk ? CONNECTION_STATUS.DEGRADED : CONNECTION_STATUS.NOT_CONFIGURED,
+      message: mlbOk
+        ? "No SportsDataIO key — using public MLB Stats API for player history."
+        : CONNECTION_MESSAGES.NOT_CONFIGURED,
+      ...mlbProbe,
+      preview: mlbOk ? "Public MLB Stats API reachable" : mlbProbe.preview,
     };
   }
 
+  // The proxy injects Ocp-Apim-Subscription-Key from the server env, but the
+  // SportsDataIO API also accepts the key as a query string for browser probes.
+  const route = `/api/sportsdata/scores/json/Teams?key=${encodeURIComponent(sportsDataKey)}`;
+  const probe = await probeFetch(route);
+  const state = getSourceState(SOURCE_IDS.SPORTSDATA);
+
+  let classified;
+  if (probe.unauthorized) {
+    classified = { status: CONNECTION_STATUS.FAILED, message: CONNECTION_MESSAGES.INVALID };
+  } else if (probe.rateLimited) {
+    classified = { status: CONNECTION_STATUS.CACHED, message: CONNECTION_MESSAGES.RATE_LIMITED };
+  } else if (probe.ok && Array.isArray(probe.payload) && probe.payload.length) {
+    classified = { status: CONNECTION_STATUS.LIVE, message: CONNECTION_MESSAGES.CONNECTED };
+  } else if (probe.ok) {
+    classified = { status: CONNECTION_STATUS.DEGRADED, message: CONNECTION_MESSAGES.DEGRADED };
+  } else if (mlbOk) {
+    classified = {
+      status: CONNECTION_STATUS.DEGRADED,
+      message: "SportsDataIO unreachable — public MLB API fallback live.",
+    };
+  } else {
+    classified = { status: CONNECTION_STATUS.FAILED, message: CONNECTION_MESSAGES.FAILED };
+  }
+
   return {
-    provider: "SportsData / Stats",
-    route: "https://statsapi.mlb.com",
-    keyConfigured: false,
-    status: mlbOk ? CONNECTION_STATUS.LIVE : CONNECTION_STATUS.DEGRADED,
-    message: mlbOk ? "Connected (MLB Stats API — no key required)" : CONNECTION_MESSAGES.DEGRADED,
-    ...mlbProbe,
-    preview: mlbOk ? "MLB Stats API reachable" : mlbProbe.preview,
+    provider: "SportsDataIO",
+    route: "/api/sportsdata/scores/json/Teams",
+    keyConfigured: true,
+    mlbStatsApi: mlbOk ? CONNECTION_STATUS.LIVE : CONNECTION_STATUS.DEGRADED,
+    ...classified,
+    ...probe,
+    lastSuccessfulFetchAt: state.lastSuccessfulFetchAt || "",
+    requestCount: state.requestCount || 0,
+    lastError: state.lastError || (classified.status === CONNECTION_STATUS.FAILED ? probe.preview : ""),
+    cooldownRemainingMs: Math.max(0, Number(state.cooldownUntil || 0) - Date.now()),
+    preview: probe.preview || mlbProbe.preview,
   };
 }
 

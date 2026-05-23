@@ -4,6 +4,7 @@ export const SOURCE_IDS = {
   PRIZEPICKS: "PrizePicks",
   UNDERDOG: "Underdog",
   ODDS_API: "Odds API",
+  SPORTSDATA: "SportsDataIO",
 };
 
 export const RATE_LIMIT_COOLDOWN_MESSAGE = "Rate limited. Showing cached lines until cooldown ends.";
@@ -25,6 +26,7 @@ const MIN_REQUEST_INTERVAL_MS = {
   PrizePicks: 3_000,
   Underdog: 5_000,
   "Odds API": 4_000,
+  SportsDataIO: 2_000,
 };
 
 /** Per-source soft retry queue — exponential backoff for transient failures. */

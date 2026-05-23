@@ -63,7 +63,7 @@ export default function SourceStatusBar({
     ["PrizePicks", mapStatus(apiHealth?.PrizePicks?.lineSourceBadge || sourceStatus.PrizePicks)],
     ["Underdog", mapStatus(apiHealth?.Underdog?.lineSourceBadge || sourceStatus.Underdog)],
     ["Odds", mapStatus(apiHealth?.OddsAPI?.lineSourceBadge || sourceStatus["The Odds API"])],
-    ["Stats", mapStatus(apiHealth?.SportsData?.lineSourceBadge || sourceHealth.BallDontLie || HEALTH_STATES.LIVE)],
+    ["SportsDataIO", mapStatus(apiHealth?.SportsData?.lineSourceBadge || sourceHealth.SportsDataIO || HEALTH_STATES.LIVE)],
     ["Cache", boardHealth],
   ];
 
@@ -87,10 +87,10 @@ export default function SourceStatusBar({
       status: apiHealth?.OddsAPI?.lineSourceBadge || sourceStatus["The Odds API"],
     },
     {
-      label: "SportsData / Stats",
+      label: "SportsDataIO",
       priority: 4,
       ...apiHealth.SportsData,
-      status: apiHealth?.SportsData?.lineSourceBadge || sourceHealth.BallDontLie || HEALTH_STATES.LIVE,
+      status: apiHealth?.SportsData?.lineSourceBadge || sourceHealth.SportsDataIO || HEALTH_STATES.LIVE,
       lastFetchAt: apiHealth?.SportsData?.lastFetchAt || "",
       cacheAge: apiHealth?.SportsData?.cacheAge || "",
       requestCount: apiHealth?.SportsData?.sessionRequestCount ?? apiHealth?.SportsData?.requestCount,

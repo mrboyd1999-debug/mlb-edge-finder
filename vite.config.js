@@ -1,9 +1,8 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const BALLDONTLIE_API_KEY =
-  process.env.BALLDONTLIE_API_KEY ||
-  process.env.VITE_BALLDONTLIE_API_KEY ||
+const SPORTSDATA_API_KEY =
+  process.env.SPORTSDATA_API_KEY ||
   process.env.VITE_SPORTSDATA_API_KEY ||
   "";
 const API_FOOTBALL_KEY = process.env.API_FOOTBALL_KEY || process.env.VITE_API_FOOTBALL_KEY || "";
@@ -69,8 +68,15 @@ function dfsApiProxy() {
             return;
           }
 
-          if (pathname.startsWith("/api/balldontlie")) {
-            await proxyUpstream(req, res, "https://api.balldontlie.io", (p) => p.replace(/^\/api\/balldontlie/, ""), ballDontLieHeaders(), "BallDontLie");
+          if (pathname.startsWith("/api/sportsdata")) {
+            await proxyUpstream(
+              req,
+              res,
+              "https://api.sportsdata.io/v3/mlb",
+              (p) => p.replace(/^\/api\/sportsdata/, ""),
+              sportsDataHeaders(),
+              "SportsDataIO"
+            );
             return;
           }
 
@@ -107,7 +113,7 @@ function isApiRoute(pathname) {
     pathname.startsWith("/api/prizepicks") ||
     pathname.startsWith("/api/underdog") ||
     pathname.startsWith("/api/sportsbookOdds") ||
-    pathname.startsWith("/api/balldontlie") ||
+    pathname.startsWith("/api/sportsdata") ||
     pathname.startsWith("/api/api-football")
   );
 }
@@ -274,10 +280,10 @@ function underdogHeaders() {
   };
 }
 
-function ballDontLieHeaders() {
+function sportsDataHeaders() {
   return {
     accept: "application/json",
-    ...(BALLDONTLIE_API_KEY ? { Authorization: BALLDONTLIE_API_KEY } : {}),
+    ...(SPORTSDATA_API_KEY ? { "Ocp-Apim-Subscription-Key": SPORTSDATA_API_KEY } : {}),
   };
 }
 

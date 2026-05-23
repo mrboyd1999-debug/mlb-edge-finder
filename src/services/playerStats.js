@@ -9,21 +9,15 @@ import {
 } from "./statEnrichment.js";
 import { MLB_ONLY_MODE, shouldRunNonMlbStatFetch } from "../utils/mlbOnlyMode.js";
 import { canonicalStatType } from "../utils/marketNormalization.js";
-import { getSportsDataApiKey } from "../config/apiConfig.js";
 
 export { statProfileKey, findStatProfile } from "../utils/playerNames.js";
 
 const MLB_SEARCH_URL = "https://statsapi.mlb.com/api/v1/people/search";
 const mlbProfileInflight = new Map();
 const MLB_PLAYER_FETCH_LIMIT = 60;
-const NBA_PLAYER_FETCH_LIMIT = 50;
 const WNBA_PLAYER_FETCH_LIMIT = 50;
 const SOCCER_PLAYER_FETCH_LIMIT = 40;
-function getBallDontLieApiKey() {
-  return getSportsDataApiKey() || import.meta.env.VITE_BALLDONTLIE_API_KEY || "";
-}
 const API_FOOTBALL_KEY = import.meta.env.VITE_API_FOOTBALL_KEY || "";
-const BALLDONTLIE_BASE = "/api/balldontlie/v1";
 const API_FOOTBALL_BASE = "/api/api-football";
 const API_FOOTBALL_LEAGUE_IDS = [253, 39, 2, 140, 78, 61, 135];
 
@@ -134,9 +128,14 @@ async function fetchNbaStats(props) {
   const supportedProps = props.filter((prop) => isSupportedBasketballStat(prop.statType));
   if (!supportedProps.length) return { stats: new Map(), warnings: [] };
 
-  const players = uniquePlayerNames(supportedProps).slice(0, NBA_PLAYER_FETCH_LIMIT);
-  const settled = await Promise.allSettled(players.map((playerName) => fetchBallDontLieProfile(playerName)));
-  return profilesToBasketballStats({ props: supportedProps, settled, sourceName: "BallDontLie NBA stats" });
+  const stats = new Map();
+  supportedProps.forEach((prop) => {
+    storeStatProfile(stats, prop, sparseProfileForProp(prop, "NBA stat enrichment temporarily disabled"));
+  });
+  return {
+    stats,
+    warnings: ["NBA stat enrichment temporarily disabled — using verified line + sportsbook signals only."],
+  };
 }
 
 async function fetchWnbaStats(props) {
@@ -267,68 +266,6 @@ async function fetchMlbProfileLive(playerName, cacheKey) {
   return profile;
 }
 
-async function fetchBallDontLieProfile(playerName) {
-  const playerUrl = apiUrl(BALLDONTLIE_BASE, "/players");
-  playerUrl.searchParams.set("search", playerName);
-
-  const playerResponse = await cachedFetch(playerUrl, { headers: ballDontLieHeaders() });
-  if (!playerResponse.ok) throw new Error("Could not load BallDontLie player search.");
-
-  const playerPayload = await playerResponse.json();
-  const player =
-    (playerPayload.data || []).find((item) => playerNamesMatch(playerFullName(item), playerName)) ||
-    (playerPayload.data || []).find((item) => normalizePlayerName(playerFullName(item)) === normalizePlayerName(playerName)) ||
-    playerPayload.data?.[0];
-  if (!player?.id) return null;
-
-  const currentSeason = new Date().getFullYear();
-  const [values, seasonAverages] = await Promise.all([
-    fetchBallDontLieStatsForSeasons(player.id, [currentSeason, currentSeason - 1]),
-    fetchBallDontLieSeasonAverages(player.id, [currentSeason, currentSeason - 1]),
-  ]);
-  return {
-    playerName: playerFullName(player) || playerName,
-    playerImage: "",
-    sport: "NBA",
-    games: values,
-    seasonAverages,
-  };
-}
-
-async function fetchBallDontLieSeasonAverages(playerId, seasons) {
-  for (const season of seasons) {
-    const url = apiUrl(BALLDONTLIE_BASE, "/season_averages");
-    url.searchParams.append("player_ids[]", String(playerId));
-    url.searchParams.set("season", String(season));
-    const response = await cachedFetch(url, { headers: ballDontLieHeaders() });
-    if (!response.ok) continue;
-    const payload = await response.json();
-    const rows = (payload.data || []).filter((row) => String(row.player_id) === String(playerId));
-    if (rows.length) return rows;
-  }
-  return [];
-}
-
-async function fetchBallDontLieStatsForSeasons(playerId, seasons) {
-  for (const season of seasons) {
-    const statsUrl = apiUrl(BALLDONTLIE_BASE, "/stats");
-    statsUrl.searchParams.append("player_ids[]", String(playerId));
-    statsUrl.searchParams.append("seasons[]", String(season));
-    statsUrl.searchParams.set("per_page", "100");
-
-    const response = await cachedFetch(statsUrl, { headers: ballDontLieHeaders() });
-    if (!response.ok) throw new Error("Could not load BallDontLie game logs.");
-    const payload = await response.json();
-    const games = (payload.data || [])
-      .map((item) => ({ ...item, playedAt: new Date(item.game?.date || item.date).getTime() }))
-      .filter((item) => Number.isFinite(item.playedAt))
-      .sort((a, b) => b.playedAt - a.playedAt);
-    if (games.length) return games;
-  }
-
-  return [];
-}
-
 async function fetchEspnWnbaProfile(playerName) {
   const searchUrl = new URL("https://site.web.api.espn.com/apis/search/v2");
   searchUrl.searchParams.set("query", playerName);
@@ -455,8 +392,7 @@ function profileForBasketballProp(profile, statType, line, source) {
   const values = (profile.games || []).map((game) => basketballPrimaryStat(game, statType)).filter(Number.isFinite);
   const seasonValues = basketballValuesFromSeasonAverages(profile.seasonAverages || [], statType);
   const mergedValues = values.length >= 5 ? values : [...values, ...seasonValues].filter(Number.isFinite);
-  const effectiveSource =
-    values.length >= 5 ? source : seasonValues.length ? `${source} + BallDontLie season averages` : source;
+  const effectiveSource = source;
   if (!mergedValues.length) {
     return sparseProfileForProp(
       { playerName: profile.playerName, statType, line, sport: profile.sport, playerImage: profile.playerImage },
@@ -472,7 +408,7 @@ function profileForBasketballProp(profile, statType, line, source) {
     values: mergedValues,
     line,
     source: effectiveSource,
-    statSources: [profile.sport === "WNBA" ? SOURCE_LABELS.espn : SOURCE_LABELS.balldontlie],
+    statSources: [profile.sport === "WNBA" ? SOURCE_LABELS.espn : SOURCE_LABELS.sportsdata],
     projectedMinutes,
     minutesTrend,
     usageTrend,
@@ -950,7 +886,7 @@ function mapSourceFromText(source = "") {
   const text = String(source).toLowerCase();
   if (text.includes("mlb") || text.includes("statsapi")) return SOURCE_LABELS.mlb;
   if (text.includes("espn")) return SOURCE_LABELS.espn;
-  if (text.includes("balldontlie")) return SOURCE_LABELS.balldontlie;
+  if (text.includes("sportsdata") || text.includes("sportsdataio")) return SOURCE_LABELS.sportsdata;
   if (text.includes("soccer") || text.includes("api-football")) return SOURCE_LABELS.soccer;
   if (text.includes("tennis")) return SOURCE_LABELS.tennis;
   return "";
@@ -1387,13 +1323,6 @@ function sportGroup(sport) {
 function apiUrl(base, path) {
   if (typeof window !== "undefined" && base.startsWith("/")) return new URL(`${base}${path}`, window.location.origin);
   return new URL(path, base);
-}
-
-function ballDontLieHeaders() {
-  return {
-    accept: "application/json",
-    Authorization: getBallDontLieApiKey(),
-  };
 }
 
 function playerFullName(player = {}) {

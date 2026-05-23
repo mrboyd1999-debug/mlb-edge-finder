@@ -11,11 +11,11 @@ export const RUNTIME_SETTING_DEFS = [
   },
   {
     key: "VITE_SPORTSDATA_API_KEY",
-    label: "SportsData API Key",
+    label: "SportsDataIO API Key",
     type: "secret",
-    placeholder: "Optional — also used for BallDontLie proxy",
-    envKeys: ["VITE_SPORTSDATA_API_KEY", "VITE_BALLDONTLIE_API_KEY", "BALLDONTLIE_API_KEY"],
-    legacyStorageKeys: ["VITE_BALLDONTLIE_API_KEY"],
+    placeholder: "Paste your SportsDataIO MLB subscription key",
+    envKeys: ["VITE_SPORTSDATA_API_KEY", "SPORTSDATA_API_KEY"],
+    legacyStorageKeys: [],
   },
   {
     key: "VITE_STATMUSE_API_KEY",
@@ -129,14 +129,6 @@ export function writeRuntimeSettings(settings = {}) {
       try {
         if (value) window.localStorage.setItem("UNDERDOG_PROXY_URL", value);
         else window.localStorage.removeItem("UNDERDOG_PROXY_URL");
-      } catch {
-        // ignore
-      }
-    }
-    if (key === "VITE_SPORTSDATA_API_KEY") {
-      try {
-        if (value) window.localStorage.setItem("VITE_BALLDONTLIE_API_KEY", value);
-        else window.localStorage.removeItem("VITE_BALLDONTLIE_API_KEY");
       } catch {
         // ignore
       }

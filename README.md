@@ -37,7 +37,7 @@ Edit `.env.local` and paste your keys:
 | Variable | Purpose |
 |----------|---------|
 | `VITE_ODDS_API_KEY` | The Odds API — sportsbook line comparison |
-| `VITE_SPORTSDATA_API_KEY` | Optional BallDontLie / stats enrichment |
+| `VITE_SPORTSDATA_API_KEY` | SportsDataIO MLB key (sent as `Ocp-Apim-Subscription-Key`) |
 | `VITE_STATMUSE_API_KEY` | Optional — reserved for future StatMuse wiring |
 | `VITE_PRIZEPICKS_PROXY_URL` | External proxy when PrizePicks direct fetch is blocked |
 | `VITE_UNDERDOG_PROXY_URL` | External proxy when Underdog direct fetch is blocked |
@@ -94,7 +94,7 @@ Settings saved in localStorage override empty env values for development. They a
 1. PrizePicks live lines  
 2. Underdog live lines  
 3. Odds API sportsbook comparison  
-4. SportsData / MLB Stats API  
+4. SportsDataIO (`/api/sportsdata/v3/mlb/*`) with public MLB Stats API as fallback  
 5. Verified cache (not used for Top Picks when expired)
 
 ## Proxy fallback order

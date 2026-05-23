@@ -11,7 +11,7 @@ export const SOURCE_LABELS = {
   underdog: "Underdog line",
   mlb: "MLB stats",
   espn: "ESPN stats",
-  balldontlie: "NBA/WNBA stats",
+  sportsdata: "SportsDataIO stats",
   soccer: "Soccer stats",
   tennis: "Tennis stats",
   sportsbook: "Sportsbook comparison",
@@ -355,7 +355,7 @@ function mapSourceLabel(source = "") {
   const text = String(source).toLowerCase();
   if (text.includes("mlb") || text.includes("statsapi")) return SOURCE_LABELS.mlb;
   if (text.includes("espn")) return SOURCE_LABELS.espn;
-  if (text.includes("balldontlie") || text.includes("nba") || text.includes("wnba")) return SOURCE_LABELS.balldontlie;
+  if (text.includes("sportsdata") || text.includes("nba") || text.includes("wnba")) return SOURCE_LABELS.sportsdata;
   if (text.includes("soccer") || text.includes("api-football") || text.includes("sofascore")) return SOURCE_LABELS.soccer;
   if (text.includes("tennis")) return SOURCE_LABELS.tennis;
   if (text.includes("sportsbook")) return SOURCE_LABELS.sportsbook;

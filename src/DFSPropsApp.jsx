@@ -427,12 +427,12 @@ function buildSourceHealth(backgroundWarnings = [], sourceFailures = [], sourceS
   const health = {
     PrizePicks: normalizeSourceState(sourceStatus.PrizePicks),
     Underdog: normalizeSourceState(sourceStatus.Underdog),
-    BallDontLie: "Full",
+    SportsDataIO: "Full",
     "Soccer stats": "Full",
     "WNBA stats": "Full",
   };
   const text = backgroundWarnings.join(" ").toLowerCase();
-  if (/balldontlie|nba stat/.test(text)) health.BallDontLie = "Fallback";
+  if (/sportsdata|sportsdataio|mlb stat/.test(text)) health.SportsDataIO = "Fallback";
   if (/soccer player stats|soccer stat/.test(text)) health["Soccer stats"] = "Fallback";
   if (/wnba stat/.test(text)) health["WNBA stats"] = "Fallback";
   if (sourceStatus.PrizePicks === "Fallback") health.PrizePicks = "Fallback";
@@ -729,7 +729,7 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
       cacheAge: "",
       requestCount: 0,
       sessionRequestCount: 0,
-      lastError: statsWarnings.find((w) => /stat|mlb|balldontlie/i.test(String(w))) || "",
+      lastError: statsWarnings.find((w) => /stat|mlb|sportsdata/i.test(String(w))) || "",
     },
     cache: {
       status: cacheLayerLabel,
