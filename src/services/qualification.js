@@ -12,6 +12,7 @@ import {
   QUALIFICATION_TIERS,
   selectDiverseAcceptedProps,
 } from "./adaptiveQualification.js";
+import { filterReadyQualityProps, meetsAcceptedPropQuality } from "./propQualityGates.js";
 import { RENDER_LIMITS } from "../utils/approvedMarkets.js";
 
 export const DISPLAY_MIN_CONFIDENCE = 40;
@@ -243,22 +244,23 @@ export function buildQualificationBoards(scoredProps = [], audit, history = []) 
 
   const acceptedPool = selectDiverseAcceptedProps(
     [
-      ...elite,
-      ...strong,
+      ...elite.filter(meetsAcceptedPropQuality),
+      ...strong.filter(meetsAcceptedPropQuality),
       ...near.filter((prop) => isAcceptedQualificationTier(prop.qualificationTier, prop)),
-      ...watchlist.filter((prop) => isAcceptedQualificationTier(prop.qualificationTier, prop)),
       ...rejected
-        .filter((prop) => !prop.hardFail && isSmartAcceptanceEligible(prop))
-        .filter((prop) => Number(prop.qualificationScore || prop.confidenceScore || 0) >= 52),
+        .filter((prop) => !prop.hardFail && isSmartAcceptanceEligible(prop) && meetsAcceptedPropQuality(prop)),
     ],
     RENDER_LIMITS.readyToBet
   );
   const readyDisplay = avoidCorrelatedProps(
-    acceptedPool.sort(
-      (a, b) =>
-        Number(b.qualificationScore || 0) - Number(a.qualificationScore || 0) ||
-        Number(b.priorityScore || 0) - Number(a.priorityScore || 0) ||
-        computeRankScore(b) - computeRankScore(a)
+    filterReadyQualityProps(
+      acceptedPool.sort(
+        (a, b) =>
+          Number(b.qualificationScore || 0) - Number(a.qualificationScore || 0) ||
+          Number(b.priorityScore || 0) - Number(a.priorityScore || 0) ||
+          computeRankScore(b) - computeRankScore(a)
+      ),
+      RENDER_LIMITS.readyToBet
     ),
     RENDER_LIMITS.readyToBet
   );

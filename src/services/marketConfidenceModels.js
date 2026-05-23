@@ -19,17 +19,17 @@ export const PROP_VOLATILITY_TIERS = {
   },
   MEDIUM: {
     minEdge: 0.85,
-    readyConfidence: 65,
+    readyConfidence: 66,
     topConfidence: 74,
     minAgreement: 0.55,
-    confidencePenalty: 4,
+    confidencePenalty: 3,
   },
   HIGH: {
     minEdge: 1.25,
-    readyConfidence: 68,
+    readyConfidence: 70,
     topConfidence: 78,
     minAgreement: 0.65,
-    confidencePenalty: 10,
+    confidencePenalty: 8,
   },
 };
 

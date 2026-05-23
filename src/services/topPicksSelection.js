@@ -1,6 +1,16 @@
 import { CONFIDENCE_THRESHOLDS } from "./confidenceEngine.js";
 import { isVerifiedSportsbookProp } from "../utils/propValidation.js";
 import { getMlbQualityTierWeight } from "../utils/mlbOnlyMode.js";
+import {
+  comparePropQuality,
+  confidenceValue,
+  edgeValue,
+  getVolatilityLabel,
+  lineStabilityScore,
+  meetsReadyToBetQuality,
+  meetsTopPickQuality,
+  volatilitySafetyScore,
+} from "./propQualityGates.js";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -14,10 +24,6 @@ function round(value, digits = 1) {
 function finiteNumber(value) {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
-}
-
-function confidenceValue(prop = {}) {
-  return Number(prop.calibratedConfidence ?? prop.confidenceScore ?? prop.confidence ?? 0);
 }
 
 function hasUsableProjection(prop = {}) {
@@ -37,12 +43,14 @@ function isPropVerified(prop = {}) {
 /** Only block Top Picks for true safety failures — not tier preferences. */
 export function explainTopPickRejection(prop = {}) {
   if (!isPropVerified(prop)) return "unverified";
+  if (!meetsReadyToBetQuality(prop)) return "below ready quality bar";
   if (prop.freshnessTier === "EXPIRED") return "stale";
   if (!hasUsableProjection(prop)) return "broken projection";
+  if (getVolatilityLabel(prop) === "HIGH") return "high volatility";
   const movementTag = prop.lineMovementTag || prop.lineMovement?.tag;
   if (prop.lineMovement?.againstPick && movementTag === "steamed") {
     const delta = Math.abs(Number(prop.lineMovement?.delta ?? prop.lineMovement?.change ?? 0));
-    if (delta >= 1) return "catastrophic line movement";
+    if (delta >= 0.75) return "catastrophic line movement";
   }
   return "";
 }
@@ -75,7 +83,7 @@ export function computeTopPickWeightedScore(prop = {}) {
   if (Number.isFinite(existing) && existing > 0) return round(existing, 1);
 
   const confidence = confidenceValue(prop);
-  const edge = Number(prop.edge || 0);
+  const edge = edgeValue(prop);
   const marketReliability = Number(prop.marketReliabilityScore ?? 50);
   const projection = finiteNumber(prop.projectedValue ?? prop.projection);
   const line = finiteNumber(prop.line);
@@ -86,10 +94,12 @@ export function computeTopPickWeightedScore(prop = {}) {
 
   const score =
     confidence +
-    clamp(edge * 6, 0, 18) +
+    clamp(edgeValue(prop) * 6, 0, 18) +
     projectionStrength +
     (marketReliability - 50) * 0.12 +
-    getMlbQualityTierWeight(prop) * 6 -
+    getMlbQualityTierWeight(prop) * 6 +
+    volatilitySafetyScore(prop) * 2 +
+    lineStabilityScore(prop) * 2 -
     volatilityPenalty(prop) -
     lineMovementPenalty(prop);
 
@@ -110,11 +120,11 @@ function sortScore(prop = {}) {
 }
 
 function rankAcceptedProp(a = {}, b = {}) {
+  const qualityDelta = comparePropQuality(a, b);
+  if (qualityDelta !== 0) return qualityDelta;
   const bandDelta = topPickConfidenceBand(b) - topPickConfidenceBand(a);
   if (bandDelta !== 0) return bandDelta;
-  const scoreDelta = sortScore(b) - sortScore(a);
-  if (scoreDelta !== 0) return scoreDelta;
-  return confidenceValue(b) - confidenceValue(a) || Number(b.edge || 0) - Number(a.edge || 0);
+  return sortScore(b) - sortScore(a);
 }
 
 function annotateRenderedPick(prop = {}, fallback = false) {
@@ -140,38 +150,17 @@ function selectFromBand(eligible = [], minBand = 0) {
  */
 export function selectTopPicks(acceptedProps = [], limit = 2) {
   const pool = Array.isArray(acceptedProps) ? acceptedProps.filter(Boolean) : [];
-  const topPickRejectionReasons = [];
-
-  console.log("ACCEPTED PROPS COUNT", pool.length);
-  console.log("ACCEPTED PROPS", pool);
-
-  if (!pool.length) {
-    console.log("TOP PICKS", []);
-    console.log("WHY TOP PICKS EMPTY", [{ reason: "accepted props pool is empty" }]);
-    return [];
-  }
+  if (!pool.length) return [];
 
   const eligible = [];
   pool.forEach((prop) => {
-    if (prop.verified === false || prop.sportsbookVerified === false) {
-      topPickRejectionReasons.push({
-        id: prop.id,
-        playerName: prop.playerName,
-        reason: "unverified",
-      });
-      return;
-    }
-    const reason = explainTopPickRejection(prop);
-    if (reason) {
-      topPickRejectionReasons.push({
-        id: prop.id,
-        playerName: prop.playerName,
-        reason,
-      });
-      return;
-    }
+    if (prop.verified === false || prop.sportsbookVerified === false) return;
+    if (explainTopPickRejection(prop)) return;
     eligible.push(annotateRenderedPick(prop, false));
   });
+
+  const strict = eligible.filter(meetsTopPickQuality).sort(rankAcceptedProp);
+  if (strict.length) return strict.slice(0, limit);
 
   let ranked = selectFromBand(eligible, 3);
   if (!ranked.length) ranked = selectFromBand(eligible, 2);
@@ -179,20 +168,13 @@ export function selectTopPicks(acceptedProps = [], limit = 2) {
   if (!ranked.length) ranked = [...eligible].sort(rankAcceptedProp);
 
   let topPicks = ranked.slice(0, limit);
-
   if (!topPicks.length && pool.length) {
     topPicks = pool
-      .filter((prop) => prop.verified !== false && prop.sportsbookVerified !== false)
+      .filter((prop) => prop.verified !== false && prop.sportsbookVerified !== false && meetsReadyToBetQuality(prop))
       .map((prop) => annotateRenderedPick(prop, true))
-      .sort((a, b) => sortScore(b) - sortScore(a))
+      .sort(rankAcceptedProp)
       .slice(0, limit);
-    if (topPicks.length) {
-      topPickRejectionReasons.push({ note: "used last-resort accepted-prop slice after safety filtering" });
-    }
   }
-
-  console.log("TOP PICKS", topPicks);
-  console.log("WHY TOP PICKS EMPTY", topPickRejectionReasons);
 
   return topPicks;
 }

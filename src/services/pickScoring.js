@@ -21,6 +21,7 @@ import { sortDecisionBoard } from "./decisionEngine.js";
 import { sortBoardProps } from "./propPriority.js";
 import { getMarketReadyThreshold, getStrongEdgeBypassGap } from "./marketThresholds.js";
 import { getPropVolatilityTier, meetsVolatilityTierRequirements } from "./marketConfidenceModels.js";
+import { hasNegativeEv } from "./propQualityGates.js";
 
 const READY_MIN_CONFIDENCE = CONFIDENCE_THRESHOLDS.READY;
 const READY_MIN_DATA_QUALITY = 45;
@@ -312,6 +313,7 @@ export function getReadyToBetRejectReason(prop, thresholds = {}) {
   }
   if (!hasValidPickFields(prop)) return "missing required pick fields";
   if (!isPositiveEdge(prop)) return "no positive edge";
+  if (hasNegativeEv(prop)) return "non-positive EV";
   if (prop.lineOnlyData && !thresholds.relaxedStats) return "line-only data";
   const status = String(prop.status || "").toLowerCase();
   if (status === "locked" || status === "expired" || status === "live") return `prop status is ${status}`;
@@ -613,5 +615,9 @@ export function filterReadyToBetProps(props = []) {
     minDataQuality: READY_MIN_DATA_QUALITY - (ladder.dqRelax || 0),
     relaxedStats: Boolean(ladder.relaxedStats),
   };
-  return sortDecisionBoard(props.filter((prop) => isReadyToBet(prop, thresholds)));
+  return sortDecisionBoard(
+    props
+      .filter((prop) => isReadyToBet(prop, thresholds))
+      .filter((prop) => !hasNegativeEv(prop))
+  ).slice(0, 20);
 }

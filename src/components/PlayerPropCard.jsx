@@ -6,6 +6,8 @@ import { confidenceTier, displayMarketLabel, displaySport } from "../utils/propL
 import { lineMovementArrow, lineSourceBadgeStyle, resultStatusBadge, sportsbookCardTag } from "../utils/cardSignals.js";
 import { dataBadgeStyle, styles, tierStyle } from "../theme/styles.js";
 import { isReadyToBet } from "../services/pickScoring.js";
+import { getVolatilityLabel } from "../services/propQualityGates.js";
+import { formatDateTime } from "../utils/formatters.js";
 
 function bettingLabelStyle(label) {
   const key = String(label || "").toLowerCase();
@@ -61,6 +63,11 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
     .filter(Boolean)
     .slice(0, 3);
   const lowReasons = prop.lowConfidenceReasons || [];
+  const volatilityLabel = getVolatilityLabel(prop);
+  const movementTag = prop.lineMovementTag || prop.lineMovement?.tag || "";
+  const bookLine = prop.sportsbookLine ?? prop.sportsbookComparison?.marketAverageLine;
+  const lastUpdated = prop.updatedAt || prop.lastFetchAt || prop.cacheMetadata?.verifiedAt || "";
+  const cacheLabel = prop.cacheVerified || prop.lineSourceBadge === "CACHED" ? "cached verified" : "";
 
   return (
     <article
@@ -181,11 +188,8 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
         <span style={styles.compactMetaItem}>
           <span style={styles.metaLabel}>Vol</span>
           <strong>
-            {Number.isFinite(Number(prop.volatilityScore))
-              ? Math.round(Number(prop.volatilityScore))
-              : Number.isFinite(Number(prop.volatility))
-                ? formatNumber(prop.volatility)
-                : "—"}
+            {volatilityLabel}
+            {Number.isFinite(Number(prop.volatility)) ? ` (${formatNumber(prop.volatility)})` : ""}
           </strong>
         </span>
         <span style={styles.compactMetaItem}>
@@ -217,11 +221,12 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
           </summary>
           <div style={styles.cardInlineBody}>
             <p style={styles.compactFlags}>
-              Book {prop.sportsbookLine != null ? formatNumber(prop.sportsbookLine) : "—"} · Proj{" "}
-              {prop.projectedValue != null ? formatNumber(prop.projectedValue) : "—"} · Edge{" "}
-              {Number(prop.edge) > 0 ? formatNumber(prop.edge) : "—"} · Conf {prop.confidenceScore ?? "—"}% · Risk{" "}
-              {prop.riskLevel || "—"} · EV {Number.isFinite(Number(prop.expectedValueScore)) ? Math.round(Number(prop.expectedValueScore)) : "—"} · Vol{" "}
-              {Number.isFinite(Number(prop.volatilityScore)) ? Math.round(Number(prop.volatilityScore)) : "—"}
+              Book {bookLine != null ? formatNumber(bookLine) : "—"} · Line {formatNumber(prop.line)} · Proj{" "}
+              {prop.projectedValue != null ? formatNumber(prop.projectedValue) : prop.projection != null ? formatNumber(prop.projection) : "—"} · Edge{" "}
+              {Number(prop.edge) > 0 ? formatNumber(prop.edge) : "—"} · Conf {prop.confidenceScore ?? "—"}% · Vol {volatilityLabel}
+              {movementTag ? ` · Move ${movementTag}` : ""} · Source {prop.platform || prop.source || "—"}
+              {lastUpdated ? ` · Updated ${formatDateTime(lastUpdated)}` : ""}
+              {cacheLabel ? ` · ${cacheLabel}` : ""}
             </p>
             <p style={styles.compactFlags}>{shortReason(prop)}</p>
             {prop.qualificationReason ? (

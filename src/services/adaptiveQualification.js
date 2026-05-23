@@ -8,6 +8,7 @@ import {
 } from "./pickScoring.js";
 import { shouldRouteMlbHitterToResearch } from "./mlbHitterConfidence.js";
 import { getMlbQualityTier } from "../utils/mlbOnlyMode.js";
+import { meetsAcceptedPropQuality, hasPositiveEv, hasMatchupData } from "./propQualityGates.js";
 
 export const QUALIFICATION_TIERS = {
   ELITE: "elite",
@@ -26,14 +27,14 @@ export const QUALIFICATION_TIER_LABELS = {
 };
 
 const DEFAULT_TIER_THRESHOLDS = {
-  elite: 74,
-  strong: 62,
-  nearMiss: 56,
-  watchlist: 48,
+  elite: 75,
+  strong: 65,
+  nearMiss: 58,
+  watchlist: 50,
 };
 
-/** Playable confidence floor for near-miss acceptance. */
-export const PLAYABLE_CONFIDENCE_MIN = 65;
+/** Playable confidence floor for accepted props. */
+export const PLAYABLE_CONFIDENCE_MIN = 60;
 export const TIER3_CONFIDENCE_MIN = 68;
 
 /** Soft penalties stack — concerns reduce score; only extreme stacks cap to watchlist. */
@@ -89,8 +90,8 @@ const MARKET_QUALIFICATION_RULES = {
 
 const RECOVERY_GAP = 4;
 const MAX_RECOVERY_BOOST = 5;
-const TARGET_ACCEPTED_MIN = 15;
-const TARGET_ACCEPTED_MAX = 30;
+const TARGET_ACCEPTED_MIN = 8;
+const TARGET_ACCEPTED_MAX = 20;
 const MAX_PER_MARKET_RATIO = 0.5;
 
 function clamp(value, min, max) {
@@ -163,6 +164,8 @@ export function isSmartAcceptanceEligible(prop = {}) {
   if (prop.freshnessTier === "EXPIRED") return false;
   if (!hasProjectionIntegrity(prop)) return false;
   if (!isPositiveEdge(prop)) return false;
+  if (!hasPositiveEv(prop)) return false;
+  if (!hasMatchupData(prop)) return false;
   const status = String(prop.status || "").toLowerCase();
   if (["locked", "expired", "live"].includes(status)) return false;
   const start = new Date(prop.startTime).getTime();
@@ -577,26 +580,22 @@ export function evaluateAdaptiveQualification(prop = {}, options = {}) {
 export function resolveAdaptiveTierThresholds(acceptedCount = 0) {
   if (acceptedCount >= TARGET_ACCEPTED_MIN) return { ...DEFAULT_TIER_THRESHOLDS, adaptive: false };
   const deficit = Math.max(0, TARGET_ACCEPTED_MIN - acceptedCount);
-  const loosen = Math.min(12, Math.ceil(deficit / 1.5));
+  const loosen = Math.min(6, Math.ceil(deficit / 2));
   return {
-    elite: DEFAULT_TIER_THRESHOLDS.elite - Math.min(6, loosen),
+    elite: DEFAULT_TIER_THRESHOLDS.elite - Math.min(3, loosen),
     strong: DEFAULT_TIER_THRESHOLDS.strong - loosen,
-    nearMiss: DEFAULT_TIER_THRESHOLDS.nearMiss - Math.min(8, loosen + 2),
-    watchlist: DEFAULT_TIER_THRESHOLDS.watchlist - Math.min(5, loosen),
+    nearMiss: DEFAULT_TIER_THRESHOLDS.nearMiss - Math.min(4, loosen + 1),
+    watchlist: DEFAULT_TIER_THRESHOLDS.watchlist,
     adaptive: true,
   };
 }
 
 export function isAcceptedQualificationTier(tier = "", prop = {}) {
-  if (tier === QUALIFICATION_TIERS.REJECT) return false;
+  if (tier === QUALIFICATION_TIERS.REJECT || tier === QUALIFICATION_TIERS.WATCHLIST) return false;
   const confidence = Number(prop.calibratedConfidence ?? prop.confidenceScore ?? prop.confidence ?? 0);
   if (confidence < acceptanceConfidenceFloor(prop)) return false;
-  return (
-    tier === QUALIFICATION_TIERS.ELITE ||
-    tier === QUALIFICATION_TIERS.STRONG ||
-    tier === QUALIFICATION_TIERS.NEAR_MISS ||
-    tier === QUALIFICATION_TIERS.WATCHLIST
-  );
+  if (!meetsAcceptedPropQuality(prop)) return false;
+  return tier === QUALIFICATION_TIERS.ELITE || tier === QUALIFICATION_TIERS.STRONG || tier === QUALIFICATION_TIERS.NEAR_MISS;
 }
 
 export function qualificationTierToDisplayTier(tier = "", prop = {}) {

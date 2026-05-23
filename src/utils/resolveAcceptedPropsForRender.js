@@ -1,26 +1,26 @@
 import { sortDecisionBoard } from "../services/decisionEngine.js";
+import { selectTopPicks } from "../services/topPicksSelection.js";
+import {
+  comparePropQuality,
+  filterAcceptedQualityProps,
+  filterTopPickQualityProps,
+  meetsAcceptedPropQuality,
+} from "../services/propQualityGates.js";
 
 /** Props already accepted upstream — no re-qualification at render time. */
 export function isUpstreamAcceptedProp(prop = {}) {
   if (!prop || typeof prop !== "object") return false;
+  if (!meetsAcceptedPropQuality(prop)) return false;
   if (prop.accepted === true || prop.pipelineAccepted === true || prop.qualified === true) return true;
   if (String(prop.status || "").toLowerCase() === "accepted") return true;
   if (prop.isQualificationAccepted) return true;
   if (prop.displayTier === "ready") return true;
   if (prop.recommendationStatus === "ready") return true;
   const tier = String(prop.qualificationTier || "").toLowerCase();
-  if (tier && tier !== "reject") return true;
+  if (tier && tier !== "reject" && tier !== "watchlist") return true;
   const label = String(prop.bettingLabel || "").toLowerCase();
   if (label.includes("elite") || label.includes("ready")) return true;
   return false;
-}
-
-function confidenceValue(prop = {}) {
-  return Number(prop.confidenceScore ?? prop.confidence ?? prop.calibratedConfidence ?? 0);
-}
-
-function weightedScoreValue(prop = {}) {
-  return Number(prop.weightedScore ?? prop.confidenceScore ?? prop.confidence ?? 0);
 }
 
 function matchHydratedFromPipeline(hydrated = [], pipelinePools = []) {
@@ -44,20 +44,18 @@ export function resolveFinalAcceptedPropsFromHydrated({
   const hydrated = (hydratedRenderableProps || []).filter(Boolean);
   if (!hydrated.length) return [];
 
+  const limit = Math.max(5, Math.min(20, Number(acceptedCount) || 20));
   const acceptedRenderableProps = hydrated.filter(isUpstreamAcceptedProp);
   if (acceptedRenderableProps.length) {
-    return sortDecisionBoard(acceptedRenderableProps).slice(0, Math.max(acceptedRenderableProps.length, Number(acceptedCount) || 30));
+    return sortDecisionBoard(filterAcceptedQualityProps(acceptedRenderableProps)).slice(0, limit);
   }
 
-  const matched = matchHydratedFromPipeline(hydrated, pipelineAcceptedPools);
+  const matched = matchHydratedFromPipeline(hydrated, pipelineAcceptedPools).filter(meetsAcceptedPropQuality);
   if (matched.length) {
-    return sortDecisionBoard(matched).slice(0, Math.max(matched.length, Number(acceptedCount) || 30));
+    return sortDecisionBoard(matched).slice(0, limit);
   }
 
-  const limit = Math.max(5, Number(acceptedCount) || 5);
-  return [...hydrated]
-    .sort((a, b) => confidenceValue(b) - confidenceValue(a) || weightedScoreValue(b) - weightedScoreValue(a))
-    .slice(0, limit);
+  return filterAcceptedQualityProps(hydrated).slice(0, Math.min(limit, 20));
 }
 
 /** @deprecated use resolveFinalAcceptedPropsFromHydrated */
@@ -70,8 +68,10 @@ export function resolveAcceptedPropsForRender(options = {}) {
 }
 
 export function selectTopPicksFromAccepted(finalAcceptedProps = [], limit = 2) {
-  return [...(finalAcceptedProps || [])]
-    .filter(Boolean)
-    .sort((a, b) => weightedScoreValue(b) - weightedScoreValue(a) || confidenceValue(b) - confidenceValue(a))
-    .slice(0, limit);
+  const pool = (finalAcceptedProps || []).filter(Boolean).filter(meetsAcceptedPropQuality);
+  const ranked = filterTopPickQualityProps(pool, limit);
+  if (ranked.length >= limit) return ranked;
+  const fallback = selectTopPicks(pool, limit);
+  if (fallback.length) return fallback;
+  return [...pool].sort(comparePropQuality).slice(0, limit);
 }

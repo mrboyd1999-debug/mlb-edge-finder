@@ -37,12 +37,13 @@ export function computeMovementSpeed({
   return round(magnitude / hours, 3);
 }
 
-/** stable | rising | falling | steamed | volatile */
+/** stable | rising | falling | steamed | volatile | reverse */
 export function classifyLineMovementTag({
   move = 0,
   absMove = 0,
   supportsPick = false,
   againstPick = false,
+  openingLine = null,
   previousLine = null,
   currentLine = null,
   movementSpeed = 0,
@@ -50,6 +51,14 @@ export function classifyLineMovementTag({
   const recent =
     Number.isFinite(previousLine) && Number.isFinite(currentLine) ? Math.abs(currentLine - previousLine) : 0;
   const speed = Number(movementSpeed) || 0;
+
+  if (Number.isFinite(previousLine) && Number.isFinite(currentLine) && Number.isFinite(openingLine)) {
+    const openingMove = currentLine - openingLine;
+    const recentMove = currentLine - previousLine;
+    if (Math.sign(openingMove) !== 0 && Math.sign(recentMove) !== 0 && Math.sign(openingMove) !== Math.sign(recentMove)) {
+      if (Math.abs(recentMove) >= TINY_MOVE_THRESHOLD) return "reverse";
+    }
+  }
 
   if (absMove >= STEAMED_THRESHOLD || recent >= STEAMED_THRESHOLD * 0.75 || speed >= 1.2) {
     return "steamed";
@@ -132,6 +141,7 @@ export function lineMovementTrustScore(prop = {}, movement = null) {
     absMove,
     supportsPick,
     againstPick,
+    openingLine,
     previousLine,
     currentLine,
     movementSpeed,
@@ -140,6 +150,9 @@ export function lineMovementTrustScore(prop = {}, movement = null) {
   if (tag === "steamed" && againstPick) {
     score -= 10;
     notes.push("steamed against pick");
+  } else if (tag === "reverse") {
+    score += againstPick ? -8 : supportsPick ? 6 : -2;
+    notes.push("reverse line movement");
   } else if (tag === "volatile") {
     score -= 4;
     notes.push("volatile line");
@@ -214,6 +227,7 @@ export function enrichLineMovementWithTags(movement = {}, bestPick = "") {
     absMove,
     supportsPick,
     againstPick,
+    openingLine,
     previousLine,
     currentLine,
     movementSpeed,

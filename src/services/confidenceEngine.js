@@ -37,26 +37,28 @@ function componentScore(score, max, label, detail) {
 }
 
 export const CONFIDENCE_THRESHOLDS = {
-  REJECT: 58,
-  RESEARCH: 58,
-  PLAYABLE: 65,
-  READY: 65,
-  STRONG: 72,
+  REJECT: 55,
+  RESEARCH: 55,
+  PLAYABLE: 55,
+  READY: 60,
+  STRONG: 65,
   TOP_PICKS: 72,
-  ELITE: 80,
+  ELITE: 75,
   DEMON: 80,
 };
 
 /** MLB weighted confidence pillars — normalized 0-100 output. */
 export const MLB_CONFIDENCE_WEIGHTS = {
-  recentHitRate: 0.14,
-  matchupQuality: 0.12,
-  projectionEdge: 0.2,
+  recentHitRate: 0.16,
+  matchupQuality: 0.14,
+  projectionEdge: 0.18,
   lineMovement: 0.14,
-  consistencyScore: 0.12,
-  historicalAccuracy: 0.1,
+  consistencyScore: 0.1,
+  historicalAccuracy: 0.08,
   verifiedStatsQuality: 0.1,
   volatilityScore: 0.08,
+  sportsbookEdge: 0.06,
+  roleContext: 0.06,
 };
 
 export const MLB_QUALITY_TIER_WEIGHT = {
@@ -382,6 +384,7 @@ function scoreLineMovementComponent(prop = {}) {
   else if (tag === "falling" || tag === "dropping") score += movement.supportsPick ? 3 : -2;
   else if (tag === "rising") score += movement.supportsPick ? 2 : -3;
   else if (tag === "steamed") score -= 5;
+  else if (tag === "reverse") score += movement.supportsPick ? 4 : movement.againstPick ? -6 : -2;
   else if (tag === "volatile") score -= 3;
 
   return componentScore(score, 12, "Line Movement", parts.length ? parts.join(" · ") : "No movement signal.");
@@ -436,6 +439,9 @@ function applyMlbConfidencePenalties(score, prop = {}) {
 
   if (prop.lineSourceBadge === "STALE" || prop.lineSourceBadge === "CACHED") {
     items.push({ amount: 6, label: "stale data" });
+  }
+  if (prop.freshnessTier === "STALE_WARNING" || prop.cacheVerified) {
+    items.push({ amount: 4, label: "cached verified line" });
   }
   if (prop.projectionSource === "missing" || !Number.isFinite(prop.projection ?? prop.projectedValue)) {
     items.push({ amount: 12, label: "missing projection" });
@@ -518,6 +524,44 @@ function applyConfidenceCaps(score, prop = {}, options = {}) {
   return { score: Math.round(clamp(capped, 0, 100)), capReason };
 }
 
+function scoreSportsbookEdgePillar(prop = {}) {
+  const discrepancy = finiteNumber(prop.sportsbookDiscrepancy);
+  const books = finiteNumber(prop.sportsbookComparison?.books) || 0;
+  const marketLine = finiteNumber(prop.sportsbookComparison?.marketAverageLine);
+  const line = finiteNumber(prop.line);
+  let score = 2;
+  const parts = [];
+  if (Number.isFinite(discrepancy) && discrepancy >= 0.35) {
+    score += clamp(discrepancy * 4, 0, 6);
+    parts.push(`book edge ${round(discrepancy)}`);
+  }
+  if (Number.isFinite(marketLine) && Number.isFinite(line) && line > 0) {
+    const gap = Math.abs(marketLine - line);
+    score += clamp((gap / line) * 12 + gap, 0, 5);
+    parts.push(`book line ${round(marketLine)}`);
+  }
+  if (books >= 2) score += 1;
+  return componentScore(score, 6, "Sportsbook Edge", parts.length ? parts.join(" · ") : "No sportsbook comparison.");
+}
+
+function scoreRoleContext(prop = {}) {
+  let score = 2;
+  const parts = [];
+  if (prop.pitchCountTrend || prop.roleContext) {
+    score += 2;
+    parts.push(String(prop.pitchCountTrend || prop.roleContext));
+  }
+  if (prop.homeAwaySplit || prop.splitNote) {
+    score += 1.5;
+    parts.push(String(prop.homeAwaySplit || prop.splitNote));
+  }
+  if (prop.projectedOpportunity || prop.usageAdjustment) {
+    score += 1.5;
+    parts.push(String(prop.projectedOpportunity || prop.usageAdjustment));
+  }
+  return componentScore(score, 6, "Role / Opportunity", parts.length ? parts.join(" · ") : "Limited role context.");
+}
+
 function calculateMlbWeightedScore(prop = {}) {
   const components = {
     recentHitRate: scoreRecentForm(prop),
@@ -528,6 +572,8 @@ function calculateMlbWeightedScore(prop = {}) {
     historicalAccuracy: scoreHistoricalAccuracy(prop),
     verifiedStatsQuality: scoreVerifiedStatsComponent(prop),
     volatilityScore: scoreVolatilityFactor(prop),
+    sportsbookEdge: scoreSportsbookEdgePillar(prop),
+    roleContext: scoreRoleContext(prop),
   };
   const maxByKey = {
     recentHitRate: 15,
@@ -538,6 +584,8 @@ function calculateMlbWeightedScore(prop = {}) {
     historicalAccuracy: 10,
     verifiedStatsQuality: 10,
     volatilityScore: 8,
+    sportsbookEdge: 6,
+    roleContext: 6,
   };
   let weighted = 0;
   Object.entries(MLB_CONFIDENCE_WEIGHTS).forEach(([key, weight]) => {
@@ -547,6 +595,7 @@ function calculateMlbWeightedScore(prop = {}) {
   });
   const qualityWeight = getMlbQualityTierWeight(prop);
   weighted *= qualityWeight;
+  const boosted = clamp(Math.round(36 + weighted * 0.58), 38, 96);
   const explanation = Object.entries(components).map(([key, comp]) => ({
     key,
     label: comp.label,
@@ -561,7 +610,7 @@ function calculateMlbWeightedScore(prop = {}) {
     max: 10,
     detail: `Tier ${getMlbQualityTier(prop) || "—"} weight ${round(qualityWeight * 100)}%`,
   });
-  return { score: clamp(Math.round(weighted), 22, 100), breakdown: components, explanation };
+  return { score: boosted, breakdown: components, explanation };
 }
 
 /**
