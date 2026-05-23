@@ -9,19 +9,19 @@ function EmptyState({ text }) {
 }
 
 function TopPicksBoard({ label = "Sport", picks = [], loading, onOpen, compactMode = true }) {
-  const sorted = useMemo(
-    () =>
-      (picks || []).slice(0, 2).map((prop) => {
-        const explanation = prop.elitePickExplanation || buildElitePickExplanation(prop);
-        return {
-          ...prop,
-          edgeScore: prop.edgeScore ?? prop.edgeRating,
-          elitePickExplanation: explanation,
-          topTwoReason: explanation.compact,
-        };
-      }),
-    [picks]
-  );
+  const sorted = useMemo(() => {
+    const list = (picks || []).filter(Boolean).slice(0, 2);
+    console.log("TOP PICKS BOARD INPUT COUNT", picks?.length || 0, "RENDER COUNT", list.length);
+    return list.map((prop) => {
+      const explanation = prop.elitePickExplanation || buildElitePickExplanation(prop);
+      return {
+        ...prop,
+        edgeScore: prop.edgeScore ?? prop.edgeRating,
+        elitePickExplanation: explanation,
+        topTwoReason: explanation?.compact || prop.topTwoReason || prop.qualificationReason || "",
+      };
+    });
+  }, [picks]);
 
   return (
     <section style={styles.section}>
@@ -30,8 +30,7 @@ function TopPicksBoard({ label = "Sport", picks = [], loading, onOpen, compactMo
           <p style={styles.eyebrow}>{label}</p>
           <h2 style={styles.sectionTitle}>Top 2 Picks</h2>
           <p style={styles.streakCopy}>
-            Best 2 accepted props · Elite {'>'} Strong {'>'} Playable · ≥
-            {CONFIDENCE_THRESHOLDS.PLAYABLE}% confidence · positive edge · minor volatility allowed.
+            Best 2 accepted props · Elite {'>'} Strong {'>'} Playable · no re-filtering at render time.
           </p>
         </div>
         <p style={styles.countPill}>{sorted.length}/2</p>
@@ -44,7 +43,7 @@ function TopPicksBoard({ label = "Sport", picks = [], loading, onOpen, compactMo
         <div style={styles.topPicksList}>
           {sorted.map((prop, index) => (
             <PlayerPropCard
-              key={prop.id}
+              key={prop.id || `${prop.playerName}-${prop.statType}-${index}`}
               prop={prop}
               rank={index + 1}
               onOpen={onOpen}

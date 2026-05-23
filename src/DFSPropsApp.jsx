@@ -1714,10 +1714,23 @@ export default function DFSPropsApp() {
   const currentCategoryLabel = currentStreakBoard.label || STREAK_TAB_OPTIONS.find((option) => option.value === streakSport)?.label || "MLB";
   const isGoblinTab = streakSport === "goblins";
   const isDemonTab = streakSport === "demons";
-  const topPicksDisplay = useMemo(
-    () => selectTopPicks(readyToBetProps.length ? readyToBetProps : qualifiedReadyProps, 2),
-    [readyToBetProps, qualifiedReadyProps]
+  const acceptedPropsPool = useMemo(
+    () => sortDecisionBoard(filterVerifiedSportsbookProps(qualifiedReadyProps)),
+    [qualifiedReadyProps]
   );
+  const topPicksDisplay = useMemo(() => {
+    const acceptedSource = readyToBetProps.length ? readyToBetProps : acceptedPropsPool;
+    const selected = selectTopPicks(acceptedSource, 2);
+    if (selected.length) return selected;
+    if (acceptedSource.length) {
+      return acceptedSource.slice(0, 2).map((prop) => ({
+        ...prop,
+        weightedScore: Number(prop.weightedScore ?? prop.confidenceScore ?? prop.confidence ?? 0),
+        topPickFallback: true,
+      }));
+    }
+    return [];
+  }, [readyToBetProps, acceptedPropsPool]);
   const topPicksForTracking = useMemo(() => topPicksDisplay, [topPicksDisplay]);
   const goblinPropsForTracking = useMemo(
     () => streakFinderProps.filter(isVerifiedSportsbookProp).filter(isGoblinProp),

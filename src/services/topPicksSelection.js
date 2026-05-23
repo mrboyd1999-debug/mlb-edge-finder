@@ -1,5 +1,4 @@
 import { CONFIDENCE_THRESHOLDS } from "./confidenceEngine.js";
-import { isVerifiedSportsbookProp } from "../utils/propValidation.js";
 import { getMlbQualityTierWeight } from "../utils/mlbOnlyMode.js";
 
 function clamp(value, min, max) {
@@ -16,48 +15,8 @@ function finiteNumber(value) {
   return Number.isFinite(num) ? num : null;
 }
 
-function pickDirection(prop = {}) {
-  return prop.bestPick || prop.pick || prop.pickDirection || prop.side || "";
-}
-
 function confidenceValue(prop = {}) {
   return Number(prop.calibratedConfidence ?? prop.confidenceScore ?? prop.confidence ?? 0);
-}
-
-function hasUsableProjection(prop = {}) {
-  if (Number.isFinite(finiteNumber(prop.projectedValue ?? prop.projection))) return true;
-  if (prop.projectionSource && prop.projectionSource !== "missing") return true;
-  if (prop.sportsbookComparison || prop.lineComparison) return true;
-  if (prop.isQualificationAccepted) return true;
-  if (prop.qualificationTier && prop.qualificationTier !== "reject") return true;
-  return false;
-}
-
-/** Only block Top Picks output for true safety failures — not elite-tier preferences. */
-export function explainTopPickRejection(prop = {}) {
-  if (!isVerifiedSportsbookProp(prop)) return "unverified";
-  if (prop.freshnessTier === "EXPIRED") return "stale cache";
-  const status = String(prop.status || "").toLowerCase();
-  if (["live", "expired", "locked"].includes(status)) return `status ${status}`;
-  if (Number(prop.edge || 0) <= 0) return "no positive edge";
-  if (!pickDirection(prop)) return "missing pick direction";
-  if (confidenceValue(prop) < CONFIDENCE_THRESHOLDS.PLAYABLE) return "below playable confidence";
-  if (!hasUsableProjection(prop)) return "broken projection";
-
-  const vol = finiteNumber(prop.volatility);
-  if (Number.isFinite(vol) && vol >= 5) return "severe volatility";
-
-  const movementTag = prop.lineMovementTag || prop.lineMovement?.tag;
-  if (prop.lineMovement?.againstPick && movementTag === "steamed") {
-    const delta = Math.abs(Number(prop.lineMovement?.delta ?? prop.lineMovement?.change ?? 0));
-    if (delta >= 1) return "catastrophic line movement";
-  }
-
-  return "";
-}
-
-export function isTopPickOutputEligible(prop = {}) {
-  return explainTopPickRejection(prop) === "";
 }
 
 function volatilityPenalty(prop = {}) {
@@ -78,8 +37,11 @@ function lineMovementPenalty(prop = {}) {
   return 0;
 }
 
-/** Output-only weighted score for final Top 2 ranking. */
+/** Output-only weighted score — used only for ranking accepted props. */
 export function computeTopPickWeightedScore(prop = {}) {
+  const existing = Number(prop.weightedScore ?? prop.topPickWeightedScore);
+  if (Number.isFinite(existing) && existing > 0) return round(existing, 1);
+
   const confidence = confidenceValue(prop);
   const edge = Number(prop.edge || 0);
   const marketReliability = Number(prop.marketReliabilityScore ?? 50);
@@ -90,21 +52,19 @@ export function computeTopPickWeightedScore(prop = {}) {
     projectionStrength = clamp((Math.abs(projection - line) / line) * 20, 0, 12);
   }
 
-  const volPenalty = volatilityPenalty(prop);
-  const movePenalty = lineMovementPenalty(prop);
-
-  let score =
+  const score =
     confidence +
     clamp(edge * 6, 0, 18) +
     projectionStrength +
     (marketReliability - 50) * 0.12 +
-    getMlbQualityTierWeight(prop) * 6;
-  score -= volPenalty + movePenalty;
+    getMlbQualityTierWeight(prop) * 6 -
+    volatilityPenalty(prop) -
+    lineMovementPenalty(prop);
 
   return round(clamp(score, 0, 100), 1);
 }
 
-/** Elite > Strong > Playable priority for fallback ordering. */
+/** Elite > Strong > Playable — ranking preference only, never a hard gate. */
 export function topPickConfidenceBand(prop = {}) {
   const confidence = confidenceValue(prop);
   if (confidence >= CONFIDENCE_THRESHOLDS.ELITE) return 3;
@@ -113,77 +73,66 @@ export function topPickConfidenceBand(prop = {}) {
   return 0;
 }
 
-function rankTopPick(a = {}, b = {}) {
+function rankAcceptedProp(a = {}, b = {}) {
   const bandDelta = topPickConfidenceBand(b) - topPickConfidenceBand(a);
   if (bandDelta !== 0) return bandDelta;
-  const scoreDelta = Number(b.topPickWeightedScore || 0) - Number(a.topPickWeightedScore || 0);
+  const scoreDelta = computeTopPickWeightedScore(b) - computeTopPickWeightedScore(a);
   if (scoreDelta !== 0) return scoreDelta;
   return confidenceValue(b) - confidenceValue(a) || Number(b.edge || 0) - Number(a.edge || 0);
 }
 
-function annotateTopPick(prop = {}, fallback = false) {
+function annotateRenderedPick(prop = {}, fallback = false) {
+  const weightedScore = computeTopPickWeightedScore(prop);
   return {
     ...prop,
-    topPickWeightedScore: computeTopPickWeightedScore(prop),
+    weightedScore,
+    topPickWeightedScore: weightedScore,
     topPickConfidenceBand: topPickConfidenceBand(prop),
     topPickFallback: fallback,
   };
 }
 
 /**
- * Final Top 2 output selection from accepted props only.
- * Never returns empty when accepted props exist unless all fail hard safety checks.
+ * Final Top 2 render selection from already-accepted props.
+ * Does NOT re-run qualification, volatility, verification, stale, or projection gates.
  */
 export function selectTopPicks(acceptedProps = [], limit = 2) {
   const pool = Array.isArray(acceptedProps) ? acceptedProps.filter(Boolean) : [];
-  const rejectedTopPickReasons = [];
-  const eligible = [];
+  const rejectionReasons = [];
 
-  pool.forEach((prop) => {
-    const reason = explainTopPickRejection(prop);
-    if (reason) {
-      rejectedTopPickReasons.push({
-        id: prop.id,
-        playerName: prop.playerName,
-        statType: prop.statType,
-        confidence: confidenceValue(prop),
-        reason,
-      });
-      return;
-    }
-    eligible.push(annotateTopPick(prop, false));
-  });
-
-  let ranked = [...eligible].sort(rankTopPick);
-
-  if (!ranked.length && pool.length) {
-    const fallback = pool
-      .filter((prop) => isVerifiedSportsbookProp(prop) && confidenceValue(prop) >= CONFIDENCE_THRESHOLDS.PLAYABLE && Number(prop.edge || 0) > 0)
-      .map((prop) => annotateTopPick(prop, true))
-      .sort(rankTopPick);
-    ranked = fallback;
-    if (fallback.length) {
-      rejectedTopPickReasons.push({
-        note: "playable fallback used because strict output gate rejected all candidates",
-        count: fallback.length,
-      });
-    }
+  if (!pool.length) {
+    rejectionReasons.push({ reason: "accepted props pool is empty" });
+    console.log("ACCEPTED PROPS", pool);
+    console.log("TOP PICK CANDIDATES", []);
+    console.log("FINAL RENDER PICKS", []);
+    console.log("WHY TOP PICKS FAILED", rejectionReasons);
+    return [];
   }
 
-  const topPicks = ranked.slice(0, limit);
+  const topCandidates = pool.map((prop) => annotateRenderedPick(prop, false)).sort(rankAcceptedProp);
+  let finalRenderedPicks = topCandidates.slice(0, limit);
 
-  if (!topPicks.length && pool.length) {
-    const lastResort = pool
-      .map((prop) => annotateTopPick(prop, true))
-      .sort((a, b) => confidenceValue(b) - confidenceValue(a) || Number(b.edge || 0) - Number(a.edge || 0))
+  if (!finalRenderedPicks.length) {
+    finalRenderedPicks = pool
+      .map((prop) => annotateRenderedPick(prop, true))
+      .sort(rankAcceptedProp)
       .slice(0, limit);
-    topPicks.push(...lastResort);
-    rejectedTopPickReasons.push({ note: "last-resort accepted props used to avoid empty Top Picks board", count: lastResort.length });
+    rejectionReasons.push({ reason: "used direct accepted-prop fallback slice" });
   }
 
-  console.log("TOP PICK CANDIDATES", pool);
-  console.log("FINAL TOP PICKS", topPicks);
-  console.log("TOP PICK REJECTION REASONS", rejectedTopPickReasons);
+  console.log("ACCEPTED PROPS", pool);
+  console.log("TOP PICK CANDIDATES", topCandidates.slice(0, Math.max(limit, 5)));
+  console.log("FINAL RENDER PICKS", finalRenderedPicks);
+  console.log("WHY TOP PICKS FAILED", rejectionReasons);
 
-  return topPicks;
+  return finalRenderedPicks;
+}
+
+/** @deprecated diagnostics only — accepted props should not be re-gated at render time. */
+export function explainTopPickRejection() {
+  return "";
+}
+
+export function isTopPickOutputEligible() {
+  return true;
 }
