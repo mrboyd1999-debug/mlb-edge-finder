@@ -315,6 +315,16 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
                 {movementTag ? ` (${movementTag})` : ""}
               </p>
             ) : null}
+            {Array.isArray(prop.confidenceBoostLabels) && prop.confidenceBoostLabels.length ? (
+              <p style={{ ...styles.compactFlags, margin: "2px 0 0", color: "#86efac" }}>
+                Why: {prop.confidenceBoostLabels.slice(0, 3).join(" · ")}
+              </p>
+            ) : null}
+            {Array.isArray(prop.confidencePenaltyLabels) && prop.confidencePenaltyLabels.length ? (
+              <p style={{ ...styles.compactFlags, margin: "2px 0 0", color: "#fca5a5" }}>
+                Caution: {prop.confidencePenaltyLabels.slice(0, 2).join(" · ")}
+              </p>
+            ) : null}
             <p style={styles.compactFlags}>{shortReason(prop)}</p>
             {prop.qualificationReason ? (
               <p style={{ ...styles.compactFlags, margin: "2px 0 0", color: "#86efac" }}>{prop.qualificationReason}</p>

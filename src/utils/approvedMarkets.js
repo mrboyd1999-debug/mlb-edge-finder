@@ -15,19 +15,21 @@ export const APPROVED_MARKETS = MLB_ONLY_MODE
       MLB: [...MLB_PRIMARY_MARKET_LABELS, ...MLB_TIER2_MARKET_LABELS, ...MLB_RESEARCH_MARKET_LABELS],
     }
   : {
-      MLB: ["Pitcher Strikeouts", "Fantasy Score", "Hits+Runs+RBIs", "Total Bases", "Pitching Outs"],
+      MLB: [...MLB_PRIMARY_MARKET_LABELS, ...MLB_TIER2_MARKET_LABELS, ...MLB_RESEARCH_MARKET_LABELS],
       NBA: ["Points", "Rebounds", "Assists", "Pts+Rebs+Asts", "Fantasy Score", "3-PT Made"],
       WNBA: ["Points", "Rebounds", "Assists", "Pts+Rebs+Asts", "Fantasy Score", "3-PT Made"],
       TENNIS: ["Fantasy Score", "Total Games Won", "Aces", "Double Faults"],
+      Soccer: ["Shots", "Shots On Target", "Passes Attempted", "Goalie Saves", "Fantasy Score"],
     };
 
 const FULL_APPROVED_MARKET_KEYS = {
-  MLB: new Set(["strikeouts", "fantasyScore", "hrr", "totalBases", "outs"]),
+  MLB: MLB_ACTIVE_MARKET_KEYS,
   NBA: new Set(["points", "rebounds", "assists", "pra", "fantasyScore", "threes"]),
   WNBA: new Set(["points", "rebounds", "assists", "pra", "fantasyScore", "threes"]),
   Tennis: new Set(["fantasyScore", "gamesWon", "aces", "doubleFaults"]),
   "ATP Tennis": new Set(["fantasyScore", "gamesWon", "aces", "doubleFaults"]),
   "WTA Tennis": new Set(["fantasyScore", "gamesWon", "aces", "doubleFaults"]),
+  Soccer: new Set(["shots", "shotsOnTarget", "passesAttempted", "goalieSaves", "fantasyScore"]),
 };
 
 const APPROVED_MARKET_KEYS = MLB_ONLY_MODE
@@ -45,6 +47,7 @@ export const SPORT_PROCESSING_LIMITS = MLB_ONLY_MODE
       Tennis: 40,
       "ATP Tennis": 40,
       "WTA Tennis": 40,
+      Soccer: 40,
     };
 
 export const RENDER_LIMITS = {

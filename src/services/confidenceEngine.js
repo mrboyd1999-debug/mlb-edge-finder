@@ -37,14 +37,14 @@ function componentScore(score, max, label, detail) {
 }
 
 export const CONFIDENCE_THRESHOLDS = {
-  REJECT: 48,
-  RESEARCH: 48,
-  PLAYABLE: 52,
-  READY: 58,
+  REJECT: 58,
+  RESEARCH: 58,
+  PLAYABLE: 60,
+  READY: 62,
   STRONG: 65,
   TOP_PICKS: 68,
-  ELITE: 72,
-  DEMON: 78,
+  ELITE: 75,
+  DEMON: 80,
 };
 
 /** MLB weighted confidence pillars — normalized 0-100 output. */
@@ -434,6 +434,103 @@ function scoreVolatilityFactor(prop = {}) {
   return componentScore(score, 8, "Volatility Score", parts.join(" · "));
 }
 
+/**
+ * Spec-aligned boosts/penalties layered on top of the weighted MLB score.
+ *
+ * BOOST when:
+ *   - line movement favors projection
+ *   - player cleared the line in 3 of last 5 (≥60% hit rate)
+ *   - opponent ranked 22+ vs the prop type (weak defense)
+ *   - prop appears on both PrizePicks/Underdog AND Odds API consensus
+ *   - low volatility (LOW tier or vol ≤ 2)
+ *
+ * PENALIZE when:
+ *   - line moved against projection
+ *   - sample size < 5
+ *   - high-variance market (vol ≥ 4 or volatile tag)
+ *   - blowout risk (significant favorite, large run total, game script dependency)
+ */
+function applySpecAlignedAdjustments(score, prop = {}) {
+  const boosts = [];
+  const penalties = [];
+
+  // BOOST: line movement supports projection.
+  if (prop.lineMovement?.supportsPick) {
+    boosts.push({ amount: 3, label: "line movement supports projection" });
+  }
+
+  // BOOST: cleared line in 3 of last 5 (≥60% hit rate on a ≥5-game sample).
+  const l5Hit = Number(prop.last5HitRate);
+  const sample = Number(prop.sampleSize) || 0;
+  if (Number.isFinite(l5Hit) && l5Hit >= 0.6 && sample >= 5) {
+    boosts.push({ amount: 4, label: "cleared 3+ of last 5" });
+  }
+  const l10Hit = Number(prop.last10HitRate ?? prop.recentHitRate);
+  if (Number.isFinite(l10Hit) && l10Hit >= 0.65 && sample >= 8) {
+    boosts.push({ amount: 2, label: "strong long-term hit rate" });
+  }
+
+  // BOOST: opponent ranked weak vs the prop type.
+  const opponentRank = Number(prop.opponentRank);
+  if (Number.isFinite(opponentRank) && opponentRank >= 22) {
+    boosts.push({ amount: 3, label: "weak opponent matchup" });
+  } else if (Number.isFinite(opponentRank) && opponentRank >= 18) {
+    boosts.push({ amount: 1.5, label: "below-average opponent" });
+  }
+
+  // BOOST: cross-source agreement (DFS line + sportsbook consensus).
+  const sportsbookBooks = Number(prop.sportsbookComparison?.books || 0);
+  if (sportsbookBooks >= 2) {
+    boosts.push({ amount: 2, label: "cross-book line agreement" });
+  } else if (sportsbookBooks === 1) {
+    boosts.push({ amount: 1, label: "sportsbook line available" });
+  }
+
+  // BOOST: low volatility.
+  const vol = Number(prop.volatility);
+  const volatilityTier = String(prop.volatilityTier || "");
+  if (volatilityTier === "LOW" || (Number.isFinite(vol) && vol <= 2)) {
+    boosts.push({ amount: 2, label: "low volatility" });
+  }
+
+  // PENALIZE: market moved against pick.
+  if (prop.lineMovement?.againstPick) {
+    penalties.push({ amount: 4, label: "line moved against projection" });
+  }
+
+  // PENALIZE: limited sample size.
+  if (sample > 0 && sample < 5) {
+    penalties.push({ amount: 3, label: "limited recent sample" });
+  }
+
+  // PENALIZE: high-variance market.
+  const movementTag = String(prop.lineMovementTag || prop.lineMovement?.tag || "").toLowerCase();
+  if (Number.isFinite(vol) && vol >= 4) {
+    penalties.push({ amount: 5, label: "high-variance market" });
+  } else if (movementTag === "volatile") {
+    penalties.push({ amount: 2, label: "volatile line market" });
+  }
+
+  // PENALIZE: blowout / game-script risk (pitcher props vulnerable to early pulls,
+  // hitter props vulnerable to lineup truncation in lopsided games).
+  const gameRunTotal = Number(prop.gameRunTotal ?? prop.runTotal ?? prop.totalRuns);
+  const spread = Math.abs(Number(prop.teamSpread ?? prop.spread ?? 0));
+  if (Number.isFinite(spread) && spread >= 2.5) {
+    penalties.push({ amount: 2, label: "blowout-risk game script" });
+  } else if (Number.isFinite(gameRunTotal) && gameRunTotal >= 11.5 && String(prop.statType || "").toLowerCase().includes("strikeout")) {
+    penalties.push({ amount: 2, label: "high-total game vs pitcher prop" });
+  }
+
+  const boostTotal = boosts.reduce((sum, item) => sum + item.amount, 0);
+  const penaltyTotal = penalties.reduce((sum, item) => sum + item.amount, 0);
+  const netDelta = clamp(boostTotal - penaltyTotal, -10, 10);
+  return {
+    score: score + netDelta,
+    boostLabels: boosts.map((b) => `+${b.amount} ${b.label}`),
+    penaltyLabels: penalties.map((p) => `−${p.amount} ${p.label}`),
+  };
+}
+
 function applyMlbConfidencePenalties(score, prop = {}) {
   const items = [];
 
@@ -675,7 +772,8 @@ export function calculateConfidenceScore(prop = {}, options = {}) {
   const isMlb = String(prop.sport || "").toUpperCase() === "MLB";
   if (isMlb) {
     const mlb = calculateMlbWeightedScore(prop);
-    const capped = applyConfidenceCaps(mlb.score, prop, options);
+    const adjusted = applySpecAlignedAdjustments(mlb.score, prop);
+    const capped = applyConfidenceCaps(adjusted.score, prop, options);
     const total = capped.score;
     const verifiedHistory =
       (finiteNumber(prop.sampleSize) || 0) >= 10 &&
@@ -690,6 +788,8 @@ export function calculateConfidenceScore(prop = {}, options = {}) {
       breakdown: mlb.breakdown,
       explanation: mlb.explanation,
       capReason: capped.capReason || "",
+      boostLabels: adjusted.boostLabels,
+      penaltyLabels: adjusted.penaltyLabels,
       verifiedHistory,
       strongData,
       rawTotal: mlb.score,

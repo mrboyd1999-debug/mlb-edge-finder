@@ -375,6 +375,55 @@ export function buildPickExplanation(prop = {}) {
     });
   }
 
+  const projectedProbability = Number(prop.projectedProbability ?? prop.confidenceScore);
+  if (Number.isFinite(projectedProbability)) {
+    const conf = Number(prop.confidenceScore ?? projectedProbability);
+    const probPct = projectedProbability > 1 ? projectedProbability : Math.round(projectedProbability * 100);
+    const evScore = Number(prop.expectedValueScore);
+    sections.push({
+      title: "Projected probability",
+      lines: [
+        `Model probability: ${Math.round(probPct)}%`,
+        Number.isFinite(conf) ? `Confidence: ${Math.round(conf)}/100` : null,
+        Number.isFinite(evScore) ? `Expected value score: ${Math.round(evScore)}/100` : null,
+      ].filter(Boolean),
+    });
+  }
+
+  const sportsbookComparison = prop.sportsbookComparison || signal.sportsbookComparison;
+  const bookLine = Number(prop.sportsbookLine ?? sportsbookComparison?.marketAverageLine);
+  const sportsbookEdge = Number(prop.sportsbookEdge);
+  if (Number.isFinite(bookLine) || prop.sportsbookEdgeLabel) {
+    const books = Number(sportsbookComparison?.books || prop.sportsbookBooksCount || 0);
+    sections.push({
+      title: "Sportsbook comparison",
+      lines: [
+        Number.isFinite(bookLine) ? `Sportsbook consensus: ${bookLine}` : null,
+        Number.isFinite(sportsbookEdge) ? `Sportsbook edge: ${sportsbookEdge > 0 ? "+" : ""}${sportsbookEdge}` : null,
+        books > 0 ? `Books surveyed: ${books}` : null,
+        prop.sportsbookEdgeDirection === "favorable"
+          ? "Books agree the line is soft in favour of the pick"
+          : prop.sportsbookEdgeDirection === "against"
+            ? "Books disagree with the DFS line"
+            : null,
+      ].filter(Boolean),
+    });
+  } else if ((prop.bookDisagreement?.summary || "").length) {
+    sections.push({
+      title: "Sportsbook comparison",
+      lines: [prop.bookDisagreement.summary],
+    });
+  }
+
+  const boostLabels = prop.confidenceBoostLabels || [];
+  const penaltyLabels = prop.confidencePenaltyLabels || [];
+  if (boostLabels.length || penaltyLabels.length) {
+    sections.push({
+      title: "Confidence adjustments",
+      lines: [...boostLabels, ...penaltyLabels],
+    });
+  }
+
   return sections;
 }
 

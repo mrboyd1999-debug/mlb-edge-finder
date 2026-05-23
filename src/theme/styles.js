@@ -114,6 +114,7 @@ export const styles = {
     padding: "8px",
     minWidth: 0,
     cursor: "pointer",
+    transition: "border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease",
   },
   cardMobileTight: {
     padding: "6px 7px",

@@ -141,6 +141,8 @@ export function calculateProjectionConfidence(prop = {}, options = {}) {
     historicalPenalty,
     marketModel: base.marketModel || null,
     marketModelLabel: base.marketModelLabel || null,
+    confidenceBoostLabels: base.boostLabels || [],
+    confidencePenaltyLabels: base.penaltyLabels || [],
     volatilityTier: base.volatilityTier || getPropVolatilityTier(prop),
     projectionAgreement: base.projectionAgreement ?? null,
     meetsVolatilityRequirements: base.meetsVolatilityRequirements ?? meetsVolatilityTierRequirements({ ...prop, projectionAgreement: base.projectionAgreement }, score),

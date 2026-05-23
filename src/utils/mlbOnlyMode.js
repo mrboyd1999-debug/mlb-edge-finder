@@ -2,26 +2,17 @@ import { APP_SPORTS } from "./marketClassification.js";
 import { canonicalMarketKey } from "./marketNormalization.js";
 
 /**
- * Temporary product scope: MLB-only decision engine.
- * Set to false to re-enable multi-sport pipelines without restoring deleted code.
+ * Multi-sport decision engine (MLB primary, NBA/WNBA/Tennis/Soccer enabled).
  *
- * Multi-sport expansion checklist (DO NOT enable yet):
- *   1. Flip MLB_ONLY_MODE → false.
- *   2. Add a `<sport>QualityTier` map to this file (mirror MLB_QUALITY_*_KEYS).
- *   3. Register the sport's market keys in `src/utils/approvedMarkets.js`
- *      (`APPROVED_MARKET_KEYS[sport]` and `SPORT_PROCESSING_LIMITS[sport]`).
- *   4. Add provider mappings (PrizePicks/Underdog) — both services already
- *      branch off `prop.sport`, so adding a sport requires no parser changes.
- *   5. Add Odds API `SPORT_KEYS[sport]` entry in `src/services/sportsbookOdds.js`
- *      so consensus-line comparison works.
- *   6. Add market models in `src/services/marketConfidenceModels.js` if the
- *      sport needs custom scoring (NBA/PRA already lives there as a stub).
+ * Verified-line + provider-data guards still apply — sports without any live
+ * verified props simply render no cards. This avoids placeholders or mock
+ * data when a sport is out of season.
  *
- * The qualification pipeline, confidence engine, and Top Picks selection are
- * sport-agnostic — they only consult tier/volatility helpers that are
- * branched on `prop.sport`, so no rewrite is needed when MLB-only is flipped.
+ * To revert to MLB-only mode, flip this constant back to `true` — every
+ * downstream consumer reads the same flag and will narrow ingestion, fetch,
+ * and rendering automatically.
  */
-export const MLB_ONLY_MODE = true;
+export const MLB_ONLY_MODE = false;
 
 export const MLB_SPORT = APP_SPORTS.MLB;
 

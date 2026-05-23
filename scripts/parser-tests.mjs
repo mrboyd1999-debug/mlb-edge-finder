@@ -699,8 +699,12 @@ const nbaProjection = projectPlayerProp(
     injury: { risk: "Low" },
   }
 );
-assert.ok(nbaProjection.projectedValue == null, "NBA projection disabled in MLB-only mode");
-assert.ok((nbaProjection.projectionReasoning || []).some((line) => /MLB-only/i.test(line)), "NBA projection explains MLB-only disable");
+if (MLB_ONLY_MODE) {
+  assert.ok(nbaProjection.projectedValue == null, "NBA projection disabled in MLB-only mode");
+  assert.ok((nbaProjection.projectionReasoning || []).some((line) => /MLB-only/i.test(line)), "NBA projection explains MLB-only disable");
+} else {
+  assert.ok(Number.isFinite(Number(nbaProjection.projectedValue)), "NBA projection enabled in multi-sport mode");
+}
 
 const tennisProjection = projectPlayerProp(
   { sport: "ATP Tennis", statType: "Aces", line: 8.5, playerName: "Test Server", opponent: "Returner", league: "Wimbledon" },
@@ -717,7 +721,11 @@ const tennisProjection = projectPlayerProp(
     },
   }
 );
-assert.ok(tennisProjection.projectedValue == null, "Tennis projection disabled in MLB-only mode");
+if (MLB_ONLY_MODE) {
+  assert.ok(tennisProjection.projectedValue == null, "Tennis projection disabled in MLB-only mode");
+} else {
+  assert.ok(Number.isFinite(Number(tennisProjection.projectedValue)), "Tennis projection enabled in multi-sport mode");
+}
 
 const projectedConfidence = calculateConfidenceScore({
   sport: "MLB",
@@ -883,14 +891,16 @@ assert.equal(sortedBoard[0].playerName, "Higher EV");
 assert.ok(isTopPickEligible({ ...decisionProp, confidenceScore: 74, dataQualityScore: 72 }));
 assert.equal(isTopPickEligible({ ...decisionProp, confidenceScore: 60 }), false);
 
-assert.equal(MLB_ONLY_MODE, true, "app should run in MLB-only mode");
 assert.ok(isApprovedMarket({ sport: "MLB", statType: "Total Bases", marketKey: "totalBases" }));
 assert.ok(isApprovedMarket({ sport: "MLB", statType: "Home Runs", marketKey: "homeRuns" }));
-assert.equal(isApprovedMarket({ sport: "NBA", statType: "Points", marketKey: "points" }), false);
+if (MLB_ONLY_MODE) {
+  assert.equal(isApprovedMarket({ sport: "NBA", statType: "Points", marketKey: "points" }), false);
+} else {
+  assert.ok(isApprovedMarket({ sport: "NBA", statType: "Points", marketKey: "points" }));
+}
 
 assert.ok(isApprovedMarket({ sport: "MLB", statType: "Pitcher Strikeouts", marketKey: "strikeouts" }));
 assert.equal(isApprovedMarket({ sport: "MLB", statType: "Steals", marketKey: "steals" }), false);
-assert.equal(isApprovedMarket({ sport: "NBA", statType: "Points", marketKey: "points" }), false);
 assert.ok(isApprovedMarketInRegistry({ sport: "NBA", statType: "Points", marketKey: "points" }));
 assert.equal(filterApprovedMarketsOnly([
   { sport: "MLB", statType: "Pitcher Strikeouts", marketKey: "strikeouts" },

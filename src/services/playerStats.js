@@ -259,6 +259,8 @@ async function fetchMlbProfileLive(playerName, cacheKey) {
   const profile = {
     playerName: player.fullName || playerName,
     playerImage: player.id ? `https://img.mlbstatic.com/mlb-photos/image/upload/w_213,q_100/v1/people/${player.id}/headshot/67/current` : "",
+    mlbId: player.id || null,
+    playerId: player.id || null,
     splits: latest,
   };
   writeSmartCache("mlb-stats", cacheKey, profile, { source: "mlb-stats-api" });

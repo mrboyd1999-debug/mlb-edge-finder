@@ -2,7 +2,11 @@
 
 PrizePicks + Underdog reference tool for finding safer MLB prop picks and tracking saved results. The app is a reference tool only; it does not place picks or manage a real streak.
 
-**Current mode:** MLB-only with verified sportsbook props, cache fallback, and rate-limit protection.
+**Current mode:** MLB primary with NBA, WNBA, Tennis, and Soccer enabled
+(`MLB_ONLY_MODE = false`). Verified sportsbook props, cache fallback, and
+rate-limit protection still apply — sports without live verified props simply
+render no cards. The board auto-refreshes silently every 90 seconds and
+respects per-source cooldowns to avoid hitting provider rate limits.
 
 ## Install
 

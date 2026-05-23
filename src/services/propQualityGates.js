@@ -7,31 +7,38 @@ export function isPositiveEdge(prop = {}) {
 }
 
 /**
- * Relaxed acceptance thresholds — keep extremely bad props out without wiping the board.
- * SAFE >= 65, PLAYABLE >= 52, VALUE >= 48 (with positive edge), RESEARCH below 48.
+ * Strict acceptance thresholds — confidence ≥ 58, EV score ≥ 85, DQ ≥ 50,
+ * volatility must not be HIGH. Adaptive softening below catches the case
+ * where the strict pool is empty so the board never goes to zero.
  */
 export const QUALITY_THRESHOLDS = {
-  ACCEPTED_MIN_CONFIDENCE: 48,
-  VALUE_MIN_CONFIDENCE: 48,
-  PLAYABLE_MIN_CONFIDENCE: 52,
-  READY_MIN_CONFIDENCE: 58,
-  SAFE_MIN_CONFIDENCE: 65,
-  TOP_PICK_MIN_CONFIDENCE: 65,
-  ELITE_MIN_CONFIDENCE: 72,
-  RESEARCH_MAX_CONFIDENCE: 48,
-  MIN_MEANINGFUL_EDGE: 0.2,
+  ACCEPTED_MIN_CONFIDENCE: 58,
+  VALUE_MIN_CONFIDENCE: 58,
+  PLAYABLE_MIN_CONFIDENCE: 60,
+  READY_MIN_CONFIDENCE: 62,
+  SAFE_MIN_CONFIDENCE: 70,
+  TOP_PICK_MIN_CONFIDENCE: 68,
+  ELITE_MIN_CONFIDENCE: 75,
+  RESEARCH_MAX_CONFIDENCE: 58,
+  MIN_MEANINGFUL_EDGE: 0.25,
   HIGH_VOLATILITY_NUM: 4.0,
   SEVERE_VOLATILITY_NUM: 4.75,
-  MIN_EV_SCORE: 35,
+  MIN_EV_SCORE: 85,
+  MIN_DATA_QUALITY: 50,
   CATASTROPHIC_LINE_MOVE: 1.25,
 };
 
-/** Auto-soften thresholds when accepted count is critically low. */
+/**
+ * Auto-soften thresholds when the strict pool would leave fewer than ~3
+ * accepted props. Keeps verified-only protection intact and only loosens the
+ * confidence / EV / data-quality floors.
+ */
 export const RELAXED_THRESHOLDS = {
-  ACCEPTED_MIN_CONFIDENCE: 44,
-  VALUE_MIN_CONFIDENCE: 44,
-  MIN_MEANINGFUL_EDGE: 0.15,
-  MIN_EV_SCORE: 28,
+  ACCEPTED_MIN_CONFIDENCE: 50,
+  VALUE_MIN_CONFIDENCE: 50,
+  MIN_MEANINGFUL_EDGE: 0.18,
+  MIN_EV_SCORE: 40,
+  MIN_DATA_QUALITY: 38,
 };
 
 export const DYNAMIC_TIER_LABELS = {
@@ -62,12 +69,17 @@ export function hasMatchupData(prop = {}) {
   return false;
 }
 
-export function hasNegativeEv(prop = {}) {
+export function hasNegativeEv(prop = {}, minEvScore = QUALITY_THRESHOLDS.MIN_EV_SCORE) {
   const ev = Number(prop.expectedValue ?? prop.modelSignal?.expectedValue);
   if (Number.isFinite(ev) && ev < -0.05) return true;
   const evScore = Number(prop.expectedValueScore ?? prop.modelSignal?.expectedValueScore);
-  if (Number.isFinite(evScore) && evScore < QUALITY_THRESHOLDS.MIN_EV_SCORE) return true;
+  if (Number.isFinite(evScore) && evScore < minEvScore) return true;
   return false;
+}
+
+export function getDataQualityScore(prop = {}) {
+  const dq = Number(prop.dataQualityScore ?? prop.modelSignal?.dataQualityScore);
+  return Number.isFinite(dq) ? dq : null;
 }
 
 export function hasPositiveEv(prop = {}) {
@@ -119,7 +131,7 @@ export function dynamicAcceptanceTier(prop = {}) {
   const conf = confidenceValue(prop);
   const positiveEdge = isPositiveEdge(prop);
   if (conf >= QUALITY_THRESHOLDS.SAFE_MIN_CONFIDENCE) return DYNAMIC_TIER_LABELS.SAFE;
-  if (conf >= QUALITY_THRESHOLDS.PLAYABLE_MIN_CONFIDENCE) return DYNAMIC_TIER_LABELS.PLAYABLE;
+  if (conf >= QUALITY_THRESHOLDS.PLAYABLE_MIN_CONFIDENCE && positiveEdge) return DYNAMIC_TIER_LABELS.PLAYABLE;
   if (conf >= QUALITY_THRESHOLDS.VALUE_MIN_CONFIDENCE && positiveEdge) return DYNAMIC_TIER_LABELS.VALUE;
   return DYNAMIC_TIER_LABELS.RESEARCH;
 }
@@ -137,12 +149,21 @@ function lineMovementBlocksAcceptance(prop = {}) {
 }
 
 /**
- * Accepted-prop quality — confidence ≥ 48, positive or zero edge, verified line, not expired.
- * Verified stats, matchup data, and positive EV are preferred but no longer hard blockers.
+ * Strict accepted-prop quality gates:
+ *   confidence ≥ ACCEPTED_MIN_CONFIDENCE (58)
+ *   EV score ≥ MIN_EV_SCORE (85)
+ *   data quality ≥ MIN_DATA_QUALITY (50)
+ *   volatility label not HIGH
+ *   verified live line + not expired/research-only
+ *
+ * Callers can override individual floors via `options` (used by the adaptive
+ * softening loop in `filterAcceptedQualityProps` to backfill the board if the
+ * strict pool would otherwise be empty).
  */
 export function meetsAcceptedPropQuality(prop = {}, options = {}) {
   if (!isVerifiedSportsbookProp(prop)) return false;
   if (isStaleOrExpiredLine(prop)) return false;
+
   const minConfidence = options.minConfidence ?? QUALITY_THRESHOLDS.ACCEPTED_MIN_CONFIDENCE;
   if (confidenceValue(prop) < minConfidence) return false;
 
@@ -157,7 +178,20 @@ export function meetsAcceptedPropQuality(prop = {}, options = {}) {
   const vol = Number(prop.volatility);
   if (Number.isFinite(vol) && vol >= QUALITY_THRESHOLDS.SEVERE_VOLATILITY_NUM) return false;
 
-  if (hasNegativeEv(prop) && confidenceValue(prop) < QUALITY_THRESHOLDS.SAFE_MIN_CONFIDENCE) return false;
+  // HIGH volatility blocks acceptance unless confidence is in the elite band.
+  if (getVolatilityLabel(prop) === "HIGH" && confidenceValue(prop) < QUALITY_THRESHOLDS.ELITE_MIN_CONFIDENCE) {
+    return false;
+  }
+
+  const minEv = options.minEvScore ?? QUALITY_THRESHOLDS.MIN_EV_SCORE;
+  if (hasNegativeEv(prop, minEv)) {
+    // Elite confidence can still rescue a sub-EV prop.
+    if (confidenceValue(prop) < QUALITY_THRESHOLDS.ELITE_MIN_CONFIDENCE) return false;
+  }
+
+  const minDq = options.minDataQuality ?? QUALITY_THRESHOLDS.MIN_DATA_QUALITY;
+  const dq = getDataQualityScore(prop);
+  if (Number.isFinite(dq) && dq < minDq) return false;
 
   return !lineMovementBlocksAcceptance(prop);
 }
@@ -187,18 +221,34 @@ export function comparePropQuality(a = {}, b = {}) {
   return lineStabilityScore(b) - lineStabilityScore(a);
 }
 
-/** Auto-soften acceptance when the pool would otherwise be empty. Always keeps verified-only. */
+/**
+ * Auto-soften acceptance when the strict pool would leave fewer than 3 props.
+ * Keeps verified-only protection, just lowers confidence / edge / EV / DQ
+ * floors progressively. Level 3 falls all the way back to RELAXED_THRESHOLDS.
+ */
 function relaxedOptions(level = 0) {
   if (level <= 0) return {};
   if (level === 1) {
     return {
-      minConfidence: 46,
-      minEdge: 0.18,
+      minConfidence: 54,
+      minEdge: 0.22,
+      minEvScore: 70,
+      minDataQuality: 45,
+    };
+  }
+  if (level === 2) {
+    return {
+      minConfidence: 50,
+      minEdge: 0.2,
+      minEvScore: 55,
+      minDataQuality: 42,
     };
   }
   return {
     minConfidence: RELAXED_THRESHOLDS.ACCEPTED_MIN_CONFIDENCE,
     minEdge: RELAXED_THRESHOLDS.MIN_MEANINGFUL_EDGE,
+    minEvScore: RELAXED_THRESHOLDS.MIN_EV_SCORE,
+    minDataQuality: RELAXED_THRESHOLDS.MIN_DATA_QUALITY,
   };
 }
 
@@ -207,8 +257,7 @@ export function filterAcceptedQualityProps(props = [], options = {}) {
   let accepted = cleaned.filter((prop) => meetsAcceptedPropQuality(prop, options)).sort(comparePropQuality);
   if (accepted.length >= 3 || options.skipAutoSoften) return accepted;
 
-  // Auto-soften — keep verified-only protection, just lower confidence/edge floors.
-  for (let level = 1; level <= 2 && accepted.length < 5; level += 1) {
+  for (let level = 1; level <= 3 && accepted.length < 5; level += 1) {
     const merged = { ...options, ...relaxedOptions(level) };
     accepted = cleaned.filter((prop) => meetsAcceptedPropQuality(prop, merged)).sort(comparePropQuality);
   }

@@ -1404,7 +1404,7 @@ export default function DFSPropsApp() {
       }
 
       loadInFlightRef.current = true;
-      setLoading(true);
+      if (!autoRefresh) setLoading(true);
       setError("");
       setLearningSaveNotice("");
       const fetchStartedAt = Date.now();
@@ -2285,11 +2285,15 @@ export default function DFSPropsApp() {
 
       <NearMissBoard picks={nearMissProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
 
-      <QualificationAnalyticsPanel analytics={qualificationAnalytics} loading={loading} />
+      {isDebugPanelEnabled() ? (
+        <>
+          <QualificationAnalyticsPanel analytics={qualificationAnalytics} loading={loading} />
 
-      <CacheAnalyticsPanel analytics={cacheAnalytics} cacheNotice={cacheNotice} loading={loading} />
+          <CacheAnalyticsPanel analytics={cacheAnalytics} cacheNotice={cacheNotice} loading={loading} />
 
-      <RejectionAnalyticsPanel summary={rejectionAnalytics} samples={rejectionSamples} loading={loading} />
+          <RejectionAnalyticsPanel summary={rejectionAnalytics} samples={rejectionSamples} loading={loading} />
+        </>
+      ) : null}
 
       <section style={styles.section} aria-label="Best Value board">
         <div style={styles.sectionHeading}>
@@ -2799,6 +2803,8 @@ function scoreDFSProp(prop, context) {
     playerImage: prop.playerImage || enriched?.playerImage || enriched?.headshot || enriched?.imageUrl || "",
     headshot: prop.headshot || enriched?.headshot || enriched?.playerImage || "",
     imageUrl: prop.imageUrl || enriched?.imageUrl || enriched?.playerImage || "",
+    mlbId: prop.mlbId || enriched?.mlbId || enriched?.profile?.mlbId || null,
+    playerId: prop.playerId || enriched?.playerId || enriched?.profile?.playerId || null,
     projection,
     projectedValue: Number.isFinite(projection) ? round(projection) : null,
     projectionSource,
