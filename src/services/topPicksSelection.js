@@ -162,7 +162,29 @@ function selectFromBand(eligible = [], minBand = 0) {
 }
 
 /**
- * Final Top 2 render selection from already-accepted props.
+ * Rank Top 2 from verified props — strict quality first, then score-based fallback.
+ */
+export function selectTopPicksFromVerifiedPool(props = [], limit = 2) {
+  const pool = (Array.isArray(props) ? props : []).filter(isVerifiedSportsbookProp);
+  if (!pool.length) return [];
+
+  const strict = selectTopPicks(pool, limit);
+  if (strict.length) return strict;
+
+  return [...pool]
+    .sort(
+      (a, b) =>
+        Number(b.decisionRankScore ?? b.priorityScore ?? b.weightedScore ?? b.confidenceScore ?? 0) -
+          Number(a.decisionRankScore ?? a.priorityScore ?? a.weightedScore ?? a.confidenceScore ?? 0) ||
+        Number(b.edge || 0) - Number(a.edge || 0) ||
+        String(a.playerName || "").localeCompare(String(b.playerName || ""))
+    )
+    .slice(0, limit)
+    .map((prop) => annotateRenderedPick(prop, true));
+}
+
+/**
+ * Final Top 2 render selection from verified props.
  * Does NOT re-run qualification — only safety filters and tier-priority ranking.
  */
 export function selectTopPicks(acceptedProps = [], limit = 2) {

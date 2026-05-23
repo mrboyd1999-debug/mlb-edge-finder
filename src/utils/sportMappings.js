@@ -50,6 +50,49 @@ export function sportFromPrizePicksLeague(leagueRecord = {}, leagueId = "") {
   return inferSportFromText(text);
 }
 
+/** Canonical app sport label from prop sport/league/text aliases. */
+export function normalizeSportLabel(value = "", league = "") {
+  const text = `${value} ${league}`.trim();
+  if (!text) return "";
+  const inferred = inferSportFromText(text, { league });
+  if (inferred && inferred !== "Unsupported") return inferred;
+  return String(value || "").trim();
+}
+
+const SPORT_EQUIVALENTS = {
+  MLB: new Set(["mlb", "baseball", "majorleaguebaseball"]),
+  NBA: new Set(["nba", "basketball"]),
+  WNBA: new Set(["wnba", "women's basketball", "womens basketball"]),
+  NFL: new Set(["nfl", "football"]),
+  NCAAF: new Set(["ncaaf", "college football"]),
+  NHL: new Set(["nhl", "hockey"]),
+  Soccer: new Set(["soccer", "football", "epl", "mls", "laliga", "premier"]),
+  "ATP Tennis": new Set(["atp", "tennis", "mens tennis", "men's tennis"]),
+  "WTA Tennis": new Set(["wta", "women's tennis", "womens tennis"]),
+};
+
+function sportToken(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+export function sportLabelsMatch(propSport = "", selectedSport = "", propLeague = "") {
+  if (!selectedSport || selectedSport === "all") return true;
+  const propCanonical = normalizeSportLabel(propSport, propLeague);
+  const selectedCanonical = normalizeSportLabel(selectedSport);
+  if (propCanonical && selectedCanonical && propCanonical === selectedCanonical) return true;
+
+  const propToken = sportToken(propSport || propLeague);
+  const selectedToken = sportToken(selectedCanonical);
+  if (propToken && selectedToken && propToken === selectedToken) return true;
+
+  const aliases = SPORT_EQUIVALENTS[selectedCanonical];
+  if (aliases && propToken && aliases.has(propToken)) return true;
+
+  return propSport === selectedSport;
+}
+
 export function inferSportFromText(text = "", context = {}) {
   const key = String(text || "").toLowerCase();
   const compact = key.replace(/[^a-z0-9]/g, "");

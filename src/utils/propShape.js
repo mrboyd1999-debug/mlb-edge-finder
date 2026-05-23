@@ -37,13 +37,14 @@ export function isUsableParsedProp(prop = {}) {
   if (!prop || typeof prop !== "object") return false;
   const shaped = normalizePropShape(prop);
   const line = Number(shaped.line);
+  const sportOrLeague = shaped.sport || shaped.league;
   return (
     shaped.playerName.length >= 2 &&
-    Boolean(shaped.sport) &&
+    Boolean(sportOrLeague) &&
     Boolean(shaped.market) &&
     Number.isFinite(line) &&
     line > 0 &&
-    Boolean(shaped.source)
+    Boolean(shaped.source || shaped.platform)
   );
 }
 

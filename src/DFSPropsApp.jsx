@@ -169,8 +169,14 @@ import {
   resolveFinalAcceptedPropsFromHydrated,
   selectTopPicksFromAccepted,
 } from "./utils/resolveAcceptedPropsForRender.js";
-import { selectTopPicks } from "./services/topPicksSelection.js";
+import { selectTopPicksFromVerifiedPool } from "./services/topPicksSelection.js";
 import { countUsableProps, normalizePropShape } from "./utils/propShape.js";
+import {
+  buildPipelineStageReport,
+  buildUsablePropsPool,
+  logPipelineStageReport,
+  samplePropsAtStage,
+} from "./utils/propPipelineStages.js";
 import { styles } from "./theme/styles.js";
 import {
   formatDateTime, formatLeanSide, formatMultiplier, formatNumber, formatMaybeLine,
@@ -212,6 +218,7 @@ import { canonicalStatType } from "./utils/marketNormalization.js";
 import {
   filterVerifiedSportsbookProps,
   isVerifiedSportsbookProp,
+  attachSportsbookVerifiedFields,
   NO_VERIFIED_PROPS_MESSAGE,
   validateAndFilterProps,
   validateProp,
@@ -242,6 +249,7 @@ const NEEDS_STATS_MESSAGE = "This prop needs more stats before a confident pick 
 const STREAK_WARNING = "Low multiplier does not guarantee the pick will hit. Verify before adding to streak.";
 const NO_ACTIVE_SCHEDULED_PROPS_MESSAGE = NO_VERIFIED_PROPS_MESSAGE;
 const EMPTY_PARSED_MESSAGE = "Connected but no usable props parsed. Check API Health raw vs parsed counts.";
+const PIPELINE_FALLBACK_MESSAGE = "Fallback mode: displaying usable props without advanced filtering.";
 const INCLUDE_UNCERTAIN_KEY = "dfs-include-uncertain-props";
 const FILTER_PREFS_KEY = "dfs-filter-prefs";
 const COMPACT_MODE_KEY = "dfs-compact-mode";
@@ -1046,18 +1054,54 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     logFilteredProp,
   });
   const { slateProps, canonicalProps, activeProps, normalProps } = filtered;
+  const usablePropsPool = buildUsablePropsPool(rawProps);
+  let pipelineFallback = false;
+  let workingActiveProps = activeProps;
+  let workingNormalProps = normalProps;
+
+  const verifiedFromUsable = filterVerifiedSportsbookProps(usablePropsPool);
+
+  let pipelineStageCounts = buildPipelineStageReport({
+    totalFetched: rawProps.length,
+    normalized: Math.max(pipelineAudit.normalized, canonicalProps.length, usablePropsPool.length),
+    verified: Math.max(canonicalProps.length, verifiedFromUsable.length),
+    sportFiltered: slateProps.length,
+    scoreFiltered: 0,
+    finalDisplayed: 0,
+    samples: {
+      totalFetched: samplePropsAtStage(rawProps),
+      normalized: samplePropsAtStage(usablePropsPool.length ? usablePropsPool : canonicalProps),
+      verified: samplePropsAtStage(verifiedFromUsable.length ? verifiedFromUsable : canonicalProps),
+      sportFiltered: samplePropsAtStage(slateProps),
+    },
+  });
+  logPipelineStageReport(pipelineStageCounts, "Prop Pipeline");
+
+  if (!workingActiveProps.length && usablePropsPool.length > 0) {
+    pipelineFallback = true;
+    workingActiveProps = usablePropsPool;
+    workingNormalProps = usablePropsPool.slice(0, MAX_PRE_SCORE_PROPS);
+    sourceWarnings.push(PIPELINE_FALLBACK_MESSAGE);
+  }
+
   pipelineAudit.normalized = Math.max(pipelineAudit.normalized, canonicalProps.length);
-  pipelineAudit.active = activeProps.length;
-  pipelineAudit.preScoring = normalProps.length;
-  pipelineAudit.preScoringTotal = filtered.preScorePool.length;
-  attachSourceFilterCounts(debugInfo, { rawProps: canonicalProps, activeProps, normalProps, slateProps });
+  pipelineAudit.active = workingActiveProps.length;
+  pipelineAudit.preScoring = workingNormalProps.length;
+  pipelineAudit.preScoringTotal = workingNormalProps.length;
+  attachSourceFilterCounts(debugInfo, {
+    rawProps: canonicalProps.length ? canonicalProps : usablePropsPool,
+    activeProps: workingActiveProps,
+    normalProps: workingNormalProps,
+    slateProps,
+  });
   debugInfo.pipelineAudit = pipelineAudit;
+  debugInfo.usablePropsCount = usablePropsPool.length;
   debugInfo.upcomingSlateCount = pipelineAudit.upcomingSlate;
   debugInfo.slateExcludedCount = pipelineAudit.slateExcluded;
   debugInfo.pregameWindowHours = filterOptions.pregameWindowHours ?? DEFAULT_PREGAME_WINDOW_HOURS;
   if (shouldLogVerbose()) logPipelineAudit("board", pipelineAudit);
 
-  if (!activeProps.length) {
+  if (!workingActiveProps.length && !usablePropsPool.length) {
     debugInfo.totals = {
       rawPropsLoaded: canonicalProps.length,
       upcomingSlateCount: pipelineAudit.upcomingSlate,
@@ -1087,6 +1131,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     });
     return {
       props: [],
+      usableProps: [],
+      pipelineFallback: false,
+      pipelineStageCounts,
       watchlist: [],
       streakProps: [],
       sourceStatus: finalStatus,
@@ -1100,9 +1147,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   }
 
   const backgroundJobs = [
-    { label: "sportsbook", run: () => fetchSportsbookComparison({ props: normalProps }) },
-    { label: "stats", run: () => fetchPlayerStats({ props: normalProps }) },
-    { label: "news", run: () => fetchInjuryNews({ props: normalProps }) },
+    { label: "sportsbook", run: () => fetchSportsbookComparison({ props: workingNormalProps }) },
+    { label: "stats", run: () => fetchPlayerStats({ props: workingNormalProps }) },
+    { label: "news", run: () => fetchInjuryNews({ props: workingNormalProps }) },
   ];
   const settledBackground = await Promise.allSettled(backgroundJobs.map((job) => job.run()));
   const background = {
@@ -1171,9 +1218,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     backgroundWarnings.push("Some data sources failed, but available props are still shown.");
   }
 
-  const lineComparisonMap = buildLineComparisonMap(normalProps);
+  const lineComparisonMap = buildLineComparisonMap(workingNormalProps);
   const sportsbookComparisonMap = buildSportsbookComparisonMap(background.comparisons);
-  const lineMovementMap = updateLineMovementMap(activeProps, sportsbookComparisonMap);
+  const lineMovementMap = updateLineMovementMap(workingActiveProps, sportsbookComparisonMap);
   const scoringContext = {
     stats: background.stats,
     news: background.news,
@@ -1187,8 +1234,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   const historyWeights = buildHistoryAccuracyWeights(historyRows);
   const scoredProps = [];
   const scoreCache = new Map();
-  for (let index = 0; index < normalProps.length; index += 75) {
-    const batch = normalProps.slice(index, index + 75);
+  for (let index = 0; index < workingNormalProps.length; index += 75) {
+    const batch = workingNormalProps.slice(index, index + 75);
     batch.forEach((prop) => {
       const cacheKey = `${prop.id}|${prop.line}|${prop.statType}|${prop.platform}`;
       let scored = scoreCache.get(cacheKey);
@@ -1218,23 +1265,59 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       }
       scoredProps.push(scored);
     });
-    if (index + 75 < normalProps.length) await yieldToMainThread();
+    if (index + 75 < workingNormalProps.length) await yieldToMainThread();
   }
   pipelineAudit.scored = scoredProps.length;
   pipelineAudit = attachDecisionDebug(pipelineAudit, scoredProps);
 
-  let qualBoards = buildQualificationBoards(scoredProps.filter(isVerifiedSportsbookProp), pipelineAudit, historyRows);
+  pipelineStageCounts = buildPipelineStageReport({
+    ...pipelineStageCounts,
+    scoreFiltered: scoredProps.length,
+    samples: {
+      ...pipelineStageCounts.samples,
+      scoreFiltered: samplePropsAtStage(scoredProps),
+    },
+  });
 
-  const displayProps = filterVerifiedSportsbookProps(
+  let qualBoards = buildQualificationBoards(
+    scoredProps.length ? scoredProps.filter(isVerifiedSportsbookProp) : filterVerifiedSportsbookProps(workingNormalProps),
+    pipelineAudit,
+    historyRows
+  );
+
+  let displayProps = filterVerifiedSportsbookProps(
     [...qualBoards.ready, ...qualBoards.allDisplayable.filter((prop) => !qualBoards.ready.some((ready) => ready.id === prop.id))]
   ).slice(0, MAX_RANKED_PROPS);
+
+  if (!displayProps.length && usablePropsPool.length > 0) {
+    pipelineFallback = true;
+    displayProps = usablePropsPool.slice(0, MAX_RANKED_PROPS);
+    if (!sourceWarnings.includes(PIPELINE_FALLBACK_MESSAGE)) {
+      sourceWarnings.push(PIPELINE_FALLBACK_MESSAGE);
+    }
+  }
+
+  pipelineStageCounts = buildPipelineStageReport({
+    ...pipelineStageCounts,
+    finalDisplayed: displayProps.length,
+    samples: {
+      ...pipelineStageCounts.samples,
+      finalDisplayed: samplePropsAtStage(displayProps),
+    },
+  });
+  logPipelineStageReport(pipelineStageCounts, "Prop Pipeline Final");
+  debugInfo.pipelineStageCounts = pipelineStageCounts;
+  debugInfo.pipelineFallback = pipelineFallback;
   const watchlistProps = [];
   const nearQualification = qualBoards.near.slice(0, 15);
-  const qualifiedReadyProps = qualBoards.ready.slice(0, RENDER_LIMITS.readyToBet);
+  let qualifiedReadyProps = qualBoards.ready.slice(0, RENDER_LIMITS.readyToBet);
+  if (!qualifiedReadyProps.length && displayProps.length) {
+    qualifiedReadyProps = sortDecisionBoard(displayProps).slice(0, RENDER_LIMITS.readyToBet);
+  }
   const acceptedPropsForRender = qualifiedReadyProps;
   const modelSignalMap = buildModelSignalMap(filterVerifiedSportsbookProps(qualBoards.allDisplayable));
   const streakProps = filterVerifiedSportsbookProps(
-    buildStreakFinderProps(activeProps, modelSignalMap, lineMovementMap).sort(sortStreakProps)
+    buildStreakFinderProps(workingActiveProps, modelSignalMap, lineMovementMap).sort(sortStreakProps)
   ).slice(0, MAX_STREAK_PROPS);
   attachScoredSourceCounts(debugInfo, {
     recommendedProps: displayProps,
@@ -1245,8 +1328,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     rawPropsLoaded: canonicalProps.length,
     upcomingSlateCount: pipelineAudit.upcomingSlate,
     slateExcludedCount: pipelineAudit.slateExcluded,
-    activeProps: activeProps.length,
-    propsAfterFilters: normalProps.length,
+    activeProps: workingActiveProps.length,
+    propsAfterFilters: workingNormalProps.length,
     recommendedProps: displayProps.length,
     watchlistProps: watchlistProps.length,
     nearQualification: nearQualification.length,
@@ -1298,11 +1381,14 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
   return {
     props: uiPayload.props,
+    usableProps: usablePropsPool,
+    pipelineFallback,
+    pipelineStageCounts,
     watchlist: uiPayload.watchlist,
     nearQualification,
     qualifiedReadyProps,
     acceptedPropsForRender,
-    displayPool: qualBoards.allDisplayable,
+    displayPool: qualBoards.allDisplayable.length ? qualBoards.allDisplayable : displayProps,
     readyProps: qualifiedReadyProps,
     streakProps: uiPayload.streakProps,
     sourceStatus: finalStatus,
@@ -1332,6 +1418,9 @@ export default function DFSPropsApp() {
     value: INITIAL_VISIBLE_SECTION_LIMIT,
   }));
   const [props, setProps] = useState([]);
+  const [usableProps, setUsableProps] = useState([]);
+  const [pipelineFallback, setPipelineFallback] = useState(false);
+  const [pipelineStageCounts, setPipelineStageCounts] = useState({});
   const [watchlist, setWatchlist] = useState([]);
   const [nearQualification, setNearQualification] = useState([]);
   const [qualifiedReadyProps, setQualifiedReadyProps] = useState([]);
@@ -1389,9 +1478,12 @@ export default function DFSPropsApp() {
 
   const applyBoardState = useCallback((board, cacheLayer = "fresh") => {
     const scopedBoard = sanitizeBoardForMlbOnly(board || {});
-    const boardProps = scopedBoard.props || [];
+    const boardProps = scopedBoard.props?.length ? scopedBoard.props : scopedBoard.usableProps || [];
     const boardSourceStatus = finalizeSourceStatus(scopedBoard.sourceStatus || DEFAULT_SOURCE_STATUS);
     setProps(boardProps);
+    setUsableProps(scopedBoard.usableProps || boardProps);
+    setPipelineFallback(Boolean(scopedBoard.pipelineFallback || scopedBoard.debugInfo?.pipelineFallback));
+    setPipelineStageCounts(scopedBoard.pipelineStageCounts || scopedBoard.debugInfo?.pipelineStageCounts || {});
     setWatchlist(scopedBoard.watchlist || []);
     setNearQualification(scopedBoard.nearQualification || []);
     let renderAccepted =
@@ -1493,7 +1585,7 @@ export default function DFSPropsApp() {
 
         if (!force && !autoRefresh) {
           const cached = readCachedBoard(DEFAULT_SOURCE_STATUS) || readVerifiedCacheBoard(DEFAULT_SOURCE_STATUS);
-          if (cached?.props?.length || cached?.qualifiedReadyProps?.length) {
+          if (cached?.props?.length || cached?.usableProps?.length || cached?.qualifiedReadyProps?.length) {
             const layer = cached.cacheMetadata?.freshnessTier || resolveCacheLayer(new Date(cached.updatedAt).getTime(), DFS_CACHE_TTL_MS);
             applyBoardState(cached, formatCacheLayerLabel(layer).toLowerCase());
             console.info("[DFS Refresh] board cache served", { updatedAt: cached.updatedAt, durationMs: Date.now() - fetchStartedAt });
@@ -1504,7 +1596,7 @@ export default function DFSPropsApp() {
         const result = await fetchDFSProps({ platform: "both", sport: MLB_ONLY_MODE ? "MLB" : "all", statType: "all" });
         scoringContextRef.current = result.scoringContext || null;
         const boardSourceStatus = finalizeSourceStatus(result.sourceStatus || DEFAULT_SOURCE_STATUS);
-        const boardProps = result.props || [];
+        const boardProps = result.props?.length ? result.props : result.usableProps || [];
         const routedCritical = sanitizeCriticalWarningsForDisplay(
           unique([...(result.criticalWarnings || []), ...(result.warnings || []), ...(result.degradedWarnings || [])]),
           boardProps,
@@ -1512,6 +1604,9 @@ export default function DFSPropsApp() {
         );
         const board = {
           props: boardProps,
+          usableProps: result.usableProps || boardProps,
+          pipelineFallback: Boolean(result.pipelineFallback),
+          pipelineStageCounts: result.pipelineStageCounts || {},
           watchlist: result.watchlist || [],
           nearQualification: result.nearQualification || [],
           qualifiedReadyProps: result.qualifiedReadyProps || result.readyProps || [],
@@ -1542,7 +1637,7 @@ export default function DFSPropsApp() {
           getMaxCooldownRemainingMs() > 0 ||
           (board.warnings || []).some((warning) => /rate limited|429|cooldown/i.test(String(warning)));
 
-        if (!board.props.length && (previousBoard?.props?.length || previousBoard?.qualifiedReadyProps?.length)) {
+        if (!board.props.length && !board.usableProps?.length && (previousBoard?.props?.length || previousBoard?.usableProps?.length || previousBoard?.qualifiedReadyProps?.length)) {
           if (
             applyVerifiedCacheFallbackBoard(applyBoardState, previousBoard, {
               notice: rateLimited ? VERIFIED_CACHE_COOLDOWN_MESSAGE : VERIFIED_CACHE_FALLBACK_MESSAGE,
@@ -1558,12 +1653,12 @@ export default function DFSPropsApp() {
           return;
         }
 
-        if (board.props.length) {
+        if (board.props.length || board.usableProps?.length) {
           writeCachedBoard(sanitizeBoardForMlbOnly(board));
           setCacheNotice("");
         }
-        applyBoardState(board, board.props.length ? "fresh" : "cached");
-        if (board.props.length) {
+        applyBoardState(board, board.props.length || board.usableProps?.length ? "fresh" : "cached");
+        if (board.props.length || board.usableProps?.length) {
           setError((current) => resolveUiErrorMessage(current, board.props, board.sourceStatus));
         } else if (
           !applyVerifiedCacheFallbackBoard(applyBoardState, previousBoard, {
@@ -1700,10 +1795,25 @@ export default function DFSPropsApp() {
     () => ({ platform, sport, statType, edgeFilter, dateFilter, readyOnly, searchTerm: debouncedSearch, ...filterPrefs }),
     [platform, sport, statType, edgeFilter, dateFilter, readyOnly, debouncedSearch, filterPrefs]
   );
-  const filteredProps = useMemo(
-    () => filterVerifiedSportsbookProps(props.filter((prop) => matchesUiFilters(prop, uiFilters))),
-    [props, uiFilters]
+  const displayPool = useMemo(
+    () => (props.length ? props : usableProps),
+    [props, usableProps]
   );
+  const filteredProps = useMemo(
+    () => filterVerifiedSportsbookProps(displayPool.filter((prop) => matchesUiFilters(prop, uiFilters))),
+    [displayPool, uiFilters]
+  );
+  const uiFilterFallbackActive = useMemo(
+    () => !loading && filteredProps.length === 0 && usableProps.length > 0,
+    [loading, filteredProps.length, usableProps.length]
+  );
+  const boardDisplayProps = useMemo(() => {
+    if (filteredProps.length) return filteredProps;
+    const verifiedUsable = filterVerifiedSportsbookProps(usableProps);
+    if (!verifiedUsable.length) return [];
+    return verifiedUsable.filter((prop) => matchesUiFiltersRelaxed(prop, uiFilters));
+  }, [filteredProps, usableProps, uiFilters]);
+  const preFilterDebugProps = useMemo(() => usableProps.slice(0, 20), [usableProps]);
   const streakFinderProps = useMemo(
     () =>
       filterVerifiedSportsbookProps(
@@ -1722,12 +1832,12 @@ export default function DFSPropsApp() {
     () =>
       sortDecisionBoard(
         filterVerifiedSportsbookProps(
-          (qualifiedReadyProps.length ? qualifiedReadyProps : filterReadyToBetProps(filteredProps)).filter((prop) =>
-            matchesUiFilters(prop, uiFilters)
+          (boardDisplayProps.length ? boardDisplayProps : usableProps).filter((prop) =>
+            boardDisplayProps.length ? true : matchesUiFiltersRelaxed(prop, uiFilters)
           )
         )
-      ),
-    [qualifiedReadyProps, filteredProps, uiFilters]
+      ).slice(0, RENDER_LIMITS.readyToBet),
+    [boardDisplayProps, usableProps, uiFilters]
   );
   const nearMissProps = useMemo(
     () =>
@@ -1755,9 +1865,9 @@ export default function DFSPropsApp() {
   const bestValueProps = useMemo(
     () =>
       sortDecisionBoard(
-        filteredProps.filter(isBestValueEligible)
+        (boardDisplayProps.length ? boardDisplayProps : filteredProps).filter(isBestValueEligible)
       ).slice(0, VISIBLE_SECTION_LIMIT),
-    [filteredProps]
+    [boardDisplayProps, filteredProps]
   );
   const visibleHistory = useMemo(() => history.filter(isSupportedHistoryPick), [history]);
   const streakSportBoards = useMemo(
@@ -1782,7 +1892,7 @@ export default function DFSPropsApp() {
       [],
     [pipelineAudit?.acceptedPropsForRender, debugInfo?.acceptedPropsForRender, debugInfo?.pipelineAudit?.acceptedPropsForRender]
   );
-  const hydratedRenderableProps = useMemo(() => filteredProps, [filteredProps]);
+  const hydratedRenderableProps = useMemo(() => boardDisplayProps, [boardDisplayProps]);
   const finalAcceptedProps = useMemo(() => {
     const acceptedCount = Number(pipelineCounters.accepted ?? 0);
     const pool = resolveFinalAcceptedPropsFromHydrated({
@@ -1802,15 +1912,25 @@ export default function DFSPropsApp() {
     pipelineCounters.accepted,
   ]);
   const topPickPool = useMemo(() => {
-    const verified = filterVerifiedSportsbookProps(filteredProps.length ? filteredProps : props);
-    return verified;
-  }, [filteredProps, props]);
+    if (boardDisplayProps.length) return boardDisplayProps;
+    return filterVerifiedSportsbookProps(usableProps);
+  }, [boardDisplayProps, usableProps]);
   const topPicksDisplay = useMemo(() => {
     if (!topPickPool.length) return [];
-    const ranked = selectTopPicksFromAccepted(topPickPool, 2);
-    if (ranked.length) return ranked;
-    return selectTopPicks(topPickPool, 2);
+    return selectTopPicksFromVerifiedPool(topPickPool, 2);
   }, [topPickPool]);
+
+  useEffect(() => {
+    if (!uiFilterFallbackActive) return;
+    console.warn("[Prop Pipeline] UI filter fallback active", {
+      usable: usableProps.length,
+      filtered: filteredProps.length,
+      boardDisplay: boardDisplayProps.length,
+      sport,
+      platform,
+    });
+  }, [uiFilterFallbackActive, usableProps.length, filteredProps.length, boardDisplayProps.length, sport, platform]);
+
   const topPicksForTracking = useMemo(() => topPicksDisplay, [topPicksDisplay]);
   const goblinPropsForTracking = useMemo(
     () => streakFinderProps.filter(isVerifiedSportsbookProp).filter(isGoblinProp),
@@ -1824,9 +1944,9 @@ export default function DFSPropsApp() {
         .filter((prop) => Number(prop.confidenceScore || 0) >= CONFIDENCE_THRESHOLDS.DEMON && Number(prop.edge || 0) >= 1),
     [streakFinderProps]
   );
-  const visibleAcceptedProps = useMemo(
-    () => finalAcceptedProps.slice(0, Math.min(visibleLimits.ready, VISIBLE_SECTION_LIMIT)),
-    [finalAcceptedProps, visibleLimits.ready]
+  const visibleReadyToBetProps = useMemo(
+    () => readyToBetProps.slice(0, Math.min(visibleLimits.ready, VISIBLE_SECTION_LIMIT)),
+    [readyToBetProps, visibleLimits.ready]
   );
   const visibleBestValueProps = useMemo(
     () => bestValueProps.slice(0, Math.min(visibleLimits.value, VISIBLE_SECTION_LIMIT)),
@@ -1892,7 +2012,7 @@ export default function DFSPropsApp() {
       : visibleCriticalWarnings.find((warning) => /rate limited|cached lines from/i.test(String(warning))) || "";
   const boardEmptyState = useMemo(() => {
     if (loading) return { kind: "loading", text: "Loading sportsbook lines…" };
-    if (props.length || topPickPool.length) return null;
+    if (props.length || usableProps.length || topPickPool.length || boardDisplayProps.length) return null;
     if (sourceCooldownSec > 0) {
       return { kind: "rate_limited", text: "Rate limited — showing cached lines when available." };
     }
@@ -1910,7 +2030,7 @@ export default function DFSPropsApp() {
       return { kind: "empty", text: EMPTY_PARSED_MESSAGE };
     }
     return { kind: "empty", text: EMPTY_PARSED_MESSAGE };
-  }, [loading, props.length, topPickPool.length, sourceCooldownSec, apiHealth, sourceStatus]);
+  }, [loading, props.length, usableProps.length, topPickPool.length, boardDisplayProps.length, sourceCooldownSec, apiHealth, sourceStatus]);
   const compactSourceWarning = useMemo(() => {
     if (sourceCooldownSec > 0) {
       return `PrizePicks rate limited. Showing cached lines. Wait ${sourceCooldownSec}s.`;
@@ -2301,7 +2421,38 @@ export default function DFSPropsApp() {
         </section>
       ) : null}
 
-      {visibleError && !props.length ? <section style={styles.errorPanel}>{visibleError}</section> : null}
+      {pipelineFallback || uiFilterFallbackActive ? (
+        <section className="mobile-warning-banner" role="status">
+          <p>{PIPELINE_FALLBACK_MESSAGE}</p>
+        </section>
+      ) : null}
+
+      {visibleError && !displayPool.length ? <section style={styles.errorPanel}>{visibleError}</section> : null}
+
+      {preFilterDebugProps.length ? (
+        <details className="all-props-debug-section dfs-section" style={styles.compactDetails} open>
+          <summary style={styles.detailsSummary}>
+            <span className="details-summary-stack">
+              <span style={styles.eyebrow}>Debug</span>
+              <strong>All Props (pre-filter sample)</strong>
+            </span>
+            <span style={styles.countPill}>{usableProps.length} usable</span>
+          </summary>
+          <div className="all-props-debug-panel">
+            <p style={styles.compactFlags}>
+              Pipeline: fetched {pipelineStageCounts.totalFetched ?? 0} · normalized {pipelineStageCounts.normalized ?? 0} · verified {pipelineStageCounts.verified ?? 0} · sport {pipelineStageCounts.sportFiltered ?? 0} · scored {pipelineStageCounts.scoreFiltered ?? 0} · displayed {pipelineStageCounts.finalDisplayed ?? 0}
+              {uiFilterFallbackActive ? " · UI fallback active" : ""}
+            </p>
+            <ul className="all-props-debug-list">
+              {preFilterDebugProps.map((prop) => (
+                <li key={prop.id}>
+                  {prop.playerName} · {prop.sport || prop.league} · {prop.market || prop.statType} · {prop.line} · {prop.source || prop.platform}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </details>
+      ) : null}
       </div>
 
       <div id="section-top-picks" className="dfs-section dfs-order-top-picks">
@@ -2332,22 +2483,22 @@ export default function DFSPropsApp() {
             Weighted qualification · market-aware thresholds · verified stats · positive edge · target 15–30 per cycle.
           </p>
           </div>
-          <p style={styles.countPill}>{finalAcceptedProps.length} qualified</p>
+          <p style={styles.countPill}>{readyToBetProps.length} scored</p>
         </div>
         {loading ? (
           <EmptyState text="Loading picks…" />
-        ) : finalAcceptedProps.length === 0 ? (
+        ) : readyToBetProps.length === 0 ? (
           <EmptyState text={boardEmptyState?.text || NO_VERIFIED_PROPS_MESSAGE} />
         ) : (
           <>
             <VirtualCardList
-              items={visibleAcceptedProps}
+              items={visibleReadyToBetProps}
               renderCard={readyRenderCard}
               initialVisible={INITIAL_VISIBLE_SECTION_LIMIT}
             />
             <LoadMoreButton
-              visible={visibleAcceptedProps.length}
-              total={finalAcceptedProps.length}
+              visible={visibleReadyToBetProps.length}
+              total={readyToBetProps.length}
               onClick={() => showMoreSection("ready")}
             />
           </>
@@ -3511,6 +3662,15 @@ function matchesStatTypeFilter(prop, statType) {
   return statType === "all" || normalize(prop.statType) === normalize(statType);
 }
 
+function matchesUiFiltersRelaxed(prop, filters) {
+  return (
+    matchesPlatformFilter(prop, filters.platform) &&
+    matchesSportFilter(prop, filters.sport) &&
+    matchesStatTypeFilter(prop, filters.statType) &&
+    matchesSearchFilter(prop, filters.searchTerm)
+  );
+}
+
 function matchesUiFilters(prop, filters) {
   if (filters.sharpOnly && !isSharpOnlyCandidate(prop)) return false;
   if (filters.hideResearchOnly && !isReadyToBet(prop)) return false;
@@ -3550,7 +3710,7 @@ function matchesSearchFilter(prop, searchTerm = "") {
 function matchesDateFilter(prop, dateFilter = "allUpcoming") {
   if (!dateFilter || dateFilter === "allUpcoming") return true;
   const start = new Date(prop.startTime).getTime();
-  if (!Number.isFinite(start)) return false;
+  if (!Number.isFinite(start)) return true;
   const propDay = dateKey(new Date(start));
   const now = new Date();
   const today = dateKey(now);
@@ -4656,11 +4816,9 @@ function getScoringRejectReason(prop) {
   if (!validation.valid) return validation.reason;
   const player = String(prop.playerName || "").trim();
   if (!player || player === "Unknown Player") return "missing player name";
-  if (!prop.statType) return "missing prop type";
+  if (!prop.statType && !prop.market) return "missing prop type";
   const line = Number(prop.line);
   if (!Number.isFinite(line) || line <= 0) return "missing or invalid line";
-  const sport = String(prop.sport || "");
-  if (!SUPPORTED_SPORTS.has(sport)) return `unsupported sport: ${sport || "Unknown"}`;
   return "";
 }
 

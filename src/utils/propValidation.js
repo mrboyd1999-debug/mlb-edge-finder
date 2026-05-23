@@ -1,10 +1,10 @@
 import { normalizePlayerName } from "./playerNames.js";
 import { isParserMergeComboBug } from "./comboMarkets.js";
 import { isOverseasOrPlaceholderProp, OVERSEAS_BLOCKED_PATTERN, getIngestionPropRejectReason } from "./ingestionFilter.js";
-import { normalizePropShape } from "./propShape.js";
+import { isUsableParsedProp, normalizePropShape } from "./propShape.js";
 
 export const VERIFIED_SPORTSBOOK_PLATFORMS = new Set(["PrizePicks", "Underdog"]);
-export const VERIFIED_LINE_BADGES = new Set(["LIVE", "CACHED"]);
+export const VERIFIED_LINE_BADGES = new Set(["LIVE", "CACHED", "EMPTY"]);
 export const NO_VERIFIED_PROPS_MESSAGE = "No verified sportsbook props available";
 
 const PLACEHOLDER_NAME_PATTERNS = [
@@ -33,6 +33,13 @@ function normalizeBadge(value = "") {
   return String(value || "").toUpperCase().trim();
 }
 
+function isSupportedSportsbookSource(prop = {}) {
+  const platform = normalizePlatform(prop.platform);
+  if (VERIFIED_SPORTSBOOK_PLATFORMS.has(platform)) return true;
+  const source = String(prop.source || prop.feedSource || "").toLowerCase();
+  return /prizepicks|underdog/.test(source);
+}
+
 export function isMalformedPlayerName(name = "") {
   const trimmed = String(name || "").trim();
   if (!trimmed || trimmed.length < 2) return true;
@@ -48,28 +55,22 @@ export function isMalformedPlayerName(name = "") {
 export { isOverseasOrPlaceholderProp } from "./ingestionFilter.js";
 
 export function hasRequiredSportsbookMetadata(prop = {}) {
-  const platform = normalizePlatform(prop.platform);
-  if (!VERIFIED_SPORTSBOOK_PLATFORMS.has(platform)) return false;
-
-  const badge = normalizeBadge(prop.lineSourceBadge || prop.feedLineBadge);
-  if (!VERIFIED_LINE_BADGES.has(badge)) return false;
-
-  const line = Number(prop.line);
-  const start = new Date(prop.startTime).getTime();
-  const sourceId = String(prop.sourceId || prop.id || "").trim();
-
+  if (!isSupportedSportsbookSource(prop)) return false;
+  const shaped = normalizePropShape(prop);
+  const market = shaped.market || shaped.statType || shaped.propType;
+  const sportOrLeague = shaped.sport || shaped.league;
+  const line = Number(shaped.line);
   return (
-    !isMalformedPlayerName(prop.playerName) &&
-    Boolean(prop.statType) &&
+    !isMalformedPlayerName(shaped.playerName) &&
+    Boolean(market) &&
     Number.isFinite(line) &&
     line > 0 &&
-    Number.isFinite(start) &&
-    Boolean(sourceId) &&
-    prop.sportsbookVerified === true
+    Boolean(sportOrLeague) &&
+    Boolean(String(shaped.source || shaped.platform || "").trim())
   );
 }
 
-/** True only for props parsed directly from PrizePicks / Underdog live or cached feeds. */
+/** True for props with core sportsbook metadata — scoring fields are optional. */
 export function isVerifiedSportsbookProp(prop) {
   if (!prop) return false;
   if (prop.isDemoData || prop.manualEntry || prop.categoryFallback) return false;
@@ -77,7 +78,8 @@ export function isVerifiedSportsbookProp(prop) {
   if (normalizeBadge(prop.lineSourceBadge) === "FALLBACK") return false;
   if (prop.projectionSource === "fallback-player-stats") return false;
   if (isOverseasOrPlaceholderProp(prop)) return false;
-  return hasRequiredSportsbookMetadata(prop);
+  if (!isSupportedSportsbookSource(prop)) return false;
+  return isUsableParsedProp(prop);
 }
 
 /** @deprecated use isVerifiedSportsbookProp */
@@ -89,14 +91,15 @@ export function propDedupeKey(prop = {}) {
   const stat = String(prop.statType || "")
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
+  const startKey = prop.startTime ? new Date(prop.startTime).toISOString().slice(0, 16) : "na";
   return [
     normalizePlatform(prop.platform),
-    prop.sport || "",
+    prop.sport || prop.league || "",
     normalizePlayerName(prop.playerName),
     stat,
     Number(prop.line),
     String(prop.bestPick || prop.side || "").toLowerCase(),
-    new Date(prop.startTime).toISOString().slice(0, 16),
+    startKey,
   ].join("|");
 }
 
@@ -118,18 +121,16 @@ export function validatePropRejectReason(prop = {}) {
   if (prop.isDemoData || prop.manualEntry) return "non-sportsbook/manual prop";
   if (prop.fallbackProfile || prop.isFallback) return "fallback profile";
   if (normalizeBadge(prop.lineSourceBadge) === "FALLBACK") return "fallback line badge";
-  if (!VERIFIED_SPORTSBOOK_PLATFORMS.has(normalizePlatform(prop.platform))) return "unsupported platform";
-  if (!VERIFIED_LINE_BADGES.has(normalizeBadge(prop.lineSourceBadge))) return "missing verified line badge";
-  if (prop.sportsbookVerified !== true) return "missing sportsbook verification";
+  if (!isSupportedSportsbookSource(prop)) return "unsupported platform";
   if (isMalformedPlayerName(prop.playerName)) return "malformed player name";
   if (isParserMergeComboBug(prop)) return "merged multi-player name (parser bug)";
   if (isOverseasOrPlaceholderProp(prop)) return getIngestionPropRejectReason(prop) || "overseas/placeholder player";
-  const line = Number(prop.line);
+  const shaped = normalizePropShape(prop);
+  const line = Number(shaped.line);
   if (!Number.isFinite(line) || line <= 0) return "invalid line";
-  if (!prop.statType) return "missing stat type";
-  if (!String(prop.sourceId || prop.id || "").trim()) return "missing source id";
-  const start = new Date(prop.startTime).getTime();
-  if (!Number.isFinite(start)) return "missing start time";
+  if (!(shaped.market || shaped.statType)) return "missing market/stat";
+  if (!(shaped.sport || shaped.league)) return "missing sport/league";
+  if (!String(shaped.source || shaped.platform || "").trim()) return "missing source";
   return "";
 }
 
@@ -165,13 +166,15 @@ export function filterVerifiedSportsbookProps(props = []) {
 export function attachSportsbookVerifiedFields(prop = {}, platform = prop.platform) {
   const badge = normalizeBadge(prop.lineSourceBadge || "LIVE");
   const shaped = normalizePropShape(prop, { platform, source: platform });
+  const normalizedPlatform = normalizePlatform(platform || shaped.platform);
+  const allowedBadge = VERIFIED_LINE_BADGES.has(badge) ? badge : "LIVE";
   return {
     ...shaped,
-    platform: normalizePlatform(platform || shaped.platform),
+    platform: normalizedPlatform,
     market: shaped.market || shaped.statType || shaped.propType || "",
-    lineSourceBadge: VERIFIED_LINE_BADGES.has(badge) ? badge : "LIVE",
-    sportsbookVerified: VERIFIED_SPORTSBOOK_PLATFORMS.has(normalizePlatform(platform || shaped.platform)),
-    feedSource: normalizePlatform(platform || shaped.platform),
-    verifiedBadge: VERIFIED_SPORTSBOOK_PLATFORMS.has(normalizePlatform(platform || shaped.platform)) ? "VERIFIED" : null,
+    lineSourceBadge: allowedBadge,
+    sportsbookVerified: isSupportedSportsbookSource({ ...shaped, platform: normalizedPlatform }),
+    feedSource: normalizedPlatform,
+    verifiedBadge: isSupportedSportsbookSource({ ...shaped, platform: normalizedPlatform }) ? "VERIFIED" : null,
   };
 }

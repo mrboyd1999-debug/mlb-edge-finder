@@ -28,7 +28,7 @@ function TopPicksBoard({ label = "Sport", picks = [], onOpen, compactMode = true
           ))}
         </div>
       ) : (
-        <div style={styles.emptyState}>No accepted props available for Top 2 yet.</div>
+        <div style={styles.emptyStateCompact}>No verified props available for Top 2 yet.</div>
       )}
     </section>
   );

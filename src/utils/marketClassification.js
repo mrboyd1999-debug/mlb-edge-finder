@@ -1,4 +1,4 @@
-import { inferSportFromText } from "./sportMappings.js";
+import { inferSportFromText, sportLabelsMatch } from "./sportMappings.js";
 import {
   enrichPropMarketFields,
   getMarketSupportTier,
@@ -304,7 +304,9 @@ export function applySportClassification(prop = {}) {
 
 export function matchesSelectedSportFilter(prop, selectedSport = "all") {
   if (selectedSport === "all") return true;
-  if (selectedSport === APP_SPORTS.Tennis) return isTennisSportLabel(prop.sport) || prop.sport === APP_SPORTS.Tennis;
+  if (selectedSport === APP_SPORTS.Tennis) {
+    return isTennisSportLabel(prop.sport) || prop.sport === APP_SPORTS.Tennis || sportLabelsMatch(prop.sport, selectedSport, prop.league);
+  }
   if (selectedSport === APP_SPORTS.Esports) return prop.sport === APP_SPORTS.Esports || prop.esports;
-  return prop.sport === selectedSport;
+  return sportLabelsMatch(prop.sport, selectedSport, prop.league) || prop.sport === selectedSport;
 }

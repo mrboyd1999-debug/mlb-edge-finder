@@ -460,6 +460,39 @@ body,
     line-height: 1;
   }
 
+  .all-props-debug-section {
+    margin-bottom: 6px;
+  }
+
+  .all-props-debug-panel {
+    padding: 6px 0 0;
+  }
+
+  .all-props-debug-list {
+    margin: 6px 0 0;
+    padding-left: 16px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: #cbd5e1;
+  }
+
+  .all-props-debug-list li {
+    margin-bottom: 4px;
+  }
+
+  .api-health-section {
+    margin-top: 4px;
+  }
+
+  .api-health-chips-row {
+    gap: 4px !important;
+    font-size: 10px !important;
+  }
+
+  .dfs-app-page {
+    padding-bottom: 74px !important;
+  }
+
   .dfs-app-page *,
   .dfs-section * {
     max-width: 100%;
