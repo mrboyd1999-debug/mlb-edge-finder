@@ -1715,16 +1715,8 @@ export default function DFSPropsApp() {
   const isGoblinTab = streakSport === "goblins";
   const isDemonTab = streakSport === "demons";
   const topPicksDisplay = useMemo(
-    () =>
-      selectTopPicks(
-        filterVerifiedSportsbookProps([
-          ...qualifiedReadyProps,
-          ...nearQualification,
-          ...filteredProps.filter((prop) => prop.isQualificationAccepted || Number(prop.confidenceScore ?? 0) >= CONFIDENCE_THRESHOLDS.PLAYABLE),
-        ]),
-        2
-      ),
-    [qualifiedReadyProps, nearQualification, filteredProps]
+    () => selectTopPicks(readyToBetProps.length ? readyToBetProps : qualifiedReadyProps, 2),
+    [readyToBetProps, qualifiedReadyProps]
   );
   const topPicksForTracking = useMemo(() => topPicksDisplay, [topPicksDisplay]);
   const goblinPropsForTracking = useMemo(
@@ -2309,7 +2301,7 @@ export default function DFSPropsApp() {
       ) : (
         <TopPicksBoard
           label={currentCategoryLabel}
-          picks={topPicksDisplay.length ? topPicksDisplay : currentCategoryPicks}
+          picks={topPicksDisplay.length ? topPicksDisplay : readyToBetProps}
           loading={loading}
           onOpen={setSelectedEvaluation}
           compactMode={compactMode}

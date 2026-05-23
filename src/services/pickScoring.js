@@ -99,8 +99,12 @@ function passesVolatilityGate(prop, confidence, thresholds) {
   const edge = Number(prop.edge || 0);
   const vol = Number(prop.volatility);
   if (qualifiesStrongEdgeBypass(prop, thresholds)) return true;
-  if (tier === "LOW" && edge >= 0.65 && confidence >= thresholds.minConfidence - 2) return true;
-  if (tier === "MEDIUM" && edge >= 0.95 && confidence >= thresholds.minConfidence && (!Number.isFinite(vol) || vol <= 2.75)) {
+  if (prop.isQualificationAccepted && confidence >= thresholds.minConfidence) return true;
+  if (tier === "LOW" && edge >= 0.55 && confidence >= thresholds.minConfidence - 3) return true;
+  if (tier === "MEDIUM" && edge >= 0.85 && confidence >= thresholds.minConfidence - 2 && (!Number.isFinite(vol) || vol <= 3)) {
+    return true;
+  }
+  if (tier === "HIGH" && edge >= 1.1 && confidence >= thresholds.minConfidence + 2 && (!Number.isFinite(vol) || vol <= 3.5)) {
     return true;
   }
   return meetsVolatilityTierRequirements(prop, confidence);
@@ -323,7 +327,10 @@ export function getReadyToBetRejectReason(prop, thresholds = {}) {
   const dataQualityScore = Number(prop.dataQualityScore || prop.modelSignal?.dataQualityScore || 0);
   const edge = Number(prop.edge || 0);
   const verified = Boolean(prop.hasVerifiedStats || prop.manualEnriched);
-  if (!verified && !thresholds.relaxedStats) return "missing verified stats";
+  if (!verified && !thresholds.relaxedStats) {
+    const hasMarketContext = Boolean(prop.sportsbookComparison || prop.lineComparison || prop.isQualificationAccepted);
+    if (!hasMarketContext) return "missing verified stats";
+  }
   if (edge < minEdge && !qualifiesStrongEdgeBypass(prop, thresholds)) return `edge ${round(edge)} below ${minEdge}`;
   if (confidence < minConfidence && !qualifiesStrongEdgeBypass(prop, thresholds)) {
     return `confidence ${confidence} below ${minConfidence}`;

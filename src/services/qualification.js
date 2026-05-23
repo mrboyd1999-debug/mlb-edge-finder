@@ -6,6 +6,7 @@ import { buildRejectionAnalytics } from "./rejectionAnalytics.js";
 import {
   evaluateQualificationPool,
   isAcceptedQualificationTier,
+  isSmartAcceptanceEligible,
   qualificationTierLabel,
   qualificationTierToDisplayTier,
   QUALIFICATION_TIERS,
@@ -49,7 +50,7 @@ export function isReadyToBet(prop) {
 
 export function classifyDisplayTier(prop) {
   if (!isDisplayable(prop)) return null;
-  return qualificationTierToDisplayTier(prop.qualificationTier);
+  return qualificationTierToDisplayTier(prop.qualificationTier, prop);
 }
 
 export function applyQualificationLabels(prop, evaluation = {}) {
@@ -241,7 +242,15 @@ export function buildQualificationBoards(scoredProps = [], audit, history = []) 
   });
 
   const acceptedPool = selectDiverseAcceptedProps(
-    [...elite, ...strong, ...near.filter((prop) => isAcceptedQualificationTier(prop.qualificationTier, prop))],
+    [
+      ...elite,
+      ...strong,
+      ...near.filter((prop) => isAcceptedQualificationTier(prop.qualificationTier, prop)),
+      ...watchlist.filter((prop) => isAcceptedQualificationTier(prop.qualificationTier, prop)),
+      ...rejected
+        .filter((prop) => !prop.hardFail && isSmartAcceptanceEligible(prop))
+        .filter((prop) => Number(prop.qualificationScore || prop.confidenceScore || 0) >= 52),
+    ],
     RENDER_LIMITS.readyToBet
   );
   const readyDisplay = avoidCorrelatedProps(

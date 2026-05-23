@@ -13,7 +13,7 @@ const DEFAULT_READY = {
 
 /** Dynamic ready thresholds by MLB market — strikeouts stricter, HRR/hits slightly softer. */
 const MARKET_READY_THRESHOLDS = {
-  strikeouts: { confidence: 60, dataQuality: 45, minEdge: 0.65 },
+  strikeouts: { confidence: 58, dataQuality: 42, minEdge: 0.55 },
   outs: { confidence: 59, dataQuality: 44, minEdge: 0.6 },
   pitchesThrown: { confidence: 59, dataQuality: 44, minEdge: 0.6 },
   hrr: { confidence: 55, dataQuality: 42, minEdge: 0.5 },
@@ -22,7 +22,7 @@ const MARKET_READY_THRESHOLDS = {
   runs: { confidence: 55, dataQuality: 42, minEdge: 0.5 },
   totalBases: { confidence: 56, dataQuality: 43, minEdge: 0.55 },
   hitsAllowed: { confidence: 57, dataQuality: 44, minEdge: 0.6 },
-  earnedRuns: { confidence: 57, dataQuality: 44, minEdge: 0.65 },
+  earnedRuns: { confidence: 57, dataQuality: 42, minEdge: 0.45 },
   fantasyScore: { confidence: 56, dataQuality: 43, minEdge: 0.55 },
   singles: { confidence: 58, dataQuality: 44, minEdge: 0.75 },
   doubles: { confidence: 58, dataQuality: 44, minEdge: 0.8 },

@@ -7,6 +7,7 @@ import {
   isPositiveEdge,
 } from "./pickScoring.js";
 import { shouldRouteMlbHitterToResearch } from "./mlbHitterConfidence.js";
+import { getMlbQualityTier } from "../utils/mlbOnlyMode.js";
 
 export const QUALIFICATION_TIERS = {
   ELITE: "elite",
@@ -25,17 +26,18 @@ export const QUALIFICATION_TIER_LABELS = {
 };
 
 const DEFAULT_TIER_THRESHOLDS = {
-  elite: 78,
-  strong: 68,
-  nearMiss: 60,
-  watchlist: 52,
+  elite: 74,
+  strong: 62,
+  nearMiss: 56,
+  watchlist: 48,
 };
 
 /** Playable confidence floor for near-miss acceptance. */
 export const PLAYABLE_CONFIDENCE_MIN = 65;
+export const TIER3_CONFIDENCE_MIN = 68;
 
 /** Soft penalties stack — hard reject only when multiple severe concerns combine. */
-const SOFT_PENALTY_HARD_REJECT = 18;
+const SOFT_PENALTY_HARD_REJECT = 22;
 
 const METRIC_WEIGHTS = {
   matchupQuality: 0.18,
@@ -51,42 +53,45 @@ const METRIC_WEIGHTS = {
 /** Market-specific qualification intelligence — adjusts metric tolerance, not hard gates. */
 const MARKET_QUALIFICATION_RULES = {
   strikeouts: {
-    verifiedStatsWeight: 1.35,
-    minVerifiedStatsScore: 58,
-    volatilityTolerance: 1.0,
+    verifiedStatsWeight: 1.25,
+    minVerifiedStatsScore: 52,
+    volatilityTolerance: 1.15,
+    lineMovementPenaltyScale: 0.55,
     requiresPitcherVerification: true,
   },
-  outs: { verifiedStatsWeight: 1.2, minVerifiedStatsScore: 55, volatilityTolerance: 1.05 },
-  pitchesThrown: { verifiedStatsWeight: 1.25, minVerifiedStatsScore: 56, volatilityTolerance: 1.0 },
+  outs: { verifiedStatsWeight: 1.2, minVerifiedStatsScore: 52, volatilityTolerance: 1.1 },
+  pitchesThrown: { verifiedStatsWeight: 1.2, minVerifiedStatsScore: 52, volatilityTolerance: 1.1 },
   totalBases: {
-    volatilityTolerance: 1.35,
-    volatilityWeight: 0.85,
-    consistencyWeight: 0.9,
+    volatilityTolerance: 1.5,
+    volatilityWeight: 0.75,
+    consistencyWeight: 0.88,
   },
   hrr: {
-    volatilityTolerance: 1.25,
+    volatilityTolerance: 1.4,
     matchupEdgeBoost: 8,
-    moderateVarianceMatchupMin: 68,
+    moderateVarianceMatchupMin: 62,
   },
-  hits: { volatilityTolerance: 1.15, matchupEdgeBoost: 6 },
-  rbis: { volatilityTolerance: 1.15, matchupEdgeBoost: 6 },
-  runs: { volatilityTolerance: 1.15, matchupEdgeBoost: 6 },
+  hits: { volatilityTolerance: 1.2, matchupEdgeBoost: 6 },
+  rbis: { volatilityTolerance: 1.2, matchupEdgeBoost: 6 },
+  runs: { volatilityTolerance: 1.2, matchupEdgeBoost: 6 },
   earnedRuns: {
-    minMatchupQuality: 58,
-    requiresStableMatchup: true,
-    volatilityTolerance: 0.95,
+    minMatchupQuality: 50,
+    requiresStableMatchup: false,
+    volatilityTolerance: 1.05,
+    minEdgeScale: 0.85,
   },
-  hitsAllowed: { minMatchupQuality: 55, requiresStableMatchup: true },
-  fantasyScore: { volatilityTolerance: 1.1 },
-  homeRuns: { volatilityTolerance: 0.9, minMatchupQuality: 60 },
-  stolenBases: { volatilityTolerance: 0.85, minMatchupQuality: 58 },
+  hitsAllowed: { minMatchupQuality: 52, requiresStableMatchup: false, volatilityTolerance: 1.0 },
+  fantasyScore: { volatilityTolerance: 1.05, minConfidenceFloor: TIER3_CONFIDENCE_MIN },
+  batterWalks: { volatilityTolerance: 1.0, minConfidenceFloor: TIER3_CONFIDENCE_MIN },
+  homeRuns: { volatilityTolerance: 0.95, minMatchupQuality: 55, minConfidenceFloor: TIER3_CONFIDENCE_MIN },
+  stolenBases: { volatilityTolerance: 0.9, minMatchupQuality: 54, minConfidenceFloor: TIER3_CONFIDENCE_MIN },
 };
 
 const RECOVERY_GAP = 4;
 const MAX_RECOVERY_BOOST = 5;
 const TARGET_ACCEPTED_MIN = 15;
 const TARGET_ACCEPTED_MAX = 30;
-const MAX_PER_MARKET_RATIO = 0.4;
+const MAX_PER_MARKET_RATIO = 0.5;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -111,7 +116,7 @@ function hasProjectionIntegrity(prop = {}) {
   return false;
 }
 
-/** Hard gates — never loosened by adaptive logic. */
+/** Hard gates — only true safety blockers; concerns become weighted penalties elsewhere. */
 export function checkQualificationHardGates(prop = {}) {
   if (!isVerifiedSportsbookProp(prop)) return { pass: false, reason: "not a verified sportsbook prop", gate: "verification" };
   if (prop.unsupportedSport || prop.marketUnsupported || prop.esports) {
@@ -120,47 +125,27 @@ export function checkQualificationHardGates(prop = {}) {
   if (prop.marketResearchOnly || prop.marketSupportTier === 2 || prop.noveltyMarket) {
     return { pass: false, reason: "research-only market tier", gate: "market" };
   }
-  if (
-    shouldRouteMlbHitterToResearch(
-      prop,
-      {
-        sampleSize: prop.sampleSize || prop.modelSignal?.sampleSize,
-        sparse: prop.sparseProfile,
-        fallback: prop.fallbackProfile,
-        manualEnriched: prop.manualEnriched,
-      },
-      { lineOnly: prop.lineOnlyData }
-    )
-  ) {
-    return { pass: false, reason: "MLB hitter research-only — insufficient data", gate: "verification" };
-  }
   if (!hasValidPickFields(prop)) return { pass: false, reason: "missing required pick fields", gate: "fields" };
   if (!isPositiveEdge(prop)) return { pass: false, reason: "no positive edge", gate: "edge" };
-  if (!prop.hasVerifiedStats && !prop.manualEnriched) {
-    return { pass: false, reason: "missing verified stats", gate: "verification" };
-  }
   if (!hasProjectionIntegrity(prop)) {
     return { pass: false, reason: "projection integrity — missing projection context", gate: "projection" };
   }
-  if (prop.lineSourceBadge === "STALE" && prop.freshnessTier === "EXPIRED") {
-    return { pass: false, reason: "expired verified cache", gate: "stale" };
-  }
-  if (prop.freshnessTier === "EXPIRED") {
+  if (prop.freshnessTier === "EXPIRED" || (prop.lineSourceBadge === "STALE" && prop.freshnessTier === "EXPIRED")) {
     return { pass: false, reason: "expired verified cache", gate: "stale" };
   }
   const vol = finiteNumber(prop.volatility);
-  const movementTag = prop.lineMovementTag || prop.lineMovement?.tag;
-  if (Number.isFinite(vol) && vol >= 4.5) {
-    return { pass: false, reason: "extreme volatility", gate: "volatility" };
+  if (Number.isFinite(vol) && vol >= 5) {
+    return { pass: false, reason: "severe volatility", gate: "volatility" };
   }
-  if (
-    prop.lineMovement?.againstPick &&
-    (movementTag === "steamed" || movementTag === "volatile")
-  ) {
+  const movementTag = prop.lineMovementTag || prop.lineMovement?.tag;
+  if (prop.lineMovement?.againstPick && movementTag === "steamed") {
     const delta = Math.abs(Number(prop.lineMovement?.delta ?? prop.lineMovement?.change ?? 0));
-    if (movementTag === "steamed" || delta >= 0.75) {
-      return { pass: false, reason: "sharp negative line movement against pick", gate: "lineMovement" };
+    if (delta >= 1) {
+      return { pass: false, reason: "catastrophic line movement against pick", gate: "lineMovement" };
     }
+  }
+  if (prop.bookDisagreement?.sharpDisagreement && prop.bookDisagreement?.staleLine) {
+    return { pass: false, reason: "conflicting stale sportsbook data", gate: "verification" };
   }
   const status = String(prop.status || "").toLowerCase();
   if (status === "locked" || status === "expired" || status === "live") {
@@ -171,6 +156,35 @@ export function checkQualificationHardGates(prop = {}) {
     return { pass: false, reason: "game already started or missing start time", gate: "timing" };
   }
   return { pass: true, reason: "", gate: "" };
+}
+
+export function acceptanceConfidenceFloor(prop = {}) {
+  const rules = getMarketRules(prop);
+  const tier3 = getMlbQualityTier(prop) === "C";
+  return Math.max(rules.minConfidenceFloor || 0, tier3 ? TIER3_CONFIDENCE_MIN : PLAYABLE_CONFIDENCE_MIN);
+}
+
+/** Secondary acceptance path when tier score is close but confidence/market context is playable. */
+export function isSmartAcceptanceEligible(prop = {}) {
+  if (!isVerifiedSportsbookProp(prop)) return false;
+  if (prop.freshnessTier === "EXPIRED") return false;
+  if (!hasProjectionIntegrity(prop)) return false;
+  if (!isPositiveEdge(prop)) return false;
+  const status = String(prop.status || "").toLowerCase();
+  if (["locked", "expired", "live"].includes(status)) return false;
+  const start = new Date(prop.startTime).getTime();
+  if (!Number.isFinite(start) || start <= Date.now()) return false;
+  const confidence = Number(prop.calibratedConfidence ?? prop.confidenceScore ?? prop.confidence ?? 0);
+  if (confidence < acceptanceConfidenceFloor(prop)) return false;
+  const vol = finiteNumber(prop.volatility);
+  if (Number.isFinite(vol) && vol >= 5) return false;
+  const movementTag = prop.lineMovementTag || prop.lineMovement?.tag;
+  if (prop.lineMovement?.againstPick && movementTag === "steamed") {
+    const delta = Math.abs(Number(prop.lineMovement?.delta ?? prop.lineMovement?.change ?? 0));
+    if (delta >= 1) return false;
+  }
+  if (prop.bookDisagreement?.sharpDisagreement && prop.bookDisagreement?.staleLine) return false;
+  return true;
 }
 
 function scoreMatchupQuality(prop = {}) {
@@ -356,36 +370,47 @@ function applyMarketQualificationAdjustments(prop = {}, metrics = {}, rules = {}
 }
 
 /** Weighted concern penalties — single flags reduce score; stacked flags can reject. */
-export function computeSoftConcernPenalties(prop = {}, metrics = {}) {
+export function computeSoftConcernPenalties(prop = {}, metrics = {}, rules = getMarketRules(prop)) {
   const stack = [];
   let totalPenalty = 0;
   const movementTag = prop.lineMovementTag || prop.lineMovement?.tag;
+  const movementScale = rules.lineMovementPenaltyScale ?? 1;
 
   if (prop.lineMovement?.againstPick) {
-    stack.push({ key: "lineMovement", label: "Line movement penalty", penalty: 6 });
-    totalPenalty += 6;
+    const penalty = Math.round(6 * movementScale);
+    stack.push({ key: "lineMovement", label: "Line movement penalty", penalty });
+    totalPenalty += penalty;
   } else if (movementTag === "volatile" || movementTag === "steamed") {
-    stack.push({ key: "lineMovement", label: "Line movement penalty", penalty: 4 });
-    totalPenalty += 4;
+    const penalty = Math.round(4 * movementScale);
+    stack.push({ key: "lineMovement", label: "Line movement penalty", penalty });
+    totalPenalty += penalty;
   }
 
   const vol = finiteNumber(prop.volatility);
-  if (Number.isFinite(vol) && vol >= 3.75) {
-    stack.push({ key: "volatility", label: "Volatility penalty", penalty: 8 });
-    totalPenalty += 8;
-  } else if (Number.isFinite(vol) && vol >= 3.25) {
-    stack.push({ key: "volatility", label: "Volatility penalty", penalty: 5 });
-    totalPenalty += 5;
+  const volTolerance = rules.volatilityTolerance || 1;
+  if (Number.isFinite(vol)) {
+    const adjustedVol = vol / volTolerance;
+    if (adjustedVol >= 3.75) {
+      stack.push({ key: "volatility", label: "Volatility penalty", penalty: 8 });
+      totalPenalty += 8;
+    } else if (adjustedVol >= 3.25) {
+      stack.push({ key: "volatility", label: "Volatility penalty", penalty: 5 });
+      totalPenalty += 5;
+    } else if (adjustedVol >= 2.85) {
+      stack.push({ key: "volatility", label: "Volatility penalty", penalty: 3 });
+      totalPenalty += 3;
+    }
   } else if (prop.meetsVolatilityRequirements === false) {
     stack.push({ key: "volatility", label: "Volatility penalty", penalty: 4 });
     totalPenalty += 4;
   }
 
   const edge = Number(prop.edge || 0);
-  const minEdge = getMarketReadyThreshold(prop).minEdge;
+  const marketThresholds = getMarketReadyThreshold(prop);
+  const minEdge = marketThresholds.minEdge * (rules.minEdgeScale || 1);
   if (edge > 0 && edge < minEdge * 0.85) {
-    stack.push({ key: "weakEdge", label: "Weak edge penalty", penalty: 5 });
-    totalPenalty += 5;
+    stack.push({ key: "weakEdge", label: "Weak edge penalty", penalty: 4 });
+    totalPenalty += 4;
   }
 
   if (metrics.lineStability != null && metrics.lineStability < 48) {
@@ -394,8 +419,29 @@ export function computeSoftConcernPenalties(prop = {}, metrics = {}) {
   }
 
   if (prop.freshnessTier === "STALE_WARNING") {
-    stack.push({ key: "cacheAge", label: "Stale cache penalty", penalty: 4 });
-    totalPenalty += 4;
+    stack.push({ key: "cacheAge", label: "Stale cache penalty", penalty: 3 });
+    totalPenalty += 3;
+  }
+
+  if (!prop.hasVerifiedStats && !prop.manualEnriched) {
+    stack.push({ key: "verification", label: "Unverified stats penalty", penalty: 6 });
+    totalPenalty += 6;
+  }
+
+  if (
+    shouldRouteMlbHitterToResearch(
+      prop,
+      {
+        sampleSize: prop.sampleSize || prop.modelSignal?.sampleSize,
+        sparse: prop.sparseProfile,
+        fallback: prop.fallbackProfile,
+        manualEnriched: prop.manualEnriched,
+      },
+      { lineOnly: prop.lineOnlyData }
+    )
+  ) {
+    stack.push({ key: "hitterData", label: "Thin hitter data penalty", penalty: 5 });
+    totalPenalty += 5;
   }
 
   return { stack, totalPenalty };
@@ -486,7 +532,7 @@ export function evaluateAdaptiveQualification(prop = {}, options = {}) {
   const metrics = computeQualificationMetrics(prop);
   const baseScore = computeWeightedQualificationScore(metrics, rules);
   const adjusted = applyMarketQualificationAdjustments(prop, metrics, rules, baseScore);
-  const softPenalties = computeSoftConcernPenalties(prop, metrics);
+  const softPenalties = computeSoftConcernPenalties(prop, metrics, rules);
   const tierThresholds = options.tierThresholds || DEFAULT_TIER_THRESHOLDS;
   const penalizedScore = clamp(adjusted.score - softPenalties.totalPenalty, 0, 100);
   const recovery = applySmartRecovery(prop, metrics, penalizedScore, tierThresholds);
@@ -532,27 +578,30 @@ export function evaluateAdaptiveQualification(prop = {}, options = {}) {
 export function resolveAdaptiveTierThresholds(acceptedCount = 0) {
   if (acceptedCount >= TARGET_ACCEPTED_MIN) return { ...DEFAULT_TIER_THRESHOLDS, adaptive: false };
   const deficit = Math.max(0, TARGET_ACCEPTED_MIN - acceptedCount);
-  const loosen = Math.min(8, Math.ceil(deficit / 2));
+  const loosen = Math.min(12, Math.ceil(deficit / 1.5));
   return {
-    elite: DEFAULT_TIER_THRESHOLDS.elite - Math.min(4, loosen),
+    elite: DEFAULT_TIER_THRESHOLDS.elite - Math.min(6, loosen),
     strong: DEFAULT_TIER_THRESHOLDS.strong - loosen,
-    nearMiss: DEFAULT_TIER_THRESHOLDS.nearMiss - Math.min(6, loosen + 1),
-    watchlist: DEFAULT_TIER_THRESHOLDS.watchlist - Math.min(3, loosen),
+    nearMiss: DEFAULT_TIER_THRESHOLDS.nearMiss - Math.min(8, loosen + 2),
+    watchlist: DEFAULT_TIER_THRESHOLDS.watchlist - Math.min(5, loosen),
     adaptive: true,
   };
 }
 
 export function isAcceptedQualificationTier(tier = "", prop = {}) {
-  if (tier === QUALIFICATION_TIERS.ELITE || tier === QUALIFICATION_TIERS.STRONG) return true;
-  if (tier === QUALIFICATION_TIERS.NEAR_MISS) {
-    const confidence = Number(prop.calibratedConfidence ?? prop.confidenceScore ?? prop.confidence ?? 0);
-    return confidence >= PLAYABLE_CONFIDENCE_MIN;
-  }
-  return false;
+  if (tier === QUALIFICATION_TIERS.REJECT) return false;
+  const confidence = Number(prop.calibratedConfidence ?? prop.confidenceScore ?? prop.confidence ?? 0);
+  if (confidence < acceptanceConfidenceFloor(prop)) return false;
+  return (
+    tier === QUALIFICATION_TIERS.ELITE ||
+    tier === QUALIFICATION_TIERS.STRONG ||
+    tier === QUALIFICATION_TIERS.NEAR_MISS ||
+    tier === QUALIFICATION_TIERS.WATCHLIST
+  );
 }
 
-export function qualificationTierToDisplayTier(tier = "") {
-  if (isAcceptedQualificationTier(tier)) return "ready";
+export function qualificationTierToDisplayTier(tier = "", prop = {}) {
+  if (isAcceptedQualificationTier(tier, prop)) return "ready";
   if (tier === QUALIFICATION_TIERS.NEAR_MISS) return "near";
   if (tier === QUALIFICATION_TIERS.WATCHLIST) return "research";
   return null;
@@ -657,18 +706,18 @@ export function buildQualificationAnalytics(evaluated = []) {
 }
 
 export function evaluateQualificationPool(props = [], options = {}) {
-  const firstPass = props.map((prop) => {
-    const result = evaluateAdaptiveQualification(prop, options);
+  let tierThresholds = { ...DEFAULT_TIER_THRESHOLDS, adaptive: false };
+  let evaluated = props.map((prop) => {
+    const result = evaluateAdaptiveQualification(prop, { tierThresholds, ...options });
     return { prop, ...result };
   });
 
-  let acceptedCount = firstPass.filter((row) => isAcceptedQualificationTier(row.qualificationTier, row.prop)).length;
-  let tierThresholds = resolveAdaptiveTierThresholds(acceptedCount);
-  let evaluated = firstPass;
+  let acceptedCount = evaluated.filter((row) => isAcceptedQualificationTier(row.qualificationTier, row.prop)).length;
 
-  if (tierThresholds.adaptive) {
+  for (let pass = 0; pass < 4 && acceptedCount < TARGET_ACCEPTED_MIN; pass += 1) {
+    tierThresholds = resolveAdaptiveTierThresholds(acceptedCount);
     evaluated = props.map((prop) => {
-      const result = evaluateAdaptiveQualification(prop, { tierThresholds });
+      const result = evaluateAdaptiveQualification(prop, { tierThresholds, ...options });
       return { prop, ...result };
     });
     acceptedCount = evaluated.filter((row) => isAcceptedQualificationTier(row.qualificationTier, row.prop)).length;

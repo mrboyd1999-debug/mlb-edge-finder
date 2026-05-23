@@ -9,9 +9,9 @@ export const FRESHNESS_TIERS = {
   EXPIRED: "EXPIRED",
 };
 
-export const VERIFIED_CACHE_FALLBACK_MESSAGE = "Using verified MLB cache while refreshing live lines.";
+export const VERIFIED_CACHE_FALLBACK_MESSAGE = "Using verified MLB cache while refreshing live sportsbook lines.";
 export const VERIFIED_CACHE_COOLDOWN_MESSAGE =
-  "Live refresh paused during cooldown — using verified MLB cache while refreshing live lines.";
+  "Live refresh paused during cooldown — using verified MLB cache while refreshing live sportsbook lines.";
 
 /** Default MLB verified cache window (5–10 min target). */
 export const MLB_VERIFIED_CACHE_MS = 8 * 60 * 1000;
