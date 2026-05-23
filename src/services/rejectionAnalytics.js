@@ -36,6 +36,46 @@ function parseCapPenalties(capReason = "") {
   return deductions;
 }
 
+function buildPenaltyStack(prop = {}, capReason = "") {
+  const stack = [];
+  const capDeductions = parseCapPenalties(capReason);
+  Object.entries(capDeductions).forEach(([key, penalty]) => {
+    if (penalty > 0) {
+      stack.push({
+        key,
+        label: key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase()),
+        penalty,
+      });
+    }
+  });
+
+  if (prop.penaltyStack?.length) {
+    prop.penaltyStack.forEach((row) => {
+      if (row.penalty > 0) stack.push(row);
+    });
+  }
+
+  const movementTag = prop.lineMovementTag || prop.lineMovement?.tag;
+  if (prop.lineMovement?.againstPick) {
+    stack.push({ key: "lineMovement", label: "Line movement penalty", penalty: 6 });
+  } else if (movementTag === "volatile" || movementTag === "steamed") {
+    stack.push({ key: "lineMovement", label: "Line movement penalty", penalty: 4 });
+  }
+
+  const vol = finiteNumber(prop.volatility);
+  if (Number.isFinite(vol) && vol >= 3.25) {
+    stack.push({ key: "volatility", label: "Volatility penalty", penalty: vol >= 3.75 ? 8 : 5 });
+  }
+
+  const edge = Number(prop.edge ?? 0);
+  const minEdge = getMarketReadyThreshold(prop).minEdge;
+  if (edge > 0 && edge < minEdge * 0.85) {
+    stack.push({ key: "weakEdge", label: "Weak edge penalty", penalty: 5 });
+  }
+
+  return stack;
+}
+
 export function analyzePropRejection(prop = {}, thresholds = null) {
   const marketThresholds = thresholds || getMarketReadyThreshold(prop);
   const finalConfidence = Number(prop.confidenceScore ?? prop.confidence ?? 0);
@@ -62,6 +102,7 @@ export function analyzePropRejection(prop = {}, thresholds = null) {
   };
 
   const capDeductions = parseCapPenalties(capReason);
+  const penaltyStack = buildPenaltyStack(prop, capReason);
   const historicalPenalty = Number(
     prop.historicalPenalty?.penalty ?? prop.confidenceBreakdown?.historicalVolatilityPenalty ?? 0
   );
@@ -107,6 +148,8 @@ export function analyzePropRejection(prop = {}, thresholds = null) {
       rawConfidence: rawTotal,
       confidenceLostByCategory: categoryLosses,
     },
+    penaltyStack,
+    softPenaltyTotal: penaltyStack.reduce((sum, row) => sum + Number(row.penalty || 0), 0),
     nearMiss,
     confidenceGap: confGap,
     volatilityTier: prop.volatilityTier || getPropVolatilityTier(prop),

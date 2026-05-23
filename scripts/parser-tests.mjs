@@ -901,7 +901,7 @@ assert.equal(
   applySportProcessingLimits(Array.from({ length: 180 }, (_, i) => ({ sport: "MLB", id: i }))).length,
   MLB_ONLY_MODE ? 150 : 80
 );
-assert.equal(RENDER_LIMITS.readyToBet, 20);
+assert.equal(RENDER_LIMITS.readyToBet, 30);
 
 const calibrationHistory = Array.from({ length: 12 }, (_, i) => ({
   id: `cal-${i}`,

@@ -33,7 +33,7 @@ function CacheAnalyticsPanel({ analytics = null, cacheNotice = "", loading = fal
       </summary>
       <div style={styles.compactPanel}>
         {cacheNotice ? (
-          <p style={{ ...styles.streakCopy, color: "#fde68a", marginBottom: 10 }}>{cacheNotice}</p>
+          <p style={{ ...styles.streakCopy, color: "#fbbf24", marginBottom: 10 }}>{cacheNotice}</p>
         ) : null}
         {analytics ? (
           <>

@@ -13,13 +13,13 @@ export const MLB_SPORT = APP_SPORTS.MLB;
 export const MLB_QUALITY_S_KEYS = new Set(["hrr", "totalBases", "strikeouts"]);
 
 /** A-tier — strong secondary markets. */
-export const MLB_QUALITY_A_KEYS = new Set(["hitsAllowed", "earnedRuns", "fantasyScore"]);
+export const MLB_QUALITY_A_KEYS = new Set(["hitsAllowed", "earnedRuns"]);
 
 /** B-tier — supported but lower signal. */
 export const MLB_QUALITY_B_KEYS = new Set(["singles", "doubles"]);
 
-/** C-tier — volatile / low priority. */
-export const MLB_QUALITY_C_KEYS = new Set(["homeRuns", "stolenBases"]);
+/** C-tier — volatile / requires stronger edge. */
+export const MLB_QUALITY_C_KEYS = new Set(["homeRuns", "stolenBases", "fantasyScore", "batterWalks"]);
 
 /** @deprecated — use MLB_QUALITY_S_KEYS for elite picks */
 export const MLB_TIER1_MARKET_KEYS = MLB_QUALITY_S_KEYS;
@@ -161,7 +161,7 @@ export const MLB_TIER_MIN_EDGE = {
   S: 0.5,
   A: 0.75,
   B: 1.0,
-  C: 1.5,
+  C: 1.25,
   UNKNOWN: 2,
 };
 

@@ -37,7 +37,11 @@ function componentScore(score, max, label, detail) {
 }
 
 export const CONFIDENCE_THRESHOLDS = {
-  READY: 58,
+  REJECT: 58,
+  RESEARCH: 58,
+  PLAYABLE: 65,
+  READY: 65,
+  STRONG: 72,
   TOP_PICKS: 72,
   ELITE: 80,
   DEMON: 80,

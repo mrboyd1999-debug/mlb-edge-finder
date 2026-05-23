@@ -96,9 +96,16 @@ function RejectionAnalyticsPanel({ summary = null, samples = [], loading = false
                   <strong>{row.playerName}</strong> · {row.statType} · conf {row.finalConfidence}% ·{" "}
                   {row.primaryReason}
                   {row.thresholdFailed ? ` · failed: ${row.thresholdFailed}` : ""}
-                  {row.deductions?.volatilityDeduction ? ` · vol −${row.deductions.volatilityDeduction}` : ""}
-                  {row.deductions?.edgeDeduction ? ` · edge −${row.deductions.edgeDeduction}` : ""}
-                  {row.deductions?.verificationDeduction ? ` · verify −${row.deductions.verificationDeduction}` : ""}
+                  {row.penaltyStack?.length
+                    ? ` · ${row.penaltyStack.map((item) => `${item.label}: -${item.penalty}`).join(" · ")}`
+                    : ""}
+                  {!row.penaltyStack?.length && row.deductions?.volatilityDeduction
+                    ? ` · vol −${row.deductions.volatilityDeduction}`
+                    : ""}
+                  {!row.penaltyStack?.length && row.deductions?.edgeDeduction ? ` · edge −${row.deductions.edgeDeduction}` : ""}
+                  {!row.penaltyStack?.length && row.deductions?.verificationDeduction
+                    ? ` · verify −${row.deductions.verificationDeduction}`
+                    : ""}
                 </p>
               ))}
             </div>

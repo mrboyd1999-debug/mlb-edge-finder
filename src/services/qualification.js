@@ -44,7 +44,7 @@ export function isNearQualification(prop) {
 }
 
 export function isReadyToBet(prop) {
-  return isAcceptedQualificationTier(prop.qualificationTier);
+  return isAcceptedQualificationTier(prop.qualificationTier, prop);
 }
 
 export function classifyDisplayTier(prop) {
@@ -96,7 +96,9 @@ export function applyQualificationLabels(prop, evaluation = {}) {
     qualificationLabel: qualificationTierLabel(tier),
     rejectionReason: "",
     rejectionStage: "",
-    isQualificationAccepted: isAcceptedQualificationTier(tier),
+    isQualificationAccepted: isAcceptedQualificationTier(tier, prop),
+    penaltyStack: evaluation.penaltyStack || prop.penaltyStack || [],
+    softPenaltyTotal: evaluation.softPenaltyTotal ?? prop.softPenaltyTotal ?? 0,
   };
 }
 
@@ -238,7 +240,10 @@ export function buildQualificationBoards(scoredProps = [], audit, history = []) 
     }
   });
 
-  const acceptedPool = selectDiverseAcceptedProps([...elite, ...strong], RENDER_LIMITS.readyToBet);
+  const acceptedPool = selectDiverseAcceptedProps(
+    [...elite, ...strong, ...near.filter((prop) => isAcceptedQualificationTier(prop.qualificationTier, prop))],
+    RENDER_LIMITS.readyToBet
+  );
   const readyDisplay = avoidCorrelatedProps(
     acceptedPool.sort(
       (a, b) =>

@@ -103,6 +103,7 @@ import {
   filterReadyToBetProps,
   isReadyToBet,
   isEliteTopPickEligible,
+  selectTopPicks,
   mergeManualStatsIntoProfile,
   READY_MIN_CONFIDENCE,
   READY_MIN_DATA_QUALITY,
@@ -158,6 +159,7 @@ import VirtualCardList from "./components/VirtualCardList.jsx";
 import PropFilters from "./components/PropFilters.jsx";
 import PlayerPropCard from "./components/PlayerPropCard.jsx";
 import PickDetailModal from "./components/PickDetailModal.jsx";
+import AcceptedPropsPanel from "./components/AcceptedPropsPanel.jsx";
 import AccuracyReview from "./components/AccuracyReview.jsx";
 import SourceStatusBar from "./components/SourceStatusBar.jsx";
 import { styles } from "./theme/styles.js";
@@ -323,6 +325,9 @@ function prizePicksHasUsableProps(props = [], sourceStatus = {}) {
 function shouldSuppressCriticalUiMessage(message = "", props = [], sourceStatus = {}) {
   if (!message) return false;
   if (isNonCriticalUnderdogFailure(message)) return true;
+  if (/using verified mlb cache/i.test(message)) return true;
+  if (/recently verified cached mlb props/i.test(message)) return true;
+  if (/live refresh paused during cooldown/i.test(message)) return true;
   if (prizePicksHasUsableProps(props, sourceStatus)) {
     if (/no verified sportsbook props/i.test(message)) return true;
     if (/try again after cooldown/i.test(message)) return true;
@@ -708,7 +713,7 @@ function applyVerifiedCacheFallbackBoard(applyBoardState, fallbackBoard, { notic
       cacheNotice: prepared.cacheNotice || notice,
       warnings: unique(
         filterCriticalUiMessages(
-          [notice, rateLimited ? RATE_LIMIT_COOLDOWN_MESSAGE : "", ...(prepared.warnings || [])].filter(Boolean),
+          [rateLimited ? RATE_LIMIT_COOLDOWN_MESSAGE : "", ...(prepared.warnings || [])].filter(Boolean),
           prepared.props || prepared.qualifiedReadyProps || [],
           prepared.sourceStatus || {}
         )
@@ -1709,10 +1714,19 @@ export default function DFSPropsApp() {
   const currentCategoryLabel = currentStreakBoard.label || STREAK_TAB_OPTIONS.find((option) => option.value === streakSport)?.label || "MLB";
   const isGoblinTab = streakSport === "goblins";
   const isDemonTab = streakSport === "demons";
-  const topPicksForTracking = useMemo(
-    () => sortDecisionBoard(filteredProps.filter(isEliteTopPickEligible)).slice(0, 2),
-    [filteredProps]
+  const topPicksDisplay = useMemo(
+    () =>
+      selectTopPicks(
+        filterVerifiedSportsbookProps([
+          ...qualifiedReadyProps,
+          ...nearQualification,
+          ...filteredProps.filter((prop) => prop.isQualificationAccepted || Number(prop.confidenceScore ?? 0) >= CONFIDENCE_THRESHOLDS.PLAYABLE),
+        ]),
+        2
+      ),
+    [qualifiedReadyProps, nearQualification, filteredProps]
   );
+  const topPicksForTracking = useMemo(() => topPicksDisplay, [topPicksDisplay]);
   const goblinPropsForTracking = useMemo(
     () => streakFinderProps.filter(isVerifiedSportsbookProp).filter(isGoblinProp),
     [streakFinderProps]
@@ -2224,10 +2238,12 @@ export default function DFSPropsApp() {
       ) : null}
 
       {cacheNotice ? (
-        <section style={styles.compactPanel}>
-          <p style={{ ...styles.compactFlags, color: "#fde68a", margin: 0 }}>{cacheNotice}</p>
+        <section style={{ ...styles.compactPanel, background: "rgba(251, 191, 36, 0.08)", borderColor: "rgba(251, 191, 36, 0.25)" }}>
+          <p style={{ ...styles.compactFlags, color: "#fbbf24", margin: 0 }}>{cacheNotice}</p>
         </section>
       ) : null}
+
+      <AcceptedPropsPanel props={readyToBetProps} loading={loading} />
 
       {visibleError ? <section style={styles.errorPanel}>{visibleError}</section> : null}
 
@@ -2293,7 +2309,7 @@ export default function DFSPropsApp() {
       ) : (
         <TopPicksBoard
           label={currentCategoryLabel}
-          picks={currentCategoryPicks}
+          picks={topPicksDisplay.length ? topPicksDisplay : currentCategoryPicks}
           loading={loading}
           onOpen={setSelectedEvaluation}
           compactMode={compactMode}
@@ -2306,7 +2322,7 @@ export default function DFSPropsApp() {
             <p style={styles.eyebrow}>Accepted props</p>
             <h2 style={styles.sectionTitle}>Ready to Bet</h2>
             <p style={styles.streakCopy}>
-            Weighted qualification · market-aware thresholds · verified stats · positive edge · target 5–15 per cycle.
+            Weighted qualification · market-aware thresholds · verified stats · positive edge · target 15–30 per cycle.
           </p>
           </div>
           <p style={styles.countPill}>{readyToBetProps.length} qualified</p>

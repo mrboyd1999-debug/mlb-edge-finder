@@ -416,8 +416,12 @@ export function projectPlayerProp(prop = {}, context = {}) {
 }
 
 export const PROJECTION_CONFIDENCE_THRESHOLDS = {
-  READY: 58,
+  RESEARCH: 58,
+  PLAYABLE: 65,
+  READY: 65,
+  STRONG: 72,
   TOP_PICKS: 72,
+  ELITE: 80,
 };
 
 function sideFromDiff(diff) {

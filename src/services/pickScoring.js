@@ -9,6 +9,8 @@ import {
   isEliteTopPickEligible,
   isDemonEligible,
   isReadyToBetEligible,
+  selectTopPicks,
+  computeTopPickWeightedScore,
   DECISION_THRESHOLDS,
 } from "./decisionEngine.js";
 import { PROJECTION_CONFIDENCE_THRESHOLDS } from "./propProjection.js";
@@ -24,7 +26,7 @@ import { getPropVolatilityTier, meetsVolatilityTierRequirements } from "./market
 const READY_MIN_CONFIDENCE = CONFIDENCE_THRESHOLDS.READY;
 const READY_MIN_DATA_QUALITY = 45;
 
-export { CONFIDENCE_THRESHOLDS, PROJECTION_CONFIDENCE_THRESHOLDS, isDemonPickConfidence, isTopPickConfidence, isTopPickEligible, isEliteTopPickEligible, isDemonEligible, isReadyToBetEligible, DECISION_THRESHOLDS };
+export { CONFIDENCE_THRESHOLDS, PROJECTION_CONFIDENCE_THRESHOLDS, isDemonPickConfidence, isTopPickConfidence, isTopPickEligible, isEliteTopPickEligible, isDemonEligible, isReadyToBetEligible, selectTopPicks, computeTopPickWeightedScore, DECISION_THRESHOLDS };
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));

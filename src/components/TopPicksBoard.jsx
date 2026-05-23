@@ -1,7 +1,6 @@
 import { memo, useMemo } from "react";
 import PlayerPropCard from "./PlayerPropCard.jsx";
-import { isEliteTopPickEligible } from "../services/pickScoring.js";
-import { sortDecisionBoard } from "../services/decisionEngine.js";
+import { selectTopPicks } from "../services/pickScoring.js";
 import { CONFIDENCE_THRESHOLDS } from "../services/confidenceEngine.js";
 import { buildElitePickExplanation } from "../services/pickExplanation.js";
 import { styles } from "../theme/styles.js";
@@ -13,17 +12,15 @@ function EmptyState({ text }) {
 function TopPicksBoard({ label = "Sport", picks = [], loading, onOpen, compactMode = true }) {
   const sorted = useMemo(
     () =>
-      sortDecisionBoard(picks.filter(isEliteTopPickEligible))
-        .slice(0, 2)
-        .map((prop, index) => {
-          const explanation = prop.elitePickExplanation || buildElitePickExplanation(prop);
-          return {
-            ...prop,
-            edgeScore: prop.edgeScore ?? prop.edgeRating,
-            elitePickExplanation: explanation,
-            topTwoReason: explanation.compact,
-          };
-        }),
+      selectTopPicks(picks, 2).map((prop, index) => {
+        const explanation = prop.elitePickExplanation || buildElitePickExplanation(prop);
+        return {
+          ...prop,
+          edgeScore: prop.edgeScore ?? prop.edgeRating,
+          elitePickExplanation: explanation,
+          topTwoReason: explanation.compact,
+        };
+      }),
     [picks]
   );
 
@@ -34,7 +31,8 @@ function TopPicksBoard({ label = "Sport", picks = [], loading, onOpen, compactMo
           <p style={styles.eyebrow}>{label}</p>
           <h2 style={styles.sectionTitle}>Top 2 Picks</h2>
           <p style={styles.streakCopy}>
-            Tier-1 MLB only · verified stats · ≥{CONFIDENCE_THRESHOLDS.ELITE}% confidence · stable lines · no volatile movement.
+            Weighted score · confidence + edge + market reliability − volatility − line movement · target ≥
+            {CONFIDENCE_THRESHOLDS.PLAYABLE}% playable.
           </p>
         </div>
         <p style={styles.countPill}>{sorted.length}/2</p>
@@ -42,7 +40,7 @@ function TopPicksBoard({ label = "Sport", picks = [], loading, onOpen, compactMo
       {loading ? (
         <EmptyState text={`Loading ${label} picks…`} />
       ) : sorted.length === 0 ? (
-        <EmptyState text="No elite MLB picks currently qualify." />
+        <EmptyState text="No qualified MLB picks currently rank in the top 2." />
       ) : (
         <div style={styles.topPicksList}>
           {sorted.map((prop, index) => (

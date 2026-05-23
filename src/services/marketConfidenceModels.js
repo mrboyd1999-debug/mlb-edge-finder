@@ -12,14 +12,14 @@ export const MARKET_CONFIDENCE_WEIGHTS = {
 export const PROP_VOLATILITY_TIERS = {
   LOW: {
     minEdge: 0.5,
-    readyConfidence: 58,
+    readyConfidence: 65,
     topConfidence: 72,
     minAgreement: 0.45,
     confidencePenalty: 0,
   },
   MEDIUM: {
     minEdge: 0.85,
-    readyConfidence: 62,
+    readyConfidence: 65,
     topConfidence: 74,
     minAgreement: 0.55,
     confidencePenalty: 4,

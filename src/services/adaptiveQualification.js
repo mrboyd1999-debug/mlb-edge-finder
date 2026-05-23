@@ -25,11 +25,17 @@ export const QUALIFICATION_TIER_LABELS = {
 };
 
 const DEFAULT_TIER_THRESHOLDS = {
-  elite: 84,
-  strong: 74,
-  nearMiss: 66,
-  watchlist: 55,
+  elite: 78,
+  strong: 68,
+  nearMiss: 60,
+  watchlist: 52,
 };
+
+/** Playable confidence floor for near-miss acceptance. */
+export const PLAYABLE_CONFIDENCE_MIN = 65;
+
+/** Soft penalties stack — hard reject only when multiple severe concerns combine. */
+const SOFT_PENALTY_HARD_REJECT = 18;
 
 const METRIC_WEIGHTS = {
   matchupQuality: 0.18,
@@ -78,8 +84,8 @@ const MARKET_QUALIFICATION_RULES = {
 
 const RECOVERY_GAP = 4;
 const MAX_RECOVERY_BOOST = 5;
-const TARGET_ACCEPTED_MIN = 5;
-const TARGET_ACCEPTED_MAX = 15;
+const TARGET_ACCEPTED_MIN = 15;
+const TARGET_ACCEPTED_MAX = 30;
 const MAX_PER_MARKET_RATIO = 0.4;
 
 function clamp(value, min, max) {
@@ -142,8 +148,19 @@ export function checkQualificationHardGates(prop = {}) {
   if (prop.freshnessTier === "EXPIRED") {
     return { pass: false, reason: "expired verified cache", gate: "stale" };
   }
-  if (prop.freshnessScore != null && Number(prop.freshnessScore) > 0 && Number(prop.freshnessScore) < 45) {
-    return { pass: false, reason: "cache freshness too low", gate: "stale" };
+  const vol = finiteNumber(prop.volatility);
+  const movementTag = prop.lineMovementTag || prop.lineMovement?.tag;
+  if (Number.isFinite(vol) && vol >= 4.5) {
+    return { pass: false, reason: "extreme volatility", gate: "volatility" };
+  }
+  if (
+    prop.lineMovement?.againstPick &&
+    (movementTag === "steamed" || movementTag === "volatile")
+  ) {
+    const delta = Math.abs(Number(prop.lineMovement?.delta ?? prop.lineMovement?.change ?? 0));
+    if (movementTag === "steamed" || delta >= 0.75) {
+      return { pass: false, reason: "sharp negative line movement against pick", gate: "lineMovement" };
+    }
   }
   const status = String(prop.status || "").toLowerCase();
   if (status === "locked" || status === "expired" || status === "live") {
@@ -317,22 +334,71 @@ function applyMarketQualificationAdjustments(prop = {}, metrics = {}, rules = {}
   let score = baseScore;
   let capTier = null;
   const notes = [];
+  const penaltyStack = [];
 
   if (rules.minVerifiedStatsScore && metrics.verifiedStatsQuality < rules.minVerifiedStatsScore) {
-    score -= 6;
+    penaltyStack.push({ key: "verificationDepth", label: "Verification depth penalty", penalty: 5 });
+    score -= 5;
     notes.push("verification depth below market minimum");
   }
   if (rules.minMatchupQuality && metrics.matchupQuality < rules.minMatchupQuality) {
-    score -= 8;
+    penaltyStack.push({ key: "matchupQuality", label: "Matchup quality penalty", penalty: 6 });
+    score -= 6;
     notes.push("matchup quality below market minimum");
-    if (rules.requiresStableMatchup) capTier = QUALIFICATION_TIERS.WATCHLIST;
   }
   if (rules.requiresStableMatchup && metrics.lineStability < 52) {
+    penaltyStack.push({ key: "lineStability", label: "Line stability penalty", penalty: 5 });
     score -= 5;
     notes.push("unstable line for matchup-sensitive market");
   }
 
-  return { score: clamp(score, 0, 100), capTier, notes };
+  return { score: clamp(score, 0, 100), capTier, notes, penaltyStack };
+}
+
+/** Weighted concern penalties — single flags reduce score; stacked flags can reject. */
+export function computeSoftConcernPenalties(prop = {}, metrics = {}) {
+  const stack = [];
+  let totalPenalty = 0;
+  const movementTag = prop.lineMovementTag || prop.lineMovement?.tag;
+
+  if (prop.lineMovement?.againstPick) {
+    stack.push({ key: "lineMovement", label: "Line movement penalty", penalty: 6 });
+    totalPenalty += 6;
+  } else if (movementTag === "volatile" || movementTag === "steamed") {
+    stack.push({ key: "lineMovement", label: "Line movement penalty", penalty: 4 });
+    totalPenalty += 4;
+  }
+
+  const vol = finiteNumber(prop.volatility);
+  if (Number.isFinite(vol) && vol >= 3.75) {
+    stack.push({ key: "volatility", label: "Volatility penalty", penalty: 8 });
+    totalPenalty += 8;
+  } else if (Number.isFinite(vol) && vol >= 3.25) {
+    stack.push({ key: "volatility", label: "Volatility penalty", penalty: 5 });
+    totalPenalty += 5;
+  } else if (prop.meetsVolatilityRequirements === false) {
+    stack.push({ key: "volatility", label: "Volatility penalty", penalty: 4 });
+    totalPenalty += 4;
+  }
+
+  const edge = Number(prop.edge || 0);
+  const minEdge = getMarketReadyThreshold(prop).minEdge;
+  if (edge > 0 && edge < minEdge * 0.85) {
+    stack.push({ key: "weakEdge", label: "Weak edge penalty", penalty: 5 });
+    totalPenalty += 5;
+  }
+
+  if (metrics.lineStability != null && metrics.lineStability < 48) {
+    stack.push({ key: "lineStability", label: "Line stability penalty", penalty: 4 });
+    totalPenalty += 4;
+  }
+
+  if (prop.freshnessTier === "STALE_WARNING") {
+    stack.push({ key: "cacheAge", label: "Stale cache penalty", penalty: 4 });
+    totalPenalty += 4;
+  }
+
+  return { stack, totalPenalty };
 }
 
 function applySmartRecovery(prop = {}, metrics = {}, score = 0, tierThresholds = {}) {
@@ -420,10 +486,24 @@ export function evaluateAdaptiveQualification(prop = {}, options = {}) {
   const metrics = computeQualificationMetrics(prop);
   const baseScore = computeWeightedQualificationScore(metrics, rules);
   const adjusted = applyMarketQualificationAdjustments(prop, metrics, rules, baseScore);
+  const softPenalties = computeSoftConcernPenalties(prop, metrics);
   const tierThresholds = options.tierThresholds || DEFAULT_TIER_THRESHOLDS;
-  const recovery = applySmartRecovery(prop, metrics, adjusted.score, tierThresholds);
+  const penalizedScore = clamp(adjusted.score - softPenalties.totalPenalty, 0, 100);
+  const recovery = applySmartRecovery(prop, metrics, penalizedScore, tierThresholds);
   let tier = resolveTierFromScore(recovery.score, tierThresholds);
   tier = capTier(tier, adjusted.capTier);
+
+  const penaltyStack = [...(adjusted.penaltyStack || []), ...softPenalties.stack];
+  if (softPenalties.totalPenalty >= SOFT_PENALTY_HARD_REJECT && tier !== QUALIFICATION_TIERS.REJECT) {
+    tier = QUALIFICATION_TIERS.WATCHLIST;
+  }
+  if (
+    softPenalties.totalPenalty >= SOFT_PENALTY_HARD_REJECT &&
+    penaltyStack.filter((row) => row.penalty >= 5).length >= 2 &&
+    recovery.score < tierThresholds.watchlist
+  ) {
+    tier = QUALIFICATION_TIERS.REJECT;
+  }
 
   const metricEntries = Object.entries(metrics).sort((a, b) => b[1] - a[1]);
   const strongestMetrics = metricEntries.slice(0, 3).map(([key, value]) => ({ key, value }));
@@ -441,6 +521,8 @@ export function evaluateAdaptiveQualification(prop = {}, options = {}) {
     recoveryBoost: recovery.recoveryBoost,
     marketRules: rules,
     adjustmentNotes: adjusted.notes,
+    penaltyStack,
+    softPenaltyTotal: softPenalties.totalPenalty,
     weakestMetrics,
     strongestMetrics,
     tierThresholds,
@@ -449,17 +531,24 @@ export function evaluateAdaptiveQualification(prop = {}, options = {}) {
 
 export function resolveAdaptiveTierThresholds(acceptedCount = 0) {
   if (acceptedCount >= TARGET_ACCEPTED_MIN) return { ...DEFAULT_TIER_THRESHOLDS, adaptive: false };
+  const deficit = Math.max(0, TARGET_ACCEPTED_MIN - acceptedCount);
+  const loosen = Math.min(8, Math.ceil(deficit / 2));
   return {
-    elite: DEFAULT_TIER_THRESHOLDS.elite - 2,
-    strong: DEFAULT_TIER_THRESHOLDS.strong - 3,
-    nearMiss: DEFAULT_TIER_THRESHOLDS.nearMiss - 2,
-    watchlist: DEFAULT_TIER_THRESHOLDS.watchlist - 1,
+    elite: DEFAULT_TIER_THRESHOLDS.elite - Math.min(4, loosen),
+    strong: DEFAULT_TIER_THRESHOLDS.strong - loosen,
+    nearMiss: DEFAULT_TIER_THRESHOLDS.nearMiss - Math.min(6, loosen + 1),
+    watchlist: DEFAULT_TIER_THRESHOLDS.watchlist - Math.min(3, loosen),
     adaptive: true,
   };
 }
 
-export function isAcceptedQualificationTier(tier = "") {
-  return tier === QUALIFICATION_TIERS.ELITE || tier === QUALIFICATION_TIERS.STRONG;
+export function isAcceptedQualificationTier(tier = "", prop = {}) {
+  if (tier === QUALIFICATION_TIERS.ELITE || tier === QUALIFICATION_TIERS.STRONG) return true;
+  if (tier === QUALIFICATION_TIERS.NEAR_MISS) {
+    const confidence = Number(prop.calibratedConfidence ?? prop.confidenceScore ?? prop.confidence ?? 0);
+    return confidence >= PLAYABLE_CONFIDENCE_MIN;
+  }
+  return false;
 }
 
 export function qualificationTierToDisplayTier(tier = "") {
@@ -509,7 +598,7 @@ export function selectDiverseAcceptedProps(props = [], limit = TARGET_ACCEPTED_M
 
 export function buildQualificationAnalytics(evaluated = []) {
   const scored = evaluated.filter((row) => !row.hardFail && row.qualificationScore > 0);
-  const accepted = evaluated.filter((row) => isAcceptedQualificationTier(row.qualificationTier));
+  const accepted = evaluated.filter((row) => isAcceptedQualificationTier(row.qualificationTier, row.prop));
   const avgScore =
     scored.length > 0
       ? Math.round(scored.reduce((sum, row) => sum + row.qualificationScore, 0) / scored.length)
@@ -573,7 +662,7 @@ export function evaluateQualificationPool(props = [], options = {}) {
     return { prop, ...result };
   });
 
-  let acceptedCount = firstPass.filter((row) => isAcceptedQualificationTier(row.qualificationTier)).length;
+  let acceptedCount = firstPass.filter((row) => isAcceptedQualificationTier(row.qualificationTier, row.prop)).length;
   let tierThresholds = resolveAdaptiveTierThresholds(acceptedCount);
   let evaluated = firstPass;
 
@@ -582,7 +671,7 @@ export function evaluateQualificationPool(props = [], options = {}) {
       const result = evaluateAdaptiveQualification(prop, { tierThresholds });
       return { prop, ...result };
     });
-    acceptedCount = evaluated.filter((row) => isAcceptedQualificationTier(row.qualificationTier)).length;
+    acceptedCount = evaluated.filter((row) => isAcceptedQualificationTier(row.qualificationTier, row.prop)).length;
   }
 
   return {
