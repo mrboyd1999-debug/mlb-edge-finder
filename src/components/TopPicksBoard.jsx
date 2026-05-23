@@ -9,7 +9,6 @@ function TopPicksBoard({ label = "Sport", picks = [], onOpen, compactMode = true
     <section className="top-picks-section" style={styles.section}>
       <div style={styles.sectionHeading}>
         <div>
-          <p style={styles.eyebrow}>{label}</p>
           <h2 style={styles.sectionTitle}>Top 2 Picks</h2>
         </div>
         <p style={styles.countPill}>{topPicks.length}/2</p>
@@ -22,6 +21,7 @@ function TopPicksBoard({ label = "Sport", picks = [], onOpen, compactMode = true
               prop={prop}
               rank={idx + 1}
               compact={compactMode}
+              topPick
               onOpen={onOpen}
               cardStyle={styles.streakCard}
             />

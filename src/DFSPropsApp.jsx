@@ -203,6 +203,8 @@ import {
 } from "./utils/mlbOnlyMode.js";
 import { runFilterPipeline, runUiPipeline } from "./utils/pipelineStages.js";
 import MobileQuickActionBar from "./components/MobileQuickActionBar.jsx";
+import MobileScrollFab from "./components/MobileScrollFab.jsx";
+import LazyBelowFold from "./components/LazyBelowFold.jsx";
 import { isHeavyDebugEnabled, readShowDebugPanelsPreference, shouldLogVerbose, shouldTrackRejectedProps, writeShowDebugPanelsPreference } from "./utils/devMode.js";
 import { canonicalStatType } from "./utils/marketNormalization.js";
 import {
@@ -1591,6 +1593,10 @@ export default function DFSPropsApp() {
     if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
 
+  const scrollToTop = useCallback(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(searchText.trim()), 300);
     return () => window.clearTimeout(timer);
@@ -2070,13 +2076,17 @@ export default function DFSPropsApp() {
       <div className="dfs-section dfs-order-header">
       <section style={styles.header}>
         <div>
-          <p style={styles.eyebrow}>DFS pick'em analytics</p>
+          <p className="mobile-hide-verbose" style={styles.eyebrow}>DFS pick'em analytics</p>
           <h1 className="dfs-header-title" style={styles.title}>PrizePicks + Underdog Pick'em Engine</h1>
-          <p className="dfs-header-subtitle" style={styles.subtitle}>
+          <p className="mobile-hide-verbose dfs-header-subtitle" style={styles.subtitle}>
             Verified PrizePicks and Underdog lines only — no mock, fallback, or generated props.
           </p>
-          <p style={styles.lastUpdated}>Last updated: {lastUpdatedLabel}</p>
-          {rateLimitNotice ? <p style={{ ...styles.streakNotice, margin: "6px 0 0" }}>{rateLimitNotice}</p> : null}
+          <p className="mobile-hide-verbose" style={styles.lastUpdated}>Last updated: {lastUpdatedLabel}</p>
+          {rateLimitNotice ? (
+            <p className="mobile-hide-soft-notice" style={{ ...styles.streakNotice, margin: "6px 0 0" }}>
+              {rateLimitNotice}
+            </p>
+          ) : null}
         </div>
         <div className="dfs-header-actions" style={{ display: "grid", gap: "8px", justifyItems: "end" }}>
           <button
@@ -2152,13 +2162,13 @@ export default function DFSPropsApp() {
       <div className="dfs-section dfs-order-sport-tabs">
       <section style={styles.streakControls} aria-label="Sport category tabs">
         <SportTabs options={visibleStreakSports} active={streakSport} onChange={setStreakSport} boards={streakSportBoards} />
-        {learningSaveNotice ? <p style={styles.streakNotice}>{learningSaveNotice}</p> : null}
+        {learningSaveNotice ? <p className="mobile-hide-verbose" style={styles.streakNotice}>{learningSaveNotice}</p> : null}
       </section>
       </div>
 
       <div className="dfs-section dfs-order-notices">
       {MLB_ONLY_MODE ? (
-        <section style={styles.compactPanel}>
+        <section className="mobile-hide-verbose" style={styles.compactPanel}>
           <p style={styles.compactFlags}>
             <strong>MLB-only mode</strong> — NBA, WNBA, Tennis, Soccer, and NHL are temporarily disabled while the engine focuses on MLB accuracy.
           </p>
@@ -2180,7 +2190,7 @@ export default function DFSPropsApp() {
       )}
 
       {underdogDegraded ? (
-        <section style={styles.compactPanel}>
+        <section className="mobile-hide-soft-notice" style={styles.compactPanel}>
           <p style={{ ...styles.compactFlags, color: "#fbbf24", margin: 0 }}>{UNDERDOG_DEGRADED_MESSAGE}</p>
         </section>
       ) : null}
@@ -2217,7 +2227,6 @@ export default function DFSPropsApp() {
       <section style={styles.section} aria-label="Ready to Bet board">
         <div style={styles.sectionHeading}>
           <div>
-            <p style={styles.eyebrow}>Accepted props</p>
             <h2 style={styles.sectionTitle}>Ready to Bet</h2>
             <p className="section-subcopy" style={styles.streakCopy}>
             Weighted qualification · market-aware thresholds · verified stats · positive edge · target 15–30 per cycle.
@@ -2246,6 +2255,7 @@ export default function DFSPropsApp() {
       </section>
       </div>
 
+      <LazyBelowFold>
       <div className="dfs-section dfs-order-near-miss">
       <NearMissBoard picks={nearMissProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
       </div>
@@ -2254,7 +2264,6 @@ export default function DFSPropsApp() {
       <section style={styles.section} aria-label="Best Value board">
         <div style={styles.sectionHeading}>
           <div>
-            <p style={styles.eyebrow}>Edge values</p>
             <h2 style={styles.sectionTitleSmall}>Best Value</h2>
             <p className="section-subcopy" style={styles.streakCopy}>Strongest verified edges from live sportsbook lines.</p>
           </div>
@@ -2301,8 +2310,9 @@ export default function DFSPropsApp() {
       />
       </div>
 
-      <div className={`dfs-section dfs-order-debug debug-panel-section${showDebugPanels ? " debug-visible" : ""}`}>
-      {showDebugPanels && Object.keys(pipelineCounters).length > 0 ? (
+      {showDebugPanels ? (
+      <div className="dfs-section dfs-order-debug">
+      {Object.keys(pipelineCounters).length > 0 ? (
         <LazyDebugDetails
           eyebrow="Pipeline"
           title="Prop Counters"
@@ -2315,7 +2325,7 @@ export default function DFSPropsApp() {
         </LazyDebugDetails>
       ) : null}
 
-      {showDebugPanels && rejectedPropSamples.length > 0 ? (
+      {rejectedPropSamples.length > 0 ? (
         <LazyDebugDetails title="Rejected Props Debug" countLabel={`${rejectedPropSamples.length} groups`}>
           {rejectedPropSamples.slice(0, DEBUG_SAMPLE_LIMIT).map((sample, index) => (
             <p key={`${sample.stage}-${sample.sport}-${sample.market}-${sample.reason}-${index}`} style={styles.compactFlags}>
@@ -2325,7 +2335,7 @@ export default function DFSPropsApp() {
         </LazyDebugDetails>
       ) : null}
 
-      {showDebugPanels && (pipelineAudit.scoringDebug?.length > 0 || pipelineAudit.projectionDebug?.length > 0 || pipelineAudit.lineMovementDebug?.length > 0) ? (
+      {(pipelineAudit.scoringDebug?.length > 0 || pipelineAudit.projectionDebug?.length > 0 || pipelineAudit.lineMovementDebug?.length > 0) ? (
         <>
           {pipelineAudit.scoringDebug?.length > 0 ? (
             <LazyDebugDetails title="Scoring Debug" countLabel={`${pipelineAudit.scoringDebug.length} groups`}>
@@ -2357,14 +2367,11 @@ export default function DFSPropsApp() {
         </>
       ) : null}
 
-      {showDebugPanels ? (
-        <>
-          <QualificationAnalyticsPanel analytics={qualificationAnalytics} loading={loading} />
-          <CacheAnalyticsPanel analytics={cacheAnalytics} cacheNotice={cacheNotice} loading={loading} />
-          <RejectionAnalyticsPanel summary={rejectionAnalytics} samples={rejectionSamples} loading={loading} />
-        </>
-      ) : null}
+      <QualificationAnalyticsPanel analytics={qualificationAnalytics} loading={loading} />
+      <CacheAnalyticsPanel analytics={cacheAnalytics} cacheNotice={cacheNotice} loading={loading} />
+      <RejectionAnalyticsPanel summary={rejectionAnalytics} samples={rejectionSamples} loading={loading} />
       </div>
+      ) : null}
 
       <div className="dfs-section dfs-order-history">
       <details style={styles.compactDetails}>
@@ -2389,6 +2396,7 @@ export default function DFSPropsApp() {
         </div>
       </details>
       </div>
+      </LazyBelowFold>
 
       {selectedEvaluation && (
         <PickDetailModal
@@ -2405,6 +2413,7 @@ export default function DFSPropsApp() {
       refreshDisabled={refreshBlocked}
       refreshLabel={mobileRefreshLabel}
     />
+    <MobileScrollFab onScrollTop={scrollToTop} onScrollTo={scrollToSection} />
     </>
   );
 }

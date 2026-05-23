@@ -25,18 +25,24 @@ body,
   .content {
     width: 100%;
     max-width: 100%;
-    padding-left: 10px !important;
-    padding-right: 10px !important;
-    padding-bottom: 76px !important;
+    padding: 8px !important;
+    padding-bottom: 62px !important;
   }
 
   .dfs-app-page {
     display: flex;
     flex-direction: column;
-    gap: 0;
+    gap: 8px;
   }
 
-  .dfs-order-header { order: 0; }
+  .dfs-section {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin-bottom: 8px;
+  }
+
+  .dfs-order-header { order: 0; margin-bottom: 4px; }
   .dfs-order-filters { order: 5; }
   .dfs-order-sport-tabs { order: 8; }
   .dfs-order-notices { order: 9; }
@@ -50,13 +56,17 @@ body,
   .dfs-order-debug { order: 70; }
   .dfs-order-history { order: 80; }
 
-  .dfs-section {
-    width: 100%;
-    max-width: 100%;
-    min-width: 0;
+  .dfs-header-actions {
+    display: none !important;
   }
 
-  .dfs-header-actions {
+  .dfs-header-title {
+    font-size: 17px !important;
+    margin: 0 !important;
+  }
+
+  .mobile-hide-verbose,
+  .mobile-hide-soft-notice {
     display: none !important;
   }
 
@@ -66,28 +76,93 @@ body,
   .accepted-props-grid,
   .top-picks-grid {
     grid-template-columns: 1fr !important;
-    gap: 10px !important;
+    gap: 8px !important;
   }
 
   .accepted-props-section,
   .top-picks-section {
-    margin-top: 10px;
+    margin-top: 0 !important;
+  }
+
+  .top-picks-section [style*="sectionHeading"],
+  .accepted-props-section [style*="sectionHeading"],
+  .dfs-section [style*="sectionHeading"] {
+    margin-bottom: 6px !important;
   }
 
   #root article[style*="cursor: pointer"] {
     font-size: 12px;
+    padding: 8px !important;
+    animation: none;
+    box-shadow: none !important;
+    transform: none !important;
+  }
+
+  #root article[style*="cursor: pointer"]:hover {
+    transform: none !important;
+    box-shadow: none !important;
+  }
+
+  .prop-card-top-pick {
     padding: 6px 8px !important;
   }
 
+  .prop-card-top-pick .prop-card-player-name {
+    font-size: 12px !important;
+  }
+
+  .prop-card-top-pick .prop-card-platform {
+    font-size: 8px !important;
+    margin-bottom: 0 !important;
+  }
+
+  .prop-card-top-pick .prop-card-meta-row {
+    gap: 4px 8px !important;
+    padding-top: 4px !important;
+    border-top: none !important;
+  }
+
+  .prop-meta-top-pick-inline {
+    display: block;
+    width: 100%;
+    margin: 2px 0 0;
+    font-size: 10px;
+    font-weight: 800;
+    color: #86efac;
+    letter-spacing: 0.02em;
+  }
+
+  .prop-card-top-pick .prop-meta-top-pick-hide {
+    display: none !important;
+  }
+
+  .prop-card-top-pick .prop-card-inline-details {
+    display: none;
+  }
+
+  .prop-card-top-pick .rank-badge,
+  .prop-card-top-pick [style*="rankBadge"] {
+    min-width: 22px !important;
+    height: 18px !important;
+    font-size: 9px !important;
+    margin-right: 4px !important;
+  }
+
   .player-image-wrap {
-    flex: 0 0 30px !important;
-    width: 30px !important;
-    height: 30px !important;
+    flex: 0 0 28px !important;
+    width: 28px !important;
+    height: 28px !important;
     border-radius: 6px !important;
   }
 
+  .prop-card-top-pick .player-image-wrap {
+    flex: 0 0 26px !important;
+    width: 26px !important;
+    height: 26px !important;
+  }
+
   .player-image-wrap .player-initials-text {
-    font-size: 10px !important;
+    font-size: 9px !important;
   }
 
   .prop-meta-secondary {
@@ -98,48 +173,69 @@ body,
     display: none;
   }
 
+  /* Horizontal category chips */
+  .sport-tabs-scroll {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+
+  .sport-tabs-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .sport-tab-chip {
+    flex: 0 0 auto;
+    padding: 6px 10px !important;
+    font-size: 11px !important;
+    border-radius: 999px !important;
+  }
+
+  .sport-tab-count {
+    opacity: 0.7;
+    font-weight: 600;
+  }
+
+  /* API health chips */
   .api-health-chips-row {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    padding: 8px 10px;
+    padding: 8px;
     border: 1px solid #334155;
     border-radius: 8px;
     background: #0f172a;
-    margin-bottom: 8px;
+    margin-bottom: 0;
   }
 
   .api-health-chip {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 3px 8px;
+    padding: 2px 7px;
     border-radius: 999px;
     border: 1px solid #334155;
     background: #111827;
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 700;
     white-space: nowrap;
   }
 
-  .api-health-chip-name {
-    color: #94a3b8;
-  }
-
-  .api-health-chip-status {
-    font-weight: 800;
-  }
-
   .api-health-expand {
-    margin-bottom: 8px;
+    margin-bottom: 0;
   }
 
   .api-health-expand > summary {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 700;
     color: #64748b;
     cursor: pointer;
-    padding: 4px 0;
+    padding: 2px 0;
     list-style: none;
   }
 
@@ -160,7 +256,8 @@ body,
   }
 
   .dfs-section h2 {
-    font-size: 16px !important;
+    font-size: 15px !important;
+    margin: 0 !important;
   }
 
   .section-subcopy {
@@ -177,9 +274,15 @@ body,
 
   .settings-test-row button {
     font-size: 11px !important;
-    padding: 8px 10px !important;
+    padding: 6px 10px !important;
   }
 
+  details[style],
+  .compact-panel {
+    margin-bottom: 0;
+  }
+
+  /* Slim bottom nav */
   .mobile-quick-bar {
     position: fixed;
     left: 0;
@@ -188,35 +291,85 @@ body,
     z-index: 1000;
     display: flex;
     gap: 4px;
-    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
-    background: rgba(10, 15, 26, 0.96);
-    border-top: 1px solid #334155;
-    backdrop-filter: blur(8px);
+    padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px));
+    background: rgba(10, 15, 26, 0.82);
+    border-top: 1px solid rgba(51, 65, 85, 0.7);
   }
 
   .mobile-quick-bar-btn {
     flex: 1;
     min-width: 0;
-    border: 1px solid #334155;
-    background: #111827;
-    color: #e2e8f0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    border: none;
+    background: transparent;
+    color: #cbd5e1;
     border-radius: 8px;
-    padding: 8px 4px;
-    font-size: 11px;
-    font-weight: 800;
+    padding: 4px 2px;
+    min-height: 44px;
     cursor: pointer;
-    white-space: nowrap;
+  }
+
+  .mobile-quick-bar-icon {
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  .mobile-quick-bar-label {
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 1.1;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .mobile-quick-bar-btn:disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: not-allowed;
   }
 
   .mobile-quick-bar-btn:active:not(:disabled) {
+    background: rgba(30, 41, 59, 0.65);
+  }
+
+  /* Floating scroll buttons */
+  .mobile-scroll-fab {
+    position: fixed;
+    right: 8px;
+    bottom: calc(54px + env(safe-area-inset-bottom, 0px));
+    z-index: 999;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .mobile-scroll-fab-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 999px;
+    border: 1px solid #334155;
+    background: rgba(15, 23, 42, 0.92);
+    color: #e2e8f0;
+    font-size: 14px;
+    font-weight: 800;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .mobile-scroll-fab-btn:active {
     background: #1e293b;
+  }
+
+  .mobile-scroll-fab-icon {
+    line-height: 1;
   }
 
   .dfs-app-page *,
@@ -231,18 +384,11 @@ body,
   textarea {
     max-width: 100%;
   }
-
-  .debug-panel-section {
-    display: none;
-  }
-
-  .debug-panel-section.debug-visible {
-    display: block;
-  }
 }
 
 @media (min-width: 769px) {
-  .mobile-quick-bar {
+  .mobile-quick-bar,
+  .mobile-scroll-fab {
     display: none;
   }
 
@@ -257,21 +403,17 @@ body,
   .api-health-full-panel {
     display: block !important;
   }
-}
 
-.debug-panel-section {
-  display: none;
-}
-
-.debug-panel-section.debug-visible {
-  display: block;
+  .prop-meta-top-pick-inline {
+    display: none;
+  }
 }
 
 @media (min-width: 641px) {
   .accepted-props-grid,
   .top-picks-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    gap: 8px;
   }
 }
 
@@ -285,27 +427,31 @@ body,
   to { opacity: 1; transform: translateY(0); }
 }
 
-#root article[style*="cursor: pointer"] {
-  animation: dfsFadeIn 0.18s ease;
-}
+@media (min-width: 769px) {
+  #root article[style*="cursor: pointer"] {
+    animation: dfsFadeIn 0.18s ease;
+  }
 
-#root article[style*="cursor: pointer"]:hover {
-  border-color: #38bdf8 !important;
-  box-shadow: 0 4px 14px rgba(56, 189, 248, 0.18);
-  transform: translateY(-1px);
+  #root article[style*="cursor: pointer"]:hover {
+    border-color: #38bdf8 !important;
+    box-shadow: 0 4px 14px rgba(56, 189, 248, 0.18);
+    transform: translateY(-1px);
+  }
 }
 
 #root button {
-  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
-#root button:active:not(:disabled) {
-  transform: scale(0.97);
+@media (min-width: 769px) {
+  #root button:active:not(:disabled) {
+    transform: scale(0.97);
+  }
 }
 
 .accepted-props-section,
 .top-picks-section {
-  margin-top: 14px;
+  margin-top: 8px;
 }
 
 .accepted-props-grid,

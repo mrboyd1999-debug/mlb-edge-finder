@@ -151,7 +151,7 @@ export default function SourceStatusBar({
               <strong style={styles.apiHealthTitle}>API health</strong>
               {devMode ? <span style={styles.apiHealthDevTag}>Dev throttle on</span> : null}
             </div>
-            <p style={styles.compactFlags}>
+            <p className="mobile-hide-verbose" style={styles.compactFlags}>
               Provider priority: PrizePicks → Underdog → Odds API → SportsData → verified cache
             </p>
             <div style={styles.sourceStatusBar}>

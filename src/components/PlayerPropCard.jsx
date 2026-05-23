@@ -65,7 +65,7 @@ function bettingLabelStyle(label) {
   };
 }
 
-function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedResult }) {
+function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, cardStyle, savedResult }) {
   const [expanded, setExpanded] = useState(false);
   const tier = confidenceTier(prop);
   const lean = formatLeanSide(prop.bestPick || prop.side || "Watch");
@@ -108,9 +108,23 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
   const recentTrend = prop.formNote || prop.profile?.formNote || prop.recentTrend || prop.strikeoutTrend || "";
   const openingLine = prop.lineMovement?.openingLine ?? null;
   const currentLineSnap = prop.lineMovement?.currentLine ?? prop.line ?? null;
+  const confDisplay =
+    prop.calibratedConfidence != null && prop.calibratedConfidence !== prop.confidenceScore
+      ? prop.calibratedConfidence
+      : prop.confidenceScore ?? prop.confidence ?? null;
+  const edgeDisplay =
+    Number.isFinite(Number(prop.edge)) && Number(prop.edge) > 0 ? formatNumber(prop.edge) : "—";
+  const riskShort = (() => {
+    const text = String(prop.riskLevel || "").toUpperCase();
+    if (text.includes("LOW")) return "LOW";
+    if (text.includes("HIGH")) return "HIGH";
+    if (text.includes("MED") || text.includes("MOD")) return "MED";
+    return text.slice(0, 3) || "—";
+  })();
 
   return (
     <article
+      className={topPick ? "prop-card-top-pick" : undefined}
       style={{ ...styles.card, ...(compact ? styles.cardMobileTight : null), ...cardStyle }}
       role="button"
       tabIndex={0}
@@ -191,6 +205,11 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
           <span style={styles.metaLabel}>Lean</span>
           <strong style={styles.metaValueStrong}>{lean}</strong>
         </span>
+        {topPick ? (
+          <p className="prop-meta-top-pick-inline">
+            CONF {confDisplay != null ? `${confDisplay}%` : "—"} • EDGE {edgeDisplay} • RISK {riskShort}
+          </p>
+        ) : null}
         <span className="prop-meta-secondary" style={styles.compactMetaItem}>
           <span style={styles.metaLabel}>Proj</span>
           <strong style={styles.metaValueStrong}>
@@ -201,24 +220,20 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
                 : "—"}
           </strong>
         </span>
-        <span style={styles.compactMetaItem}>
+        <span className={`prop-meta-conf-edge-risk${topPick ? " prop-meta-top-pick-hide" : ""}`} style={styles.compactMetaItem}>
           <span style={styles.metaLabel}>Edge</span>
-          <strong style={styles.metaValueStrong}>
-            {Number.isFinite(Number(prop.edge)) && Number(prop.edge) > 0 ? formatNumber(prop.edge) : "—"}
-          </strong>
+          <strong style={styles.metaValueStrong}>{edgeDisplay}</strong>
         </span>
-        <span style={styles.compactMetaItem}>
+        <span className={`prop-meta-conf-edge-risk${topPick ? " prop-meta-top-pick-hide" : ""}`} style={styles.compactMetaItem}>
           <span style={styles.metaLabel}>Conf</span>
           <strong style={styles.metaValueStrong}>
-            {prop.calibratedConfidence != null && prop.calibratedConfidence !== prop.confidenceScore
-              ? `${prop.calibratedConfidence}%`
-              : `${prop.confidenceScore ?? prop.confidence ?? "—"}%`}
+            {confDisplay != null ? `${confDisplay}%` : "—"}
           </strong>
           {prop.calibratedConfidence != null && prop.calibratedConfidence !== prop.confidenceScore ? (
             <span style={{ ...styles.compactFlags, marginLeft: 4 }}> raw {prop.confidenceScore}%</span>
           ) : null}
         </span>
-        <span style={styles.compactMetaItem}>
+        <span className={`prop-meta-conf-edge-risk${topPick ? " prop-meta-top-pick-hide" : ""}`} style={styles.compactMetaItem}>
           <span style={styles.metaLabel}>Risk</span>
           <strong>{prop.riskLevel || "—"}</strong>
         </span>

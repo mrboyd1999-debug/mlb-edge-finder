@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { styles } from "../theme/styles.js";
 import { formatDateTime } from "../utils/formatters.js";
 import {
@@ -18,6 +18,7 @@ export default function SettingsPanel({
   showDebugPanels = false,
   onShowDebugPanelsChange,
 }) {
+  const panelRef = useRef(null);
   const [draft, setDraft] = useState(() => readRuntimeSettings());
   const [saved, setSaved] = useState(() => readRuntimeSettings());
   const [meta, setMeta] = useState(() => readSettingsMeta());
@@ -28,14 +29,19 @@ export default function SettingsPanel({
   const isSaved = settingsDraftMatchesSaved(draft, saved);
   const apiValidation = validateApiConfig();
 
+  function collapsePanel() {
+    if (panelRef.current) panelRef.current.open = false;
+  }
+
   function handleSave() {
     writeRuntimeSettings(draft);
     const nextSaved = readRuntimeSettings();
     setSaved(nextSaved);
     setMeta(readSettingsMeta());
-    setNotice("Settings saved locally. Click Refresh lines to apply.");
+    setNotice("Settings saved.");
     onClearCaches?.();
     onSaved?.(nextSaved);
+    collapsePanel();
   }
 
   async function handleTestConnections() {
@@ -50,6 +56,7 @@ export default function SettingsPanel({
         lastConnectionReport: report.results,
       });
       setMeta(readSettingsMeta());
+      collapsePanel();
     } catch (error) {
       setNotice(error?.message || "Connection test failed.");
     } finally {
@@ -58,21 +65,21 @@ export default function SettingsPanel({
   }
 
   return (
-    <details id="section-settings" className="settings-panel" style={styles.compactDetails}>
+    <details id="section-settings" ref={panelRef} className="settings-panel" style={styles.compactDetails}>
       <summary style={styles.detailsSummary}>
         <span>
-          <span style={styles.eyebrow}>Runtime setup</span>
+          <span className="mobile-hide-verbose" style={styles.eyebrow}>Runtime setup</span>
           <strong>Settings</strong>
         </span>
-        <span style={styles.countPill}>{isSaved ? "Saved" : "Unsaved changes"}</span>
+        <span style={styles.countPill}>{isSaved ? "Saved" : "Unsaved"}</span>
       </summary>
       <div style={styles.compactPanel}>
         <div className="settings-test-row" style={{ ...styles.segmentRow, marginTop: 0, flexWrap: "wrap" }}>
           <button type="button" style={styles.secondaryButton} onClick={handleSave}>
-            Save settings
+            Save
           </button>
           <button type="button" style={styles.secondaryButton} onClick={handleTestConnections} disabled={testing}>
-            {testing ? "Testing…" : "Test API Connections"}
+            {testing ? "Testing…" : "Test API"}
           </button>
         </div>
         <label
@@ -91,12 +98,12 @@ export default function SettingsPanel({
           />
           Show Debug Panels
         </label>
-        <p style={{ ...styles.compactFlags, margin: "8px 0 0" }}>
+        <p className="mobile-hide-verbose" style={{ ...styles.compactFlags, margin: "8px 0 0" }}>
           Keys are stored in <code>localStorage</code> for development. For production, set the same{" "}
           <code>VITE_*</code> variables in Vercel — never commit <code>.env.local</code>.
         </p>
         {apiValidation.warnings.length > 0 ? (
-          <ul style={{ ...styles.explanationList, margin: "4px 0 0", paddingLeft: "18px" }}>
+          <ul className="mobile-hide-verbose" style={{ ...styles.explanationList, margin: "4px 0 0", paddingLeft: "18px" }}>
             {apiValidation.warnings.map((warning) => (
               <li key={warning} style={{ ...styles.compactFlags, color: apiValidation.ok ? "#fcd34d" : "#fca5a5" }}>
                 {warning}
@@ -107,7 +114,7 @@ export default function SettingsPanel({
         <details className="settings-keys-expand" style={{ ...styles.compactDetails, marginTop: "8px" }}>
           <summary style={styles.detailsSummary}>
             <span>
-              <span style={styles.eyebrow}>Credentials</span>
+              <span className="mobile-hide-verbose" style={styles.eyebrow}>Credentials</span>
               <strong>API Keys & Proxies</strong>
             </span>
           </summary>
@@ -129,7 +136,7 @@ export default function SettingsPanel({
                     onChange={(event) => setDraft((current) => ({ ...current, [def.key]: event.target.value }))}
                     placeholder={def.placeholder || def.key}
                   />
-                  <span style={{ fontSize: 11, opacity: 0.65 }}>{def.key}</span>
+                  <span className="mobile-hide-verbose" style={{ fontSize: 11, opacity: 0.65 }}>{def.key}</span>
                 </label>
               );
             })}
@@ -137,26 +144,22 @@ export default function SettingsPanel({
         </details>
         <div style={{ ...styles.segmentRow, marginTop: "8px", flexWrap: "wrap" }}>
           {meta.savedAt ? (
-            <span style={styles.compactFlags}>Last saved: {formatDateTime(meta.savedAt)}</span>
+            <span className="mobile-hide-verbose" style={styles.compactFlags}>Last saved: {formatDateTime(meta.savedAt)}</span>
           ) : null}
           {meta.lastTestedAt ? (
-            <span style={styles.compactFlags}>Last tested: {formatDateTime(meta.lastTestedAt)}</span>
+            <span className="mobile-hide-verbose" style={styles.compactFlags}>Last tested: {formatDateTime(meta.lastTestedAt)}</span>
           ) : null}
           {notice ? <p style={styles.compactFlags}>{notice}</p> : null}
         </div>
         {connectionReport?.results?.length ? (
-          <div style={{ marginTop: "12px" }}>
-            <strong style={{ fontSize: 13 }}>Connection test results</strong>
+          <div style={{ marginTop: "8px" }}>
+            <strong style={{ fontSize: 13 }}>Connection test</strong>
             {connectionReport.results.map((row) => (
-              <div key={row.provider} style={{ ...styles.apiHealthRow, marginTop: "8px" }}>
+              <div key={row.provider} style={{ ...styles.apiHealthRow, marginTop: "6px" }}>
                 <div style={styles.apiHealthRowTop}>
                   <span style={styles.sourceName}>{row.provider}</span>
                   <span style={connectionStatusStyle(row.status)}>{row.status}</span>
                 </div>
-                <p style={styles.compactFlags}>
-                  {row.message}
-                  {row.durationMs ? ` · ${row.durationMs}ms` : ""}
-                </p>
               </div>
             ))}
           </div>
