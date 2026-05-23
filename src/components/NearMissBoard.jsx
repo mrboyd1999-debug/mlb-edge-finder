@@ -17,7 +17,7 @@ function NearMissBoard({ picks = [], loading, onOpen, compactMode = true }) {
           <p style={styles.eyebrow}>Within 3–5 pts</p>
           <h2 style={styles.sectionTitleSmall}>Near Miss</h2>
           <p style={styles.streakCopy}>
-            Verified props with strong edge and matchup that narrowly missed market-specific confidence thresholds.
+            Within adaptive tier boundary — strong edge and matchup with one secondary metric slightly below threshold.
           </p>
         </div>
         <p style={styles.countPill}>{sorted.length} near</p>

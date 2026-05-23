@@ -3,23 +3,17 @@ import { MLB_ONLY_MODE, guardMlbOnlyProp } from "../utils/mlbOnlyMode.js";
 import { isVerifiedSportsbookProp } from "../utils/propValidation.js";
 import { computeRankScore } from "./projectionEngine.js";
 import { buildRejectionAnalytics } from "./rejectionAnalytics.js";
-import { getMarketReadyThreshold, NEAR_MISS_CONFIDENCE_GAP, NEAR_MISS_DQ_GAP } from "./marketThresholds.js";
 import {
-  hasValidPickFields,
-  getReadyToBetRejectReason,
-  isReadyToBet,
-  isPositiveEdge,
-  resolveReadyThresholds,
-  READY_MIN_CONFIDENCE,
-  READY_MIN_DATA_QUALITY,
-} from "./pickScoring.js";
+  evaluateQualificationPool,
+  isAcceptedQualificationTier,
+  qualificationTierLabel,
+  qualificationTierToDisplayTier,
+  QUALIFICATION_TIERS,
+  selectDiverseAcceptedProps,
+} from "./adaptiveQualification.js";
 import { RENDER_LIMITS } from "../utils/approvedMarkets.js";
 
 export const DISPLAY_MIN_CONFIDENCE = 40;
-export const NEAR_CONFIDENCE_MIN = 55;
-export const NEAR_CONFIDENCE_MAX = 64;
-export const NEAR_DQ_MIN = 38;
-export const NEAR_DQ_MAX = 49;
 
 const SUPPORTED_SPORTS = MLB_ONLY_MODE ? new Set(["MLB"]) : new Set(["MLB", "NBA", "WNBA", "ATP Tennis", "WTA Tennis", "Tennis", "Soccer", "NFL", "NCAAF", "NHL"]);
 
@@ -45,54 +39,64 @@ export function isDisplayable(prop) {
   return confidence > 0;
 }
 
-export function isNearQualification(prop, globalThresholds = {}) {
-  if (isReadyToBet(prop, globalThresholds)) return false;
-  if (!isDisplayable(prop)) return false;
-  if (!isPositiveEdge(prop)) return false;
-  if (!prop.hasVerifiedStats && !prop.manualEnriched && !globalThresholds.relaxedStats) return false;
-
-  const marketThresholds = getMarketReadyThreshold(prop);
-  const minConf = globalThresholds.minConfidence ?? marketThresholds.confidence;
-  const minDq = globalThresholds.minDataQuality ?? marketThresholds.dataQuality;
-  const confidence = Number(prop.confidenceScore ?? 0);
-  const dq = Number(prop.dataQualityScore ?? 0);
-  const confGap = minConf - confidence;
-  const dqGap = minDq - dq;
-
-  if (confGap > 0 && confGap <= NEAR_MISS_CONFIDENCE_GAP) return true;
-  if (dqGap > 0 && dqGap <= NEAR_MISS_DQ_GAP && confidence >= minConf - 3) return true;
-  return false;
+export function isNearQualification(prop) {
+  return prop.qualificationTier === QUALIFICATION_TIERS.NEAR_MISS;
 }
 
-export function classifyDisplayTier(prop, globalThresholds = {}) {
+export function isReadyToBet(prop) {
+  return isAcceptedQualificationTier(prop.qualificationTier);
+}
+
+export function classifyDisplayTier(prop) {
   if (!isDisplayable(prop)) return null;
-  if (isReadyToBet(prop, globalThresholds)) return "ready";
-  if (isNearQualification(prop, globalThresholds)) return "near";
-  return "research";
+  return qualificationTierToDisplayTier(prop.qualificationTier);
 }
 
-export function applyQualificationLabels(prop, globalThresholds = {}) {
-  const tier = classifyDisplayTier(prop, globalThresholds);
-  if (!tier) {
+export function applyQualificationLabels(prop, evaluation = {}) {
+  const tier = evaluation.qualificationTier || prop.qualificationTier || QUALIFICATION_TIERS.REJECT;
+  const displayTier = qualificationTierToDisplayTier(tier);
+
+  if (!displayTier) {
     return {
       ...prop,
+      ...evaluation,
+      qualificationTier: tier,
       displayTier: null,
       recommendationStatus: "rejected",
       bettingLabel: "Hidden",
-      rejectionReason: prop.rejectionReason || "below display threshold",
-      rejectionStage: prop.rejectionStage || "display",
+      rejectionReason: evaluation.hardFailReason || prop.rejectionReason || "below qualification threshold",
+      rejectionStage: prop.rejectionStage || "qualification",
     };
   }
+
   const bettingLabel =
-    tier === "ready" ? "Ready to Bet" : tier === "near" ? "Near Qualification" : "Research only";
-  const recommendationStatus = tier === "ready" ? "ready" : tier === "near" ? "near" : "research";
+    tier === QUALIFICATION_TIERS.ELITE
+      ? "Elite"
+      : tier === QUALIFICATION_TIERS.STRONG
+        ? "Ready to Bet"
+        : tier === QUALIFICATION_TIERS.NEAR_MISS
+          ? "Near Miss"
+          : "Watchlist";
+
+  const recommendationStatus =
+    tier === QUALIFICATION_TIERS.ELITE || tier === QUALIFICATION_TIERS.STRONG
+      ? "ready"
+      : tier === QUALIFICATION_TIERS.NEAR_MISS
+        ? "near"
+        : "research";
+
   return {
     ...prop,
-    displayTier: tier,
+    ...evaluation,
+    qualificationTier: tier,
+    qualificationScore: evaluation.qualificationScore ?? prop.qualificationScore ?? 0,
+    displayTier,
     recommendationStatus,
     bettingLabel,
+    qualificationLabel: qualificationTierLabel(tier),
     rejectionReason: "",
     rejectionStage: "",
+    isQualificationAccepted: isAcceptedQualificationTier(tier),
   };
 }
 
@@ -150,15 +154,7 @@ export function researchGapConfidencePenalty(research = {}) {
 }
 
 function correlationKey(prop) {
-  return [
-    prop.playerName,
-    prop.sport,
-    prop.statType,
-    prop.startTime,
-    prop.platform,
-  ]
-    .join("|")
-    .toLowerCase();
+  return [prop.playerName, prop.sport, prop.statType, prop.startTime, prop.platform].join("|").toLowerCase();
 }
 
 function gameKey(prop) {
@@ -170,10 +166,19 @@ export function avoidCorrelatedProps(props = [], limit = 120) {
   const usedPlayers = new Set();
   const gameCounts = new Map();
 
-  const tierPriority = (prop) => (prop.displayTier === "ready" ? 3 : prop.displayTier === "near" ? 2 : 1);
+  const tierPriority = (prop) => {
+    if (prop.qualificationTier === QUALIFICATION_TIERS.ELITE) return 5;
+    if (prop.qualificationTier === QUALIFICATION_TIERS.STRONG) return 4;
+    if (prop.displayTier === "ready") return 4;
+    if (prop.qualificationTier === QUALIFICATION_TIERS.NEAR_MISS || prop.displayTier === "near") return 3;
+    if (prop.qualificationTier === QUALIFICATION_TIERS.WATCHLIST || prop.displayTier === "research") return 2;
+    return 1;
+  };
+
   const sorted = [...props].sort(
     (a, b) =>
       tierPriority(b) - tierPriority(a) ||
+      Number(b.qualificationScore || 0) - Number(a.qualificationScore || 0) ||
       Number(b.priorityScore || 0) - Number(a.priorityScore || 0) ||
       computeRankScore(b) - computeRankScore(a)
   );
@@ -206,69 +211,90 @@ export function avoidCorrelatedProps(props = [], limit = 120) {
 export function buildQualificationBoards(scoredProps = [], audit, history = []) {
   const scopedProps = MLB_ONLY_MODE ? scoredProps.filter((prop) => guardMlbOnlyProp(prop)) : scoredProps;
   const historyWeights = buildHistoryAccuracyWeights(history);
-  const ladder = resolveReadyThresholds(scopedProps);
-  const globalThresholds = {
-    minDataQuality: READY_MIN_DATA_QUALITY - (ladder.dqRelax || 0),
-    relaxedStats: Boolean(ladder.relaxedStats),
-  };
-  const ready = [];
+  const pool = evaluateQualificationPool(scopedProps);
+
+  const elite = [];
+  const strong = [];
   const near = [];
-  const research = [];
+  const watchlist = [];
   const rejected = [];
 
-  scopedProps.forEach((prop) => {
-    const labeled = applyQualificationLabels(prop, globalThresholds);
-    const tier = labeled.displayTier;
-    if (!tier) {
+  pool.evaluated.forEach((row) => {
+    const labeled = applyQualificationLabels(row.prop, row);
+    const tier = labeled.qualificationTier;
+
+    if (tier === QUALIFICATION_TIERS.ELITE) elite.push(labeled);
+    else if (tier === QUALIFICATION_TIERS.STRONG) strong.push(labeled);
+    else if (tier === QUALIFICATION_TIERS.NEAR_MISS) near.push(labeled);
+    else if (tier === QUALIFICATION_TIERS.WATCHLIST) watchlist.push(labeled);
+    else {
       rejected.push(labeled);
-      recordReject(audit, labeled.rejectionReason || "below display threshold", "display", labeled);
-      return;
-    }
-    if (tier === "ready") {
-      ready.push(labeled);
-    } else {
-      recordReject(audit, getReadyToBetRejectReason(labeled, globalThresholds) || "not ready to bet", "qualification", labeled);
-      if (tier === "near") near.push(labeled);
-      else research.push(labeled);
+      recordReject(
+        audit,
+        labeled.hardFailReason || labeled.rejectionReason || "below qualification threshold",
+        labeled.hardFail ? "hard-gate" : "qualification",
+        labeled
+      );
     }
   });
 
+  const acceptedPool = selectDiverseAcceptedProps([...elite, ...strong], RENDER_LIMITS.readyToBet);
   const readyDisplay = avoidCorrelatedProps(
-    ready.sort((a, b) => Number(b.priorityScore || 0) - Number(a.priorityScore || 0) || computeRankScore(b) - computeRankScore(a)),
+    acceptedPool.sort(
+      (a, b) =>
+        Number(b.qualificationScore || 0) - Number(a.qualificationScore || 0) ||
+        Number(b.priorityScore || 0) - Number(a.priorityScore || 0) ||
+        computeRankScore(b) - computeRankScore(a)
+    ),
     RENDER_LIMITS.readyToBet
   );
   const nearDisplay = avoidCorrelatedProps(
-    near.sort((a, b) => Number(b.priorityScore || 0) - Number(a.priorityScore || 0) || Number(b.confidenceScore) - Number(a.confidenceScore)),
+    near.sort(
+      (a, b) =>
+        Number(b.qualificationScore || 0) - Number(a.qualificationScore || 0) ||
+        Number(b.priorityScore || 0) - Number(a.priorityScore || 0)
+    ),
     15
   );
   const researchDisplay = avoidCorrelatedProps(
-    research.sort((a, b) => Number(b.priorityScore || 0) - Number(a.priorityScore || 0) || computeRankScore(b) - computeRankScore(a)),
+    watchlist.sort(
+      (a, b) =>
+        Number(b.qualificationScore || 0) - Number(a.qualificationScore || 0) ||
+        Number(b.priorityScore || 0) - Number(a.priorityScore || 0) ||
+        computeRankScore(b) - computeRankScore(a)
+    ),
     25
   );
   const allDisplayable = [...readyDisplay, ...nearDisplay, ...researchDisplay];
 
   const rejectionAnalytics = buildRejectionAnalytics(scopedProps, {
-    readyProps: ready,
+    readyProps: acceptedPool,
     nearProps: near,
   });
 
   audit.displayed = allDisplayable.length;
-  audit.ready = ready.length;
+  audit.ready = acceptedPool.length;
+  audit.elite = elite.length;
+  audit.strong = strong.length;
   audit.near = near.length;
-  audit.research = research.length;
+  audit.research = watchlist.length;
   audit.scored = scoredProps.length;
   audit.rejectionAnalytics = rejectionAnalytics.summary;
   audit.rejectionSamples = rejectionAnalytics.rejected.slice(0, 40);
+  audit.qualificationAnalytics = pool.analytics;
 
   return {
     ready: readyDisplay,
+    elite: elite.slice(0, RENDER_LIMITS.topPicks || 2),
     near: nearDisplay,
     research: researchDisplay,
+    watchlist: researchDisplay,
     allDisplayable,
     rejected,
     historyWeights,
     rejectionAnalytics,
-    globalThresholds,
+    qualificationAnalytics: pool.analytics,
+    tierThresholds: pool.tierThresholds,
   };
 }
 

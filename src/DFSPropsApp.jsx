@@ -64,6 +64,7 @@ import {
   buildQualificationBoards,
   isGameNotExpired,
 } from "./services/qualification.js";
+import { evaluateAdaptiveQualification } from "./services/adaptiveQualification.js";
 import { dataQualityBadge, dataQualityFromSignals } from "./services/dataQuality";
 import {
   computeEdgeScore,
@@ -138,6 +139,7 @@ import SportTabs from "./components/SportTabs.jsx";
 import TopPicksBoard from "./components/TopPicksBoard.jsx";
 import NearMissBoard from "./components/NearMissBoard.jsx";
 import RejectionAnalyticsPanel from "./components/RejectionAnalyticsPanel.jsx";
+import QualificationAnalyticsPanel from "./components/QualificationAnalyticsPanel.jsx";
 import LazyDebugDetails from "./components/LazyDebugDetails.jsx";
 import GoblinBoard from "./components/GoblinBoard.jsx";
 import DemonBoard from "./components/DemonBoard.jsx";
@@ -1187,6 +1189,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   debugInfo.qualificationSummary = safeFormatRejectionSummary(pipelineAudit);
   debugInfo.rejectionAnalytics = qualBoards.rejectionAnalytics?.summary || pipelineAudit.rejectionAnalytics || null;
   debugInfo.rejectionSamples = qualBoards.rejectionAnalytics?.rejected?.slice(0, 40) || pipelineAudit.rejectionSamples || [];
+  debugInfo.qualificationAnalytics = qualBoards.qualificationAnalytics || pipelineAudit.qualificationAnalytics || null;
 
   const finalStatus = finalizeSourceStatus(sourceStatus);
   const { criticalWarnings, degradedWarnings, sourceHealth } = partitionWarnings(
@@ -1633,6 +1636,10 @@ export default function DFSPropsApp() {
     () => debugInfo.rejectionSamples || pipelineAudit.rejectionSamples || [],
     [debugInfo.rejectionSamples, pipelineAudit.rejectionSamples]
   );
+  const qualificationAnalytics = useMemo(
+    () => debugInfo.qualificationAnalytics || pipelineAudit.qualificationAnalytics || null,
+    [debugInfo.qualificationAnalytics, pipelineAudit.qualificationAnalytics]
+  );
   const bestValueProps = useMemo(
     () =>
       sortDecisionBoard(
@@ -1957,7 +1964,9 @@ export default function DFSPropsApp() {
     });
     const target = mergedMap.get(propId);
     if (target) {
-      mergedMap.set(propId, applyQualificationLabels(scoreDFSProp({ ...target, manualStats }, context)));
+      const scored = scoreDFSProp({ ...target, manualStats }, context);
+      const evaluation = evaluateAdaptiveQualification(scored);
+      mergedMap.set(propId, applyQualificationLabels(scored, evaluation));
     }
     const boards = buildQualificationBoards(Array.from(mergedMap.values()), safeCreateEmptyPipelineAudit(), readHistory());
     setProps(boards.allDisplayable.slice(0, MAX_RANKED_PROPS));
@@ -1969,7 +1978,9 @@ export default function DFSPropsApp() {
     );
     setSelectedEvaluation((current) => {
       if (!current || current.id !== propId) return current;
-      return applyQualificationLabels(scoreDFSProp({ ...current, manualStats }, context));
+      const scored = scoreDFSProp({ ...current, manualStats }, context);
+      const evaluation = evaluateAdaptiveQualification(scored);
+      return applyQualificationLabels(scored, evaluation);
     });
     setLearningSaveNotice("Manual stats saved — confidence recalculated.");
   }
@@ -2226,8 +2237,8 @@ export default function DFSPropsApp() {
             <p style={styles.eyebrow}>Accepted props</p>
             <h2 style={styles.sectionTitle}>Ready to Bet</h2>
             <p style={styles.streakCopy}>
-              Live lines only · market-specific confidence thresholds · verified stats · positive edge · target 5–20 per cycle.
-            </p>
+            Weighted qualification · market-aware thresholds · verified stats · positive edge · target 5–15 per cycle.
+          </p>
           </div>
           <p style={styles.countPill}>{readyToBetProps.length} qualified</p>
         </div>
@@ -2248,6 +2259,8 @@ export default function DFSPropsApp() {
       </section>
 
       <NearMissBoard picks={nearMissProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
+
+      <QualificationAnalyticsPanel analytics={qualificationAnalytics} loading={loading} />
 
       <RejectionAnalyticsPanel summary={rejectionAnalytics} samples={rejectionSamples} loading={loading} />
 

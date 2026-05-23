@@ -68,6 +68,15 @@ import {
   BOARD_SORT_MODES,
 } from "../src/services/propPriority.js";
 import { computeMlbHitterConfidenceAdjustments, shouldRouteMlbHitterToResearch } from "../src/services/mlbHitterConfidence.js";
+import {
+  evaluateAdaptiveQualification,
+  evaluateQualificationPool,
+  checkQualificationHardGates,
+  QUALIFICATION_TIERS,
+  isAcceptedQualificationTier,
+  selectDiverseAcceptedProps,
+} from "../src/services/adaptiveQualification.js";
+import { buildQualificationBoards } from "../src/services/qualification.js";
 import { computeDataQualityFromEnrichment } from "../src/services/statEnrichment.js";
 import {
   attachDebugArtifacts,
@@ -929,5 +938,53 @@ assert.equal(
 const slim = slimPropForUi({ id: "1", playerName: "Test", sport: "NBA", statType: "Points", line: 20, sportsbookComparison: { books: 3 }, raw: {} });
 assert.equal(slim.playerName, "Test");
 assert.equal(slim.sportsbookComparison, undefined);
+
+const adaptiveProp = {
+  id: "qual-strong",
+  sport: "MLB",
+  platform: "PrizePicks",
+  playerName: "Elite Pitcher",
+  statType: "Pitcher Strikeouts",
+  line: 5.5,
+  startTime: "2099-06-01T00:00:00Z",
+  sourceId: "pp-qual-1",
+  lineSourceBadge: "LIVE",
+  sportsbookVerified: true,
+  edge: 1.4,
+  bestPick: "More",
+  confidenceScore: 68,
+  dataQualityScore: 58,
+  status: "upcoming",
+  hasVerifiedStats: true,
+  sampleSize: 10,
+  projection: 6.8,
+  projectionSource: "player-stats",
+  volatility: 2.1,
+  matchupRating: 72,
+  opponentAllowed: 6.2,
+  meetsVolatilityRequirements: true,
+};
+const adaptiveEval = evaluateAdaptiveQualification(adaptiveProp);
+assert.ok(adaptiveEval.qualificationScore >= 65);
+assert.ok(Object.keys(adaptiveEval.metrics).length >= 6);
+assert.equal(checkQualificationHardGates({ ...adaptiveProp, lineSourceBadge: "STALE" }).pass, false);
+
+const adaptivePool = evaluateQualificationPool([adaptiveProp, { ...adaptiveProp, id: "qual-stale", lineSourceBadge: "STALE" }]);
+assert.ok(adaptivePool.analytics.avgQualificationScore > 0);
+assert.ok(adaptivePool.analytics.topRejectionCauses.length >= 1);
+
+const qualBoards = buildQualificationBoards([adaptiveProp], safeCreateEmptyPipelineAudit(), []);
+assert.ok(qualBoards.qualificationAnalytics);
+assert.ok(Array.isArray(qualBoards.ready));
+
+const diverse = selectDiverseAcceptedProps(
+  [
+    { ...adaptiveProp, id: "a", statType: "Pitcher Strikeouts", qualificationScore: 82 },
+    { ...adaptiveProp, id: "b", statType: "Pitcher Strikeouts", qualificationScore: 80 },
+    { ...adaptiveProp, id: "c", statType: "Total Bases", qualificationScore: 78 },
+  ],
+  3
+);
+assert.equal(diverse.length, 3);
 
 console.log("Parser smoke tests passed.");

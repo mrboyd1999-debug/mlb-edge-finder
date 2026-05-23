@@ -46,10 +46,10 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
   const [expanded, setExpanded] = useState(false);
   const tier = confidenceTier(prop);
   const lean = formatLeanSide(prop.bestPick || prop.side || "Watch");
-  const ready = isReadyToBet(prop);
+  const ready = Boolean(prop.isQualificationAccepted) || isReadyToBet(prop);
   const bettingLabel =
     prop.bettingLabel ||
-    (ready ? "Ready to Bet" : prop.displayTier === "near" || prop.recommendationStatus === "near" ? "Near Qualification" : "Research only");
+    (ready ? "Ready to Bet" : prop.displayTier === "near" || prop.recommendationStatus === "near" ? "Near Miss" : "Watchlist");
   const isWatch = !ready && (prop.recommendationStatus === "watchlist" || prop.recommendationStatus === "research" || prop.recommendationStatus === "near");
   const movementLabel = lineMovementArrow(prop);
   const bookTag = sportsbookCardTag(prop);
