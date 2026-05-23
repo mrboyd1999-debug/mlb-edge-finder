@@ -1,5 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import {
+  buildPrizePicksFallbackPayload,
+  getPrizePicksServerCooldownRemainingMs,
+  isPrizePicksServerCooldown,
+  markPrizePicksUpstreamAttempt,
+  savePrizePicksPayload,
+  withPrizePicksServerLock,
+} from "./api/lib/prizepicksServerCache.js";
 
 const SPORTSDATA_API_KEY =
   process.env.SPORTSDATA_API_KEY ||
@@ -54,7 +62,7 @@ function dfsApiProxy() {
           }
 
           if (pathname.startsWith("/api/prizepicks")) {
-            await proxyWithFallback(req, res, PRIZEPICKS_TARGETS, rewritePrizePicksPath, prizePicksHeaders(), "PrizePicks");
+            await proxyPrizePicksWithCache(req, res);
             return;
           }
 
@@ -133,10 +141,147 @@ function apiErrorPayload(source, error, extra = {}) {
 
 async function proxyWithFallback(req, res, targets, rewriteFn, headers, source) {
   for (const target of targets) {
-    const ok = await proxyUpstream(req, res, target, rewriteFn, headers, source);
-    if (ok) return;
+    const sent = await proxyUpstream(req, res, target, rewriteFn, headers, source);
+    if (sent) return;
   }
-  sendJson(res, 200, apiErrorPayload(source, "upstream fetch failed"));
+  if (!res.writableEnded) {
+    sendJson(res, 200, apiErrorPayload(source, "upstream fetch failed"));
+  }
+}
+
+async function proxyPrizePicksWithCache(req, res) {
+  const cooldownPayload = buildPrizePicksCooldownPayload();
+  if (cooldownPayload) {
+    sendJson(res, 200, cooldownPayload);
+    return;
+  }
+
+  await withPrizePicksServerLock(async () => {
+    const cooldownAgain = buildPrizePicksCooldownPayload();
+    if (cooldownAgain) {
+      sendJson(res, 200, cooldownAgain);
+      return;
+    }
+
+    markPrizePicksUpstreamAttempt();
+
+    let lastFailure = { status: 0, error: "upstream fetch failed", preview: "" };
+
+    for (const target of PRIZEPICKS_TARGETS) {
+      const result = await fetchPrizePicksUpstream(req, target);
+      if (result.sent) return;
+      if (result.ok) {
+        try {
+          savePrizePicksPayload(JSON.parse(result.text));
+        } catch {
+          // keep raw text response even if cache parse fails
+        }
+        res.statusCode = 200;
+        res.setHeader("content-type", "application/json; charset=utf-8");
+        res.setHeader("cache-control", "no-store");
+        res.end(result.text);
+        return;
+      }
+      lastFailure = result;
+      if (!shouldRetryPrizePicksTarget(result.status)) break;
+    }
+
+    const fallback = buildPrizePicksFallbackPayload(null, {
+      rateLimited: lastFailure.status === 429,
+      message: prizePicksFallbackMessage(lastFailure.status),
+    });
+    if (fallback) {
+      sendJson(res, 200, fallback);
+      return;
+    }
+
+    sendJson(
+      res,
+      200,
+      apiErrorPayload("PrizePicks", lastFailure.error || "upstream fetch failed", {
+        preview: lastFailure.preview,
+        upstreamStatus: lastFailure.status,
+      })
+    );
+  });
+}
+
+function buildPrizePicksCooldownPayload() {
+  if (!isPrizePicksServerCooldown()) return null;
+  const remainingSec = Math.ceil(getPrizePicksServerCooldownRemainingMs() / 1000);
+  return buildPrizePicksFallbackPayload(null, {
+    rateLimited: true,
+    message: `Rate limited. Showing cached props. Wait ${remainingSec}s.`,
+  });
+}
+
+function prizePicksFallbackMessage(status) {
+  if (status === 429) return "Rate limited. Showing cached props.";
+  if (status === 403) return "PrizePicks blocked the request. Showing cached props.";
+  if (status === 404) return "PrizePicks returned no data. Showing cached props.";
+  return "Showing cached props.";
+}
+
+function shouldRetryPrizePicksTarget(status) {
+  return status === 0 || status >= 500;
+}
+
+async function fetchPrizePicksUpstream(req, targetBase) {
+  const fullUrl = req.url || "";
+  const targetPath = rewritePrizePicksPath(fullUrl);
+  const upstreamUrl = configuredProxyUrl(fullUrl, "PrizePicks") || new URL(targetPath, targetBase);
+  const headers = prizePicksHeaders();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+
+  try {
+    const upstream = await fetch(upstreamUrl, { headers, signal: controller.signal });
+    const text = await upstream.text();
+    const contentType = upstream.headers.get("content-type") || "";
+    const preview = text.slice(0, 200);
+
+    console.info("[DFS proxy]", {
+      source: "PrizePicks",
+      requestUrl: fullUrl,
+      upstreamUrl: upstreamUrl.toString(),
+      status: upstream.status,
+      contentType,
+      preview,
+    });
+    console.log("PrizePicks raw response", preview);
+
+    if (isJsSourceResponse(text, contentType)) {
+      return {
+        sent: false,
+        ok: false,
+        status: 502,
+        error: "API route is serving source/HTML instead of JSON. Check proxy/backend routing.",
+        preview,
+        text: "",
+      };
+    }
+
+    if (!upstream.ok) {
+      const error =
+        upstream.status === 403
+          ? "PrizePicks blocked the request (403)"
+          : upstream.status === 429
+            ? "PrizePicks rate limited (429)"
+            : `PrizePicks returned status ${upstream.status}.`;
+      return { sent: false, ok: false, status: upstream.status, error, preview, text: "" };
+    }
+
+    return { sent: false, ok: true, status: upstream.status, text, preview, error: "" };
+  } catch (error) {
+    const message =
+      error?.name === "AbortError"
+        ? `upstream fetch timed out after ${UPSTREAM_TIMEOUT_MS}ms`
+        : error?.message || "upstream fetch failed";
+    console.warn("[DFS proxy] PrizePicks fetch failed", { message });
+    return { sent: false, ok: false, status: 0, error: message, preview: "", text: "" };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function proxyUpstream(req, res, targetBase, rewriteFn, headers, source) {
@@ -170,7 +315,7 @@ async function proxyUpstream(req, res, targetBase, rewriteFn, headers, source) {
     if (isJsSourceResponse(text, contentType)) {
       console.warn("[DFS proxy] JS/HTML source detected — routing misconfigured", { requestUrl: fullUrl });
       sendJson(res, 502, apiErrorPayload(source, "API route is serving source/HTML instead of JSON. Check proxy/backend routing.", { preview }));
-      return;
+      return true;
     }
 
     if (!upstream.ok) {
@@ -180,13 +325,14 @@ async function proxyUpstream(req, res, targetBase, rewriteFn, headers, source) {
           : `${source} returned status ${upstream.status}.`;
       const statusCode = source === "Underdog" || source === "PrizePicks" ? 200 : upstream.status >= 400 && upstream.status < 600 ? upstream.status : 502;
       sendJson(res, statusCode, apiErrorPayload(source, error, { preview, upstreamStatus: upstream.status }));
-      return;
+      return true;
     }
 
     res.statusCode = 200;
     res.setHeader("content-type", "application/json; charset=utf-8");
     res.setHeader("cache-control", "no-store");
     res.end(text);
+    return true;
   } catch (error) {
     const message =
       error?.name === "AbortError"
@@ -195,6 +341,7 @@ async function proxyUpstream(req, res, targetBase, rewriteFn, headers, source) {
     console.warn("[DFS proxy] fetch failed", { source, message });
     const statusCode = source === "Underdog" || source === "PrizePicks" ? 200 : 502;
     sendJson(res, statusCode, apiErrorPayload(source, message));
+    return true;
   } finally {
     clearTimeout(timer);
   }

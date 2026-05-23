@@ -1,4 +1,4 @@
-import { getShortCacheTtlMs, resilientFetch } from "./fetchUtil.js";
+import { resilientFetch } from "./fetchUtil.js";
 import { normalizeGameStartTime, startTimeUncertainty } from "../utils/normalizeGameStartTime.js";
 import { inferSportFromText, sportFromPrizePicksLeague } from "../utils/sportMappings.js";
 import { filterApprovedMarketsOnly } from "../utils/approvedMarkets.js";
@@ -44,6 +44,7 @@ export const PRIZEPICKS_RATE_LIMIT_MESSAGE = "Rate limited. Showing cached lines
 const PRIZEPICKS_ENDPOINTS = ["/api/prizepicks"];
 const PRIZEPICKS_CACHE_KEY = "dfs-prizepicks-last-good-payload";
 const PRIZEPICKS_CACHE_MAX_MS = 60 * 60 * 1000;
+const PRIZEPICKS_CLIENT_STALE_MS = 5 * 60 * 1000;
 
 const SPORT_ALIASES = {
   mlb: "MLB",
@@ -122,6 +123,10 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all" } 
     attempts.push(parsed.attempt);
 
     if (parsed.ok && parsed.payload) {
+      const isFallback = parsed.payload?.fallback === true;
+      const isRateLimited = Boolean(parsed.payload?.rateLimited || parsed.rateLimited);
+      if (isRateLimited) recordSource429(SOURCE_IDS.PRIZEPICKS);
+
       const setupWarning = setupWarningFromPayload(parsed.payload, "PrizePicks");
       if (parsed.payload?.error && parsed.payload?.needsSetup) {
         return {
@@ -133,7 +138,7 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all" } 
           debug: buildDebug(endpoint, "Failed", 0, 0, setupWarning || "PrizePicks setup needed.", attempts),
         };
       }
-      if (parsed.payload?.error) {
+      if (parsed.payload?.error && !isFallback) {
         return failedPrizePicksResult({
           endpoint,
           message: setupWarning || parsed.payload.message || parsed.payload.errorMessage || "PrizePicks unavailable.",
@@ -142,28 +147,56 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all" } 
         });
       }
 
-      writeCachedPayload(sanitizePrizePicksPayloadForCache(parsed.payload));
-      recordSourceSuccess(SOURCE_IDS.PRIZEPICKS);
-      const { props, audit } = normalizePrizePicksPayload(parsed.payload, sport, statType, "LIVE");
-      logPipelineAudit("PrizePicks", audit);
-      const warnings = setupWarning ? [setupWarning] : [];
+      if (!isFallback) {
+        writeCachedPayload(sanitizePrizePicksPayloadForCache(parsed.payload));
+        recordSourceSuccess(SOURCE_IDS.PRIZEPICKS);
+      } else {
+        markSourceCached(SOURCE_IDS.PRIZEPICKS, parsed.payload.cachedAt || readCachedPayloadSavedAt());
+      }
+
+      const lineSourceBadge = isFallback ? "CACHED" : "LIVE";
+      const { props, audit } = normalizePrizePicksPayload(parsed.payload, sport, statType, lineSourceBadge);
+      logPipelineAudit(isFallback ? "PrizePicks-cached" : "PrizePicks", audit);
+      const warnings = [];
+      if (isFallback) {
+        warnings.push(parsed.payload.message || PRIZEPICKS_RATE_LIMIT_MESSAGE);
+      } else if (setupWarning) {
+        warnings.push(setupWarning);
+      }
       if (parsed.htmlError) warnings.push(PRIZEPICKS_HTML_BANNER);
 
       return {
         source: "PrizePicks",
-        status: props.length ? "Full" : "Partial",
+        status: isFallback ? "Cached" : props.length ? "Full" : "Partial",
         props,
         pipelineAudit: audit,
         warnings,
-        lineSourceBadge: "LIVE",
-        lastSuccessfulFetchAt: new Date().toISOString(),
-        debug: buildDebug(endpoint, props.length ? "Full" : "Partial", audit.fetched, props.length, "", attempts),
+        lineSourceBadge,
+        rateLimited: isRateLimited,
+        cached: isFallback,
+        lastSuccessfulFetchAt: isFallback
+          ? parsed.payload.cachedAt || readCachedPayloadSavedAt()
+          : new Date().toISOString(),
+        debug: buildDebug(
+          isFallback ? "server-cache:prizepicks" : endpoint,
+          isFallback ? "Cached" : props.length ? "Full" : "Partial",
+          audit.fetched,
+          props.length,
+          warnings[0] || "",
+          attempts
+        ),
       };
     }
 
-    if (parsed.rateLimited) {
-      recordSource429(SOURCE_IDS.PRIZEPICKS);
-      const cachedResult = buildCachedPrizePicksResult({ sport, statType, attempts, endpoint, reason: "rate-limit" });
+    if (parsed.rateLimited || [403, 404].includes(parsed.httpStatus)) {
+      if (parsed.rateLimited) recordSource429(SOURCE_IDS.PRIZEPICKS);
+      const cachedResult = buildCachedPrizePicksResult({
+        sport,
+        statType,
+        attempts,
+        endpoint,
+        reason: parsed.rateLimited ? "rate-limit" : "fetch-failed",
+      });
       if (cachedResult) return cachedResult;
     }
   }
@@ -200,7 +233,7 @@ function buildCachedPrizePicksResult({ sport, statType, attempts, endpoint, reas
     lineSourceBadge: "CACHED",
     lastSuccessfulFetchAt: savedAt,
     rateLimited: reason === "rate-limit" || reason === "cooldown",
-    warnings: [warning, ...formatAttemptWarnings(attempts)],
+    warnings: [warning],
     debug: buildDebug(
       "localStorage:last-good-prizepicks",
       "Cached",
@@ -228,7 +261,7 @@ async function fetchPrizePicksEndpoint(endpoint, init) {
   try {
     const response = await resilientFetch(endpoint, init, {
       source: "PrizePicks",
-      ttlMs: getShortCacheTtlMs(),
+      ttlMs: PRIZEPICKS_CLIENT_STALE_MS,
       timeoutMs: 15_000,
       maxRetries: 0,
       skip429Retry: true,
@@ -257,7 +290,13 @@ async function fetchPrizePicksEndpoint(endpoint, init) {
           : response.status === 429
             ? "PrizePicks rate limited (429)"
             : `HTTP ${response.status}`;
-      return { ok: false, attempt, htmlError: attempt.preview.startsWith("<"), rateLimited: response.status === 429 };
+      return {
+        ok: false,
+        attempt,
+        htmlError: attempt.preview.startsWith("<"),
+        rateLimited: response.status === 429,
+        httpStatus: response.status,
+      };
     }
 
     const trimmed = text.trim();
@@ -288,9 +327,23 @@ async function fetchPrizePicksEndpoint(endpoint, init) {
       return { ok: false, attempt, htmlError: false, rateLimited: false };
     }
 
+    if (payload?.ok === true && payload?.fallback === true) {
+      attempt.rateLimited = Boolean(payload.rateLimited);
+      return { ok: true, attempt, payload, htmlError: false, rateLimited: Boolean(payload.rateLimited) };
+    }
+
     if (payload?.ok === false || payload?.status === "failed") {
       attempt.error = payload.error || payload.message || payload.errorMessage || "Proxy error payload";
-      return { ok: false, attempt, htmlError: /html|non-json/i.test(attempt.error), payload, rateLimited: false };
+      const rateLimited = payload?.upstreamStatus === 429 || payload?.rateLimited === true;
+      attempt.rateLimited = rateLimited;
+      return {
+        ok: false,
+        attempt,
+        htmlError: /html|non-json/i.test(attempt.error),
+        payload,
+        rateLimited,
+        httpStatus: payload?.upstreamStatus || attempt.status,
+      };
     }
 
     return { ok: true, attempt, payload, htmlError: false, rateLimited: false };

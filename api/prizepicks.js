@@ -1,3 +1,12 @@
+import {
+  buildPrizePicksFallbackPayload,
+  getPrizePicksServerCooldownRemainingMs,
+  isPrizePicksServerCooldown,
+  markPrizePicksUpstreamAttempt,
+  savePrizePicksPayload,
+  withPrizePicksServerLock,
+} from "./lib/prizepicksServerCache.js";
+
 const APIFY_PRIZEPICKS_ACTOR = "zen-studio~prizepicks-player-props";
 const PRIZEPICKS_PROJECTION_BASES = [
   "https://partner-api.prizepicks.com/projections",
@@ -12,14 +21,15 @@ export default async function handler(req, res) {
   }
 
   try {
-    const leagueId = req.query?.league_id;
+    const leagueId = req.query?.league_id || "";
     const proxyUrl = req.query?.proxyUrl || "";
-    if (leagueId) {
-      return respondWithFetch(res, await fetchPrizePicksBoard(leagueId, proxyUrl));
-    }
-
-    return respondWithFetch(res, await fetchPrizePicksBoard("", proxyUrl));
+    return await respondWithPrizePicks(res, leagueId, proxyUrl);
   } catch (error) {
+    const fallback = buildPrizePicksFallbackPayload(null, {
+      rateLimited: false,
+      message: "Showing cached props.",
+    });
+    if (fallback) return res.status(200).json(fallback);
     return res.status(200).json({
       ok: false,
       source: "PrizePicks",
@@ -29,6 +39,48 @@ export default async function handler(req, res) {
       data: [],
     });
   }
+}
+
+async function respondWithPrizePicks(res, leagueId, proxyUrl) {
+  const cooldownPayload = buildCooldownFallbackPayload();
+  if (cooldownPayload) return res.status(200).json(cooldownPayload);
+
+  return withPrizePicksServerLock(async () => {
+    const cooldownAgain = buildCooldownFallbackPayload();
+    if (cooldownAgain) return res.status(200).json(cooldownAgain);
+
+    markPrizePicksUpstreamAttempt();
+    const result = await fetchPrizePicksBoard(leagueId, proxyUrl);
+
+    if (result.ok) {
+      savePrizePicksPayload(result.data);
+      return respondWithFetch(res, result);
+    }
+
+    const fallback = buildPrizePicksFallbackPayload(null, {
+      rateLimited: result.status === 429,
+      message: fallbackMessageForStatus(result.status),
+    });
+    if (fallback) return res.status(200).json(fallback);
+
+    return respondWithFetch(res, result);
+  });
+}
+
+function buildCooldownFallbackPayload() {
+  if (!isPrizePicksServerCooldown()) return null;
+  const remainingSec = Math.ceil(getPrizePicksServerCooldownRemainingMs() / 1000);
+  return buildPrizePicksFallbackPayload(null, {
+    rateLimited: true,
+    message: `Rate limited. Showing cached props. Wait ${remainingSec}s.`,
+  });
+}
+
+function fallbackMessageForStatus(status) {
+  if (status === 429) return "Rate limited. Showing cached props.";
+  if (status === 403) return "PrizePicks blocked the request. Showing cached props.";
+  if (status === 404) return "PrizePicks returned no data. Showing cached props.";
+  return "Showing cached props.";
 }
 
 async function fetchPrizePicksBoard(leagueId = "", proxyUrl = "") {
@@ -61,22 +113,34 @@ async function fetchPrizePicksBoard(leagueId = "", proxyUrl = "") {
     console.log("PrizePicks raw response", preview);
 
     if (response.ok && parsed.ok) {
-      return { ok: true, data: parsed.data };
+      return { ok: true, data: parsed.data, status: response.status };
     }
 
     lastError = {
       ok: false,
+      status: response.status,
       error: !response.ok ? prizePicksStatusMessage(response.status, leagueId) : parsed.error,
       preview,
       data: null,
     };
+
+    if (!shouldTryNextUrl(response.status)) break;
   }
 
-  return lastError || {
-    ok: false,
-    error: leagueId ? `PrizePicks returned no projection data (league ${leagueId}).` : "PrizePicks returned no projection data.",
-    data: null,
-  };
+  return (
+    lastError || {
+      ok: false,
+      status: 0,
+      error: leagueId
+        ? `PrizePicks returned no projection data (league ${leagueId}).`
+        : "PrizePicks returned no projection data.",
+      data: null,
+    }
+  );
+}
+
+function shouldTryNextUrl(status) {
+  return status === 0 || status >= 500;
 }
 
 function respondWithFetch(res, result) {
@@ -91,6 +155,7 @@ function respondWithFetch(res, result) {
       props: [],
       data: [],
       preview: result.preview || "",
+      upstreamStatus: result.status || 0,
     });
   }
 
@@ -106,18 +171,25 @@ function respondWithFetch(res, result) {
 
 function parseJsonOrError(text, source, contentType = "") {
   const trimmed = String(text || "").trim();
-  const looksHtml =
-    trimmed.startsWith("<") ||
-    /text\/html/i.test(contentType);
-  const looksJavaScript = /^export\s+default\b/.test(trimmed) || trimmed.includes("export default async function");
+  const looksHtml = trimmed.startsWith("<") || /text\/html/i.test(contentType);
+  const looksJavaScript =
+    /^export\s+default\b/.test(trimmed) || trimmed.includes("export default async function");
   if (!trimmed) {
     return { ok: false, error: `${source} returned empty response`, preview: "" };
   }
   if (looksHtml) {
-    return { ok: false, error: "API route is serving source/HTML instead of JSON. Check proxy/backend routing.", preview: trimmed.slice(0, 300) };
+    return {
+      ok: false,
+      error: "API route is serving source/HTML instead of JSON. Check proxy/backend routing.",
+      preview: trimmed.slice(0, 300),
+    };
   }
   if (looksJavaScript) {
-    return { ok: false, error: "API route is serving source/HTML instead of JSON. Check proxy/backend routing.", preview: trimmed.slice(0, 300) };
+    return {
+      ok: false,
+      error: "API route is serving source/HTML instead of JSON. Check proxy/backend routing.",
+      preview: trimmed.slice(0, 300),
+    };
   }
   try {
     return { ok: true, data: JSON.parse(trimmed) };
@@ -139,6 +211,8 @@ function prizePicksProjectionUrls(leagueId) {
 
 function prizePicksStatusMessage(status, leagueId) {
   if (status === 403) return "PrizePicks blocked the request (403)";
+  if (status === 429) return "PrizePicks rate limited (429)";
+  if (status === 404) return "PrizePicks returned no projection data (404)";
   return `PrizePicks provider returned status ${status} (league ${leagueId}).`;
 }
 
@@ -154,7 +228,8 @@ function redactPrizePicksUrl(url) {
 
 function prizePicksHeaders() {
   return {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36",
+    "User-Agent":
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36",
     Accept: "application/json",
     origin: "https://app.prizepicks.com",
     referer: "https://app.prizepicks.com/",

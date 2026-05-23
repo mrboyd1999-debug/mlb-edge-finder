@@ -1,10 +1,10 @@
 /** Board-level fetch coordination — prevents duplicate concurrent refreshes. */
 
-/** Silent auto-refresh every 90s. Source cooldowns + rate-limit guards in
+/** Silent auto-refresh every 5m. Source cooldowns + rate-limit guards in
  *  `sourceRateLimit.js` still throttle actual upstream API calls, so this
- *  cannot spam providers. */
-const AUTO_REFRESH_MS = 90 * 1000;
-const MANUAL_REFRESH_COOLDOWN_MS = 30 * 1000;
+ *  cannot spam providers. Window-focus refetch is disabled in the app shell. */
+const AUTO_REFRESH_MS = 5 * 60 * 1000;
+const MANUAL_REFRESH_COOLDOWN_MS = 90 * 1000;
 
 let boardFetchInFlight = false;
 let queuedBoardFetch = null;

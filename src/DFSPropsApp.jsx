@@ -325,10 +325,14 @@ function isIndirectSourceFailureBanner(message = "") {
 function prizePicksHasUsableProps(props = [], sourceStatus = {}) {
   const list = props || [];
   if (!list.length) return false;
+  const ppStatus = String(sourceStatus.PrizePicks || "").toLowerCase();
+  if (["cached", "full", "partial"].includes(ppStatus)) return true;
   if (MLB_ONLY_MODE) {
     return list.some((prop) => guardMlbOnlyProp(prop)) || list.length > 0;
   }
-  if (String(sourceStatus.PrizePicks || "").toLowerCase() === "failed") return false;
+  if (ppStatus === "failed") {
+    return list.some((prop) => normalize(prop.platform) === "prizepicks");
+  }
   return list.some((prop) => normalize(prop.platform) === "prizepicks");
 }
 
@@ -341,6 +345,7 @@ function shouldSuppressCriticalUiMessage(message = "", props = [], sourceStatus 
   if (prizePicksHasUsableProps(props, sourceStatus)) {
     if (/no verified sportsbook props/i.test(message)) return true;
     if (/try again after cooldown/i.test(message)) return true;
+    if (/rate limited|showing cached|prizepicks.*failed|could not load prizepicks|429/i.test(message)) return true;
   }
   if (MLB_ONLY_MODE && prizePicksHasUsableProps(props, sourceStatus) && isIndirectSourceFailureBanner(message)) {
     return true;
@@ -1618,17 +1623,6 @@ export default function DFSPropsApp() {
   }, [loadProps]);
 
   useEffect(() => {
-    const onVisibility = () => {
-      if (document.visibilityState !== "visible") return;
-      if (canAutoRefresh(Date.now(), lastAutoRefreshRef.current || lastRefreshAtRef.current)) {
-        loadProps({ autoRefresh: true });
-      }
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [loadProps]);
-
-  useEffect(() => {
     if (platform === "underdog") {
       console.info("[Underdog Audit] Underdog tab/source selected", {
         sourceStatus: sourceStatus.Underdog,
@@ -1826,6 +1820,15 @@ export default function DFSPropsApp() {
     sourceCooldownSec > 0
       ? `${RATE_LIMIT_COOLDOWN_MESSAGE} (${formatCooldownRemaining(sourceCooldownSec * 1000)} remaining)`
       : visibleCriticalWarnings.find((warning) => /rate limited|cached lines from/i.test(String(warning))) || "";
+  const compactSourceWarning = useMemo(() => {
+    if (sourceCooldownSec > 0) {
+      return `PrizePicks rate limited. Showing cached lines. Wait ${sourceCooldownSec}s.`;
+    }
+    if (cacheNotice) return cacheNotice;
+    const softNotice = String(rateLimitNotice || "").trim();
+    if (softNotice && props.length) return softNotice;
+    return "";
+  }, [sourceCooldownSec, cacheNotice, rateLimitNotice, props.length]);
   const lastUpdatedLabel = lastUpdated ? `${formatDateTime(lastUpdated)}${cacheStatus === "cached" ? " (cached)" : ""}` : "Never";
   const lastUpdatedMs = lastUpdated ? new Date(lastUpdated).getTime() : NaN;
   const staleDataWarning =
@@ -2175,19 +2178,19 @@ export default function DFSPropsApp() {
         </section>
       ) : null}
 
-      {prizePicksHtmlWarning && (
+      {prizePicksHtmlWarning && !props.length ? (
         <section style={styles.errorPanel}>
           <p>{prizePicksHtmlWarning}</p>
         </section>
-      )}
+      ) : null}
 
-      {visibleCriticalWarnings.length > 0 && (
+      {visibleCriticalWarnings.length > 0 && !props.length ? (
         <section style={styles.errorPanel}>
           {visibleCriticalWarnings.map((warning) => (
             <p key={warning}>{warning}</p>
           ))}
         </section>
-      )}
+      ) : null}
 
       {underdogDegraded ? (
         <section className="mobile-hide-soft-notice" style={styles.compactPanel}>
@@ -2195,13 +2198,19 @@ export default function DFSPropsApp() {
         </section>
       ) : null}
 
-      {cacheNotice ? (
-        <section style={{ ...styles.compactPanel, background: "rgba(251, 191, 36, 0.08)", borderColor: "rgba(251, 191, 36, 0.25)" }}>
+      {compactSourceWarning ? (
+        <section className="mobile-warning-banner" role="status">
+          <p>{compactSourceWarning}</p>
+        </section>
+      ) : null}
+
+      {cacheNotice && !compactSourceWarning ? (
+        <section className="mobile-hide-soft-notice" style={{ ...styles.compactPanel, background: "rgba(251, 191, 36, 0.08)", borderColor: "rgba(251, 191, 36, 0.25)" }}>
           <p style={{ ...styles.compactFlags, color: "#fbbf24", margin: 0 }}>{cacheNotice}</p>
         </section>
       ) : null}
 
-      {visibleError ? <section style={styles.errorPanel}>{visibleError}</section> : null}
+      {visibleError && !props.length ? <section style={styles.errorPanel}>{visibleError}</section> : null}
       </div>
 
       <div id="section-top-picks" className="dfs-section dfs-order-top-picks">

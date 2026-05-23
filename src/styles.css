@@ -12,6 +12,22 @@ body,
   box-sizing: border-box;
 }
 
+.mobile-warning-banner {
+  display: block;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.1);
+  color: #fde68a;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.mobile-warning-banner p {
+  margin: 0;
+}
+
 /* ── Mobile-first compact layout ─────────────────────────────────────── */
 @media (max-width: 768px) {
   body {
@@ -26,7 +42,7 @@ body,
     width: 100%;
     max-width: 100%;
     padding: 8px !important;
-    padding-bottom: 62px !important;
+    padding-bottom: 68px !important;
   }
 
   .dfs-app-page {
@@ -68,6 +84,31 @@ body,
   .mobile-hide-verbose,
   .mobile-hide-soft-notice {
     display: none !important;
+  }
+
+  .mobile-warning-banner {
+    padding: 6px 8px;
+    font-size: 11px;
+    line-height: 1.35;
+    margin-bottom: 6px;
+  }
+
+  details[style],
+  .compact-panel,
+  .dfs-order-filters details {
+    padding: 6px 8px !important;
+    border-radius: 6px !important;
+  }
+
+  .dfs-order-filters summary,
+  details summary {
+    font-size: 12px !important;
+    padding: 2px 0 !important;
+  }
+
+  .dfs-order-history details,
+  .dfs-order-settings details {
+    padding: 6px 8px !important;
   }
 
   .card-grid,
