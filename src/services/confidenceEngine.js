@@ -428,51 +428,52 @@ function scoreVolatilityFactor(prop = {}) {
 }
 
 function applyMlbConfidencePenalties(score, prop = {}) {
-  let next = score;
-  const penalties = [];
+  const items = [];
 
   if (prop.lineSourceBadge === "STALE" || prop.lineSourceBadge === "CACHED") {
-    next -= 8;
-    penalties.push("stale data");
+    items.push({ amount: 6, label: "stale data" });
   }
   if (prop.projectionSource === "missing" || !Number.isFinite(prop.projection ?? prop.projectedValue)) {
-    next -= 12;
-    penalties.push("missing projection");
+    items.push({ amount: 12, label: "missing projection" });
   }
   if (prop.marketResearchOnly || prop.noveltyMarket || Number(prop.marketSupportTier) >= 2) {
-    next -= 10;
-    penalties.push("unsupported prop");
+    items.push({ amount: 10, label: "unsupported prop" });
   }
   const sampleSize = finiteNumber(prop.sampleSize) || 0;
   if (sampleSize > 0 && sampleSize < 5) {
-    next -= 6;
-    penalties.push("low sample size");
+    items.push({ amount: 5, label: "low sample size" });
   }
   const movementTag = prop.lineMovementTag || prop.lineMovement?.tag;
   if (movementTag === "volatile" || (movementTag === "steamed" && prop.lineMovement?.againstPick)) {
-    next -= 8;
-    penalties.push("volatile line movement");
+    items.push({ amount: movementTag === "volatile" ? 5 : 7, label: "volatile line movement" });
   }
   const tier = getMlbQualityTier(prop);
   if (tier) {
     const minEdge = getMlbMinEdgeForTier(prop);
-    if (Number(prop.edge || 0) > 0 && Number(prop.edge || 0) < minEdge) {
-      next -= tier === "C" ? 10 : tier === "B" ? 6 : 3;
-      penalties.push(`${tier}-tier needs stronger edge`);
+    const edge = Number(prop.edge || 0);
+    if (edge > 0 && edge < minEdge) {
+      const base = tier === "C" ? 10 : tier === "B" ? 6 : 3;
+      const ratio = edge / Math.max(minEdge, 0.01);
+      items.push({
+        amount: ratio >= 0.85 ? Math.round(base * 0.45) : base,
+        label: `${tier}-tier needs stronger edge`,
+      });
     }
   }
   const status = String(prop.status || "").toLowerCase();
   if (["live", "in progress", "inprogress"].includes(status)) {
-    next -= 15;
-    penalties.push("live game");
+    items.push({ amount: 15, label: "live game" });
   }
   const start = new Date(prop.startTime).getTime();
   if (Number.isFinite(start) && start <= Date.now()) {
-    next -= 10;
-    penalties.push("started game");
+    items.push({ amount: 10, label: "started game" });
   }
 
-  return { score: next, penalties };
+  let totalDeduction = items.reduce((sum, item) => sum + item.amount, 0);
+  if (items.length >= 3) totalDeduction = Math.round(totalDeduction * 0.78);
+  totalDeduction = Math.min(22, totalDeduction);
+
+  return { score: score - totalDeduction, penalties: items.map((item) => item.label) };
 }
 
 function applyConfidenceCaps(score, prop = {}, options = {}) {
@@ -573,8 +574,15 @@ export function calculateConfidenceScore(prop = {}, options = {}) {
     const capped = applyConfidenceCaps(uncapped, prop, options);
     let total = capped.score;
     if (!marketResult.meetsVolatilityRequirements) {
-      const tierRules = marketResult.volatilityTier;
-      total = Math.min(total, 54);
+      const edge = Number(prop.edge || 0);
+      const vol = finiteNumber(prop.volatility);
+      const softCap =
+        edge >= 1.15 && (!Number.isFinite(vol) || vol <= 2.5)
+          ? 58
+          : edge >= 0.85 && (!Number.isFinite(vol) || vol <= 3)
+            ? 56
+            : 54;
+      total = Math.min(total, softCap);
     }
 
     const explanation = buildMarketConfidenceExplanation(marketResult);

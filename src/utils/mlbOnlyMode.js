@@ -295,6 +295,8 @@ export function sanitizeBoardForMlbOnly(board = {}) {
     props: filterActiveSportProps(board.props || []),
     watchlist: filterActiveSportProps(board.watchlist || []),
     nearQualification: filterActiveSportProps(board.nearQualification || []),
+    qualifiedReadyProps: filterActiveSportProps(board.qualifiedReadyProps || board.readyProps || []),
+    readyProps: filterActiveSportProps(board.readyProps || board.qualifiedReadyProps || []),
     streakProps: filterActiveSportProps(board.streakProps || []),
     debugInfo: sanitizeDebugInfoForMlbOnly(board.debugInfo),
   };

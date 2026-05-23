@@ -52,12 +52,18 @@ export function calculateProjectionConfidence(prop = {}, options = {}) {
   const marketHistory = options.marketHistory || marketHitRateAdjustment(prop, historyRows);
   const marketReliability = marketReliabilityScore(prop, historyRows);
 
+  const histPen = Number(historicalPenalty.penalty || 0);
+  const missPen = Number(missPenalty.penalty || 0);
+  const combinedHistPenalty =
+    histPen > 0 && missPen > 0
+      ? Math.min(12, Math.max(histPen, missPen) + Math.min(histPen, missPen) * 0.35)
+      : Math.min(12, histPen * 0.75 + missPen * 0.55);
+
   let score = clamp(
     Math.round(
       base.score +
         Number(historicalBoost.boost || 0) -
-        Number(historicalPenalty.penalty || 0) -
-        Number(missPenalty.penalty || 0) +
+        combinedHistPenalty +
         (marketReliability.reliable ? 2 : marketReliability.score < 42 ? -3 : 0)
     ),
     hasLine ? 28 : 0,

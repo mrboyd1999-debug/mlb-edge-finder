@@ -18,6 +18,8 @@ import { shouldRouteMlbHitterToResearch } from "./mlbHitterConfidence.js";
 import { estimateModelProbability } from "./projectionEngine.js";
 import { sortDecisionBoard } from "./decisionEngine.js";
 import { sortBoardProps } from "./propPriority.js";
+import { getMarketReadyThreshold, getStrongEdgeBypassGap } from "./marketThresholds.js";
+import { getPropVolatilityTier, meetsVolatilityTierRequirements } from "./marketConfidenceModels.js";
 
 const READY_MIN_CONFIDENCE = CONFIDENCE_THRESHOLDS.READY;
 const READY_MIN_DATA_QUALITY = 45;
@@ -51,6 +53,55 @@ export function hasValidPickFields(prop) {
 export function isPositiveEdge(prop) {
   const edge = Number(prop.edge);
   return Number.isFinite(edge) && edge > 0 && Boolean(prop.bestPick);
+}
+
+function resolveReadyThresholdsForProp(prop, overrides = {}) {
+  const market = getMarketReadyThreshold(prop);
+  return {
+    minConfidence: overrides.minConfidence ?? market.confidence,
+    minDataQuality: overrides.minDataQuality ?? market.dataQuality,
+    minEdge: overrides.minEdge ?? market.minEdge,
+    relaxedStats: Boolean(overrides.relaxedStats),
+  };
+}
+
+export function qualifiesStrongEdgeBypass(prop, overrides = {}) {
+  if (!isVerifiedSportsbookProp(prop)) return false;
+  if (!isPositiveEdge(prop)) return false;
+  if (!prop.hasVerifiedStats && !prop.manualEnriched && !overrides.relaxedStats) return false;
+
+  const thresholds = resolveReadyThresholdsForProp(prop, overrides);
+  const confidence = Number(prop.confidenceScore || prop.modelSignal?.confidenceScore || 0);
+  const edge = Number(prop.edge || 0);
+  const vol = Number(prop.volatility);
+  const gap = thresholds.minConfidence - confidence;
+  if (gap <= 0) return true;
+
+  const maxGap = getStrongEdgeBypassGap(prop);
+  if (gap > maxGap) return false;
+  if (edge < thresholds.minEdge) return false;
+  if (Number.isFinite(vol) && vol > 2.85) return false;
+
+  const matchupStrong =
+    Number(prop.matchupRating) >= 58 ||
+    Boolean(prop.handednessMatchup) ||
+    Boolean(prop.matchupNote);
+  if (gap <= 3) return edge >= 1.0 && (matchupStrong || !Number.isFinite(vol) || vol <= 2.35);
+  if (gap <= 4) return edge >= 1.15 && matchupStrong && (!Number.isFinite(vol) || vol <= 2.5);
+  return edge >= 1.35 && matchupStrong && Number.isFinite(vol) && vol <= 2.0;
+}
+
+function passesVolatilityGate(prop, confidence, thresholds) {
+  if (prop.meetsVolatilityRequirements !== false) return true;
+  const tier = getPropVolatilityTier(prop);
+  const edge = Number(prop.edge || 0);
+  const vol = Number(prop.volatility);
+  if (qualifiesStrongEdgeBypass(prop, thresholds)) return true;
+  if (tier === "LOW" && edge >= 0.65 && confidence >= thresholds.minConfidence - 2) return true;
+  if (tier === "MEDIUM" && edge >= 0.95 && confidence >= thresholds.minConfidence && (!Number.isFinite(vol) || vol <= 2.75)) {
+    return true;
+  }
+  return meetsVolatilityTierRequirements(prop, confidence);
 }
 
 export function isLineOnlyData(prop, { profile, lineComparison, sportsbookComparison, injury, projectionSource }) {
@@ -262,21 +313,23 @@ export function getReadyToBetRejectReason(prop, thresholds = {}) {
   const start = new Date(prop.startTime).getTime();
   if (!Number.isFinite(start) || start <= Date.now()) return "game already started or missing start time";
 
-  const minConfidence = thresholds.minConfidence ?? READY_MIN_CONFIDENCE;
-  const minDataQuality = thresholds.minDataQuality ?? READY_MIN_DATA_QUALITY;
+  const resolved = resolveReadyThresholdsForProp(prop, thresholds);
+  const minConfidence = resolved.minConfidence;
+  const minDataQuality = resolved.minDataQuality;
+  const minEdge = resolved.minEdge;
   const confidence = Number(prop.confidenceScore || prop.modelSignal?.confidenceScore || 0);
   const dataQualityScore = Number(prop.dataQualityScore || prop.modelSignal?.dataQualityScore || 0);
-  const hasManualStats =
-    Boolean(prop.manualStats?.last5Average) ||
-    Boolean(prop.manualStats?.seasonAverage) ||
-    prop.manualEnriched;
-  const hasSportsbookSupport =
-    Boolean(prop.sportsbookComparison || prop.modelSignal?.sportsbookComparison) ||
-    Number(prop.sportsbookDiscrepancy || prop.modelSignal?.sportsbookDiscrepancy) > 0;
+  const edge = Number(prop.edge || 0);
   const verified = Boolean(prop.hasVerifiedStats || prop.manualEnriched);
   if (!verified && !thresholds.relaxedStats) return "missing verified stats";
-  if (confidence < minConfidence) return `confidence ${confidence} below ${minConfidence}`;
-  if (dataQualityScore < minDataQuality && !thresholds.relaxedStats) return `data quality ${dataQualityScore} below ${minDataQuality}`;
+  if (edge < minEdge && !qualifiesStrongEdgeBypass(prop, thresholds)) return `edge ${round(edge)} below ${minEdge}`;
+  if (confidence < minConfidence && !qualifiesStrongEdgeBypass(prop, thresholds)) {
+    return `confidence ${confidence} below ${minConfidence}`;
+  }
+  if (dataQualityScore < minDataQuality && !thresholds.relaxedStats && !qualifiesStrongEdgeBypass(prop, thresholds)) {
+    return `data quality ${dataQualityScore} below ${minDataQuality}`;
+  }
+  if (!passesVolatilityGate(prop, confidence, resolved)) return "volatility tier requirements";
   return "";
 }
 
@@ -519,20 +572,38 @@ export function rescoredPropFields(prop, context = {}) {
 }
 
 export function resolveReadyThresholds(props = []) {
-  const verified = props.filter((prop) => prop?.sportsbookVerified || prop?.verifiedBadge === "VERIFIED");
-  const countAt = (minConf, minDq, relaxedStats) =>
-    verified.filter((prop) => isReadyToBet(prop, { minConfidence: minConf, minDataQuality: minDq, relaxedStats })).length;
+  const verified = props.filter(isVerifiedSportsbookProp);
+  const countAt = (overrides = {}) => verified.filter((prop) => isReadyToBet(prop, overrides)).length;
 
-  if (countAt(READY_MIN_CONFIDENCE, READY_MIN_DATA_QUALITY, false) > 0) {
-    return { minConfidence: READY_MIN_CONFIDENCE, minDataQuality: READY_MIN_DATA_QUALITY, relaxedStats: false };
+  const baseCount = countAt({});
+  if (baseCount >= 5 && baseCount <= 20) return { relaxedStats: false, dqRelax: 0 };
+  if (baseCount > 20) return { relaxedStats: false, dqRelax: 0 };
+
+  const ladders = [
+    { relaxedStats: false, dqRelax: 3 },
+    { relaxedStats: false, dqRelax: 5 },
+    { relaxedStats: true, dqRelax: 5 },
+    { relaxedStats: true, dqRelax: 7 },
+  ];
+
+  for (const ladder of ladders) {
+    const overrides = {
+      minDataQuality: READY_MIN_DATA_QUALITY - ladder.dqRelax,
+      relaxedStats: ladder.relaxedStats,
+    };
+    const count = countAt(overrides);
+    if (count >= 5) return ladder;
   }
-  if (countAt(54, 38, true) > 0) {
-    return { minConfidence: 54, minDataQuality: 38, relaxedStats: true };
-  }
-  return { minConfidence: READY_MIN_CONFIDENCE, minDataQuality: READY_MIN_DATA_QUALITY, relaxedStats: false };
+
+  if (baseCount > 0) return { relaxedStats: false, dqRelax: 0 };
+  return { relaxedStats: true, dqRelax: 7 };
 }
 
 export function filterReadyToBetProps(props = []) {
-  const thresholds = resolveReadyThresholds(props);
+  const ladder = resolveReadyThresholds(props);
+  const thresholds = {
+    minDataQuality: READY_MIN_DATA_QUALITY - (ladder.dqRelax || 0),
+    relaxedStats: Boolean(ladder.relaxedStats),
+  };
   return sortDecisionBoard(props.filter((prop) => isReadyToBet(prop, thresholds)));
 }

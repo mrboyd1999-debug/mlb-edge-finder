@@ -860,8 +860,8 @@ assert.equal(filterApprovedMarketsOnly([
   { sport: "NBA", statType: "Points", marketKey: "points" },
 ]).length, MLB_ONLY_MODE ? 1 : 2);
 assert.equal(
-  applySportProcessingLimits(Array.from({ length: 120 }, (_, i) => ({ sport: "MLB", id: i }))).length,
-  MLB_ONLY_MODE ? 100 : 80
+  applySportProcessingLimits(Array.from({ length: 180 }, (_, i) => ({ sport: "MLB", id: i }))).length,
+  MLB_ONLY_MODE ? 150 : 80
 );
 assert.equal(RENDER_LIMITS.readyToBet, 20);
 

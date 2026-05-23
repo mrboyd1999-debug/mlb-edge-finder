@@ -2,18 +2,23 @@ import { recordFilterReason } from "../utils/propPipelineDebug.js";
 import { MLB_ONLY_MODE, guardMlbOnlyProp } from "../utils/mlbOnlyMode.js";
 import { isVerifiedSportsbookProp } from "../utils/propValidation.js";
 import { computeRankScore } from "./projectionEngine.js";
+import { buildRejectionAnalytics } from "./rejectionAnalytics.js";
+import { getMarketReadyThreshold, NEAR_MISS_CONFIDENCE_GAP, NEAR_MISS_DQ_GAP } from "./marketThresholds.js";
 import {
   hasValidPickFields,
   getReadyToBetRejectReason,
   isReadyToBet,
+  isPositiveEdge,
+  resolveReadyThresholds,
   READY_MIN_CONFIDENCE,
   READY_MIN_DATA_QUALITY,
 } from "./pickScoring.js";
+import { RENDER_LIMITS } from "../utils/approvedMarkets.js";
 
 export const DISPLAY_MIN_CONFIDENCE = 40;
-export const NEAR_CONFIDENCE_MIN = 58;
+export const NEAR_CONFIDENCE_MIN = 55;
 export const NEAR_CONFIDENCE_MAX = 64;
-export const NEAR_DQ_MIN = 40;
+export const NEAR_DQ_MIN = 38;
 export const NEAR_DQ_MAX = 49;
 
 const SUPPORTED_SPORTS = MLB_ONLY_MODE ? new Set(["MLB"]) : new Set(["MLB", "NBA", "WNBA", "ATP Tennis", "WTA Tennis", "Tennis", "Soccer", "NFL", "NCAAF", "NHL"]);
@@ -40,25 +45,34 @@ export function isDisplayable(prop) {
   return confidence > 0;
 }
 
-export function isNearQualification(prop) {
-  if (isReadyToBet(prop)) return false;
+export function isNearQualification(prop, globalThresholds = {}) {
+  if (isReadyToBet(prop, globalThresholds)) return false;
   if (!isDisplayable(prop)) return false;
+  if (!isPositiveEdge(prop)) return false;
+  if (!prop.hasVerifiedStats && !prop.manualEnriched && !globalThresholds.relaxedStats) return false;
+
+  const marketThresholds = getMarketReadyThreshold(prop);
+  const minConf = globalThresholds.minConfidence ?? marketThresholds.confidence;
+  const minDq = globalThresholds.minDataQuality ?? marketThresholds.dataQuality;
   const confidence = Number(prop.confidenceScore ?? 0);
   const dq = Number(prop.dataQualityScore ?? 0);
-  const nearConf = confidence >= NEAR_CONFIDENCE_MIN && confidence <= NEAR_CONFIDENCE_MAX;
-  const nearDq = dq >= NEAR_DQ_MIN && dq <= NEAR_DQ_MAX;
-  return nearConf || nearDq;
+  const confGap = minConf - confidence;
+  const dqGap = minDq - dq;
+
+  if (confGap > 0 && confGap <= NEAR_MISS_CONFIDENCE_GAP) return true;
+  if (dqGap > 0 && dqGap <= NEAR_MISS_DQ_GAP && confidence >= minConf - 3) return true;
+  return false;
 }
 
-export function classifyDisplayTier(prop) {
+export function classifyDisplayTier(prop, globalThresholds = {}) {
   if (!isDisplayable(prop)) return null;
-  if (isReadyToBet(prop)) return "ready";
-  if (isNearQualification(prop)) return "near";
+  if (isReadyToBet(prop, globalThresholds)) return "ready";
+  if (isNearQualification(prop, globalThresholds)) return "near";
   return "research";
 }
 
-export function applyQualificationLabels(prop) {
-  const tier = classifyDisplayTier(prop);
+export function applyQualificationLabels(prop, globalThresholds = {}) {
+  const tier = classifyDisplayTier(prop, globalThresholds);
   if (!tier) {
     return {
       ...prop,
@@ -192,13 +206,18 @@ export function avoidCorrelatedProps(props = [], limit = 120) {
 export function buildQualificationBoards(scoredProps = [], audit, history = []) {
   const scopedProps = MLB_ONLY_MODE ? scoredProps.filter((prop) => guardMlbOnlyProp(prop)) : scoredProps;
   const historyWeights = buildHistoryAccuracyWeights(history);
+  const ladder = resolveReadyThresholds(scopedProps);
+  const globalThresholds = {
+    minDataQuality: READY_MIN_DATA_QUALITY - (ladder.dqRelax || 0),
+    relaxedStats: Boolean(ladder.relaxedStats),
+  };
   const ready = [];
   const near = [];
   const research = [];
   const rejected = [];
 
   scopedProps.forEach((prop) => {
-    const labeled = applyQualificationLabels(prop);
+    const labeled = applyQualificationLabels(prop, globalThresholds);
     const tier = labeled.displayTier;
     if (!tier) {
       rejected.push(labeled);
@@ -208,39 +227,48 @@ export function buildQualificationBoards(scoredProps = [], audit, history = []) 
     if (tier === "ready") {
       ready.push(labeled);
     } else {
-      recordReject(audit, getReadyToBetRejectReason(labeled) || "not ready to bet", "qualification", labeled);
+      recordReject(audit, getReadyToBetRejectReason(labeled, globalThresholds) || "not ready to bet", "qualification", labeled);
       if (tier === "near") near.push(labeled);
       else research.push(labeled);
     }
   });
 
-  const allDisplayable = avoidCorrelatedProps(
-    [...ready, ...near, ...research].sort((a, b) => computeRankScore(b) - computeRankScore(a)),
-    40
+  const readyDisplay = avoidCorrelatedProps(
+    ready.sort((a, b) => Number(b.priorityScore || 0) - Number(a.priorityScore || 0) || computeRankScore(b) - computeRankScore(a)),
+    RENDER_LIMITS.readyToBet
   );
+  const nearDisplay = avoidCorrelatedProps(
+    near.sort((a, b) => Number(b.priorityScore || 0) - Number(a.priorityScore || 0) || Number(b.confidenceScore) - Number(a.confidenceScore)),
+    15
+  );
+  const researchDisplay = avoidCorrelatedProps(
+    research.sort((a, b) => Number(b.priorityScore || 0) - Number(a.priorityScore || 0) || computeRankScore(b) - computeRankScore(a)),
+    25
+  );
+  const allDisplayable = [...readyDisplay, ...nearDisplay, ...researchDisplay];
+
+  const rejectionAnalytics = buildRejectionAnalytics(scopedProps, {
+    readyProps: ready,
+    nearProps: near,
+  });
 
   audit.displayed = allDisplayable.length;
   audit.ready = ready.length;
   audit.near = near.length;
   audit.research = research.length;
   audit.scored = scoredProps.length;
+  audit.rejectionAnalytics = rejectionAnalytics.summary;
+  audit.rejectionSamples = rejectionAnalytics.rejected.slice(0, 40);
 
   return {
-    ready: ready.sort(
-      (a, b) =>
-        Number(b.priorityScore || 0) - Number(a.priorityScore || 0) || computeRankScore(b) - computeRankScore(a)
-    ),
-    near: near.sort(
-      (a, b) =>
-        Number(b.priorityScore || 0) - Number(a.priorityScore || 0) ||
-        Number(b.confidenceScore) - Number(a.confidenceScore)
-    ),
-    research: research.sort(
-      (a, b) => Number(b.priorityScore || 0) - Number(a.priorityScore || 0) || computeRankScore(b) - computeRankScore(a)
-    ),
+    ready: readyDisplay,
+    near: nearDisplay,
+    research: researchDisplay,
     allDisplayable,
     rejected,
     historyWeights,
+    rejectionAnalytics,
+    globalThresholds,
   };
 }
 

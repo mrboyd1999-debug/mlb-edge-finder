@@ -136,6 +136,8 @@ import {
 } from "./services/propPriority.js";
 import SportTabs from "./components/SportTabs.jsx";
 import TopPicksBoard from "./components/TopPicksBoard.jsx";
+import NearMissBoard from "./components/NearMissBoard.jsx";
+import RejectionAnalyticsPanel from "./components/RejectionAnalyticsPanel.jsx";
 import LazyDebugDetails from "./components/LazyDebugDetails.jsx";
 import GoblinBoard from "./components/GoblinBoard.jsx";
 import DemonBoard from "./components/DemonBoard.jsx";
@@ -1155,9 +1157,12 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
   let qualBoards = buildQualificationBoards(scoredProps.filter(isVerifiedSportsbookProp), pipelineAudit, historyRows);
 
-  const displayProps = filterVerifiedSportsbookProps(qualBoards.allDisplayable).slice(0, MAX_RANKED_PROPS);
+  const displayProps = filterVerifiedSportsbookProps(
+    [...qualBoards.ready, ...qualBoards.allDisplayable.filter((prop) => !qualBoards.ready.some((ready) => ready.id === prop.id))]
+  ).slice(0, MAX_RANKED_PROPS);
   const watchlistProps = [];
-  const nearQualification = [];
+  const nearQualification = qualBoards.near.slice(0, 15);
+  const qualifiedReadyProps = qualBoards.ready.slice(0, RENDER_LIMITS.readyToBet);
   const modelSignalMap = buildModelSignalMap(filterVerifiedSportsbookProps(qualBoards.allDisplayable));
   const streakProps = filterVerifiedSportsbookProps(
     buildStreakFinderProps(activeProps, modelSignalMap, lineMovementMap).sort(sortStreakProps)
@@ -1180,6 +1185,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     streakProps: streakProps.length,
   };
   debugInfo.qualificationSummary = safeFormatRejectionSummary(pipelineAudit);
+  debugInfo.rejectionAnalytics = qualBoards.rejectionAnalytics?.summary || pipelineAudit.rejectionAnalytics || null;
+  debugInfo.rejectionSamples = qualBoards.rejectionAnalytics?.rejected?.slice(0, 40) || pipelineAudit.rejectionSamples || [];
 
   const finalStatus = finalizeSourceStatus(sourceStatus);
   const { criticalWarnings, degradedWarnings, sourceHealth } = partitionWarnings(
@@ -1220,8 +1227,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     props: uiPayload.props,
     watchlist: uiPayload.watchlist,
     nearQualification,
+    qualifiedReadyProps,
     displayPool: qualBoards.allDisplayable,
-    readyProps: qualBoards.ready.slice(0, RENDER_LIMITS.readyToBet),
+    readyProps: qualifiedReadyProps,
     streakProps: uiPayload.streakProps,
     sourceStatus: finalStatus,
     sourceHealth,
@@ -1251,6 +1259,7 @@ export default function DFSPropsApp() {
   const [props, setProps] = useState([]);
   const [watchlist, setWatchlist] = useState([]);
   const [nearQualification, setNearQualification] = useState([]);
+  const [qualifiedReadyProps, setQualifiedReadyProps] = useState([]);
   const [streakProps, setStreakProps] = useState([]);
   const [settingsDraft, setSettingsDraft] = useState(() => readRuntimeSettings());
   const [settingsNotice, setSettingsNotice] = useState("");
@@ -1312,6 +1321,7 @@ export default function DFSPropsApp() {
     setProps(boardProps);
     setWatchlist(scopedBoard.watchlist || []);
     setNearQualification(scopedBoard.nearQualification || []);
+    setQualifiedReadyProps(scopedBoard.qualifiedReadyProps || scopedBoard.readyProps || []);
     setStreakProps(scopedBoard.streakProps || []);
     setCriticalWarnings(
       sanitizeCriticalWarningsForDisplay(collectBoardWarningMessages(scopedBoard), boardProps, boardSourceStatus)
@@ -1385,6 +1395,7 @@ export default function DFSPropsApp() {
           props: boardProps,
           watchlist: result.watchlist || [],
           nearQualification: result.nearQualification || [],
+          qualifiedReadyProps: result.qualifiedReadyProps || result.readyProps || [],
           streakProps: result.streakProps || [],
           warnings: routedCritical,
           degradedWarnings: sanitizeDegradedWarningsForDisplay(
@@ -1597,8 +1608,30 @@ export default function DFSPropsApp() {
     [streakProps, platform, statType, dateFilter, readyOnly, debouncedSearch]
   );
   const readyToBetProps = useMemo(
-    () => sortDecisionBoard(filterReadyToBetProps(filteredProps)),
-    [filteredProps]
+    () =>
+      sortDecisionBoard(
+        filterVerifiedSportsbookProps(
+          (qualifiedReadyProps.length ? qualifiedReadyProps : filterReadyToBetProps(filteredProps)).filter((prop) =>
+            matchesUiFilters(prop, uiFilters)
+          )
+        )
+      ),
+    [qualifiedReadyProps, filteredProps, uiFilters]
+  );
+  const nearMissProps = useMemo(
+    () =>
+      sortDecisionBoard(
+        filterVerifiedSportsbookProps(nearQualification.filter((prop) => matchesUiFilters(prop, uiFilters)))
+      ),
+    [nearQualification, uiFilters]
+  );
+  const rejectionAnalytics = useMemo(
+    () => debugInfo.rejectionAnalytics || pipelineAudit.rejectionAnalytics || null,
+    [debugInfo.rejectionAnalytics, pipelineAudit.rejectionAnalytics]
+  );
+  const rejectionSamples = useMemo(
+    () => debugInfo.rejectionSamples || pipelineAudit.rejectionSamples || [],
+    [debugInfo.rejectionSamples, pipelineAudit.rejectionSamples]
   );
   const bestValueProps = useMemo(
     () =>
@@ -1930,6 +1963,7 @@ export default function DFSPropsApp() {
     setProps(boards.allDisplayable.slice(0, MAX_RANKED_PROPS));
     setWatchlist(boards.research.slice(0, MAX_WATCHLIST_PROPS));
     setNearQualification(boards.near);
+    setQualifiedReadyProps(boards.ready);
     setStreakProps((current) =>
       current.map((item) => (item.id === propId ? mergedMap.get(propId) || item : item))
     );
@@ -2189,10 +2223,10 @@ export default function DFSPropsApp() {
       <section style={styles.section} aria-label="Ready to Bet board">
         <div style={styles.sectionHeading}>
           <div>
-            <p style={styles.eyebrow}>Qualified only</p>
+            <p style={styles.eyebrow}>Accepted props</p>
             <h2 style={styles.sectionTitle}>Ready to Bet</h2>
             <p style={styles.streakCopy}>
-              Live lines only · confidence ≥ {READY_MIN_CONFIDENCE}, data quality ≥ {READY_MIN_DATA_QUALITY}, positive edge.
+              Live lines only · market-specific confidence thresholds · verified stats · positive edge · target 5–20 per cycle.
             </p>
           </div>
           <p style={styles.countPill}>{readyToBetProps.length} qualified</p>
@@ -2212,6 +2246,10 @@ export default function DFSPropsApp() {
           </>
         )}
       </section>
+
+      <NearMissBoard picks={nearMissProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
+
+      <RejectionAnalyticsPanel summary={rejectionAnalytics} samples={rejectionSamples} loading={loading} />
 
       <section style={styles.section} aria-label="Best Value board">
         <div style={styles.sectionHeading}>
