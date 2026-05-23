@@ -163,6 +163,9 @@ export function compactPropForStorage(prop) {
 
 export function writeCachedBoard(board) {
   try {
+    const parsedCount = (board?.props || []).length;
+    const qualifiedCount = (board?.qualifiedReadyProps || board?.readyProps || []).length;
+    if (parsedCount === 0 && qualifiedCount === 0) return;
     if (isFailedEmptyBoard(board)) return;
     const scopedBoard = sanitizeBoardForMlbOnly(board);
     const hasAccepted =

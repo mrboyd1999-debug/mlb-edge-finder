@@ -1,14 +1,21 @@
 import { styles } from "../theme/styles.js";
 import { formatDateTime } from "../utils/formatters.js";
 import { formatCooldownRemaining } from "../services/sourceRateLimit.js";
-import { resolveSourceHealthState, healthStateStyle, HEALTH_STATES, CONNECTION_LABELS } from "../services/sourceHealth.js";
+import {
+  resolveSourceHealthState,
+  healthStateStyle,
+  HEALTH_STATES,
+  CONNECTION_LABELS,
+  summarizeSourceCounts,
+} from "../services/sourceHealth.js";
 
 function mapStatus(raw) {
   const s = String(raw || "Pending");
   const upper = s.toUpperCase();
   if (Object.values(HEALTH_STATES).includes(upper)) return upper;
-  if (["Full", "Partial", "Fallback", "Failed", "Cached", "Stale", "Connected", "Unavailable", "active", "rate_limited", "cached"].includes(s)) {
+  if (["Full", "Partial", "Fallback", "Failed", "Cached", "Stale", "Connected", "Unavailable", "Empty", "active", "rate_limited", "cached", "empty"].includes(s)) {
     if (s === "rate_limited") return HEALTH_STATES.CACHED;
+    if (s === "Empty" || s === "empty") return HEALTH_STATES.EMPTY;
     if (s === "active" || s === "Connected" || s === "Full") return HEALTH_STATES.LIVE;
     if (s === "Unavailable") return HEALTH_STATES.DEGRADED;
     if (s === "Failed" || s === "Not Connected") return HEALTH_STATES.FAILED;
@@ -23,6 +30,7 @@ function mapStatus(raw) {
 function connectionHint(row = {}) {
   const status = mapStatus(row.status || row.lineSourceBadge);
   if (status === HEALTH_STATES.NOT_CONFIGURED) return CONNECTION_LABELS.NOT_CONFIGURED;
+  if (status === HEALTH_STATES.EMPTY) return CONNECTION_LABELS.EMPTY;
   if (status === HEALTH_STATES.FAILED && /401|403|unauthorized|invalid key/i.test(String(row.lastError || ""))) {
     return CONNECTION_LABELS.INVALID;
   }
@@ -44,9 +52,15 @@ function chipStatusColor(status) {
   const key = String(status || "").toUpperCase();
   if (key === HEALTH_STATES.LIVE) return "#86efac";
   if (key === HEALTH_STATES.CACHED) return "#93c5fd";
+  if (key === HEALTH_STATES.EMPTY) return "#cbd5e1";
   if (key === HEALTH_STATES.DEGRADED) return "#fdba74";
   if (key === HEALTH_STATES.FAILED) return "#fca5a5";
   return "#cbd5e1";
+}
+
+function formatCountLine(row = {}) {
+  const counts = summarizeSourceCounts(row);
+  return `raw ${counts.rawCount} · parsed ${counts.parsedCount} · usable ${counts.usableCount}`;
 }
 
 export default function SourceStatusBar({
@@ -61,18 +75,20 @@ export default function SourceStatusBar({
   slateExcludedCount = 0,
   pregameWindowHours = 24,
 }) {
+  const cacheCounts = summarizeSourceCounts(apiHealth.cache || {});
   const boardHealth = resolveSourceHealthState({
     status: stale ? HEALTH_STATES.STALE : cacheStatus,
     lineSourceBadge: apiHealth?.cache?.status || cacheStatus,
     lastFetchAt: apiHealth?.cache?.lastFetchAt || lastUpdated,
-    hasData: Boolean(lastUpdated),
+    hasData: cacheCounts.usableCount > 0,
+    usableCount: cacheCounts.usableCount,
   });
 
   const items = [
     ["PrizePicks", mapStatus(apiHealth?.PrizePicks?.lineSourceBadge || sourceStatus.PrizePicks)],
     ["Underdog", mapStatus(apiHealth?.Underdog?.lineSourceBadge || sourceStatus.Underdog)],
     ["Odds", mapStatus(apiHealth?.OddsAPI?.lineSourceBadge || sourceStatus["The Odds API"])],
-    ["SportsData", mapStatus(apiHealth?.SportsData?.lineSourceBadge || sourceHealth.SportsDataIO || HEALTH_STATES.LIVE)],
+    ["SportsData", mapStatus(apiHealth?.SportsData?.lineSourceBadge || sourceHealth.SportsDataIO || HEALTH_STATES.NOT_CONFIGURED)],
     ["Cache", boardHealth],
   ];
 
@@ -99,7 +115,7 @@ export default function SourceStatusBar({
       label: "SportsDataIO",
       priority: 4,
       ...apiHealth.SportsData,
-      status: apiHealth?.SportsData?.lineSourceBadge || sourceHealth.SportsDataIO || HEALTH_STATES.LIVE,
+      status: apiHealth?.SportsData?.lineSourceBadge || sourceHealth.SportsDataIO || HEALTH_STATES.NOT_CONFIGURED,
       lastFetchAt: apiHealth?.SportsData?.lastFetchAt || "",
       cacheAge: apiHealth?.SportsData?.cacheAge || "",
       requestCount: apiHealth?.SportsData?.sessionRequestCount ?? apiHealth?.SportsData?.requestCount,
@@ -110,6 +126,9 @@ export default function SourceStatusBar({
       label: "Verified cache",
       priority: 5,
       status: boardHealth,
+      rawCount: cacheCounts.rawCount,
+      parsedCount: cacheCounts.parsedCount,
+      usableCount: cacheCounts.usableCount,
       lastFetchAt: apiHealth?.cache?.lastFetchAt || lastUpdated,
       cacheAge: apiHealth?.cache?.cacheAge || (apiHealth?.cache?.lastFetchAt ? formatHealthTime(apiHealth.cache.lastFetchAt) : ""),
       cooldownRemainingMs: 0,
@@ -143,7 +162,7 @@ export default function SourceStatusBar({
         ))}
       </div>
 
-      <details className="api-health-expand" style={styles.compactDetails}>
+      <details className="api-health-expand api-health-collapsed-default" style={styles.compactDetails}>
         <summary>API Health details</summary>
         <div className="api-health-full-panel">
           <section style={styles.apiHealthPanel}>
@@ -167,6 +186,7 @@ export default function SourceStatusBar({
                 const health = mapStatus(row.status);
                 const hint = connectionHint(row);
                 const sessionCount = row.sessionRequestCount ?? row.requestCount;
+                const countLine = formatCountLine(row);
                 return (
                   <div key={row.label} style={styles.apiHealthRow}>
                     <div style={styles.apiHealthRowTop}>
@@ -176,6 +196,7 @@ export default function SourceStatusBar({
                     <div style={styles.apiHealthMeta}>
                       {hint ? <span>{hint}</span> : null}
                       {row.badge ? <span style={styles.lineSourceBadge(row.badge)}>{row.badge}</span> : null}
+                      {row.label !== "Upcoming slate" ? <span className="api-health-count-line">{countLine}</span> : null}
                       <span>Last OK: {formatHealthTime(row.lastFetchAt)}</span>
                       {row.cacheAge ? <span>Cache age: {row.cacheAge}</span> : null}
                       {Number(row.cooldownRemainingMs) > 0 ? (

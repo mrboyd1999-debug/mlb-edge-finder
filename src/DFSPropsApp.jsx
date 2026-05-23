@@ -6,7 +6,7 @@ import {
   applyUnderdogProviderToDebug,
   UNDERDOG_SOFT_MESSAGE,
 } from "./services/providers/underdogProvider.js";
-import { resolveSourceHealthState } from "./services/sourceHealth.js";
+import { resolveSourceHealthState, resolveFetchHealthBadge, summarizeSourceCounts, HEALTH_STATES, EMPTY_SOURCE_MESSAGE } from "./services/sourceHealth.js";
 import { enrichLineMovementWithTags } from "./services/lineMovementTrust.js";
 import { fetchSportsbookComparison } from "./services/sportsbookOdds";
 import { fetchPlayerStats, findStatProfile } from "./services/playerStats";
@@ -169,6 +169,8 @@ import {
   resolveFinalAcceptedPropsFromHydrated,
   selectTopPicksFromAccepted,
 } from "./utils/resolveAcceptedPropsForRender.js";
+import { selectTopPicks } from "./services/topPicksSelection.js";
+import { countUsableProps, normalizePropShape } from "./utils/propShape.js";
 import { styles } from "./theme/styles.js";
 import {
   formatDateTime, formatLeanSide, formatMultiplier, formatNumber, formatMaybeLine,
@@ -239,6 +241,7 @@ const NO_EDGE_MESSAGE = "No betting edge detected. More data needed before this 
 const NEEDS_STATS_MESSAGE = "This prop needs more stats before a confident pick can be made.";
 const STREAK_WARNING = "Low multiplier does not guarantee the pick will hit. Verify before adding to streak.";
 const NO_ACTIVE_SCHEDULED_PROPS_MESSAGE = NO_VERIFIED_PROPS_MESSAGE;
+const EMPTY_PARSED_MESSAGE = "Connected but no usable props parsed. Check API Health raw vs parsed counts.";
 const INCLUDE_UNCERTAIN_KEY = "dfs-include-uncertain-props";
 const FILTER_PREFS_KEY = "dfs-filter-prefs";
 const COMPACT_MODE_KEY = "dfs-compact-mode";
@@ -342,6 +345,7 @@ function shouldSuppressCriticalUiMessage(message = "", props = [], sourceStatus 
   if (/using verified mlb cache/i.test(message)) return true;
   if (/recently verified cached mlb props/i.test(message)) return true;
   if (/live refresh paused during cooldown/i.test(message)) return true;
+  if (/connected but no usable props parsed/i.test(message)) return true;
   if (prizePicksHasUsableProps(props, sourceStatus)) {
     if (/no verified sportsbook props/i.test(message)) return true;
     if (/try again after cooldown/i.test(message)) return true;
@@ -413,6 +417,7 @@ function normalizeSourceState(status, fallback = "Failed") {
   if (!text || text === "Pending") return fallback;
   if (text === "Connected" || text === "Full") return "Full";
   if (text === "Cached") return "Cached";
+  if (text === "Empty") return "Empty";
   if (text === "Unavailable") return "Unavailable";
   if (/setup/i.test(text)) return "Fallback";
   if (/partial/i.test(text)) return "Partial";
@@ -673,27 +678,38 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
   const odds = board?.debugInfo?.sources?.["The Odds API"] || {};
   const sourceSnapshot = buildSourceHealthSnapshot();
   const boardTs = board?.updatedAt ? new Date(board.updatedAt).getTime() : 0;
-  const resolveBadge = (row, status, fallbackTs = boardTs) =>
-    resolveSourceHealthState({
+  const boardPropCount = (board?.props || []).length;
+  const resolveBadge = (row, status, fallbackTs = boardTs) => {
+    const counts = summarizeSourceCounts(row);
+    return resolveSourceHealthState({
       status: status || row.status,
       lineSourceBadge: row.lineSourceBadge || row.providerHealth || row.health,
       lastFetchAt: row.lastSuccessfulFetchAt || fallbackTs,
-      hasData: Number(row.propsAfterParsing || row.rawPropsLoaded || 0) > 0,
+      hasData: counts.usableCount > 0,
+      usableCount: counts.usableCount,
     });
+  };
+  const cacheUsableCount = boardPropCount;
   const cacheLayerLabel =
-    cacheLayer === "fresh"
-      ? "LIVE"
-      : boardTs
-        ? formatCacheLayerLabel(resolveCacheLayer(boardTs, CACHE_TTL.BOARD_MS))
-        : formatCacheLayerLabel(String(cacheLayer || "EMPTY").toUpperCase());
+    cacheUsableCount === 0
+      ? "EMPTY"
+      : cacheLayer === "fresh"
+        ? "LIVE"
+        : boardTs
+          ? formatCacheLayerLabel(resolveCacheLayer(boardTs, CACHE_TTL.BOARD_MS))
+          : formatCacheLayerLabel(String(cacheLayer || "EMPTY").toUpperCase());
   const oddsKeyConfigured = Boolean(getOddsApiKey());
   const sportsDataConfigured = Boolean(getSportsDataApiKey());
   const statsWarnings = board?.debugInfo?.statsWarnings || [];
+  const statsLoadedCount = Number(board?.debugInfo?.statsLoadedCount || 0);
   return {
     PrizePicks: {
       status: sourceSnapshot[SOURCE_IDS.PRIZEPICKS]?.status || board?.sourceStatus?.PrizePicks || pp.status || "Pending",
       lastFetchAt: pp.lastSuccessfulFetchAt || sourceSnapshot.PrizePicks?.lastSuccessfulFetchAt || board?.updatedAt || "",
       lineSourceBadge: resolveBadge(pp, board?.sourceStatus?.PrizePicks),
+      rawCount: Number(pp.rawPropsLoaded || 0),
+      parsedCount: Number(pp.propsAfterParsing || 0),
+      usableCount: Number(pp.usablePropsCount ?? pp.propsAfterParsing ?? 0),
       cooldownRemainingMs: sourceSnapshot.PrizePicks?.cooldownRemainingMs || 0,
       cacheAge: sourceSnapshot.PrizePicks?.cacheAge || "",
       requestCount: sourceSnapshot.PrizePicks?.requestCount || 0,
@@ -704,12 +720,15 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
       status: sourceSnapshot.Underdog?.status || board?.sourceStatus?.Underdog || ud.status || "Pending",
       lastFetchAt: ud.lastSuccessfulFetchAt || sourceSnapshot.Underdog?.lastSuccessfulFetchAt || board?.updatedAt || "",
       lineSourceBadge: resolveBadge(ud, board?.sourceStatus?.Underdog),
+      rawCount: Number(ud.rawPropsLoaded || 0),
+      parsedCount: Number(ud.propsAfterParsing || 0),
+      usableCount: Number(ud.usablePropsCount ?? ud.propsAfterParsing ?? 0),
       cooldownRemainingMs: sourceSnapshot.Underdog?.cooldownRemainingMs || 0,
       cacheAge: sourceSnapshot.Underdog?.cacheAge || "",
       requestCount: sourceSnapshot.Underdog?.requestCount || 0,
       sessionRequestCount: sourceSnapshot.Underdog?.sessionRequestCount || 0,
       lastError:
-        MLB_ONLY_MODE && (board?.props?.length || 0) > 0
+        MLB_ONLY_MODE && boardPropCount > 0
           ? ""
           : filterCriticalUiMessages(
               [sourceSnapshot.Underdog?.lastError, ud.message].filter(Boolean),
@@ -723,6 +742,9 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
       lineSourceBadge: oddsKeyConfigured
         ? resolveBadge(odds, board?.sourceStatus?.["The Odds API"])
         : "NOT CONFIGURED",
+      rawCount: Number(odds.rawPropsLoaded || 0),
+      parsedCount: Number(odds.propsAfterParsing || 0),
+      usableCount: Number(odds.propsAfterParsing || 0),
       cooldownRemainingMs: sourceSnapshot[SOURCE_IDS.ODDS_API]?.cooldownRemainingMs || 0,
       cacheAge: sourceSnapshot[SOURCE_IDS.ODDS_API]?.cacheAge || "",
       requestCount: sourceSnapshot[SOURCE_IDS.ODDS_API]?.requestCount || 0,
@@ -732,9 +754,12 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
         : "Not configured",
     },
     SportsData: {
-      status: "active",
+      status: sportsDataConfigured ? (statsLoadedCount > 0 ? "active" : "empty") : "not_configured",
       lastFetchAt: board?.updatedAt || "",
-      lineSourceBadge: sportsDataConfigured ? "LIVE" : "LIVE",
+      lineSourceBadge: sportsDataConfigured ? (statsLoadedCount > 0 ? "LIVE" : "EMPTY") : "NOT CONFIGURED",
+      rawCount: statsLoadedCount,
+      parsedCount: statsLoadedCount,
+      usableCount: statsLoadedCount,
       cacheAge: "",
       requestCount: 0,
       sessionRequestCount: 0,
@@ -744,6 +769,9 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
       status: cacheLayerLabel,
       lastFetchAt: board?.updatedAt || "",
       cacheAge: boardTs ? formatCacheAge(board?.updatedAt) : "",
+      rawCount: boardPropCount,
+      parsedCount: boardPropCount,
+      usableCount: cacheUsableCount,
       lastError: cacheLayerLabel === "EXPIRED" ? "Expired cache not used for Top Picks" : "",
     },
   };
@@ -758,11 +786,25 @@ function applySourceResult({
   sourceStatus,
   debugInfo,
 }) {
-  const props = result.props || [];
-  const valueStatus = result.status || (label === "Underdog" ? "Connected" : "Full");
-  sourceStatus[label] = valueStatus;
+  const platform = label === "PrizePicks" ? "PrizePicks" : label === "Underdog" ? "Underdog" : label;
+  const props = (result.props || []).map((prop) => normalizePropShape(prop, { platform, source: platform }));
+  const rawCount = Number(result.debug?.rawPropsLoaded ?? result.pipelineAudit?.fetched ?? 0);
+  const parsedCount = props.length;
+  const usableCount = countUsableProps(props);
+  const failed = result.status === "Failed";
+  const rateLimited = Boolean(result.rateLimited || result.cached);
+  const cached = result.status === "Cached" || rateLimited;
+  const health = resolveFetchHealthBadge({
+    ok: !failed,
+    failed,
+    rateLimited,
+    cached,
+    rawCount,
+    parsedCount,
+    usableCount,
+  });
 
-  if (label === "Underdog" && (valueStatus === "Failed" || valueStatus === "Unavailable")) {
+  if (label === "Underdog" && failed) {
     const detailWarnings = result.warnings?.length ? result.warnings : [UNDERDOG_UNAVAILABLE_MESSAGE];
     sourceStatus.Underdog = "Unavailable";
     detailWarnings.forEach((warning) => {
@@ -774,58 +816,69 @@ function applySourceResult({
       apiStatus: result.debug?.apiStatus || "Unavailable",
       apiUrl: result.debug?.apiUrl || "",
       endpointsTried: result.debug?.endpointsTried || [],
-      rawPropsLoaded: 0,
+      rawPropsLoaded: rawCount,
       propsAfterParsing: 0,
+      usablePropsCount: 0,
       message: result.debug?.message || detailWarnings.join(" | "),
       lastSuccessfulFetchAt: result.lastSuccessfulFetchAt || "",
-      lineSourceBadge: result.lineSourceBadge || result.health || "STALE",
+      lineSourceBadge: HEALTH_STATES.FAILED,
     };
     return false;
   }
 
-  if (valueStatus === "Failed") {
+  if (failed) {
     const detailWarnings = result.warnings || [];
     sourceWarnings.push(...detailWarnings);
     if (label === "PrizePicks") {
       sourceFailures.push(...(detailWarnings.length ? detailWarnings : ["PrizePicks data failed to load."]));
     }
+    sourceStatus[label] = "Failed";
     debugInfo.sources[label] = {
       ...debugInfo.sources[label],
       status: "Failed",
       apiStatus: result.debug?.apiStatus || "Failed",
       apiUrl: result.debug?.apiUrl || "",
       endpointsTried: result.debug?.endpointsTried || [],
-      rawPropsLoaded: 0,
+      rawPropsLoaded: rawCount,
       propsAfterParsing: 0,
+      usablePropsCount: 0,
       message: result.debug?.message || detailWarnings.join(" | "),
       lastSuccessfulFetchAt: result.lastSuccessfulFetchAt || "",
-      lineSourceBadge: result.lineSourceBadge || "",
+      lineSourceBadge: HEALTH_STATES.FAILED,
     };
     return false;
   }
 
-  if (label === "Underdog" && (!props.length || !["Connected", "Cached", "Full"].includes(valueStatus))) {
-    sourceStatus.Underdog = props.length ? valueStatus : "Unavailable";
-    if (!props.length && !sourceWarnings.includes(UNDERDOG_UNAVAILABLE_MESSAGE)) {
-      sourceWarnings.push(UNDERDOG_UNAVAILABLE_MESSAGE);
-    }
+  const pipelineStatus =
+    label === "Underdog" && health.pipelineStatus === "Full"
+      ? "Connected"
+      : health.pipelineStatus === "Full"
+        ? label === "Underdog"
+          ? "Connected"
+          : "Full"
+        : health.pipelineStatus;
+  sourceStatus[label] = pipelineStatus;
+
+  if (health.message && !sourceWarnings.includes(health.message)) {
+    sourceWarnings.push(health.message);
   }
 
-  rawProps.push(...props);
-  sourceWarnings.push(...(result.warnings || []));
+  if (props.length) rawProps.push(...props);
+
   debugInfo.sources[label] = {
     ...debugInfo.sources[label],
-    status: sourceStatus[label],
-    apiStatus: result.debug?.apiStatus || sourceStatus[label],
+    status: pipelineStatus,
+    apiStatus: result.debug?.apiStatus || pipelineStatus,
     apiUrl: result.debug?.apiUrl || "",
     endpointsTried: result.debug?.endpointsTried || [],
-    rawPropsLoaded: result.debug?.rawPropsLoaded ?? props.length,
-    propsAfterParsing: result.debug?.propsAfterParsing ?? props.length,
-    message: result.debug?.message || "",
+    rawPropsLoaded: rawCount,
+    propsAfterParsing: parsedCount,
+    usablePropsCount: usableCount,
+    message: health.message || result.debug?.message || "",
     lastSuccessfulFetchAt: result.lastSuccessfulFetchAt || "",
-    lineSourceBadge: result.lineSourceBadge || result.health || "LIVE",
+    lineSourceBadge: health.badge,
   };
-  return props.length > 0;
+  return usableCount > 0;
 }
 
 async function fetchDFSProps({ platform = "both", sport = "all", statType = "all" } = {}) {
@@ -1078,12 +1131,24 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
           rawPropsLoaded: normalProps.length,
           propsAfterParsing: background.comparisons.length,
           propsAfterFilters: background.comparisons.length,
-          message: (result.value.warnings || []).join(" "),
+          usablePropsCount: background.comparisons.length,
+          message:
+            background.comparisons.length > 0
+              ? (result.value.warnings || []).join(" ")
+              : EMPTY_SOURCE_MESSAGE,
           lastSuccessfulFetchAt: result.value.lastSuccessfulFetchAt || "",
-          lineSourceBadge: result.value.cached || result.value.rateLimited ? "CACHED" : "LIVE",
+          lineSourceBadge:
+            background.comparisons.length > 0
+              ? result.value.cached || result.value.rateLimited
+                ? "CACHED"
+                : "LIVE"
+              : "EMPTY",
         };
       }
-      if (label === "stats") background.stats = result.value.stats || new Map();
+      if (label === "stats") {
+        background.stats = result.value.stats || new Map();
+        debugInfo.statsLoadedCount = background.stats.size;
+      }
       if (label === "news") background.news = result.value.news || new Map();
       return;
     }
@@ -1736,11 +1801,16 @@ export default function DFSPropsApp() {
     qualifiedReadyProps,
     pipelineCounters.accepted,
   ]);
+  const topPickPool = useMemo(() => {
+    const verified = filterVerifiedSportsbookProps(filteredProps.length ? filteredProps : props);
+    return verified;
+  }, [filteredProps, props]);
   const topPicksDisplay = useMemo(() => {
-    const topPicks = selectTopPicksFromAccepted(finalAcceptedProps, 2);
-    console.log("FINAL TOP PICKS", topPicks);
-    return topPicks;
-  }, [finalAcceptedProps]);
+    if (!topPickPool.length) return [];
+    const ranked = selectTopPicksFromAccepted(topPickPool, 2);
+    if (ranked.length) return ranked;
+    return selectTopPicks(topPickPool, 2);
+  }, [topPickPool]);
   const topPicksForTracking = useMemo(() => topPicksDisplay, [topPicksDisplay]);
   const goblinPropsForTracking = useMemo(
     () => streakFinderProps.filter(isVerifiedSportsbookProp).filter(isGoblinProp),
@@ -1820,6 +1890,27 @@ export default function DFSPropsApp() {
     sourceCooldownSec > 0
       ? `${RATE_LIMIT_COOLDOWN_MESSAGE} (${formatCooldownRemaining(sourceCooldownSec * 1000)} remaining)`
       : visibleCriticalWarnings.find((warning) => /rate limited|cached lines from/i.test(String(warning))) || "";
+  const boardEmptyState = useMemo(() => {
+    if (loading) return { kind: "loading", text: "Loading sportsbook lines…" };
+    if (props.length || topPickPool.length) return null;
+    if (sourceCooldownSec > 0) {
+      return { kind: "rate_limited", text: "Rate limited — showing cached lines when available." };
+    }
+    const badges = [
+      apiHealth?.PrizePicks?.lineSourceBadge,
+      apiHealth?.Underdog?.lineSourceBadge,
+      apiHealth?.OddsAPI?.lineSourceBadge,
+      sourceStatus?.PrizePicks,
+      sourceStatus?.Underdog,
+    ].map((value) => String(value || "").toUpperCase());
+    if (badges.some((value) => value === "FAILED" || value === "OFFLINE")) {
+      return { kind: "error", text: NO_VERIFIED_PROPS_MESSAGE };
+    }
+    if (badges.some((value) => value === "EMPTY" || value === "CACHED")) {
+      return { kind: "empty", text: EMPTY_PARSED_MESSAGE };
+    }
+    return { kind: "empty", text: EMPTY_PARSED_MESSAGE };
+  }, [loading, props.length, topPickPool.length, sourceCooldownSec, apiHealth, sourceStatus]);
   const compactSourceWarning = useMemo(() => {
     if (sourceCooldownSec > 0) {
       return `PrizePicks rate limited. Showing cached lines. Wait ${sourceCooldownSec}s.`;
@@ -2126,7 +2217,7 @@ export default function DFSPropsApp() {
       <div className="dfs-section dfs-order-filters">
       <details style={styles.compactDetails}>
         <summary style={styles.detailsSummary}>
-          <span>
+          <span className="details-summary-stack">
             <span style={styles.eyebrow}>Board controls</span>
             <strong>Filters</strong>
           </span>
@@ -2246,7 +2337,7 @@ export default function DFSPropsApp() {
         {loading ? (
           <EmptyState text="Loading picks…" />
         ) : finalAcceptedProps.length === 0 ? (
-          <EmptyState text={NO_VERIFIED_PROPS_MESSAGE} />
+          <EmptyState text={boardEmptyState?.text || NO_VERIFIED_PROPS_MESSAGE} />
         ) : (
           <>
             <VirtualCardList
@@ -2278,10 +2369,10 @@ export default function DFSPropsApp() {
           </div>
           <p style={styles.countPill}>{bestValueProps.length} values</p>
         </div>
-        {loading ? (
+        {loading || boardEmptyState?.kind === "loading" ? (
           <EmptyState text="Loading value board…" />
         ) : bestValueProps.length === 0 ? (
-          <EmptyState text={NO_VERIFIED_PROPS_MESSAGE} />
+          <EmptyState text={boardEmptyState?.text || NO_VERIFIED_PROPS_MESSAGE} />
         ) : (
           <>
             <VirtualCardList
@@ -2385,7 +2476,7 @@ export default function DFSPropsApp() {
       <div className="dfs-section dfs-order-history">
       <details style={styles.compactDetails}>
         <summary style={styles.detailsSummary}>
-          <span>
+          <span className="details-summary-stack">
             <span style={styles.eyebrow}>Accuracy</span>
             <strong>Saved pick history</strong>
           </span>

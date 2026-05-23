@@ -25,6 +25,8 @@ import {
 } from "../utils/propPipelineDebug.js";
 import { safeParse } from "../utils/safeEngine.js";
 import { MLB_ONLY_MODE, emptySourcePipelineAudit } from "../utils/mlbOnlyMode.js";
+import { countUsableProps } from "../utils/propShape.js";
+import { EMPTY_SOURCE_MESSAGE } from "./sourceHealth.js";
 import {
   SOURCE_IDS,
   RATE_LIMIT_COOLDOWN_MESSAGE,
@@ -147,15 +149,21 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all" } 
         });
       }
 
-      if (!isFallback) {
+      const badgeForParse = isFallback ? "CACHED" : "LIVE";
+      const { props: normalizedProps, audit } = normalizePrizePicksPayload(parsed.payload, sport, statType, badgeForParse);
+      const usableCount = countUsableProps(normalizedProps);
+      const hasUsable = usableCount > 0;
+      const lineSourceBadge = isFallback ? (hasUsable ? "CACHED" : "EMPTY") : hasUsable ? "LIVE" : "EMPTY";
+
+      if (!isFallback && normalizedProps.length > 0) {
         writeCachedPayload(sanitizePrizePicksPayloadForCache(parsed.payload));
         recordSourceSuccess(SOURCE_IDS.PRIZEPICKS);
-      } else {
+      } else if (isFallback) {
         markSourceCached(SOURCE_IDS.PRIZEPICKS, parsed.payload.cachedAt || readCachedPayloadSavedAt());
+      } else {
+        recordSourceSuccess(SOURCE_IDS.PRIZEPICKS);
       }
 
-      const lineSourceBadge = isFallback ? "CACHED" : "LIVE";
-      const { props, audit } = normalizePrizePicksPayload(parsed.payload, sport, statType, lineSourceBadge);
       logPipelineAudit(isFallback ? "PrizePicks-cached" : "PrizePicks", audit);
       const warnings = [];
       if (isFallback) {
@@ -163,12 +171,13 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all" } 
       } else if (setupWarning) {
         warnings.push(setupWarning);
       }
+      if (!hasUsable) warnings.push(EMPTY_SOURCE_MESSAGE);
       if (parsed.htmlError) warnings.push(PRIZEPICKS_HTML_BANNER);
 
       return {
         source: "PrizePicks",
-        status: isFallback ? "Cached" : props.length ? "Full" : "Partial",
-        props,
+        status: isFallback ? (hasUsable ? "Cached" : "Empty") : hasUsable ? "Full" : "Empty",
+        props: normalizedProps,
         pipelineAudit: audit,
         warnings,
         lineSourceBadge,
@@ -179,9 +188,9 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all" } 
           : new Date().toISOString(),
         debug: buildDebug(
           isFallback ? "server-cache:prizepicks" : endpoint,
-          isFallback ? "Cached" : props.length ? "Full" : "Partial",
+          isFallback ? "Cached" : hasUsable ? "Full" : "Empty",
           audit.fetched,
-          props.length,
+          normalizedProps.length,
           warnings[0] || "",
           attempts
         ),

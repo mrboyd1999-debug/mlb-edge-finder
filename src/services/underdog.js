@@ -14,6 +14,8 @@ import {
   shouldParseIngestionContext,
 } from "../utils/ingestionFilter.js";
 import { attachSportsbookVerifiedFields, isMalformedPlayerName } from "../utils/propValidation.js";
+import { countUsableProps } from "../utils/propShape.js";
+import { EMPTY_SOURCE_MESSAGE } from "./sourceHealth.js";
 import { attachNormalizedGameStatus } from "../utils/slateFilter.js";
 import {
   coercePipelineAudit,
@@ -138,38 +140,44 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all" } = 
           attempts,
         });
       }
-      writeCachedPayload(sanitizeUnderdogPayloadForCache(payload));
-      recordSourceSuccess(SOURCE_IDS.UNDERDOG);
+      const rawCount = rawUnderdogRecordCount(payload);
       const { props: parsedProps, audit } = parseUnderdogPayload(payload, "LIVE");
       logPipelineAudit("Underdog", audit);
       const props = parsedProps.filter((prop) => matchesFilter(prop, sport, statType));
+      const usableCount = countUsableProps(props);
+      if (parsedProps.length > 0) {
+        writeCachedPayload(sanitizeUnderdogPayloadForCache(payload));
+        recordSourceSuccess(SOURCE_IDS.UNDERDOG);
+      }
       console.info(`${UNDERDOG_AUDIT_PREFIX} parsed Underdog props count`, {
-        rawPropsLoaded: rawUnderdogRecordCount(payload),
+        rawPropsLoaded: rawCount,
         parsedPropsCount: parsedProps.length,
         filteredPropsCount: props.length,
+        usablePropsCount: usableCount,
       });
 
-      if (!props.length) {
+      if (!usableCount) {
         const cachedResult = buildCachedUnderdogResult({ sport, statType, attempts, reason: "empty-parse" });
         if (cachedResult) return cachedResult;
         console.warn(`${UNDERDOG_AUDIT_PREFIX} no parsed props returned`, {
           url: apiUrl,
-          rawPropsLoaded: rawUnderdogRecordCount(payload),
+          rawPropsLoaded: rawCount,
           parsedPropsCount: parsedProps.length,
         });
         return {
           source: "Underdog",
-          status: "Unavailable",
+          status: "Empty",
           props: [],
-          warnings: [UNDERDOG_TEMPORARY_MESSAGE],
-          health: "CACHED",
+          warnings: [EMPTY_SOURCE_MESSAGE],
+          health: "EMPTY",
+          lineSourceBadge: "EMPTY",
           debug: underdogDebug({
             apiUrl,
             apiStatus: "Empty",
             endpointsTried: attempts.map((item) => item.url),
-            rawPropsLoaded: rawUnderdogRecordCount(payload),
+            rawPropsLoaded: rawCount,
             parsedPropsCount: parsedProps.length,
-            message: UNDERDOG_TEMPORARY_MESSAGE,
+            message: EMPTY_SOURCE_MESSAGE,
           }),
         };
       }
@@ -187,7 +195,7 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all" } = 
           apiUrl,
           apiStatus: "Connected",
           endpointsTried: attempts.map((item) => item.url),
-          rawPropsLoaded: rawUnderdogRecordCount(payload),
+          rawPropsLoaded: rawCount,
           parsedPropsCount: parsedProps.length,
           message: "",
         }),

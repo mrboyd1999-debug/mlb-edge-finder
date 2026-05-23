@@ -1,6 +1,7 @@
 import { normalizePlayerName } from "./playerNames.js";
 import { isParserMergeComboBug } from "./comboMarkets.js";
 import { isOverseasOrPlaceholderProp, OVERSEAS_BLOCKED_PATTERN, getIngestionPropRejectReason } from "./ingestionFilter.js";
+import { normalizePropShape } from "./propShape.js";
 
 export const VERIFIED_SPORTSBOOK_PLATFORMS = new Set(["PrizePicks", "Underdog"]);
 export const VERIFIED_LINE_BADGES = new Set(["LIVE", "CACHED"]);
@@ -163,12 +164,14 @@ export function filterVerifiedSportsbookProps(props = []) {
 
 export function attachSportsbookVerifiedFields(prop = {}, platform = prop.platform) {
   const badge = normalizeBadge(prop.lineSourceBadge || "LIVE");
+  const shaped = normalizePropShape(prop, { platform, source: platform });
   return {
-    ...prop,
-    platform: normalizePlatform(platform || prop.platform),
+    ...shaped,
+    platform: normalizePlatform(platform || shaped.platform),
+    market: shaped.market || shaped.statType || shaped.propType || "",
     lineSourceBadge: VERIFIED_LINE_BADGES.has(badge) ? badge : "LIVE",
-    sportsbookVerified: VERIFIED_SPORTSBOOK_PLATFORMS.has(normalizePlatform(platform || prop.platform)),
-    feedSource: normalizePlatform(platform || prop.platform),
-    verifiedBadge: VERIFIED_SPORTSBOOK_PLATFORMS.has(normalizePlatform(platform || prop.platform)) ? "VERIFIED" : null,
+    sportsbookVerified: VERIFIED_SPORTSBOOK_PLATFORMS.has(normalizePlatform(platform || shaped.platform)),
+    feedSource: normalizePlatform(platform || shaped.platform),
+    verifiedBadge: VERIFIED_SPORTSBOOK_PLATFORMS.has(normalizePlatform(platform || shaped.platform)) ? "VERIFIED" : null,
   };
 }
