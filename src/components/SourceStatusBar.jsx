@@ -40,6 +40,15 @@ function formatHealthTime(value) {
   }
 }
 
+function chipStatusColor(status) {
+  const key = String(status || "").toUpperCase();
+  if (key === HEALTH_STATES.LIVE) return "#86efac";
+  if (key === HEALTH_STATES.CACHED) return "#93c5fd";
+  if (key === HEALTH_STATES.DEGRADED) return "#fdba74";
+  if (key === HEALTH_STATES.FAILED) return "#fca5a5";
+  return "#cbd5e1";
+}
+
 export default function SourceStatusBar({
   sourceStatus = {},
   sourceHealth = {},
@@ -63,7 +72,7 @@ export default function SourceStatusBar({
     ["PrizePicks", mapStatus(apiHealth?.PrizePicks?.lineSourceBadge || sourceStatus.PrizePicks)],
     ["Underdog", mapStatus(apiHealth?.Underdog?.lineSourceBadge || sourceStatus.Underdog)],
     ["Odds", mapStatus(apiHealth?.OddsAPI?.lineSourceBadge || sourceStatus["The Odds API"])],
-    ["SportsDataIO", mapStatus(apiHealth?.SportsData?.lineSourceBadge || sourceHealth.SportsDataIO || HEALTH_STATES.LIVE)],
+    ["SportsData", mapStatus(apiHealth?.SportsData?.lineSourceBadge || sourceHealth.SportsDataIO || HEALTH_STATES.LIVE)],
     ["Cache", boardHealth],
   ];
 
@@ -122,57 +131,68 @@ export default function SourceStatusBar({
   ].sort((a, b) => (a.priority || 99) - (b.priority || 99));
 
   return (
-    <details style={styles.compactDetails} aria-label="API health">
-      <summary style={styles.detailsSummary}>
-        <span>
-          <span style={styles.eyebrow}>Source health</span>
-          <strong>API Health</strong>
-        </span>
-        <span style={styles.countPill}>{items.map(([, status]) => status).join(" / ")}</span>
-      </summary>
-      <section style={styles.apiHealthPanel}>
-        <div style={styles.apiHealthHeader}>
-          <strong style={styles.apiHealthTitle}>API health</strong>
-          {devMode ? <span style={styles.apiHealthDevTag}>Dev throttle on</span> : null}
-        </div>
-        <p style={styles.compactFlags}>
-          Provider priority: PrizePicks → Underdog → Odds API → SportsData → verified cache
-        </p>
-        <div style={styles.sourceStatusBar}>
-          {items.map(([name, status]) => (
-            <div key={name} style={styles.sourceStatusItem}>
-              <span style={styles.sourceName}>{name}</span>
-              <span style={healthStateStyle(status)}>{status}</span>
+    <section className="api-health-section" aria-label="API health">
+      <div className="api-health-chips-row" aria-label="API status chips">
+        {items.map(([name, status]) => (
+          <span key={name} className="api-health-chip">
+            <span className="api-health-chip-name">{name}:</span>
+            <span className="api-health-chip-status" style={{ color: chipStatusColor(status) }}>
+              {status}
+            </span>
+          </span>
+        ))}
+      </div>
+
+      <details className="api-health-expand" style={styles.compactDetails}>
+        <summary>API Health details</summary>
+        <div className="api-health-full-panel">
+          <section style={styles.apiHealthPanel}>
+            <div style={styles.apiHealthHeader}>
+              <strong style={styles.apiHealthTitle}>API health</strong>
+              {devMode ? <span style={styles.apiHealthDevTag}>Dev throttle on</span> : null}
             </div>
-          ))}
-        </div>
-        <div style={styles.apiHealthGrid}>
-          {healthRows.map((row) => {
-            const health = mapStatus(row.status);
-            const hint = connectionHint(row);
-            const sessionCount = row.sessionRequestCount ?? row.requestCount;
-            return (
-              <div key={row.label} style={styles.apiHealthRow}>
-                <div style={styles.apiHealthRowTop}>
-                  <span style={styles.sourceName}>{row.label}</span>
-                  <span style={healthStateStyle(health)}>{health}</span>
+            <p style={styles.compactFlags}>
+              Provider priority: PrizePicks → Underdog → Odds API → SportsData → verified cache
+            </p>
+            <div style={styles.sourceStatusBar}>
+              {items.map(([name, status]) => (
+                <div key={name} style={styles.sourceStatusItem}>
+                  <span style={styles.sourceName}>{name}</span>
+                  <span style={healthStateStyle(status)}>{status}</span>
                 </div>
-                <div style={styles.apiHealthMeta}>
-                  {hint ? <span>{hint}</span> : null}
-                  {row.badge ? <span style={styles.lineSourceBadge(row.badge)}>{row.badge}</span> : null}
-                  <span>Last OK: {formatHealthTime(row.lastFetchAt)}</span>
-                  {row.cacheAge ? <span>Cache age: {row.cacheAge}</span> : null}
-                  {Number(row.cooldownRemainingMs) > 0 ? (
-                    <span>Cooldown: {formatCooldownRemaining(row.cooldownRemainingMs)}</span>
-                  ) : null}
-                  {sessionCount != null ? <span>Requests (session): {sessionCount}</span> : null}
-                  {row.lastError ? <span>Last error: {row.lastError}</span> : null}
-                </div>
-              </div>
-            );
-          })}
+              ))}
+            </div>
+            <div style={styles.apiHealthGrid}>
+              {healthRows.map((row) => {
+                const health = mapStatus(row.status);
+                const hint = connectionHint(row);
+                const sessionCount = row.sessionRequestCount ?? row.requestCount;
+                return (
+                  <div key={row.label} style={styles.apiHealthRow}>
+                    <div style={styles.apiHealthRowTop}>
+                      <span style={styles.sourceName}>{row.label}</span>
+                      <span style={healthStateStyle(health)}>{health}</span>
+                    </div>
+                    <div style={styles.apiHealthMeta}>
+                      {hint ? <span>{hint}</span> : null}
+                      {row.badge ? <span style={styles.lineSourceBadge(row.badge)}>{row.badge}</span> : null}
+                      <span>Last OK: {formatHealthTime(row.lastFetchAt)}</span>
+                      {row.cacheAge ? <span>Cache age: {row.cacheAge}</span> : null}
+                      {Number(row.cooldownRemainingMs) > 0 ? (
+                        <span>Cooldown: {formatCooldownRemaining(row.cooldownRemainingMs)}</span>
+                      ) : null}
+                      {sessionCount != null ? <span>Requests (session): {sessionCount}</span> : null}
+                      {row.lastError ? (
+                        <span className="api-health-error-preview">Last error: {row.lastError}</span>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
         </div>
-      </section>
-    </details>
+      </details>
+    </section>
   );
 }

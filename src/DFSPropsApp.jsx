@@ -202,7 +202,8 @@ import {
   sanitizeDebugInfoForMlbOnly,
 } from "./utils/mlbOnlyMode.js";
 import { runFilterPipeline, runUiPipeline } from "./utils/pipelineStages.js";
-import { isDebugPanelEnabled, isHeavyDebugEnabled, shouldLogVerbose, shouldTrackRejectedProps } from "./utils/devMode.js";
+import MobileQuickActionBar from "./components/MobileQuickActionBar.jsx";
+import { isHeavyDebugEnabled, readShowDebugPanelsPreference, shouldLogVerbose, shouldTrackRejectedProps, writeShowDebugPanelsPreference } from "./utils/devMode.js";
 import { canonicalStatType } from "./utils/marketNormalization.js";
 import {
   filterVerifiedSportsbookProps,
@@ -239,6 +240,7 @@ const NO_ACTIVE_SCHEDULED_PROPS_MESSAGE = NO_VERIFIED_PROPS_MESSAGE;
 const INCLUDE_UNCERTAIN_KEY = "dfs-include-uncertain-props";
 const FILTER_PREFS_KEY = "dfs-filter-prefs";
 const COMPACT_MODE_KEY = "dfs-compact-mode";
+const DEBUG_SAMPLE_LIMIT = 10;
 
 const DEFAULT_FILTER_PREFS = {
   hideResearchOnly: false,
@@ -1250,6 +1252,7 @@ export default function DFSPropsApp() {
   const [dateFilter, setDateFilter] = useState("allUpcoming");
   const [readyOnly, setReadyOnly] = useState(false);
   const [compactMode, setCompactMode] = useState(() => readCompactModePreference());
+  const [showDebugPanels, setShowDebugPanels] = useState(() => readShowDebugPanelsPreference());
   const [searchText, setSearchText] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [visibleLimits, setVisibleLimits] = useState(() => ({
@@ -1580,6 +1583,15 @@ export default function DFSPropsApp() {
   }, [compactMode]);
 
   useEffect(() => {
+    writeShowDebugPanelsPreference(showDebugPanels);
+  }, [showDebugPanels]);
+
+  const scrollToSection = useCallback((sectionId) => {
+    const target = document.getElementById(sectionId);
+    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(searchText.trim()), 300);
     return () => window.clearTimeout(timer);
   }, [searchText]);
@@ -1760,7 +1772,7 @@ export default function DFSPropsApp() {
         pipelineAudit
       )
         .filter((sample) => !sample.inactive)
-        .slice(0, 40),
+        .slice(0, DEBUG_SAMPLE_LIMIT),
     [debugInfo.rejectedProps, pipelineAudit]
   );
   const underdogDegraded = useMemo(
@@ -2046,19 +2058,27 @@ export default function DFSPropsApp() {
     setLearningSaveNotice("Manual stats saved — confidence recalculated.");
   }
 
+  const mobileRefreshLabel = loading
+    ? "Loading…"
+    : refreshCountdownSec > 0
+      ? `Wait ${refreshCountdownSec}s`
+      : "Refresh";
+
   return (
-    <main style={styles.page}>
+    <>
+    <main className="dfs-app-page" style={styles.page}>
+      <div className="dfs-section dfs-order-header">
       <section style={styles.header}>
         <div>
           <p style={styles.eyebrow}>DFS pick'em analytics</p>
-          <h1 style={styles.title}>PrizePicks + Underdog Pick'em Engine</h1>
-          <p style={styles.subtitle}>
+          <h1 className="dfs-header-title" style={styles.title}>PrizePicks + Underdog Pick'em Engine</h1>
+          <p className="dfs-header-subtitle" style={styles.subtitle}>
             Verified PrizePicks and Underdog lines only — no mock, fallback, or generated props.
           </p>
           <p style={styles.lastUpdated}>Last updated: {lastUpdatedLabel}</p>
           {rateLimitNotice ? <p style={{ ...styles.streakNotice, margin: "6px 0 0" }}>{rateLimitNotice}</p> : null}
         </div>
-        <div style={{ display: "grid", gap: "8px", justifyItems: "end" }}>
+        <div className="dfs-header-actions" style={{ display: "grid", gap: "8px", justifyItems: "end" }}>
           <button
             style={{
               ...styles.refreshButton,
@@ -2088,9 +2108,9 @@ export default function DFSPropsApp() {
           </label>
         </div>
       </section>
+      </div>
 
-      <SettingsPanel onSaved={handleSettingsSaved} onClearCaches={handleSettingsSaved} />
-
+      <div className="dfs-section dfs-order-filters">
       <details style={styles.compactDetails}>
         <summary style={styles.detailsSummary}>
           <span>
@@ -2127,25 +2147,16 @@ export default function DFSPropsApp() {
           dateFilters={DATE_FILTER_OPTIONS}
         />
       </details>
+      </div>
 
-      <SourceStatusBar
-        sourceStatus={displaySourceStatus}
-        sourceHealth={sourceHealth}
-        cacheStatus={cacheStatus}
-        stale={Boolean(staleDataWarning)}
-        apiHealth={apiHealth}
-        lastUpdated={lastUpdated}
-        devMode={isDevEnvironment()}
-        upcomingSlateCount={debugInfo.upcomingSlateCount ?? pipelineAudit.upcomingSlate ?? 0}
-        slateExcludedCount={debugInfo.slateExcludedCount ?? pipelineAudit.slateExcluded ?? 0}
-        pregameWindowHours={debugInfo.pregameWindowHours ?? filterPrefs.pregameWindowHours ?? DEFAULT_PREGAME_WINDOW_HOURS}
-      />
-
+      <div className="dfs-section dfs-order-sport-tabs">
       <section style={styles.streakControls} aria-label="Sport category tabs">
         <SportTabs options={visibleStreakSports} active={streakSport} onChange={setStreakSport} boards={streakSportBoards} />
         {learningSaveNotice ? <p style={styles.streakNotice}>{learningSaveNotice}</p> : null}
       </section>
+      </div>
 
+      <div className="dfs-section dfs-order-notices">
       {MLB_ONLY_MODE ? (
         <section style={styles.compactPanel}>
           <p style={styles.compactFlags}>
@@ -2180,65 +2191,10 @@ export default function DFSPropsApp() {
         </section>
       ) : null}
 
-      <AcceptedPropsPanel props={finalAcceptedProps} onOpen={setSelectedEvaluation} compactMode={compactMode} />
-
       {visibleError ? <section style={styles.errorPanel}>{visibleError}</section> : null}
+      </div>
 
-      {isDebugLoggingEnabled() && Object.keys(pipelineCounters).length > 0 ? (
-        <LazyDebugDetails
-          eyebrow="Pipeline"
-          title="Prop Counters"
-          countLabel={`${pipelineCounters.accepted ?? 0} accepted / ${pipelineCounters.rejected ?? 0} rejected`}
-        >
-          <p style={styles.compactFlags}>
-            accepted {pipelineCounters.accepted ?? 0} · rejected {pipelineCounters.rejected ?? 0} · live{" "}
-            {pipelineCounters.live ?? 0} · cached {pipelineCounters.cached ?? 0} · stale {pipelineCounters.stale ?? 0}
-          </p>
-        </LazyDebugDetails>
-      ) : null}
-
-      {isDebugLoggingEnabled() && rejectedPropSamples.length > 0 ? (
-        <LazyDebugDetails title="Rejected Props Debug" countLabel={`${rejectedPropSamples.length} groups`}>
-          {rejectedPropSamples.map((sample, index) => (
-            <p key={`${sample.stage}-${sample.sport}-${sample.market}-${sample.reason}-${index}`} style={styles.compactFlags}>
-              {formatGroupedDebugLine({ ...sample, stage: sample.stage || "filter" }, pipelineAudit)}
-            </p>
-          ))}
-        </LazyDebugDetails>
-      ) : null}
-
-      {isDebugLoggingEnabled() && (pipelineAudit.scoringDebug?.length > 0 || pipelineAudit.projectionDebug?.length > 0 || pipelineAudit.lineMovementDebug?.length > 0) ? (
-        <>
-          {pipelineAudit.scoringDebug?.length > 0 ? (
-            <LazyDebugDetails title="Scoring Debug" countLabel={`${pipelineAudit.scoringDebug.length} groups`}>
-              {pipelineAudit.scoringDebug.map((sample, index) => (
-                <p key={`scoring-${sample.sport}-${sample.market}-${sample.reason}-${index}`} style={styles.compactFlags}>
-                  {formatGroupedDebugLine({ ...sample, stage: sample.stage || "scoring" }, pipelineAudit)}
-                </p>
-              ))}
-            </LazyDebugDetails>
-          ) : null}
-          {pipelineAudit.projectionDebug?.length > 0 ? (
-            <LazyDebugDetails title="Projection Debug" countLabel={`${pipelineAudit.projectionDebug.length} groups`}>
-              {pipelineAudit.projectionDebug.map((sample, index) => (
-                <p key={`projection-${sample.sport}-${sample.market}-${sample.reason}-${index}`} style={styles.compactFlags}>
-                  {formatGroupedDebugLine({ ...sample, stage: sample.stage || "projection" }, pipelineAudit)}
-                </p>
-              ))}
-            </LazyDebugDetails>
-          ) : null}
-          {pipelineAudit.lineMovementDebug?.length > 0 ? (
-            <LazyDebugDetails title="Line Movement Debug" countLabel={`${pipelineAudit.lineMovementDebug.length} groups`}>
-              {pipelineAudit.lineMovementDebug.map((sample, index) => (
-                <p key={`movement-${sample.sport}-${sample.market}-${sample.reason}-${index}`} style={styles.compactFlags}>
-                  {formatGroupedDebugLine({ ...sample, stage: sample.stage || "lineMovement" }, pipelineAudit)}
-                </p>
-              ))}
-            </LazyDebugDetails>
-          ) : null}
-        </>
-      ) : null}
-
+      <div id="section-top-picks" className="dfs-section dfs-order-top-picks">
       {isGoblinTab ? (
         <GoblinBoard picks={streakFinderProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
       ) : isDemonTab ? (
@@ -2251,13 +2207,19 @@ export default function DFSPropsApp() {
           compactMode={compactMode}
         />
       )}
+      </div>
 
+      <div id="section-accepted" className="dfs-section dfs-order-accepted">
+      <AcceptedPropsPanel props={finalAcceptedProps} onOpen={setSelectedEvaluation} compactMode={compactMode} />
+      </div>
+
+      <div className="dfs-section dfs-order-ready">
       <section style={styles.section} aria-label="Ready to Bet board">
         <div style={styles.sectionHeading}>
           <div>
             <p style={styles.eyebrow}>Accepted props</p>
             <h2 style={styles.sectionTitle}>Ready to Bet</h2>
-            <p style={styles.streakCopy}>
+            <p className="section-subcopy" style={styles.streakCopy}>
             Weighted qualification · market-aware thresholds · verified stats · positive edge · target 15–30 per cycle.
           </p>
           </div>
@@ -2282,25 +2244,19 @@ export default function DFSPropsApp() {
           </>
         )}
       </section>
+      </div>
 
+      <div className="dfs-section dfs-order-near-miss">
       <NearMissBoard picks={nearMissProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
+      </div>
 
-      {isDebugPanelEnabled() ? (
-        <>
-          <QualificationAnalyticsPanel analytics={qualificationAnalytics} loading={loading} />
-
-          <CacheAnalyticsPanel analytics={cacheAnalytics} cacheNotice={cacheNotice} loading={loading} />
-
-          <RejectionAnalyticsPanel summary={rejectionAnalytics} samples={rejectionSamples} loading={loading} />
-        </>
-      ) : null}
-
+      <div className="dfs-section dfs-order-best-value">
       <section style={styles.section} aria-label="Best Value board">
         <div style={styles.sectionHeading}>
           <div>
             <p style={styles.eyebrow}>Edge values</p>
             <h2 style={styles.sectionTitleSmall}>Best Value</h2>
-            <p style={styles.streakCopy}>Strongest verified edges from live sportsbook lines.</p>
+            <p className="section-subcopy" style={styles.streakCopy}>Strongest verified edges from live sportsbook lines.</p>
           </div>
           <p style={styles.countPill}>{bestValueProps.length} values</p>
         </div>
@@ -2319,7 +2275,98 @@ export default function DFSPropsApp() {
           </>
         )}
       </section>
+      </div>
 
+      <div className="dfs-section dfs-order-api-health">
+      <SourceStatusBar
+        sourceStatus={displaySourceStatus}
+        sourceHealth={sourceHealth}
+        cacheStatus={cacheStatus}
+        stale={Boolean(staleDataWarning)}
+        apiHealth={apiHealth}
+        lastUpdated={lastUpdated}
+        devMode={isDevEnvironment()}
+        upcomingSlateCount={debugInfo.upcomingSlateCount ?? pipelineAudit.upcomingSlate ?? 0}
+        slateExcludedCount={debugInfo.slateExcludedCount ?? pipelineAudit.slateExcluded ?? 0}
+        pregameWindowHours={debugInfo.pregameWindowHours ?? filterPrefs.pregameWindowHours ?? DEFAULT_PREGAME_WINDOW_HOURS}
+      />
+      </div>
+
+      <div className="dfs-section dfs-order-settings">
+      <SettingsPanel
+        onSaved={handleSettingsSaved}
+        onClearCaches={handleSettingsSaved}
+        showDebugPanels={showDebugPanels}
+        onShowDebugPanelsChange={setShowDebugPanels}
+      />
+      </div>
+
+      <div className={`dfs-section dfs-order-debug debug-panel-section${showDebugPanels ? " debug-visible" : ""}`}>
+      {showDebugPanels && Object.keys(pipelineCounters).length > 0 ? (
+        <LazyDebugDetails
+          eyebrow="Pipeline"
+          title="Prop Counters"
+          countLabel={`${pipelineCounters.accepted ?? 0} accepted / ${pipelineCounters.rejected ?? 0} rejected`}
+        >
+          <p style={styles.compactFlags}>
+            accepted {pipelineCounters.accepted ?? 0} · rejected {pipelineCounters.rejected ?? 0} · live{" "}
+            {pipelineCounters.live ?? 0} · cached {pipelineCounters.cached ?? 0} · stale {pipelineCounters.stale ?? 0}
+          </p>
+        </LazyDebugDetails>
+      ) : null}
+
+      {showDebugPanels && rejectedPropSamples.length > 0 ? (
+        <LazyDebugDetails title="Rejected Props Debug" countLabel={`${rejectedPropSamples.length} groups`}>
+          {rejectedPropSamples.slice(0, DEBUG_SAMPLE_LIMIT).map((sample, index) => (
+            <p key={`${sample.stage}-${sample.sport}-${sample.market}-${sample.reason}-${index}`} style={styles.compactFlags}>
+              {formatGroupedDebugLine({ ...sample, stage: sample.stage || "filter" }, pipelineAudit)}
+            </p>
+          ))}
+        </LazyDebugDetails>
+      ) : null}
+
+      {showDebugPanels && (pipelineAudit.scoringDebug?.length > 0 || pipelineAudit.projectionDebug?.length > 0 || pipelineAudit.lineMovementDebug?.length > 0) ? (
+        <>
+          {pipelineAudit.scoringDebug?.length > 0 ? (
+            <LazyDebugDetails title="Scoring Debug" countLabel={`${pipelineAudit.scoringDebug.length} groups`}>
+              {pipelineAudit.scoringDebug.slice(0, DEBUG_SAMPLE_LIMIT).map((sample, index) => (
+                <p key={`scoring-${sample.sport}-${sample.market}-${sample.reason}-${index}`} style={styles.compactFlags}>
+                  {formatGroupedDebugLine({ ...sample, stage: sample.stage || "scoring" }, pipelineAudit)}
+                </p>
+              ))}
+            </LazyDebugDetails>
+          ) : null}
+          {pipelineAudit.projectionDebug?.length > 0 ? (
+            <LazyDebugDetails title="Projection Debug" countLabel={`${pipelineAudit.projectionDebug.length} groups`}>
+              {pipelineAudit.projectionDebug.slice(0, DEBUG_SAMPLE_LIMIT).map((sample, index) => (
+                <p key={`projection-${sample.sport}-${sample.market}-${sample.reason}-${index}`} style={styles.compactFlags}>
+                  {formatGroupedDebugLine({ ...sample, stage: sample.stage || "projection" }, pipelineAudit)}
+                </p>
+              ))}
+            </LazyDebugDetails>
+          ) : null}
+          {pipelineAudit.lineMovementDebug?.length > 0 ? (
+            <LazyDebugDetails title="Line Movement Debug" countLabel={`${pipelineAudit.lineMovementDebug.length} groups`}>
+              {pipelineAudit.lineMovementDebug.slice(0, DEBUG_SAMPLE_LIMIT).map((sample, index) => (
+                <p key={`movement-${sample.sport}-${sample.market}-${sample.reason}-${index}`} style={styles.compactFlags}>
+                  {formatGroupedDebugLine({ ...sample, stage: sample.stage || "lineMovement" }, pipelineAudit)}
+                </p>
+              ))}
+            </LazyDebugDetails>
+          ) : null}
+        </>
+      ) : null}
+
+      {showDebugPanels ? (
+        <>
+          <QualificationAnalyticsPanel analytics={qualificationAnalytics} loading={loading} />
+          <CacheAnalyticsPanel analytics={cacheAnalytics} cacheNotice={cacheNotice} loading={loading} />
+          <RejectionAnalyticsPanel summary={rejectionAnalytics} samples={rejectionSamples} loading={loading} />
+        </>
+      ) : null}
+      </div>
+
+      <div className="dfs-section dfs-order-history">
       <details style={styles.compactDetails}>
         <summary style={styles.detailsSummary}>
           <span>
@@ -2341,6 +2388,7 @@ export default function DFSPropsApp() {
           />
         </div>
       </details>
+      </div>
 
       {selectedEvaluation && (
         <PickDetailModal
@@ -2351,6 +2399,13 @@ export default function DFSPropsApp() {
         />
       )}
     </main>
+    <MobileQuickActionBar
+      onRefresh={() => loadProps({ force: true })}
+      onNavigate={scrollToSection}
+      refreshDisabled={refreshBlocked}
+      refreshLabel={mobileRefreshLabel}
+    />
+    </>
   );
 }
 
@@ -4545,10 +4600,6 @@ function logFilteredProp(prop, reason) {
     sport: prop.sport,
     reason,
   });
-}
-
-function isDebugLoggingEnabled() {
-  return isDebugPanelEnabled();
 }
 
 function projectionRangeForProp(prop) {

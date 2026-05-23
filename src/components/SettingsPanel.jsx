@@ -12,7 +12,12 @@ import {
 import { validateApiConfig } from "../config/apiConfig.js";
 import { connectionStatusStyle, testAllApiConnections } from "../services/apiConnectionTest.js";
 
-export default function SettingsPanel({ onSaved, onClearCaches }) {
+export default function SettingsPanel({
+  onSaved,
+  onClearCaches,
+  showDebugPanels = false,
+  onShowDebugPanelsChange,
+}) {
   const [draft, setDraft] = useState(() => readRuntimeSettings());
   const [saved, setSaved] = useState(() => readRuntimeSettings());
   const [meta, setMeta] = useState(() => readSettingsMeta());
@@ -53,7 +58,7 @@ export default function SettingsPanel({ onSaved, onClearCaches }) {
   }
 
   return (
-    <details style={styles.compactDetails}>
+    <details id="section-settings" className="settings-panel" style={styles.compactDetails}>
       <summary style={styles.detailsSummary}>
         <span>
           <span style={styles.eyebrow}>Runtime setup</span>
@@ -62,7 +67,31 @@ export default function SettingsPanel({ onSaved, onClearCaches }) {
         <span style={styles.countPill}>{isSaved ? "Saved" : "Unsaved changes"}</span>
       </summary>
       <div style={styles.compactPanel}>
-        <p style={styles.compactFlags}>
+        <div className="settings-test-row" style={{ ...styles.segmentRow, marginTop: 0, flexWrap: "wrap" }}>
+          <button type="button" style={styles.secondaryButton} onClick={handleSave}>
+            Save settings
+          </button>
+          <button type="button" style={styles.secondaryButton} onClick={handleTestConnections} disabled={testing}>
+            {testing ? "Testing…" : "Test API Connections"}
+          </button>
+        </div>
+        <label
+          style={{
+            ...styles.selectLabel,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: "8px",
+            marginTop: "8px",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={showDebugPanels}
+            onChange={(event) => onShowDebugPanelsChange?.(event.target.checked)}
+          />
+          Show Debug Panels
+        </label>
+        <p style={{ ...styles.compactFlags, margin: "8px 0 0" }}>
           Keys are stored in <code>localStorage</code> for development. For production, set the same{" "}
           <code>VITE_*</code> variables in Vercel — never commit <code>.env.local</code>.
         </p>
@@ -75,36 +104,38 @@ export default function SettingsPanel({ onSaved, onClearCaches }) {
             ))}
           </ul>
         ) : null}
-        <div style={styles.controls}>
-          {RUNTIME_SETTING_DEFS.map((def) => {
-            const value = draft[def.key] || "";
-            const effectiveSaved = Boolean(saved[def.key]?.trim());
-            return (
-              <label key={def.key} style={styles.selectLabel}>
-                <span style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
-                  <span>{def.label}</span>
-                  <span style={{ fontSize: 11, opacity: 0.75 }}>{effectiveSaved ? "Saved" : "Not saved"}</span>
-                </span>
-                <input
-                  style={styles.textInput}
-                  type={def.type === "secret" ? "password" : "text"}
-                  autoComplete="off"
-                  value={value}
-                  onChange={(event) => setDraft((current) => ({ ...current, [def.key]: event.target.value }))}
-                  placeholder={def.placeholder || def.key}
-                />
-                <span style={{ fontSize: 11, opacity: 0.65 }}>{def.key}</span>
-              </label>
-            );
-          })}
-        </div>
+        <details className="settings-keys-expand" style={{ ...styles.compactDetails, marginTop: "8px" }}>
+          <summary style={styles.detailsSummary}>
+            <span>
+              <span style={styles.eyebrow}>Credentials</span>
+              <strong>API Keys & Proxies</strong>
+            </span>
+          </summary>
+          <div className="settings-key-fields" style={styles.controls}>
+            {RUNTIME_SETTING_DEFS.map((def) => {
+              const value = draft[def.key] || "";
+              const effectiveSaved = Boolean(saved[def.key]?.trim());
+              return (
+                <label key={def.key} style={styles.selectLabel}>
+                  <span style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
+                    <span>{def.label}</span>
+                    <span style={{ fontSize: 11, opacity: 0.75 }}>{effectiveSaved ? "Saved" : "Not saved"}</span>
+                  </span>
+                  <input
+                    style={styles.textInput}
+                    type={def.type === "secret" ? "password" : "text"}
+                    autoComplete="off"
+                    value={value}
+                    onChange={(event) => setDraft((current) => ({ ...current, [def.key]: event.target.value }))}
+                    placeholder={def.placeholder || def.key}
+                  />
+                  <span style={{ fontSize: 11, opacity: 0.65 }}>{def.key}</span>
+                </label>
+              );
+            })}
+          </div>
+        </details>
         <div style={{ ...styles.segmentRow, marginTop: "8px", flexWrap: "wrap" }}>
-          <button type="button" style={styles.secondaryButton} onClick={handleSave}>
-            Save settings
-          </button>
-          <button type="button" style={styles.secondaryButton} onClick={handleTestConnections} disabled={testing}>
-            {testing ? "Testing API connections…" : "Test API Connections"}
-          </button>
           {meta.savedAt ? (
             <span style={styles.compactFlags}>Last saved: {formatDateTime(meta.savedAt)}</span>
           ) : null}
@@ -125,9 +156,7 @@ export default function SettingsPanel({ onSaved, onClearCaches }) {
                 <p style={styles.compactFlags}>
                   {row.message}
                   {row.durationMs ? ` · ${row.durationMs}ms` : ""}
-                  {row.route ? ` · ${row.route}` : ""}
                 </p>
-                {row.preview ? <p style={styles.compactFlags}>{row.preview}</p> : null}
               </div>
             ))}
           </div>

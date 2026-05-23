@@ -49,9 +49,9 @@ export default function PlayerImage({ prop, large = false }) {
   const showInitials = failed || index >= candidates.length;
 
   return (
-    <div style={wrapStyle} aria-hidden="true">
+    <div className="player-image-wrap" style={wrapStyle} aria-hidden="true">
       {showInitials ? (
-        <span style={styles.playerInitials}>{initials}</span>
+        <span className="player-initials-text" style={styles.playerInitials}>{initials}</span>
       ) : (
         <img
           src={candidates[index]}

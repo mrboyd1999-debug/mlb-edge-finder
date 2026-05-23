@@ -145,10 +145,10 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
         <div style={styles.cardInfo}>
           <div style={styles.cardTitleRow}>
             <div style={{ minWidth: 0 }}>
-              <p style={styles.platform}>
+              <p className="prop-card-platform" style={styles.platform}>
                 {prop.platform} · {displaySport(prop)}
               </p>
-              <h3 style={styles.playerName}>{prop.playerName}</h3>
+              <h3 className="prop-card-player-name" style={styles.playerName}>{prop.playerName}</h3>
               {!compact && (
                 <p style={styles.gameLine}>
                   {prop.team || "—"} vs {prop.opponent || "—"}
@@ -175,7 +175,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
           </div>
         </div>
       </div>
-      <div style={styles.compactMetaRow}>
+      <div className="prop-card-meta-row" style={styles.compactMetaRow}>
         <span style={styles.compactMetaItem}>
           <span style={styles.metaLabel}>Prop</span>
           <strong>{displayMarketLabel(prop)}</strong>
@@ -191,7 +191,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
           <span style={styles.metaLabel}>Lean</span>
           <strong style={styles.metaValueStrong}>{lean}</strong>
         </span>
-        <span style={styles.compactMetaItem}>
+        <span className="prop-meta-secondary" style={styles.compactMetaItem}>
           <span style={styles.metaLabel}>Proj</span>
           <strong style={styles.metaValueStrong}>
             {prop.projectedValue != null
@@ -222,23 +222,24 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
           <span style={styles.metaLabel}>Risk</span>
           <strong>{prop.riskLevel || "—"}</strong>
         </span>
-        <span style={styles.compactMetaItem}>
+        <span className="prop-meta-secondary" style={styles.compactMetaItem}>
           <span style={styles.metaLabel}>EV</span>
           <strong>{Number.isFinite(Number(prop.expectedValueScore)) ? Math.round(Number(prop.expectedValueScore)) : "—"}</strong>
         </span>
-        <span style={styles.compactMetaItem}>
+        <span className="prop-meta-secondary" style={styles.compactMetaItem}>
           <span style={styles.metaLabel}>Vol</span>
           <strong>
             {volatilityLabel}
             {Number.isFinite(Number(prop.volatility)) ? ` (${formatNumber(prop.volatility)})` : ""}
           </strong>
         </span>
-        <span style={styles.compactMetaItem}>
+        <span className="prop-meta-secondary" style={styles.compactMetaItem}>
           <span style={styles.metaLabel}>DQ</span>
           <strong>{Number.isFinite(Number(prop.dataQualityScore)) ? Math.max(22, Math.round(Number(prop.dataQualityScore))) : "—"}</strong>
         </span>
         {bookLine != null && Number.isFinite(sportsbookEdgeNum) && sportsbookEdgeNum !== 0 ? (
           <span
+            className="prop-meta-secondary"
             style={styles.compactMetaItem}
             title={sportsbookEdgeLabel || `Sportsbook consensus ${formatNumber(bookLine)}`}
           >
@@ -269,6 +270,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
       {!compact && bookTag ? <p style={{ ...styles.compactFlags, margin: "4px 0 0", color: "#86efac" }}>{bookTag}</p> : null}
       {compact ? (
         <details
+          className="prop-card-inline-details"
           style={styles.cardInlineDetails}
           open={expanded}
           onClick={(event) => event.stopPropagation()}
@@ -363,7 +365,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, cardStyle, savedRe
           )}
         </>
       )}
-      <div style={styles.whyLink}>Why this pick?</div>
+      <div className="prop-card-why-link" style={styles.whyLink}>Why this pick?</div>
     </article>
   );
 }

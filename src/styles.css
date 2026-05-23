@@ -12,21 +12,259 @@ body,
   box-sizing: border-box;
 }
 
-@media (max-width: 640px) {
-  #root main {
-    padding-left: 6px !important;
-    padding-right: 6px !important;
+/* ── Mobile-first compact layout ─────────────────────────────────────── */
+@media (max-width: 768px) {
+  body {
+    overflow-x: hidden;
   }
 
-  #root article[style*="cursor: pointer"] {
-    font-size: 13px;
+  .dfs-app-page,
+  .app-container,
+  .page,
+  .dashboard,
+  .content {
+    width: 100%;
+    max-width: 100%;
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+    padding-bottom: 76px !important;
   }
 
+  .dfs-app-page {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .dfs-order-header { order: 0; }
+  .dfs-order-filters { order: 5; }
+  .dfs-order-sport-tabs { order: 8; }
+  .dfs-order-notices { order: 9; }
+  .dfs-order-top-picks { order: 10; }
+  .dfs-order-accepted { order: 20; }
+  .dfs-order-ready { order: 30; }
+  .dfs-order-near-miss { order: 35; }
+  .dfs-order-best-value { order: 40; }
+  .dfs-order-api-health { order: 50; }
+  .dfs-order-settings { order: 60; }
+  .dfs-order-debug { order: 70; }
+  .dfs-order-history { order: 80; }
+
+  .dfs-section {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .dfs-header-actions {
+    display: none !important;
+  }
+
+  .card-grid,
+  .props-grid,
+  .picks-grid,
   .accepted-props-grid,
   .top-picks-grid {
     grid-template-columns: 1fr !important;
-    gap: 6px !important;
+    gap: 10px !important;
   }
+
+  .accepted-props-section,
+  .top-picks-section {
+    margin-top: 10px;
+  }
+
+  #root article[style*="cursor: pointer"] {
+    font-size: 12px;
+    padding: 6px 8px !important;
+  }
+
+  .player-image-wrap {
+    flex: 0 0 30px !important;
+    width: 30px !important;
+    height: 30px !important;
+    border-radius: 6px !important;
+  }
+
+  .player-image-wrap .player-initials-text {
+    font-size: 10px !important;
+  }
+
+  .prop-meta-secondary {
+    display: none !important;
+  }
+
+  .prop-card-why-link {
+    display: none;
+  }
+
+  .api-health-chips-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 10px;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    background: #0f172a;
+    margin-bottom: 8px;
+  }
+
+  .api-health-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid #334155;
+    background: #111827;
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .api-health-chip-name {
+    color: #94a3b8;
+  }
+
+  .api-health-chip-status {
+    font-weight: 800;
+  }
+
+  .api-health-expand {
+    margin-bottom: 8px;
+  }
+
+  .api-health-expand > summary {
+    font-size: 11px;
+    font-weight: 700;
+    color: #64748b;
+    cursor: pointer;
+    padding: 4px 0;
+    list-style: none;
+  }
+
+  .api-health-full-panel {
+    display: none;
+  }
+
+  .api-health-expand[open] .api-health-full-panel {
+    display: block;
+  }
+
+  .api-health-error-preview {
+    display: none;
+  }
+
+  .api-health-expand[open] .api-health-error-preview {
+    display: block;
+  }
+
+  .dfs-section h2 {
+    font-size: 16px !important;
+  }
+
+  .section-subcopy {
+    display: none;
+  }
+
+  .settings-keys-expand > .settings-key-fields {
+    display: none;
+  }
+
+  .settings-keys-expand[open] > .settings-key-fields {
+    display: grid;
+  }
+
+  .settings-test-row button {
+    font-size: 11px !important;
+    padding: 8px 10px !important;
+  }
+
+  .mobile-quick-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    display: flex;
+    gap: 4px;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+    background: rgba(10, 15, 26, 0.96);
+    border-top: 1px solid #334155;
+    backdrop-filter: blur(8px);
+  }
+
+  .mobile-quick-bar-btn {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid #334155;
+    background: #111827;
+    color: #e2e8f0;
+    border-radius: 8px;
+    padding: 8px 4px;
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mobile-quick-bar-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .mobile-quick-bar-btn:active:not(:disabled) {
+    background: #1e293b;
+  }
+
+  .dfs-app-page *,
+  .dfs-section * {
+    max-width: 100%;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  input,
+  select,
+  textarea {
+    max-width: 100%;
+  }
+
+  .debug-panel-section {
+    display: none;
+  }
+
+  .debug-panel-section.debug-visible {
+    display: block;
+  }
+}
+
+@media (min-width: 769px) {
+  .mobile-quick-bar {
+    display: none;
+  }
+
+  .api-health-chips-row {
+    display: none;
+  }
+
+  .api-health-expand > summary {
+    display: none;
+  }
+
+  .api-health-full-panel {
+    display: block !important;
+  }
+}
+
+.debug-panel-section {
+  display: none;
+}
+
+.debug-panel-section.debug-visible {
+  display: block;
 }
 
 @media (min-width: 641px) {
@@ -38,24 +276,13 @@ body,
 }
 
 @keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 @keyframes dfsFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(2px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 #root article[style*="cursor: pointer"] {
@@ -86,47 +313,4 @@ body,
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
   gap: 8px;
-}
-
-.accepted-prop-card,
-.top-pick-card {
-  border: 1px solid #334155;
-  background: #111827;
-  color: #f8fafc;
-  border-radius: 8px;
-  padding: 12px;
-  min-height: 120px;
-  display: grid;
-  gap: 4px;
-  font-size: 13px;
-  line-height: 1.35;
-}
-
-.top-pick-card {
-  border-color: #22c55e;
-  background: #0f172a;
-}
-
-.prop-card-player {
-  font-size: 15px;
-  font-weight: 800;
-  color: #f8fafc;
-}
-
-.prop-card-market,
-.prop-card-pick,
-.prop-card-line,
-.prop-card-confidence {
-  color: #cbd5e1;
-}
-
-.prop-card-confidence {
-  font-weight: 700;
-  color: #86efac;
-}
-
-.prop-card-edge,
-.prop-card-source {
-  color: #94a3b8;
-  font-size: 12px;
 }
