@@ -2301,7 +2301,7 @@ export default function DFSPropsApp() {
       ) : (
         <TopPicksBoard
           label={currentCategoryLabel}
-          picks={topPicksDisplay.length ? topPicksDisplay : readyToBetProps}
+          picks={topPicksDisplay}
           loading={loading}
           onOpen={setSelectedEvaluation}
           compactMode={compactMode}

@@ -1,6 +1,5 @@
 import { memo, useMemo } from "react";
 import PlayerPropCard from "./PlayerPropCard.jsx";
-import { selectTopPicks } from "../services/pickScoring.js";
 import { CONFIDENCE_THRESHOLDS } from "../services/confidenceEngine.js";
 import { buildElitePickExplanation } from "../services/pickExplanation.js";
 import { styles } from "../theme/styles.js";
@@ -12,7 +11,7 @@ function EmptyState({ text }) {
 function TopPicksBoard({ label = "Sport", picks = [], loading, onOpen, compactMode = true }) {
   const sorted = useMemo(
     () =>
-      selectTopPicks(picks, 2).map((prop, index) => {
+      (picks || []).slice(0, 2).map((prop) => {
         const explanation = prop.elitePickExplanation || buildElitePickExplanation(prop);
         return {
           ...prop,
@@ -31,8 +30,8 @@ function TopPicksBoard({ label = "Sport", picks = [], loading, onOpen, compactMo
           <p style={styles.eyebrow}>{label}</p>
           <h2 style={styles.sectionTitle}>Top 2 Picks</h2>
           <p style={styles.streakCopy}>
-            Weighted score · confidence + edge + market reliability − volatility − line movement · target ≥
-            {CONFIDENCE_THRESHOLDS.PLAYABLE}% playable.
+            Best 2 accepted props · Elite {'>'} Strong {'>'} Playable · ≥
+            {CONFIDENCE_THRESHOLDS.PLAYABLE}% confidence · positive edge · minor volatility allowed.
           </p>
         </div>
         <p style={styles.countPill}>{sorted.length}/2</p>

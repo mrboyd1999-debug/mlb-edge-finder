@@ -11,7 +11,7 @@ import { lineMovementTrustScore, enrichLineMovementWithTags } from "./lineMoveme
 import { isVerifiedSportsbookProp } from "../utils/propValidation.js";
 import { isDemonProp, isGoblinProp } from "../utils/propLabels.js";
 import { getPropVolatilityTier, meetsVolatilityTierRequirements, PROP_VOLATILITY_TIERS } from "./marketConfidenceModels.js";
-import { getMlbQualityTierWeight, getMlbMinEdgeForTier, isMlbQualityTierS, MLB_ONLY_MODE } from "../utils/mlbOnlyMode.js";
+import { getMlbMinEdgeForTier, isMlbQualityTierS, MLB_ONLY_MODE } from "../utils/mlbOnlyMode.js";
 
 export { CONFIDENCE_THRESHOLDS };
 
@@ -385,70 +385,6 @@ export function isReadyToBetEligible(prop = {}) {
   if (MLB_ONLY_MODE && Number(prop.edge || 0) < getMlbMinEdgeForTier(prop)) return false;
   if (!meetsVolatilityTierRequirements(prop, confidence)) return false;
   return confidence >= Math.max(CONFIDENCE_THRESHOLDS.PLAYABLE, tierRules.readyConfidence);
-}
-
-/** Weighted top-pick score: confidence + edge + reliability + projection − volatility − line movement. */
-export function computeTopPickWeightedScore(prop = {}) {
-  const confidence = Number(prop.calibratedConfidence ?? prop.confidenceScore ?? prop.confidence ?? 0);
-  const edge = Number(prop.edge || 0);
-  const marketReliability = Number(prop.marketReliabilityScore ?? 50);
-  const historicalBoost = Number(prop.historicalBoost?.boost ?? 0);
-  const vol = Number(prop.volatility ?? 2.5);
-  const lineTrust = Number(prop.lineMovementTrustScore ?? 50);
-  const movementTag = prop.lineMovementTag || prop.lineMovement?.tag;
-  const projection = finiteNumber(prop.projectedValue ?? prop.projection);
-  const line = finiteNumber(prop.line);
-  let projectionStrength = 0;
-  if (Number.isFinite(projection) && Number.isFinite(line) && line > 0) {
-    projectionStrength = clamp((Math.abs(projection - line) / line) * 20, 0, 12);
-  }
-
-  let score =
-    confidence * 0.42 +
-    clamp(edge * 6, 0, 18) +
-    projectionStrength +
-    (marketReliability - 50) * 0.12 +
-    historicalBoost * 0.8 +
-    getMlbQualityTierWeight(prop) * 8;
-  score -= clamp((vol - 2) * 3, 0, 12);
-  if (prop.lineMovement?.againstPick || movementTag === "steamed") score -= 8;
-  else if (movementTag === "volatile") score -= 4;
-  score += (lineTrust - 50) * 0.08;
-  return round(clamp(score, 0, 100), 1);
-}
-
-export function isTopPickCandidate(prop = {}) {
-  if (!isVerifiedSportsbookProp(prop)) return false;
-  if (!prop.hasVerifiedStats && !prop.manualEnriched && !prop.isQualificationAccepted) return false;
-  if (Number(prop.edge || 0) <= 0 || !prop.bestPick) return false;
-  const status = String(prop.status || "").toLowerCase();
-  if (["live", "expired", "locked"].includes(status)) return false;
-  if (prop.freshnessTier === "EXPIRED") return false;
-  if (prop.projectionSource === "missing" && !Number.isFinite(prop.projectedValue ?? prop.projection)) return false;
-  const confidence = Number(prop.calibratedConfidence ?? prop.confidenceScore ?? prop.confidence ?? 0);
-  if (confidence < CONFIDENCE_THRESHOLDS.PLAYABLE) return false;
-  const vol = finiteNumber(prop.volatility);
-  if (Number.isFinite(vol) && vol >= 5) return false;
-  return true;
-}
-
-/** Always attempt to surface the top 2 props by weighted score from accepted candidates. */
-export function selectTopPicks(props = [], limit = 2) {
-  const candidates = props.filter((prop) => isTopPickCandidate(prop));
-  if (!candidates.length) return [];
-
-  return [...candidates]
-    .sort(
-      (a, b) =>
-        computeTopPickWeightedScore(b) - computeTopPickWeightedScore(a) ||
-        Number(b.calibratedConfidence ?? b.confidenceScore ?? 0) - Number(a.calibratedConfidence ?? a.confidenceScore ?? 0) ||
-        Number(b.edge || 0) - Number(a.edge || 0)
-    )
-    .slice(0, limit)
-    .map((prop) => ({
-      ...prop,
-      topPickWeightedScore: computeTopPickWeightedScore(prop),
-    }));
 }
 
 export function isDemonEligible(prop = {}) {

@@ -9,10 +9,9 @@ import {
   isEliteTopPickEligible,
   isDemonEligible,
   isReadyToBetEligible,
-  selectTopPicks,
-  computeTopPickWeightedScore,
   DECISION_THRESHOLDS,
 } from "./decisionEngine.js";
+import { selectTopPicks, computeTopPickWeightedScore } from "./topPicksSelection.js";
 import { PROJECTION_CONFIDENCE_THRESHOLDS } from "./propProjection.js";
 import { dataQualityFromSignals } from "./dataQuality.js";
 import { isVerifiedSportsbookProp } from "../utils/propValidation.js";
