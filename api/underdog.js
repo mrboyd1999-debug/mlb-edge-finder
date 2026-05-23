@@ -6,7 +6,10 @@ export default async function handler(req, res) {
   }
 
   try {
-    const providerUrl = req.query?.proxyUrl || process.env.UNDERDOG_PROXY_URL;
+    const providerUrl =
+      req.query?.proxyUrl ||
+      process.env.VITE_UNDERDOG_PROXY_URL ||
+      process.env.UNDERDOG_PROXY_URL;
     const apifyToken = process.env.APIFY_TOKEN;
     const apifyActor = process.env.UNDERDOG_APIFY_ACTOR;
     const url = providerUrl || apifyActorUrl(apifyActor, apifyToken) || "https://api.underdogfantasy.com/beta/v3/over_under_lines";

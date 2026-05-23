@@ -36,6 +36,7 @@ import {
   markSourceCached,
   withSourceRequestLock,
 } from "./sourceRateLimit.js";
+import { getProxyUrl } from "./runtimeSettings.js";
 
 export const PRIZEPICKS_HTML_BANNER = "API route is serving source/HTML instead of JSON. Check proxy/backend routing.";
 export const PRIZEPICKS_RATE_LIMIT_MESSAGE = "Rate limited. Showing cached lines until cooldown ends.";
@@ -303,19 +304,11 @@ async function fetchPrizePicksEndpoint(endpoint, init) {
 }
 
 function prizePicksEndpoints() {
-  const proxyUrl = localSetting("PRIZEPICKS_PROXY_URL");
+  const proxyUrl = getProxyUrl("prizepicks");
   if (!proxyUrl) return PRIZEPICKS_ENDPOINTS;
   const url = new URL("/api/prizepicks", window.location.origin);
   url.searchParams.set("proxyUrl", proxyUrl);
   return [url.pathname + url.search, ...PRIZEPICKS_ENDPOINTS];
-}
-
-function localSetting(key) {
-  try {
-    return String(window.localStorage.getItem(key) || "").trim();
-  } catch {
-    return "";
-  }
 }
 
 function formatAttemptWarnings(attempts = []) {

@@ -18,6 +18,15 @@ export const MIN_SOURCE_CACHE_MS = 10 * 60 * 1000;
 
 const inFlightPromises = new Map();
 let memoryState = null;
+const sessionRequestCounts = {};
+
+function bumpSessionRequestCount(sourceId) {
+  sessionRequestCounts[sourceId] = (sessionRequestCounts[sourceId] || 0) + 1;
+}
+
+export function getSessionRequestCount(sourceId) {
+  return sessionRequestCounts[sourceId] || 0;
+}
 
 function defaultSourceState() {
   return {
@@ -133,6 +142,7 @@ export function recordSource429(sourceId) {
     requestCount: current.requestCount + 1,
   };
 
+  bumpSessionRequestCount(sourceId);
   if (Date.now() >= Number(current.last429LoggedUntil || 0)) {
     console.warn(
       `[DFS Rate Limit] ${sourceId} returned 429. Cooldown ${formatCooldownRemaining(backoffMs)}.`
@@ -162,6 +172,7 @@ export function recordSourceSuccess(sourceId) {
   state[sourceId] = next;
   memoryState = state;
   saveState();
+  bumpSessionRequestCount(sourceId);
   return next;
 }
 
@@ -177,6 +188,7 @@ export function recordSourceFailure(sourceId, error = "") {
   state[sourceId] = next;
   memoryState = state;
   saveState();
+  bumpSessionRequestCount(sourceId);
   return next;
 }
 
@@ -221,6 +233,7 @@ export function buildSourceHealthSnapshot() {
       cooldownRemainingMs: getCooldownRemainingMs(sourceId),
       cacheAge: formatCacheAge(state.lastSuccessfulFetchAt),
       requestCount: state.requestCount,
+      sessionRequestCount: getSessionRequestCount(sourceId),
       lastError: state.lastError,
       inFlight: isSourceRequestInFlight(sourceId),
     };

@@ -10,6 +10,7 @@ import {
   markSourceCached,
   withSourceRequestLock,
 } from "./sourceRateLimit.js";
+import { getOddsApiKey as getRuntimeOddsApiKey } from "./runtimeSettings.js";
 
 const ODDS_CACHE_KEY = "dfs-odds-last-good-comparisons";
 const ODDS_CACHE_MAX_MS = 60 * 60 * 1000;
@@ -360,17 +361,7 @@ function normalize(value) {
 }
 
 function getOddsApiKey() {
-  try {
-    return (
-      API_KEY ||
-      window.localStorage.getItem("VITE_ODDS_API_KEY") ||
-      window.localStorage.getItem("odds-api-key") ||
-      window.localStorage.getItem("the-odds-api-key") ||
-      ""
-    ).trim();
-  } catch {
-    return "";
-  }
+  return getRuntimeOddsApiKey();
 }
 
 function oddsApiErrorMessage(status) {

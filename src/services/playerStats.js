@@ -9,6 +9,7 @@ import {
 } from "./statEnrichment.js";
 import { MLB_ONLY_MODE, shouldRunNonMlbStatFetch } from "../utils/mlbOnlyMode.js";
 import { canonicalStatType } from "../utils/marketNormalization.js";
+import { getSportsDataApiKey } from "./runtimeSettings.js";
 
 export { statProfileKey, findStatProfile } from "../utils/playerNames.js";
 
@@ -18,7 +19,9 @@ const MLB_PLAYER_FETCH_LIMIT = 60;
 const NBA_PLAYER_FETCH_LIMIT = 50;
 const WNBA_PLAYER_FETCH_LIMIT = 50;
 const SOCCER_PLAYER_FETCH_LIMIT = 40;
-const BALLDONTLIE_API_KEY = import.meta.env.VITE_BALLDONTLIE_API_KEY || "";
+function getBallDontLieApiKey() {
+  return getSportsDataApiKey() || import.meta.env.VITE_BALLDONTLIE_API_KEY || "";
+}
 const API_FOOTBALL_KEY = import.meta.env.VITE_API_FOOTBALL_KEY || "";
 const BALLDONTLIE_BASE = "/api/balldontlie/v1";
 const API_FOOTBALL_BASE = "/api/api-football";
@@ -1387,7 +1390,7 @@ function apiUrl(base, path) {
 function ballDontLieHeaders() {
   return {
     accept: "application/json",
-    Authorization: BALLDONTLIE_API_KEY,
+    Authorization: getBallDontLieApiKey(),
   };
 }
 

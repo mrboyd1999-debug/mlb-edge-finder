@@ -32,7 +32,10 @@ export default async function handler(req, res) {
 }
 
 async function fetchPrizePicksBoard(leagueId = "", proxyUrl = "") {
-  const providerUrl = proxyUrl || process.env.PRIZEPICKS_PROXY_URL;
+  const providerUrl =
+    proxyUrl ||
+    process.env.VITE_PRIZEPICKS_PROXY_URL ||
+    process.env.PRIZEPICKS_PROXY_URL;
   const apifyToken = process.env.APIFY_TOKEN;
   const configuredUrl = providerUrl || apifyActorUrl(APIFY_PRIZEPICKS_ACTOR, apifyToken);
   const urls = configuredUrl ? [configuredUrl] : prizePicksProjectionUrls(leagueId);

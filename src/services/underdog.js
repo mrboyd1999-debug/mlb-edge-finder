@@ -34,6 +34,7 @@ import {
   markSourceCached,
   withSourceRequestLock,
 } from "./sourceRateLimit.js";
+import { getProxyUrl } from "./runtimeSettings.js";
 import { MLB_ONLY_MODE, emptySourcePipelineAudit } from "../utils/mlbOnlyMode.js";
 
 const UNDERDOG_ENDPOINTS = [
@@ -316,19 +317,11 @@ async function fetchUnderdogEndpoint(endpoint) {
 }
 
 function underdogEndpoints() {
-  const proxyUrl = localSetting("UNDERDOG_PROXY_URL");
+  const proxyUrl = getProxyUrl("underdog");
   if (!proxyUrl) return UNDERDOG_ENDPOINTS;
   const url = new URL("/api/underdog", window.location.origin);
   url.searchParams.set("proxyUrl", proxyUrl);
   return [url.pathname + url.search, ...UNDERDOG_ENDPOINTS];
-}
-
-function localSetting(key) {
-  try {
-    return String(window.localStorage.getItem(key) || "").trim();
-  } catch {
-    return "";
-  }
 }
 
 function formatUnderdogAttemptWarnings(attempts = []) {

@@ -6,6 +6,15 @@ export const HEALTH_STATES = {
   STALE: "STALE",
   DEGRADED: "DEGRADED",
   OFFLINE: "OFFLINE",
+  FAILED: "FAILED",
+  NOT_CONFIGURED: "NOT CONFIGURED",
+};
+
+export const CONNECTION_LABELS = {
+  CONNECTED: "Connected",
+  NOT_CONFIGURED: "Not configured",
+  INVALID: "Invalid key or unauthorized",
+  RATE_LIMITED: "Rate limited — using cache",
 };
 
 const HEALTH_COLORS = {
@@ -14,6 +23,8 @@ const HEALTH_COLORS = {
   STALE: { bg: "rgba(234,179,8,0.18)", text: "#fde047", border: "rgba(234,179,8,0.35)" },
   DEGRADED: { bg: "rgba(249,115,22,0.18)", text: "#fdba74", border: "rgba(249,115,22,0.35)" },
   OFFLINE: { bg: "rgba(239,68,68,0.15)", text: "#fca5a5", border: "rgba(239,68,68,0.3)" },
+  FAILED: { bg: "rgba(239,68,68,0.15)", text: "#fca5a5", border: "rgba(239,68,68,0.3)" },
+  "NOT CONFIGURED": { bg: "rgba(148,163,184,0.15)", text: "#cbd5e1", border: "rgba(148,163,184,0.3)" },
 };
 
 export function healthStateStyle(state = "") {
@@ -41,7 +52,7 @@ export function resolveSourceHealthState({
   hasData = true,
 } = {}) {
   const badge = String(lineSourceBadge || "").toUpperCase();
-  if (["LIVE", "CACHED", "STALE", "DEGRADED", "OFFLINE"].includes(badge)) return badge;
+  if (["LIVE", "CACHED", "STALE", "DEGRADED", "OFFLINE", "FAILED", "NOT CONFIGURED"].includes(badge)) return badge;
 
   const normalized = String(status || "").toLowerCase();
   if (normalized === "failed" || normalized === "not connected") {

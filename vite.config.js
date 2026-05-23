@@ -1,7 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const BALLDONTLIE_API_KEY = process.env.BALLDONTLIE_API_KEY || process.env.VITE_BALLDONTLIE_API_KEY || "";
+const BALLDONTLIE_API_KEY =
+  process.env.BALLDONTLIE_API_KEY ||
+  process.env.VITE_BALLDONTLIE_API_KEY ||
+  process.env.VITE_SPORTSDATA_API_KEY ||
+  "";
 const API_FOOTBALL_KEY = process.env.API_FOOTBALL_KEY || process.env.VITE_API_FOOTBALL_KEY || "";
 const ODDS_API_KEY = process.env.ODDS_API_KEY || process.env.VITE_ODDS_API_KEY || "";
 

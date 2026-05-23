@@ -13,6 +13,14 @@ export default function handler(req, res) {
     routes: {
       prizepicks: "/api/prizepicks",
       underdog: "/api/underdog",
+      odds: "/api/sportsbookOdds",
+      health: "/api/health",
+    },
+    configured: {
+      oddsApi: Boolean(process.env.ODDS_API_KEY || process.env.VITE_ODDS_API_KEY),
+      prizepicksProxy: Boolean(process.env.VITE_PRIZEPICKS_PROXY_URL || process.env.PRIZEPICKS_PROXY_URL),
+      underdogProxy: Boolean(process.env.VITE_UNDERDOG_PROXY_URL || process.env.UNDERDOG_PROXY_URL),
+      apify: Boolean(process.env.APIFY_TOKEN),
     },
     timestamp: new Date().toISOString(),
   });

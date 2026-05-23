@@ -31,6 +31,7 @@ import {
 import {
   buildSourceHealthSnapshot,
   formatCooldownRemaining,
+  formatCacheAge,
   getMaxCooldownRemainingMs,
   NO_VERIFIED_AFTER_COOLDOWN_MESSAGE,
   RATE_LIMIT_COOLDOWN_MESSAGE,
@@ -161,6 +162,8 @@ import PickDetailModal from "./components/PickDetailModal.jsx";
 import AcceptedPropsPanel from "./components/AcceptedPropsPanel.jsx";
 import AccuracyReview from "./components/AccuracyReview.jsx";
 import SourceStatusBar from "./components/SourceStatusBar.jsx";
+import SettingsPanel from "./components/SettingsPanel.jsx";
+import { getOddsApiKey, getSportsDataApiKey } from "./services/runtimeSettings.js";
 import {
   isUpstreamAcceptedProp,
   resolveFinalAcceptedPropsFromHydrated,
@@ -233,7 +236,6 @@ const NO_EDGE_MESSAGE = "No betting edge detected. More data needed before this 
 const NEEDS_STATS_MESSAGE = "This prop needs more stats before a confident pick can be made.";
 const STREAK_WARNING = "Low multiplier does not guarantee the pick will hit. Verify before adding to streak.";
 const NO_ACTIVE_SCHEDULED_PROPS_MESSAGE = NO_VERIFIED_PROPS_MESSAGE;
-const SETTINGS_KEYS = ["VITE_ODDS_API_KEY", "PRIZEPICKS_PROXY_URL", "UNDERDOG_PROXY_URL"];
 const INCLUDE_UNCERTAIN_KEY = "dfs-include-uncertain-props";
 const FILTER_PREFS_KEY = "dfs-filter-prefs";
 const COMPACT_MODE_KEY = "dfs-compact-mode";
@@ -442,48 +444,6 @@ function buildSourceHealth(backgroundWarnings = [], sourceFailures = [], sourceS
   return health;
 }
 
-const API_TEST_ROUTES = [
-  "/api/health",
-  "/api/prizepicks",
-  "/api/underdog",
-  "/api/underdog/beta/v5/over_under_lines",
-];
-
-async function probeApiRoute(route) {
-  const startedAt = Date.now();
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 15_000);
-  try {
-    const response = await fetch(route, { cache: "no-store", signal: controller.signal });
-    const contentType = response.headers.get("content-type") || "no content-type";
-    const text = await response.text();
-    const trimmed = text.trim();
-    const looksJson =
-      /json/i.test(contentType) || trimmed.startsWith("{") || trimmed.startsWith("[");
-    const looksHtml = trimmed.startsWith("<") || /text\/html/i.test(contentType);
-    return {
-      route,
-      ok: response.ok && looksJson && !looksHtml,
-      status: response.status,
-      contentType,
-      preview: text.slice(0, 120).replace(/\s+/g, " ").trim() || "(empty)",
-      durationMs: Date.now() - startedAt,
-    };
-  } catch (error) {
-    const message = error?.message || "Failed to fetch";
-    return {
-      route,
-      ok: false,
-      status: "?",
-      contentType: "no content-type",
-      preview: /abort/i.test(message) ? "Request timed out after 15s" : message,
-      durationMs: Date.now() - startedAt,
-    };
-  } finally {
-    window.clearTimeout(timer);
-  }
-}
-
 function partitionWarnings(backgroundWarnings, sourceFailures, sourceStatus) {
   const criticalPatterns = [
     /could not load prizepicks/i,
@@ -663,36 +623,6 @@ const REALISTIC_PROJECTION_RANGES = [
   { sport: "Soccer", match: (key) => key.includes("goaliesaves") || key.includes("keepersaves") || key === "saves", label: "Soccer Goalie Saves", min: 0, max: 15 },
 ];
 
-function readRuntimeSettings() {
-  return Object.fromEntries(
-    SETTINGS_KEYS.map((key) => {
-      try {
-        return [key, window.localStorage.getItem(key) || ""];
-      } catch {
-        return [key, ""];
-      }
-    })
-  );
-}
-
-function writeRuntimeSettings(settings = {}) {
-  SETTINGS_KEYS.forEach((key) => {
-    const value = String(settings[key] || "").trim();
-    try {
-      if (value) window.localStorage.setItem(key, value);
-      else window.localStorage.removeItem(key);
-    } catch {
-      // ignore private-mode storage errors
-    }
-  });
-  try {
-    const oddsKey = String(settings.VITE_ODDS_API_KEY || "").trim();
-    if (oddsKey) window.localStorage.setItem("odds-api-key", oddsKey);
-  } catch {
-    // ignore
-  }
-}
-
 function prizePicksSucceeded(result) {
   const status = String(result?.status || "");
   return Boolean(result?.props?.length) && !["Failed"].includes(status);
@@ -747,6 +677,9 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
       : boardTs
         ? formatCacheLayerLabel(resolveCacheLayer(boardTs, CACHE_TTL.BOARD_MS))
         : formatCacheLayerLabel(String(cacheLayer || "EMPTY").toUpperCase());
+  const oddsKeyConfigured = Boolean(getOddsApiKey());
+  const sportsDataConfigured = Boolean(getSportsDataApiKey());
+  const statsWarnings = board?.debugInfo?.statsWarnings || [];
   return {
     PrizePicks: {
       status: sourceSnapshot[SOURCE_IDS.PRIZEPICKS]?.status || board?.sourceStatus?.PrizePicks || pp.status || "Pending",
@@ -755,6 +688,7 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
       cooldownRemainingMs: sourceSnapshot.PrizePicks?.cooldownRemainingMs || 0,
       cacheAge: sourceSnapshot.PrizePicks?.cacheAge || "",
       requestCount: sourceSnapshot.PrizePicks?.requestCount || 0,
+      sessionRequestCount: sourceSnapshot.PrizePicks?.sessionRequestCount || 0,
       lastError: sourceSnapshot.PrizePicks?.lastError || pp.message || "",
     },
     Underdog: {
@@ -764,6 +698,7 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
       cooldownRemainingMs: sourceSnapshot.Underdog?.cooldownRemainingMs || 0,
       cacheAge: sourceSnapshot.Underdog?.cacheAge || "",
       requestCount: sourceSnapshot.Underdog?.requestCount || 0,
+      sessionRequestCount: sourceSnapshot.Underdog?.sessionRequestCount || 0,
       lastError:
         MLB_ONLY_MODE && (board?.props?.length || 0) > 0
           ? ""
@@ -776,15 +711,31 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
     OddsAPI: {
       status: sourceSnapshot[SOURCE_IDS.ODDS_API]?.status || odds.status || board?.sourceStatus?.["The Odds API"] || "Pending",
       lastFetchAt: odds.lastSuccessfulFetchAt || sourceSnapshot[SOURCE_IDS.ODDS_API]?.lastSuccessfulFetchAt || "",
-      lineSourceBadge: resolveBadge(odds, board?.sourceStatus?.["The Odds API"]),
+      lineSourceBadge: oddsKeyConfigured
+        ? resolveBadge(odds, board?.sourceStatus?.["The Odds API"])
+        : "NOT CONFIGURED",
       cooldownRemainingMs: sourceSnapshot[SOURCE_IDS.ODDS_API]?.cooldownRemainingMs || 0,
-      cacheAge: sourceSnapshot.OddsAPI?.cacheAge || "",
+      cacheAge: sourceSnapshot[SOURCE_IDS.ODDS_API]?.cacheAge || "",
       requestCount: sourceSnapshot[SOURCE_IDS.ODDS_API]?.requestCount || 0,
-      lastError: sourceSnapshot[SOURCE_IDS.ODDS_API]?.lastError || odds.message || "",
+      sessionRequestCount: sourceSnapshot[SOURCE_IDS.ODDS_API]?.sessionRequestCount || 0,
+      lastError: oddsKeyConfigured
+        ? sourceSnapshot[SOURCE_IDS.ODDS_API]?.lastError || odds.message || ""
+        : "Not configured",
+    },
+    SportsData: {
+      status: "active",
+      lastFetchAt: board?.updatedAt || "",
+      lineSourceBadge: sportsDataConfigured ? "LIVE" : "LIVE",
+      cacheAge: "",
+      requestCount: 0,
+      sessionRequestCount: 0,
+      lastError: statsWarnings.find((w) => /stat|mlb|balldontlie/i.test(String(w))) || "",
     },
     cache: {
       status: cacheLayerLabel,
       lastFetchAt: board?.updatedAt || "",
+      cacheAge: boardTs ? formatCacheAge(board?.updatedAt) : "",
+      lastError: cacheLayerLabel === "EXPIRED" ? "Expired cache not used for Top Picks" : "",
     },
   };
 }
@@ -1311,8 +1262,6 @@ export default function DFSPropsApp() {
   const [qualifiedReadyProps, setQualifiedReadyProps] = useState([]);
   const [acceptedPropsForRender, setAcceptedPropsForRender] = useState([]);
   const [streakProps, setStreakProps] = useState([]);
-  const [settingsDraft, setSettingsDraft] = useState(() => readRuntimeSettings());
-  const [settingsNotice, setSettingsNotice] = useState("");
   const [streakSport, setStreakSport] = useState("MLB");
   const [parlayRiskMode, setParlayRiskMode] = useState("balanced");
   const [selectedEvaluation, setSelectedEvaluation] = useState(null);
@@ -1334,8 +1283,6 @@ export default function DFSPropsApp() {
     Underdog: { status: "Pending", lastFetchAt: "", lineSourceBadge: "" },
     cache: { status: "empty", lastFetchAt: "" },
   });
-  const [apiRouteTests, setApiRouteTests] = useState([]);
-  const [apiRouteTesting, setApiRouteTesting] = useState(false);
   const [refreshCooldownSec, setRefreshCooldownSec] = useState(0);
   const [sourceCooldownSec, setSourceCooldownSec] = useState(0);
   const [includeUncertainProps, setIncludeUncertainProps] = useState(() => readIncludeUncertainPreference());
@@ -2022,25 +1969,9 @@ export default function DFSPropsApp() {
     reader.readAsText(file);
   }
 
-  function saveSettings() {
-    writeRuntimeSettings(settingsDraft);
+  function handleSettingsSaved() {
     clearApiCache({ preserveLastGood: true });
     clearBoardCache();
-    setSettingsNotice("Settings saved. Refresh today's picks to use the updated values.");
-  }
-
-  async function testApiRoutes() {
-    setApiRouteTesting(true);
-    setApiRouteTests([]);
-    try {
-      const results = [];
-      for (const route of API_TEST_ROUTES) {
-        results.push(await probeApiRoute(route));
-      }
-      setApiRouteTests(results);
-    } finally {
-      setApiRouteTesting(false);
-    }
   }
 
   function showMoreSection(section) {
@@ -2158,54 +2089,7 @@ export default function DFSPropsApp() {
         </div>
       </section>
 
-      <details style={styles.compactDetails}>
-        <summary style={styles.detailsSummary}>
-          <span>
-            <span style={styles.eyebrow}>Runtime setup</span>
-            <strong>Settings</strong>
-          </span>
-          <span style={styles.countPill}>localStorage</span>
-        </summary>
-        <div style={styles.compactPanel}>
-          <div style={styles.controls}>
-            {SETTINGS_KEYS.map((key) => (
-              <label key={key} style={styles.selectLabel}>
-                {key}
-                <input
-                  style={styles.textInput}
-                  value={settingsDraft[key] || ""}
-                  onChange={(event) => setSettingsDraft((current) => ({ ...current, [key]: event.target.value }))}
-                  placeholder={key.includes("URL") ? "Optional proxy URL" : "Optional Odds API key"}
-                />
-              </label>
-            ))}
-          </div>
-          <div style={{ ...styles.segmentRow, marginTop: "8px" }}>
-            <button type="button" style={styles.secondaryButton} onClick={saveSettings}>
-              Save settings
-            </button>
-            <button
-              type="button"
-              style={styles.secondaryButton}
-              onClick={testApiRoutes}
-              disabled={apiRouteTesting}
-            >
-              {apiRouteTesting ? "Testing API routes…" : "Test API Routes"}
-            </button>
-            {settingsNotice ? <p style={styles.compactFlags}>{settingsNotice}</p> : null}
-          </div>
-          {apiRouteTests.length > 0 ? (
-            <div style={{ marginTop: "10px" }}>
-              {apiRouteTests.map((result) => (
-                <p key={result.route} style={styles.compactFlags}>
-                  <strong>{result.ok ? "OK" : "FAIL"}</strong> {result.route} — status {result.status} ·{" "}
-                  {result.contentType} · {result.durationMs}ms — {result.preview}
-                </p>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      </details>
+      <SettingsPanel onSaved={handleSettingsSaved} onClearCaches={handleSettingsSaved} />
 
       <details style={styles.compactDetails}>
         <summary style={styles.detailsSummary}>
