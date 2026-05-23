@@ -159,11 +159,13 @@ import PropFilters from "./components/PropFilters.jsx";
 import PlayerPropCard from "./components/PlayerPropCard.jsx";
 import PickDetailModal from "./components/PickDetailModal.jsx";
 import AcceptedPropsPanel from "./components/AcceptedPropsPanel.jsx";
-import SimplePropCard from "./components/SimplePropCard.jsx";
 import AccuracyReview from "./components/AccuracyReview.jsx";
 import SourceStatusBar from "./components/SourceStatusBar.jsx";
-import { normalizePropsForCards } from "./utils/normalizePropForCard.js";
-import { isUpstreamAcceptedProp, resolveAcceptedPropsForRender } from "./utils/resolveAcceptedPropsForRender.js";
+import {
+  isUpstreamAcceptedProp,
+  resolveFinalAcceptedPropsFromHydrated,
+  selectTopPicksFromAccepted,
+} from "./utils/resolveAcceptedPropsForRender.js";
 import { styles } from "./theme/styles.js";
 import {
   formatDateTime, formatLeanSide, formatMultiplier, formatNumber, formatMaybeLine,
@@ -1756,33 +1758,31 @@ export default function DFSPropsApp() {
       [],
     [pipelineAudit?.acceptedPropsForRender, debugInfo?.acceptedPropsForRender, debugInfo?.pipelineAudit?.acceptedPropsForRender]
   );
-  const resolvedAcceptedProps = useMemo(() => {
+  const hydratedRenderableProps = useMemo(() => filteredProps, [filteredProps]);
+  const finalAcceptedProps = useMemo(() => {
     const acceptedCount = Number(pipelineCounters.accepted ?? 0);
-    const pool = resolveAcceptedPropsForRender({
-      acceptedPropsForRender,
-      counterAcceptedSource,
-      qualifiedReadyProps,
-      allProps: props,
+    const pool = resolveFinalAcceptedPropsFromHydrated({
+      hydratedRenderableProps,
+      pipelineAcceptedPools: [acceptedPropsForRender, counterAcceptedSource, qualifiedReadyProps],
       acceptedCount,
     });
     console.log("PIPELINE ACCEPTED COUNT", acceptedCount);
-    console.log("ACCEPTED PROPS FOR RENDER", pool);
+    console.log("HYDRATED RENDERABLE PROPS", hydratedRenderableProps);
+    console.log("FINAL ACCEPTED PROPS", pool);
     return pool;
-  }, [acceptedPropsForRender, counterAcceptedSource, qualifiedReadyProps, props, pipelineCounters.accepted]);
-  const normalizedAcceptedProps = useMemo(() => {
-    const normalized = normalizePropsForCards(resolvedAcceptedProps);
-    console.log("NORMALIZED ACCEPTED PROPS", normalized);
-    return normalized;
-  }, [resolvedAcceptedProps]);
+  }, [
+    hydratedRenderableProps,
+    acceptedPropsForRender,
+    counterAcceptedSource,
+    qualifiedReadyProps,
+    pipelineCounters.accepted,
+  ]);
   const topPicksDisplay = useMemo(() => {
-    const topPicks = [...normalizedAcceptedProps].sort((a, b) => b.weightedScore - a.weightedScore).slice(0, 2);
+    const topPicks = selectTopPicksFromAccepted(finalAcceptedProps, 2);
     console.log("FINAL TOP PICKS", topPicks);
     return topPicks;
-  }, [normalizedAcceptedProps]);
-  const topPicksForTracking = useMemo(
-    () => topPicksDisplay.map((prop) => prop._raw || prop),
-    [topPicksDisplay]
-  );
+  }, [finalAcceptedProps]);
+  const topPicksForTracking = useMemo(() => topPicksDisplay, [topPicksDisplay]);
   const goblinPropsForTracking = useMemo(
     () => streakFinderProps.filter(isVerifiedSportsbookProp).filter(isGoblinProp),
     [streakFinderProps]
@@ -1796,8 +1796,8 @@ export default function DFSPropsApp() {
     [streakFinderProps]
   );
   const visibleAcceptedProps = useMemo(
-    () => normalizedAcceptedProps.slice(0, Math.min(visibleLimits.ready, VISIBLE_SECTION_LIMIT)),
-    [normalizedAcceptedProps, visibleLimits.ready]
+    () => finalAcceptedProps.slice(0, Math.min(visibleLimits.ready, VISIBLE_SECTION_LIMIT)),
+    [finalAcceptedProps, visibleLimits.ready]
   );
   const visibleBestValueProps = useMemo(
     () => bestValueProps.slice(0, Math.min(visibleLimits.value, VISIBLE_SECTION_LIMIT)),
@@ -2296,12 +2296,7 @@ export default function DFSPropsApp() {
         </section>
       ) : null}
 
-      <AcceptedPropsPanel
-        props={normalizedAcceptedProps}
-        loading={loading}
-        onOpen={setSelectedEvaluation}
-        acceptedCount={pipelineCounters.accepted ?? 0}
-      />
+      <AcceptedPropsPanel props={finalAcceptedProps} onOpen={setSelectedEvaluation} compactMode={compactMode} />
 
       {visibleError ? <section style={styles.errorPanel}>{visibleError}</section> : null}
 
@@ -2368,9 +2363,8 @@ export default function DFSPropsApp() {
         <TopPicksBoard
           label={currentCategoryLabel}
           picks={topPicksDisplay}
-          loading={loading}
           onOpen={setSelectedEvaluation}
-          acceptedCount={pipelineCounters.accepted ?? 0}
+          compactMode={compactMode}
         />
       )}
 
@@ -2383,30 +2377,22 @@ export default function DFSPropsApp() {
             Weighted qualification · market-aware thresholds · verified stats · positive edge · target 15–30 per cycle.
           </p>
           </div>
-          <p style={styles.countPill}>{normalizedAcceptedProps.length || pipelineCounters.accepted || 0} qualified</p>
+          <p style={styles.countPill}>{finalAcceptedProps.length} qualified</p>
         </div>
         {loading ? (
           <EmptyState text="Loading picks…" />
-        ) : normalizedAcceptedProps.length === 0 && !Number(pipelineCounters.accepted) ? (
+        ) : finalAcceptedProps.length === 0 ? (
           <EmptyState text={NO_VERIFIED_PROPS_MESSAGE} />
-        ) : normalizedAcceptedProps.length === 0 ? (
-          <EmptyState text={`Pipeline reports ${pipelineCounters.accepted} accepted props — cards will appear once objects hydrate.`} />
         ) : (
           <>
-            <div className="accepted-props-grid">
-              {visibleAcceptedProps.map((prop, idx) => (
-                <SimplePropCard
-                  key={prop.id || idx}
-                  prop={prop}
-                  index={idx}
-                  className="accepted-prop-card"
-                  onOpen={setSelectedEvaluation}
-                />
-              ))}
-            </div>
+            <VirtualCardList
+              items={visibleAcceptedProps}
+              renderCard={readyRenderCard}
+              initialVisible={INITIAL_VISIBLE_SECTION_LIMIT}
+            />
             <LoadMoreButton
               visible={visibleAcceptedProps.length}
-              total={normalizedAcceptedProps.length}
+              total={finalAcceptedProps.length}
               onClick={() => showMoreSection("ready")}
             />
           </>

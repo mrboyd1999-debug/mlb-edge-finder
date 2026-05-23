@@ -1,10 +1,9 @@
 import { memo } from "react";
-import SimplePropCard from "./SimplePropCard.jsx";
+import PlayerPropCard from "./PlayerPropCard.jsx";
 import { styles } from "../theme/styles.js";
 
-function TopPicksBoard({ label = "Sport", picks = [], loading, onOpen, acceptedCount = 0 }) {
+function TopPicksBoard({ label = "Sport", picks = [], onOpen, compactMode = true }) {
   const topPicks = (picks || []).filter(Boolean).slice(0, 2);
-  const hasAccepted = topPicks.length > 0 || Number(acceptedCount) > 0;
 
   return (
     <section className="top-picks-section" style={styles.section}>
@@ -15,22 +14,19 @@ function TopPicksBoard({ label = "Sport", picks = [], loading, onOpen, acceptedC
         </div>
         <p style={styles.countPill}>{topPicks.length}/2</p>
       </div>
-      {loading && !topPicks.length ? (
-        <div style={styles.emptyState}>Loading {label} picks…</div>
-      ) : topPicks.length > 0 ? (
+      {topPicks.length > 0 ? (
         <div className="top-picks-grid" style={styles.topPicksList}>
           {topPicks.map((prop, idx) => (
-            <SimplePropCard
+            <PlayerPropCard
               key={prop.id || `top-pick-${idx}`}
               prop={prop}
-              index={idx}
-              className="top-pick-card"
+              rank={idx + 1}
+              compact={compactMode}
               onOpen={onOpen}
+              cardStyle={styles.streakCard}
             />
           ))}
         </div>
-      ) : hasAccepted ? (
-        <div style={styles.emptyState}>Accepted props are loading — check Accepted Props above.</div>
       ) : (
         <div style={styles.emptyState}>No accepted props available for Top 2 yet.</div>
       )}
