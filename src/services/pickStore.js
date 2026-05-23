@@ -110,6 +110,13 @@ function readRawCachedBoard(defaultSourceStatus = {}) {
         : Array.isArray(parsed.readyProps)
           ? parsed.readyProps
           : [],
+      acceptedPropsForRender: Array.isArray(parsed.acceptedPropsForRender)
+        ? parsed.acceptedPropsForRender
+        : Array.isArray(parsed.qualifiedReadyProps)
+          ? parsed.qualifiedReadyProps
+          : Array.isArray(parsed.readyProps)
+            ? parsed.readyProps
+            : [],
       streakProps: Array.isArray(parsed.streakProps) ? parsed.streakProps : [],
       warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
       degradedWarnings: Array.isArray(parsed.degradedWarnings) ? parsed.degradedWarnings : [],
@@ -175,6 +182,9 @@ export function writeCachedBoard(board) {
       cacheAnalytics: cacheMeta.cacheAnalytics,
       props: enrichList(scopedBoard.props || []),
       qualifiedReadyProps: enrichList(scopedBoard.qualifiedReadyProps || scopedBoard.readyProps || []),
+      acceptedPropsForRender: enrichList(
+        scopedBoard.acceptedPropsForRender || scopedBoard.qualifiedReadyProps || scopedBoard.readyProps || []
+      ),
       nearQualification: enrichList(scopedBoard.nearQualification || []),
       watchlist: enrichList(scopedBoard.watchlist || []).slice(0, 60),
       streakProps: enrichList(scopedBoard.streakProps || []).slice(0, 180),

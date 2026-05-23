@@ -185,6 +185,10 @@ export function prepareVerifiedCacheBoard(board = {}, { now = Date.now() } = {})
     verifiedAt,
     updatedAt: boardUpdatedAt,
   });
+  const acceptedPropsForRender = filterUsableCachedProps(
+    board.acceptedPropsForRender || board.qualifiedReadyProps || board.readyProps || [],
+    { verifiedAt, updatedAt: boardUpdatedAt }
+  );
   const nearQualification = filterUsableCachedProps(board.nearQualification || [], { verifiedAt, updatedAt: boardUpdatedAt });
   const streakProps = filterUsableCachedProps(board.streakProps || [], { verifiedAt, updatedAt: boardUpdatedAt });
   const watchlist = filterUsableCachedProps(board.watchlist || [], { verifiedAt, updatedAt: boardUpdatedAt });
@@ -198,6 +202,11 @@ export function prepareVerifiedCacheBoard(board = {}, { now = Date.now() } = {})
     ...board,
     props: props.length ? props : qualifiedReadyProps,
     qualifiedReadyProps: qualifiedReadyProps.length ? qualifiedReadyProps : props.filter((prop) => prop.isQualificationAccepted),
+    acceptedPropsForRender: acceptedPropsForRender.length
+      ? acceptedPropsForRender
+      : qualifiedReadyProps.length
+        ? qualifiedReadyProps
+        : props.filter((prop) => prop.isQualificationAccepted),
     nearQualification,
     streakProps,
     watchlist,

@@ -1201,6 +1201,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   const watchlistProps = [];
   const nearQualification = qualBoards.near.slice(0, 15);
   const qualifiedReadyProps = qualBoards.ready.slice(0, RENDER_LIMITS.readyToBet);
+  const acceptedPropsForRender = qualifiedReadyProps;
   const modelSignalMap = buildModelSignalMap(filterVerifiedSportsbookProps(qualBoards.allDisplayable));
   const streakProps = filterVerifiedSportsbookProps(
     buildStreakFinderProps(activeProps, modelSignalMap, lineMovementMap).sort(sortStreakProps)
@@ -1237,13 +1238,14 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   pipelineAudit = coercePipelineAudit(pipelineAudit);
   const cacheCounts = countPropCacheLayers(displayProps);
   finalizePipelineCounters(pipelineAudit, {
-    displayed: qualBoards.ready.length ? qualBoards.ready : displayProps,
+    displayed: acceptedPropsForRender.length ? acceptedPropsForRender : qualBoards.ready.length ? qualBoards.ready : displayProps,
     rejected: Math.max(0, (pipelineAudit.fetched || 0) - (pipelineAudit.scored || 0)),
     stale: cacheCounts.stale,
     cached: cacheCounts.cached,
     live: cacheCounts.live,
   });
   debugInfo.pipelineCounters = pipelineAudit.pipelineCounters;
+  debugInfo.acceptedPropsForRender = pipelineAudit.acceptedPropsForRender || acceptedPropsForRender;
   if (isHeavyDebugEnabled()) {
     Object.assign(debugInfo, attachDebugArtifacts(sanitizeDebugInfoForMlbOnly(debugInfo), pipelineAudit));
     if (shouldLogVerbose()) logPipelineAudit("qualified", pipelineAudit);
@@ -1253,6 +1255,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       preScoring: pipelineAudit.preScoring,
       active: pipelineAudit.active,
       displayed: pipelineAudit.displayed,
+      acceptedPropsForRender: debugInfo.acceptedPropsForRender,
+      pipelineCounters: pipelineAudit.pipelineCounters,
     };
   }
 
@@ -1267,6 +1271,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     watchlist: uiPayload.watchlist,
     nearQualification,
     qualifiedReadyProps,
+    acceptedPropsForRender,
     displayPool: qualBoards.allDisplayable,
     readyProps: qualifiedReadyProps,
     streakProps: uiPayload.streakProps,
@@ -1299,6 +1304,7 @@ export default function DFSPropsApp() {
   const [watchlist, setWatchlist] = useState([]);
   const [nearQualification, setNearQualification] = useState([]);
   const [qualifiedReadyProps, setQualifiedReadyProps] = useState([]);
+  const [acceptedPropsForRender, setAcceptedPropsForRender] = useState([]);
   const [streakProps, setStreakProps] = useState([]);
   const [settingsDraft, setSettingsDraft] = useState(() => readRuntimeSettings());
   const [settingsNotice, setSettingsNotice] = useState("");
@@ -1361,7 +1367,15 @@ export default function DFSPropsApp() {
     setProps(boardProps);
     setWatchlist(scopedBoard.watchlist || []);
     setNearQualification(scopedBoard.nearQualification || []);
-    setQualifiedReadyProps(scopedBoard.qualifiedReadyProps || scopedBoard.readyProps || []);
+    const renderAccepted =
+      scopedBoard.acceptedPropsForRender ||
+      scopedBoard.debugInfo?.acceptedPropsForRender ||
+      scopedBoard.debugInfo?.pipelineAudit?.acceptedPropsForRender ||
+      scopedBoard.qualifiedReadyProps ||
+      scopedBoard.readyProps ||
+      [];
+    setQualifiedReadyProps(scopedBoard.qualifiedReadyProps || scopedBoard.readyProps || renderAccepted);
+    setAcceptedPropsForRender(Array.isArray(renderAccepted) ? renderAccepted : []);
     setStreakProps(scopedBoard.streakProps || []);
     setCriticalWarnings(
       sanitizeCriticalWarningsForDisplay(collectBoardWarningMessages(scopedBoard), boardProps, boardSourceStatus)
@@ -1380,7 +1394,16 @@ export default function DFSPropsApp() {
     setLastUpdated(scopedBoard.updatedAt || "");
     setCacheStatus(cacheLayer);
     setCacheNotice(scopedBoard.cacheNotice || "");
-    setPipelineAudit(coercePipelineAudit(scopedBoard.debugInfo?.pipelineAudit));
+    setPipelineAudit(
+      coercePipelineAudit({
+        ...(scopedBoard.debugInfo?.pipelineAudit || {}),
+        acceptedPropsForRender: renderAccepted,
+        pipelineCounters:
+          scopedBoard.debugInfo?.pipelineCounters ||
+          scopedBoard.debugInfo?.pipelineAudit?.pipelineCounters ||
+          {},
+      })
+    );
     setApiHealth(buildApiHealthFromBoard(scopedBoard, cacheLayer));
   }, [platform]);
 
@@ -1461,6 +1484,7 @@ export default function DFSPropsApp() {
           watchlist: result.watchlist || [],
           nearQualification: result.nearQualification || [],
           qualifiedReadyProps: result.qualifiedReadyProps || result.readyProps || [],
+          acceptedPropsForRender: result.acceptedPropsForRender || result.qualifiedReadyProps || result.readyProps || [],
           streakProps: result.streakProps || [],
           warnings: routedCritical,
           degradedWarnings: sanitizeDegradedWarningsForDisplay(
@@ -1713,25 +1737,41 @@ export default function DFSPropsApp() {
   const currentCategoryLabel = currentStreakBoard.label || STREAK_TAB_OPTIONS.find((option) => option.value === streakSport)?.label || "MLB";
   const isGoblinTab = streakSport === "goblins";
   const isDemonTab = streakSport === "demons";
+  const pipelineCounters = useMemo(
+    () => pipelineAudit.pipelineCounters || debugInfo.pipelineCounters || {},
+    [pipelineAudit.pipelineCounters, debugInfo.pipelineCounters]
+  );
+  const counterAcceptedSource = useMemo(
+    () =>
+      pipelineAudit?.acceptedPropsForRender ||
+      debugInfo?.acceptedPropsForRender ||
+      debugInfo?.pipelineAudit?.acceptedPropsForRender ||
+      [],
+    [pipelineAudit?.acceptedPropsForRender, debugInfo?.acceptedPropsForRender, debugInfo?.pipelineAudit?.acceptedPropsForRender]
+  );
   const acceptedProps = useMemo(() => {
-    const fromReady = qualifiedReadyProps.length
-      ? qualifiedReadyProps
-      : props.filter((prop) => prop.isQualificationAccepted || isReadyToBet(prop));
-    const pool = sortDecisionBoard(fromReady.filter(Boolean));
+    const source =
+      acceptedPropsForRender.length > 0
+        ? acceptedPropsForRender
+        : counterAcceptedSource.length > 0
+          ? counterAcceptedSource
+          : qualifiedReadyProps;
+    const pool = sortDecisionBoard((source || []).filter(Boolean));
+    console.log("COUNTER ACCEPTED SOURCE", pipelineCounters.accepted ?? counterAcceptedSource.length);
+    console.log("ACCEPTED ARRAY LENGTH", pool.length);
     console.log("ACCEPTED PROPS", pool);
-    console.log("RENDERING ACCEPTED", pool.length);
     return pool;
-  }, [qualifiedReadyProps, props]);
+  }, [acceptedPropsForRender, counterAcceptedSource, qualifiedReadyProps, pipelineCounters.accepted]);
   const topPicksDisplay = useMemo(() => {
-    const topPicks =
-      acceptedProps
-        ?.filter(Boolean)
-        ?.sort(
-          (a, b) =>
-            (b.weightedScore || b.confidenceScore || b.confidence || 0) -
-            (a.weightedScore || a.confidenceScore || a.confidence || 0)
-        )
-        ?.slice(0, 2) || [];
+    const topPicks = acceptedProps
+      .filter(Boolean)
+      .sort(
+        (a, b) =>
+          (b.weightedScore || b.confidenceScore || b.confidence || 0) -
+          (a.weightedScore || a.confidenceScore || a.confidence || 0)
+      )
+      .slice(0, 2);
+    console.log("TOP PICKS SOURCE", topPicks);
     console.log("TOP PICKS", topPicks);
     return topPicks;
   }, [acceptedProps]);
@@ -1748,17 +1788,13 @@ export default function DFSPropsApp() {
         .filter((prop) => Number(prop.confidenceScore || 0) >= CONFIDENCE_THRESHOLDS.DEMON && Number(prop.edge || 0) >= 1),
     [streakFinderProps]
   );
-  const visibleReadyProps = useMemo(
-    () => readyToBetProps.slice(0, Math.min(visibleLimits.ready, VISIBLE_SECTION_LIMIT)),
-    [readyToBetProps, visibleLimits.ready]
+  const visibleAcceptedProps = useMemo(
+    () => acceptedProps.slice(0, Math.min(visibleLimits.ready, VISIBLE_SECTION_LIMIT)),
+    [acceptedProps, visibleLimits.ready]
   );
   const visibleBestValueProps = useMemo(
     () => bestValueProps.slice(0, Math.min(visibleLimits.value, VISIBLE_SECTION_LIMIT)),
     [bestValueProps, visibleLimits.value]
-  );
-  const pipelineCounters = useMemo(
-    () => pipelineAudit.pipelineCounters || debugInfo.pipelineCounters || {},
-    [pipelineAudit.pipelineCounters, debugInfo.pipelineCounters]
   );
 
   const rejectedPropSamples = useMemo(
@@ -2059,6 +2095,7 @@ export default function DFSPropsApp() {
     setWatchlist(boards.research.slice(0, MAX_WATCHLIST_PROPS));
     setNearQualification(boards.near);
     setQualifiedReadyProps(boards.ready);
+    setAcceptedPropsForRender(boards.ready);
     setStreakProps((current) =>
       current.map((item) => (item.id === propId ? mergedMap.get(propId) || item : item))
     );
@@ -2333,34 +2370,28 @@ export default function DFSPropsApp() {
             Weighted qualification · market-aware thresholds · verified stats · positive edge · target 15–30 per cycle.
           </p>
           </div>
-          <p style={styles.countPill}>{readyToBetProps.length || acceptedProps.length} qualified</p>
+          <p style={styles.countPill}>{acceptedProps.length} qualified</p>
         </div>
         {loading ? (
           <EmptyState text="Loading picks…" />
-        ) : readyToBetProps.length === 0 && acceptedProps.length === 0 ? (
+        ) : acceptedProps.length === 0 ? (
           <EmptyState text={NO_VERIFIED_PROPS_MESSAGE} />
-        ) : readyToBetProps.length === 0 ? (
-          <div className="accepted-props-grid">
-            {acceptedProps.map((prop, idx) => (
-              <div key={prop.id || idx} className="accepted-prop-card">
-                <div className="prop-card-player">{prop.playerName || prop.player}</div>
-                <div className="prop-card-market">{prop.market || prop.statType}</div>
-                <div className="prop-card-pick">{prop.pick || prop.bestPick || prop.pickDirection}</div>
-                <div className="prop-card-line">{prop.line}</div>
-                <div className="prop-card-confidence">
-                  Confidence: {Math.round(prop.confidenceScore || prop.confidence || 0)}%
-                </div>
-              </div>
-            ))}
-          </div>
         ) : (
           <>
-            <VirtualCardList
-              items={visibleReadyProps}
-              renderCard={readyRenderCard}
-              initialVisible={INITIAL_VISIBLE_SECTION_LIMIT}
-            />
-            <LoadMoreButton visible={visibleReadyProps.length} total={readyToBetProps.length} onClick={() => showMoreSection("ready")} />
+            <div className="accepted-props-grid">
+              {visibleAcceptedProps.map((prop, idx) => (
+                <div key={prop.id || idx} className="accepted-prop-card">
+                  <div className="prop-card-player">{prop.playerName || prop.player}</div>
+                  <div className="prop-card-market">{prop.market || prop.statType}</div>
+                  <div className="prop-card-pick">{prop.pick || prop.bestPick || prop.pickDirection}</div>
+                  <div className="prop-card-line">{prop.line}</div>
+                  <div className="prop-card-confidence">
+                    Confidence: {Math.round(prop.confidenceScore || prop.confidence || 0)}%
+                  </div>
+                </div>
+              ))}
+            </div>
+            <LoadMoreButton visible={visibleAcceptedProps.length} total={acceptedProps.length} onClick={() => showMoreSection("ready")} />
           </>
         )}
       </section>

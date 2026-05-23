@@ -455,7 +455,9 @@ export function formatRejectionSummary(audit = {}) {
 
 export function finalizePipelineCounters(audit = {}, { displayed = [], rejected = 0, stale = 0, cached = 0, live = 0 } = {}) {
   if (!audit || typeof audit !== "object") return audit;
-  const accepted = Array.isArray(displayed) ? displayed.length : Number(audit.displayed || 0);
+  const acceptedPropsForRender = Array.isArray(displayed) ? displayed.filter(Boolean) : [];
+  const accepted = acceptedPropsForRender.length || Number(audit.displayed || 0);
+  audit.acceptedPropsForRender = acceptedPropsForRender;
   audit.pipelineCounters = {
     accepted,
     rejected:
