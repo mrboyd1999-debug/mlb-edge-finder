@@ -6,6 +6,8 @@ export const DATA_STATUS = {
   FALLBACK: "Estimated fallback projection",
 };
 
+export const VERIFIED_PROJECTION_LABEL = "Verified MLB projection";
+
 function round(value, digits = 2) {
   const factor = 10 ** digits;
   return Math.round(Number(value) * factor) / factor;
@@ -61,8 +63,11 @@ export function isFallbackDataStatus(dataStatus) {
 
 export function projectionLabelFromDataStatus(dataStatus) {
   if (dataStatus === DATA_STATUS.FALLBACK) return DATA_STATUS.FALLBACK;
-  if (dataStatus === DATA_STATUS.VERIFIED) return "Stat-based projection";
-  return "Stat-based projection";
+  return VERIFIED_PROJECTION_LABEL;
+}
+
+export function isVerifiedProjectionStatus(dataStatus) {
+  return dataStatus === DATA_STATUS.VERIFIED || dataStatus === DATA_STATUS.PARTIAL;
 }
 
 export function projectionConfidenceFromDataStatus(dataStatus, sampleSize = 0) {

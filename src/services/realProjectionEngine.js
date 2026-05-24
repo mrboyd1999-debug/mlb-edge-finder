@@ -362,12 +362,9 @@ export function buildRealProjection(prop = {}, profile = {}, context = {}) {
 
   if (sport === "MLB" && isMlbPitcherMarket(prop.statType) && hasMlbPitcherStatInputs(profile)) {
     const pitcher = projectMlbPitcherProp(prop, profile, context);
-    if (pitcher) return pitcher;
+    if (pitcher?.projectedValue != null) return pitcher;
   }
 
-  if (sport === "MLB" && (key === "strikeouts" || key === "outs" || key === "pitchesThrown")) {
-    return projectMlbPitcherStrikeouts(prop, profile, context);
-  }
   if (sport === "MLB") {
     return projectMlbHitterProp(prop, profile, context);
   }

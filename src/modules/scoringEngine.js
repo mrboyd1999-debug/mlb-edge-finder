@@ -41,14 +41,21 @@ export function computePitcherHitChance({
   isFallback = false,
 }) {
   const payout = normalizePayout(payoutType);
-  const favorableEdge = Math.max(Number(edge) || 0, 0);
-  let pct = Number(confidence) * 0.78 + favorableEdge * 4.8;
+  const numericEdge = Number(edge) || 0;
+  const favorableEdge = Math.max(numericEdge, 0);
 
-  if (volatility.tier === "LOW") pct += 4;
-  if (volatility.tier === "HIGH") pct -= 7;
+  let pct = 50 + favorableEdge * 7.5 + Number(confidence) * 0.32;
+
+  if (volatility.tier === "LOW") pct += 5;
+  else if (volatility.tier === "MEDIUM") pct += 1;
+  else if (volatility.tier === "HIGH") pct -= 6;
+
   if (payout === "goblin") pct += 4;
-  if (payout === "demon") pct -= 8;
-  if (Number(edge) < 0) pct -= 12;
+  if (payout === "demon") pct -= 9;
+
+  if (numericEdge >= 1.0) pct += 4;
+  else if (numericEdge >= 0.7) pct += 2;
+  if (numericEdge < 0) pct += numericEdge * 9;
 
   if (isFallback) return Math.round(clamp(pct, 35, 65));
   return Math.round(clamp(pct, 38, 88));
@@ -79,16 +86,18 @@ export function computePitcherConfidence({
   let score = min + (Math.max(0, Math.min(100, projectionConfidence)) / 100) * (max - min);
 
   const favorableEdge = Math.max(Number(edge) || 0, 0);
-  if (favorableEdge >= 1.8) score += 5;
-  else if (favorableEdge >= 1.2) score += 3;
-  else if (favorableEdge >= 0.7) score += 2;
-  else if (favorableEdge <= 0.25) score -= 4;
-  if (Number(edge) < 0) score -= 8;
+  if (favorableEdge >= 1.5) score += 7;
+  else if (favorableEdge >= 1.0) score += 5;
+  else if (favorableEdge >= 0.7) score += 4;
+  else if (favorableEdge >= 0.4) score += 2;
+  else if (favorableEdge <= 0.25) score -= 5;
+  if (Number(edge) < 0) score -= 12;
 
-  if (volatility.tier === "LOW") score += 4;
-  else if (volatility.tier === "HIGH") score -= 6;
+  if (volatility.tier === "LOW") score += 5;
+  else if (volatility.tier === "HIGH") score -= 7;
 
-  if (marketKey === "strikeouts" && favorableEdge >= 0.7) score += 4;
+  if (marketKey === "strikeouts" && favorableEdge >= 0.7) score += 5;
+  if (marketKey === "strikeouts" && favorableEdge >= 1.0) score += 2;
   if (marketKey === "outs" && favorableEdge >= 0.5) score += 2;
   if (marketKey === "earnedRuns") score -= 3;
 
@@ -98,8 +107,8 @@ export function computePitcherConfidence({
   if (isFallback) score = Math.min(score, 62);
 
   if (Number(edge) < 0) {
-    const negativeCap = payout === "goblin" ? 58 : payout === "demon" ? 52 : 55;
-    return Math.round(clamp(Math.min(score, negativeCap), 40, negativeCap));
+    const negativeCap = payout === "goblin" ? 56 : payout === "demon" ? 50 : 52;
+    return Math.round(clamp(Math.min(score, negativeCap), 38, negativeCap));
   }
 
   const floor = payout === "goblin" ? 72 : payout === "demon" ? 45 : 58;

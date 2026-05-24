@@ -2,6 +2,11 @@ import { canonicalMarketKey } from "../utils/marketNormalization.js";
 
 export const MLB_PITCHER_MARKET_KEYS = ["strikeouts", "outs", "hitsAllowed", "earnedRuns"];
 
+function round(value, digits = 2) {
+  const factor = 10 ** digits;
+  return Math.round(Number(value) * factor) / factor;
+}
+
 function finiteNumber(value) {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
@@ -16,6 +21,10 @@ function average(values = []) {
 export function isMlbPitcherMarket(statType = "") {
   const key = canonicalMarketKey(statType);
   return MLB_PITCHER_MARKET_KEYS.includes(key);
+}
+
+export function isStrikeoutMarket(statType = "") {
+  return canonicalMarketKey(statType) === "strikeouts";
 }
 
 export function inningsFromStat(stat = {}) {
@@ -63,6 +72,36 @@ export function valuesFromStartRows(rows = [], marketKey = "") {
   return rows.map((row) => statValueFromRow(row, marketKey)).filter(Number.isFinite);
 }
 
+export function pitchCountTrendFromValues(pitchValues = []) {
+  if (pitchValues.length < 4) return null;
+  const recent = average(pitchValues.slice(0, 3));
+  const older = average(pitchValues.slice(3, 5));
+  if (recent == null || older == null) return null;
+  const delta = round(recent - older, 1);
+  if (Math.abs(delta) < 2) return { recent, delta, label: "Stable pitch count" };
+  return {
+    recent,
+    delta,
+    label: delta > 0 ? `Pitch count up ${Math.abs(delta)}` : `Pitch count down ${Math.abs(delta)}`,
+  };
+}
+
+export function handednessBoostFromNote(note = "") {
+  const text = String(note || "");
+  if (/favorable|platoon|left-on-left|right-on-right/i.test(text)) return 0.2;
+  if (/tough|mismatch/i.test(text)) return -0.2;
+  if (/LHP|LHB/i.test(text) && /leaned vs L/i.test(text)) return 0.1;
+  if (/RHP|RHB/i.test(text) && /leaned vs R/i.test(text)) return 0.1;
+  return 0;
+}
+
+export function isMlbVerifiedSource(profile = {}) {
+  if (profile.sparse || profile.fallback) return false;
+  const source = String(profile.source || "");
+  const sources = (profile.statSources || []).map((item) => String(item)).join(" ");
+  return /mlb|statsapi/i.test(source) || /mlb|statsapi/i.test(sources);
+}
+
 export function buildMlbPitcherDataPackage(prop = {}, profile = {}, context = {}) {
   const marketKey = canonicalMarketKey(prop.statType);
   const startRows = extractPitcherStartRows(profile);
@@ -81,17 +120,21 @@ export function buildMlbPitcherDataPackage(prop = {}, profile = {}, context = {}
       : null);
 
   const projectedPitchCount = average(pitchValues.slice(0, 5));
+  const pitchCountTrend = profile.pitchCountTrend?.label
+    ? profile.pitchCountTrend
+    : pitchCountTrendFromValues(pitchValues);
 
   const opponent = context.opponentContext || profile.opponentContext || {};
-  const hasGameLogs = Boolean(profile.hasGameLogs || statValues.length >= 3 || startRows.length >= 3);
-  const hasCoreRates = last5Average != null || seasonAverage != null;
-  const hasOpponent = Boolean(
-    finiteNumber(opponent.strikeoutsPerGame) ||
-      finiteNumber(opponent.runsScoredPerGame) ||
-      finiteNumber(opponent.hitsAllowedPerGame) ||
-      finiteNumber(opponent.whip)
+  const handednessMatchup = profile.handednessMatchup || "";
+  const handednessBoost = handednessBoostFromNote(handednessMatchup);
+
+  const hasGameLogs = Boolean(
+    profile.hasGameLogs || statValues.length >= 3 || (startRows.length >= 3 && isMlbVerifiedSource(profile))
   );
-  const hasWorkload = projectedInnings != null || projectedPitchCount != null;
+  const hasCoreRates = last5Average != null && seasonAverage != null;
+  const hasOpponent = finiteNumber(opponent.strikeoutsPerGame) != null;
+  const hasWorkload = projectedInnings != null && projectedPitchCount != null;
+  const verifiedSource = isMlbVerifiedSource(profile);
 
   return {
     playerName: prop.playerName || profile.playerName || "",
@@ -105,20 +148,50 @@ export function buildMlbPitcherDataPackage(prop = {}, profile = {}, context = {}
     last5Average,
     seasonAverage,
     last10Average,
+    last5Starts: statValues.slice(0, 5),
     projectedInnings,
     projectedPitchCount,
+    pitchCountTrend,
     sampleSize: finiteNumber(profile.sampleSize) ?? statValues.length,
     opponentContext: opponent,
-    handednessMatchup: profile.handednessMatchup || "",
+    opponentStrikeoutRate: finiteNumber(opponent.strikeoutsPerGame),
+    handednessMatchup,
+    handednessBoost,
     hasGameLogs,
     hasCoreRates,
     hasOpponent,
     hasWorkload,
+    verifiedSource,
     startRows,
     statValues,
+    startCount: statValues.length,
   };
 }
 
 export function hasVerifiedPitcherGameLogs(data = {}) {
   return Boolean(data.hasGameLogs && data.hasCoreRates && (data.statValues?.length >= 3 || data.last5Average != null));
+}
+
+/** Strict verified check for Pitcher Strikeouts — requires MLB game logs. */
+export function hasVerifiedStrikeoutGameLogs(data = {}, profile = {}) {
+  return Boolean(
+    data.verifiedSource &&
+      data.hasGameLogs &&
+      data.last5Average != null &&
+      data.seasonAverage != null &&
+      data.startCount >= 3 &&
+      !profile.sparse &&
+      !profile.fallback
+  );
+}
+
+export function computeOpponentKAdjustment(data = {}) {
+  const core = data.last5Average != null && data.seasonAverage != null
+    ? data.last5Average * 0.54 + data.seasonAverage * 0.46
+    : data.last5Average ?? data.seasonAverage;
+  const oppK = finiteNumber(data.opponentContext?.strikeoutsPerGame ?? data.opponentStrikeoutRate);
+  if (core == null || oppK == null) return { adjustment: null, oppRate: null };
+  const leagueK = 8.4;
+  const oppRate = round(core * (1 + ((oppK - leagueK) / leagueK) * 0.35), 2);
+  return { adjustment: round(oppRate - core, 2), oppRate, core };
 }

@@ -117,6 +117,7 @@ import {
   computeDirectionalEdge,
 } from "../src/utils/manualPropScoring.js";
 import { projectPitcherStrikeouts, DATA_STATUS } from "../src/modules/mlbProjectionEngine.js";
+import { VERIFIED_PROJECTION_LABEL } from "../src/modules/projectionBreakdown.js";
 import { computePitcherEdge, computePitcherHitChance } from "../src/modules/scoringEngine.js";
 
 function parseJsonEnvelope(text, source) {
@@ -1109,21 +1110,31 @@ const kProjection = projectPitcherStrikeouts(
     last5Average: 6.3,
     seasonAverage: 5.9,
     hasGameLogs: true,
+    source: "MLB StatsAPI game logs",
+    statSources: ["MLB"],
     gradingRows: [
       { stat: { strikeOuts: 7, inningsPitched: "6.0", numberOfPitches: 95, gamesStarted: 1 } },
       { stat: { strikeOuts: 6, inningsPitched: "5.2", numberOfPitches: 88, gamesStarted: 1 } },
+      { stat: { strikeOuts: 8, inningsPitched: "5.1", numberOfPitches: 91, gamesStarted: 1 } },
     ],
   },
   { opponentContext: { strikeoutsPerGame: 9.1 } }
 );
 assert.ok(kProjection.projectedValue > 0);
-assert.ok(Array.isArray(kProjection.projectionBreakdown) && kProjection.projectionBreakdown.length >= 5);
-assert.ok(kProjection.dataStatus === DATA_STATUS.VERIFIED || kProjection.dataStatus === DATA_STATUS.PARTIAL);
-assert.ok(kProjection.projectionBreakdown.some((row) => row.label === "Last 5 avg"));
+assert.equal(kProjection.projectionLabel, VERIFIED_PROJECTION_LABEL);
+assert.ok(kProjection.projectionBreakdown.some((row) => row.label === "Last 5 Avg Ks"));
+assert.ok(kProjection.projectionBreakdown.some((row) => row.label === "Season Avg Ks"));
+assert.ok(kProjection.projectionBreakdown.some((row) => row.label === "Projected Innings"));
 assert.equal(computePitcherEdge(6.2, 6.5, "over"), -0.3);
 assert.equal(computePitcherEdge(6.8, 6.5, "over"), 0.3);
 const fallbackHit = computePitcherHitChance({ edge: 0.2, volatility: { tier: "LOW" }, confidence: 52, isFallback: true });
 assert.ok(fallbackHit >= 35 && fallbackHit <= 65);
+const unverifiedK = projectPitcherStrikeouts(
+  { statType: "Pitcher Strikeouts", line: 6.5, sport: "MLB" },
+  { sparse: true, last5Average: 6.3 }
+);
+assert.equal(unverifiedK.projectedValue, null);
+assert.equal(unverifiedK.projectionLabel, DATA_STATUS.FALLBACK);
 
 const topTwo = selectManualTopPicks([demonHrr, goblinHit, nbaAst], 2);
 assert.equal(topTwo.length, 2);

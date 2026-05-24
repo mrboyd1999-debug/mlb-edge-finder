@@ -3936,6 +3936,7 @@ function scoreDFSProp(prop, context) {
   const isFallbackProjection = Boolean(statModel.isFallbackProjection);
   const dataStatus = statModel.dataStatus || null;
   const projectionConfidence = statModel.projectionConfidence ?? null;
+  const isVerifiedProjection = Boolean(statModel.isVerifiedProjection);
   if (!Number.isFinite(projection) && verifiedStats) {
     if (Number.isFinite(enriched?.last5Average)) {
       projection = enriched.last5Average;
@@ -4339,6 +4340,7 @@ function scoreDFSProp(prop, context) {
     isFallbackProjection,
     dataStatus: statModel.dataStatus || null,
     projectionConfidence: statModel.projectionConfidence ?? null,
+    isVerifiedProjection,
     statProfileSource: enriched?.source || "",
     statEnrichmentSources: enriched?.statSources || [],
     fallbackProfile: profileIsFallback,

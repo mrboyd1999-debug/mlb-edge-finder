@@ -5,11 +5,13 @@ import { buildRealProjection, hasRealStatInputs } from "../services/realProjecti
 import {
   hasMlbPitcherStatInputs,
   isMlbPitcherMarket,
+  isStrikeoutMarket,
   projectMlbPitcherProp,
+  projectPitcherStrikeouts,
   DATA_STATUS,
 } from "../modules/mlbProjectionEngine.js";
 import { scorePitcherManualProp } from "../modules/scoringEngine.js";
-import { buildFallbackBreakdown } from "../modules/projectionBreakdown.js";
+import { buildFallbackBreakdown, VERIFIED_PROJECTION_LABEL } from "../modules/projectionBreakdown.js";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -215,6 +217,9 @@ export function computeImpliedHitChance({
 
 export function manualScoringModeLabel(liveScored = null, isFallback = false) {
   if (isFallback) return "Estimated grade";
+  if (liveScored?.isVerifiedProjection || liveScored?.projectionLabel === VERIFIED_PROJECTION_LABEL) {
+    return "Verified MLB projection";
+  }
   const source = String(liveScored?.projectionSource || "").toLowerCase();
   if (source && source !== "missing" && source !== "manual-dynamic" && source !== "manual-fallback" && source !== "manual-offline") {
     return "Live projection";
@@ -508,8 +513,33 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
   const sportKey = normalizeSportKey(sport);
   const marketKey = canonicalMarketKey(statType);
   const isPitcherProp = sportKey === "MLB" && isMlbPitcherMarket(statType);
+  const isStrikeoutProp = sportKey === "MLB" && isStrikeoutMarket(statType);
 
-  if (isPitcherProp && mergedProfile && hasMlbPitcherStatInputs(mergedProfile)) {
+  if (isStrikeoutProp && mergedProfile) {
+    const strikeoutData = projectPitcherStrikeouts(
+      {
+        sport,
+        statType,
+        line,
+        playerName: input.playerName,
+        opponent: input.opponent,
+        team: input.team,
+        side: pick,
+        source,
+      },
+      mergedProfile,
+      { opponentContext: mergedProfile.opponentContext }
+    );
+    if (strikeoutData && Number.isFinite(strikeoutData.projectedValue)) {
+      fairLine = strikeoutData.projectedValue;
+      projectionBreakdown = strikeoutData.projectionBreakdown || [];
+      projectionLabel = strikeoutData.projectionLabel;
+      projectionSource = strikeoutData.projectionSource;
+      isFallbackProjection = strikeoutData.isFallbackProjection;
+      dataStatus = strikeoutData.dataStatus;
+      projectionConfidence = strikeoutData.projectionConfidence;
+    }
+  } else if (isPitcherProp && mergedProfile && hasMlbPitcherStatInputs(mergedProfile)) {
     const pitcher = projectMlbPitcherProp(
       {
         sport,
@@ -574,7 +604,7 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
   let confidence;
   let impliedHitChance;
 
-  if (isPitcherProp) {
+  if (isStrikeoutProp || isPitcherProp) {
     const pitcherScore = scorePitcherManualProp({
       projection: fairLine,
       line,
@@ -649,6 +679,7 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
     projectionLabel,
     projectionSource: projectionSource || "manual-dynamic",
     isFallbackProjection: Boolean(isFallbackProjection),
+    isVerifiedProjection: dataStatus === DATA_STATUS.VERIFIED || dataStatus === DATA_STATUS.PARTIAL,
     dataStatus: dataStatus || (isFallbackProjection ? DATA_STATUS.FALLBACK : null),
     projectionConfidence,
     manualVolatilityTier: volatility.tier,
@@ -683,6 +714,7 @@ export function mergeManualPropScoring(builtProp = {}, manualScore = {}, liveSco
     projectionBreakdown: manualScore.projectionBreakdown || liveScored?.projectionBreakdown || [],
     projectionLabel: manualScore.projectionLabel || liveScored?.projectionLabel || "Estimated fallback projection",
     isFallbackProjection: manualScore.isFallbackProjection ?? liveScored?.isFallbackProjection,
+    isVerifiedProjection: manualScore.isVerifiedProjection ?? liveScored?.isVerifiedProjection,
     dataStatus: manualScore.dataStatus || liveScored?.dataStatus || null,
     projectionConfidence: manualScore.projectionConfidence ?? liveScored?.projectionConfidence ?? null,
     analyzedAt: new Date().toISOString(),

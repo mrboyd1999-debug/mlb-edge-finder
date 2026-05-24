@@ -270,7 +270,7 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
           <strong style={{ fontSize: "11px" }}>{manualProp ? "Grade summary" : "Why this pick"}</strong>
           {manualProp && (prop.dataStatus || prop.projectionLabel) ? (
             <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "10px", color: prop.isFallbackProjection ? "#fcd34d" : "#86efac" }}>
-              {prop.dataStatus || prop.projectionLabel}
+              {prop.isVerifiedProjection ? "Verified MLB projection" : prop.dataStatus || prop.projectionLabel}
             </p>
           ) : null}
           <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "11px", lineHeight: 1.35 }}>{whyText}</p>
@@ -290,7 +290,7 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
             <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "3px", marginTop: "4px" }}>
               {prop.projectionBreakdown
                 .filter((row) => row.label !== "Projected Output" && row.label !== "Projected Ks" && row.label !== "Data status")
-                .slice(0, 8)
+                .slice(0, 10)
                 .map((row) => (
                   <MetricIf key={row.label} label={row.label} value={row.display ?? row.value} strong={/projected/i.test(row.label)} />
                 ))}
