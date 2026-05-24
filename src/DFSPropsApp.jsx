@@ -48,6 +48,7 @@ import {
 } from "./services/verifiedCacheFallback.js";
 import { normalizeGameStartTime } from "./utils/normalizeGameStartTime.js";
 import { inferSportFromText } from "./utils/sportMappings.js";
+import { hasMlbStatIndicator } from "./utils/underdogSportDetection.js";
 import {
   APP_SPORTS,
   isUnsupportedMarket,
@@ -173,6 +174,12 @@ import { writeLastGoodBoard, readLastGoodBoard, boardFromLastGood } from "./serv
 import { initRawResponseDebug, dumpDebugGlobals, recordProviderStatus, recordNormalizedProps } from "./utils/rawResponseDebug.js";
 import RawApiDebugPanel from "./components/RawApiDebugPanel.jsx";
 import { logLiveFetchResult, buildLiveFetchFailureSummary } from "./utils/liveFetchAudit.js";
+import {
+  buildGuaranteedBaseFeedDisplay,
+  ensureMlbSportOnProps,
+  logPipelinePropCounts,
+  mapRawToDisplayProps,
+} from "./utils/baseFeedPipeline.js";
 import { isSafeModeEnabled, SAFE_MODE_FALLBACK_MESSAGE, SAFE_MODE_LOADING_MESSAGE } from "./utils/safeMode.js";
 import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks, resolveSafeMlbStreakPicks } from "./utils/safeModePipeline.js";
 import {
@@ -418,6 +425,7 @@ function shouldSuppressCriticalUiMessage(message = "", props = [], sourceStatus 
   if (/recently verified cached mlb props/i.test(message)) return true;
   if (/live refresh paused during cooldown/i.test(message)) return true;
   if (/connected but no usable props parsed/i.test(message)) return true;
+  if (/no mlb props in feed|none matched mlb|0 mlb props/.test(message)) return true;
   if (prizePicksHasUsableProps(props, sourceStatus)) {
     if (/no verified sportsbook props/i.test(message)) return true;
     if (/try again after cooldown/i.test(message)) return true;
@@ -1312,7 +1320,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   });
   if (mergedProviderProps.length) {
     rawProps.length = 0;
-    rawProps.push(...mergedProviderProps);
+    rawProps.push(...ensureMlbSportOnProps(mergedProviderProps));
   } else {
     const sdioImmediate = await injectSportsDataIfProvidersEmpty({
       mergedCount: 0,
@@ -1331,7 +1339,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     sourceWarnings.unshift(PRIZEPICKS_RATE_LIMIT_MESSAGE);
   }
 
-  const scopedCoreRawProps = filterActiveSportProps([...rawProps]);
+  const scopedCoreRawProps = filterActiveSportProps(ensureMlbSportOnProps([...rawProps]));
   let coreDisplayProps = buildAllDisplayProps({
     prizePicksResult,
     underdogResult,
@@ -1355,6 +1363,12 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     coreDisplayProps = normalizePropsWithSource(coreDisplayProps);
   }
 
+  logPipelinePropCounts("post-merge", {
+    raw: rawProps.length,
+    normalized: coreDisplayProps.length,
+    filteredMlb: scopedCoreRawProps.length,
+  });
+
   if (typeof onCoreReady === "function" && (coreDisplayProps.length || scopedCoreRawProps.length)) {
     try {
       onCoreReady(
@@ -1370,10 +1384,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     }
   }
 
-  oddsApiPlayerResult = await oddsApiPromise;
-  applyOddsApiSourceState(oddsApiPlayerResult, sourceStatus, debugInfo);
-
-  const scopedRawProps = filterActiveSportProps(rawProps);
+  const scopedRawProps = filterActiveSportProps(ensureMlbSportOnProps(rawProps));
   if (MLB_ONLY_MODE && scopedRawProps.length !== rawProps.length) {
     console.info("[DFS Pipeline] MLB-only scope removed non-MLB props", {
       before: rawProps.length,
@@ -1391,17 +1402,51 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     Number(underdogResult?.props?.length || 0),
     rawProps.length
   );
-  let allDisplayProps = normalizePropsWithSource(
-    buildAllDisplayProps({
-      prizePicksResult,
-      underdogResult,
-      sport: fetchSport,
-      selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
-      oddsApi: oddsApiPlayerResult?.authDisabled ? [] : oddsApiPlayerResult?.props || [],
-    })
+  let allDisplayProps = buildGuaranteedBaseFeedDisplay({
+    rawProps,
+    underdogResult,
+    prizePicksResult,
+    fetchSport,
+    selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
+    oddsApi: [],
+  });
+
+  oddsApiPlayerResult = await oddsApiPromise.catch(() =>
+    emptyOddsApiResult({ timedOut: true, warnings: [ENRICHMENT_TIMEOUT_MESSAGE] })
   );
+  applyOddsApiSourceState(oddsApiPlayerResult, sourceStatus, debugInfo);
+  if (!allDisplayProps.length && oddsApiPlayerResult?.props?.length) {
+    allDisplayProps = normalizePropsWithSource(
+      buildAllDisplayProps({
+        prizePicksResult,
+        underdogResult,
+        sport: fetchSport,
+        selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
+        oddsApi: oddsApiPlayerResult.authDisabled ? [] : oddsApiPlayerResult.props || [],
+      })
+    );
+  }
+
   if (!allDisplayProps.length && rawProps.length) {
-    const sportsData = await enrichPropsWithSportsData(rawProps);
+    allDisplayProps = mapRawToDisplayProps(rawProps, {
+      fetchSport,
+      selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
+    });
+  }
+
+  logPipelinePropCounts("display-built", {
+    raw: rawProps.length,
+    normalized: allDisplayProps.length,
+    filteredMlb: scopedRawProps.length,
+    display: allDisplayProps.length,
+  });
+
+  if (!allDisplayProps.length && rawProps.length) {
+    const sportsData = await withFetchTimeout(
+      () => enrichPropsWithSportsData(rawProps),
+      Math.min(enrichmentTimeoutMs, 4000),
+      { label: "SportsDataIO optional enrich", fallback: () => ({ props: rawProps, warnings: [ENRICHMENT_TIMEOUT_MESSAGE], enrichedCount: 0 }) }
+    );
     if (sportsData.enrichedCount > 0 || sportsData.props.length) {
       rawProps.length = 0;
       rawProps.push(...normalizePropsWithSource(sportsData.props));
@@ -1582,6 +1627,27 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   debugInfo.pregameWindowHours = filterOptions.pregameWindowHours ?? DEFAULT_PREGAME_WINDOW_HOURS;
   if (shouldLogVerbose()) logPipelineAudit("board", pipelineAudit);
 
+  logPipelinePropCounts("post-filter", {
+    raw: rawProps.length,
+    normalized: allDisplayProps.length,
+    filteredMlb: workingNormalProps.length,
+    display: allDisplayProps.length,
+  });
+
+  if (!allDisplayProps.length && (usablePropsPool.length || canonicalProps.length || rawProps.length)) {
+    allDisplayProps = mapRawToDisplayProps(
+      usablePropsPool.length ? usablePropsPool : canonicalProps.length ? canonicalProps : rawProps,
+      {
+        fetchSport,
+        selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
+      }
+    );
+    if (allDisplayProps.length) {
+      pipelineFallback = true;
+      debugInfo.ingestionFallback = debugInfo.ingestionFallback || "filter-pipeline-recovery";
+    }
+  }
+
   if (!allDisplayProps.length) {
     const fallback = await resolveIngestionFallback({
       rawProps,
@@ -1616,6 +1682,23 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         debugInfo.ingestionFallback = restored.ingestionSource || "last-good-board";
         sourceStatus.SportsDataIO = sourceStatus.SportsDataIO || lastGood.sourceStatus?.SportsDataIO || "Connected";
       } else {
+        const baseFeed = buildGuaranteedBaseFeedDisplay({
+          rawProps,
+          underdogResult,
+          prizePicksResult,
+          fetchSport,
+          selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
+        });
+        if (baseFeed.length) {
+          allDisplayProps = baseFeed;
+          rawProps.length = 0;
+          rawProps.push(...baseFeed);
+          pipelineFallback = true;
+          workingActiveProps = filterActiveSportProps(allDisplayProps);
+          workingNormalProps = workingActiveProps.length ? workingActiveProps : allDisplayProps;
+          usablePropsPool = buildUsablePropsPool(allDisplayProps);
+          debugInfo.ingestionFallback = "base-feed-recovery";
+        } else {
     debugInfo.totals = {
       rawPropsLoaded: canonicalProps.length,
       upcomingSlateCount: pipelineAudit.upcomingSlate,
@@ -1659,8 +1742,14 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       debugInfo: attachDebugArtifacts(sanitizeDebugInfoForMlbOnly(debugInfo), pipelineAudit),
       pipelineAudit: coercePipelineAudit(pipelineAudit),
     };
+        }
       }
     }
+  }
+
+  if (!workingNormalProps.length && allDisplayProps.length) {
+    workingNormalProps = allDisplayProps;
+    workingActiveProps = allDisplayProps;
   }
 
   const backgroundJobs = [
@@ -1668,14 +1757,29 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     { label: "stats", run: () => fetchPlayerStats({ props: workingNormalProps }) },
     { label: "news", run: () => fetchInjuryNews({ props: workingNormalProps }) },
   ];
-  const settledBackground = await Promise.allSettled(
-    backgroundJobs.map((job) =>
-      withFetchTimeout(job.run, enrichmentTimeoutMs, {
-        label: job.label,
-        fallback: () => enrichmentBackgroundFallback(job.label),
-      })
-    )
-  );
+  const backgroundCapMs = Math.min(enrichmentTimeoutMs, 6000);
+  const settledBackground = await Promise.race([
+    Promise.allSettled(
+      backgroundJobs.map((job) =>
+        withFetchTimeout(job.run, backgroundCapMs, {
+          label: job.label,
+          fallback: () => enrichmentBackgroundFallback(job.label),
+        })
+      )
+    ),
+    new Promise((resolve) =>
+      setTimeout(
+        () =>
+          resolve(
+            backgroundJobs.map((job) => ({
+              status: "fulfilled",
+              value: enrichmentBackgroundFallback(job.label),
+            }))
+          ),
+        backgroundCapMs
+      )
+    ),
+  ]);
   const background = {
     comparisons: [],
     stats: new Map(),
@@ -1818,6 +1922,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   let displayProps = filterVerifiedSportsbookProps(
     [...qualBoards.ready, ...qualBoards.allDisplayable.filter((prop) => !qualBoards.ready.some((ready) => ready.id === prop.id))]
   ).slice(0, MAX_RANKED_PROPS);
+  if (!displayProps.length && allDisplayProps.length) {
+    displayProps = allDisplayProps.slice(0, MAX_RANKED_PROPS);
+  }
 
   pipelineStageCounts = buildPipelineStageReport({
     ...pipelineStageCounts,
@@ -1836,7 +1943,10 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   if (!qualifiedReadyProps.length && displayProps.length) {
     qualifiedReadyProps = sortDecisionBoard(displayProps).slice(0, RENDER_LIMITS.readyToBet);
   }
-  const acceptedPropsForRender = qualifiedReadyProps;
+  if (!qualifiedReadyProps.length && allDisplayProps.length) {
+    qualifiedReadyProps = allDisplayProps.slice(0, RENDER_LIMITS.readyToBet);
+  }
+  const acceptedPropsForRender = qualifiedReadyProps.length ? qualifiedReadyProps : allDisplayProps.slice(0, RENDER_LIMITS.readyToBet);
   const modelSignalMap = buildModelSignalMap(filterVerifiedSportsbookProps(qualBoards.allDisplayable));
   let streakProps = [];
 
@@ -2122,7 +2232,10 @@ export default function DFSPropsApp() {
       scopedBoard.readyProps ||
       [];
     if (!renderAccepted.length && boardProps.length) {
-      renderAccepted = boardProps.filter(isUpstreamAcceptedProp);
+      renderAccepted = boardProps.filter(isVerifiedSportsbookProp);
+    }
+    if (!renderAccepted.length && boardProps.length) {
+      renderAccepted = boardProps.slice(0, RENDER_LIMITS.readyToBet);
     }
     setQualifiedReadyProps(scopedBoard.qualifiedReadyProps || scopedBoard.readyProps || renderAccepted);
     setAcceptedPropsForRender(Array.isArray(renderAccepted) ? renderAccepted : []);
@@ -2235,7 +2348,7 @@ export default function DFSPropsApp() {
                 if (!autoRefresh) setLoading(false);
               },
             }),
-          10000,
+          45000,
           { fallback: null, label: "board-fetch" }
         );
         if (!result) {
@@ -2611,20 +2724,23 @@ export default function DFSPropsApp() {
     [visibleHistory]
   );
   const topMlbPlayBoard = useMemo(() => {
-    const liveInputCount =
-      (boardDisplayProps || []).filter((p) => !p.isDemoData).length +
-      (props || []).filter((p) => !p.isDemoData).length +
-      (parsedUnderdogProps || []).filter((p) => !p.isDemoData).length;
-    const fetchFailureReasons = buildLiveFetchFailureSummary(debugInfo?.sources || {});
+    const fetchFailureReasons = buildLiveFetchFailureSummary(debugInfo?.sources || {}, {
+      suppressWhenPrimaryLoaded: true,
+    });
+    const loadedPropCount = Math.max(
+      allDisplayProps.length,
+      (boardDisplayProps || []).filter((p) => !p.isDemoData).length
+    );
     const board = resolveTopMlbPlaySections(boardDisplayProps, props, parsedUnderdogProps, {
       sourceStatus,
       lastUpdated,
       debugInfo,
       fetchFailureReasons,
-      liveFetchFailed: liveInputCount === 0,
+      liveFetchFailed: loadedPropCount === 0,
       fetchTimedOut: /timed?\s*out|board fetch timed out/i.test(String(error || "")),
-      allSourcesEmpty: liveInputCount === 0,
+      allSourcesEmpty: loadedPropCount === 0,
     });
+    board.loadedPropCount = loadedPropCount;
     if (board.pipelineDebug) {
       board.pipelineDebug.apiKeys = {
         PrizePicks: "configured",
@@ -2634,7 +2750,7 @@ export default function DFSPropsApp() {
       };
     }
     return board;
-  }, [boardDisplayProps, props, parsedUnderdogProps, sourceStatus, lastUpdated, debugInfo, error]);
+  }, [boardDisplayProps, props, parsedUnderdogProps, sourceStatus, lastUpdated, debugInfo, error, allDisplayProps.length]);
   const curatedSportPicks = useMemo(() => {
     const primary = resolveMlbStreakPicks(
       streakSportBoards,
@@ -3340,6 +3456,7 @@ export default function DFSPropsApp() {
             fallbackLabel={topMlbPlayBoard.fallbackLabel}
             pipelineDebug={topMlbPlayBoard.pipelineDebug}
             fetchFailureReasons={topMlbPlayBoard.fetchFailureReasons}
+            loadedPropCount={topMlbPlayBoard.loadedPropCount || allDisplayProps.length}
             showDebugPanels={debugPanelsVisible}
             loading={loading}
             onOpen={setSelectedEvaluation}
@@ -5827,6 +5944,9 @@ function canonicalSportFromProp(prop) {
     return "Soccer";
   }
   if (prop?.sport && prop.sport !== "Other") return prop.sport;
+  const platform = String(prop?.platform || prop?.source || "").toLowerCase();
+  if (/prizepicks|underdog/.test(platform)) return "MLB";
+  if (hasMlbStatIndicator(prop?.statType || prop?.market || "")) return "MLB";
   return APP_SPORTS.Unsupported;
 }
 

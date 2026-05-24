@@ -7,7 +7,10 @@ import {
   MLB_RESEARCH_MARKET_LABELS,
   getSportDisabledReason,
   isSportActiveInApp,
+  resolvePropSport,
 } from "./mlbOnlyMode.js";
+import { inferMlbSportForProp } from "./baseFeedPipeline.js";
+import { isSupportedSportsbookSource } from "./propValidation.js";
 
 /** Human-readable approved markets (reference). Keys are canonical marketKey values. */
 export const APPROVED_MARKETS = MLB_ONLY_MODE
@@ -71,19 +74,29 @@ export function marketKeyForProp(prop = {}) {
 }
 
 export function isApprovedMarket(prop = {}) {
-  if (MLB_ONLY_MODE && !isSportActiveInApp(prop.sport)) return false;
-  const sport = resolveSportBucket(prop.sport);
+  const resolvedSport = resolvePropSport(prop) || inferMlbSportForProp(prop);
+  if (MLB_ONLY_MODE && !isSportActiveInApp(resolvedSport)) return false;
+  if (
+    MLB_ONLY_MODE &&
+    resolvedSport === "MLB" &&
+    isSupportedSportsbookSource(prop) &&
+    Boolean(prop.statType || prop.market || prop.propType)
+  ) {
+    return true;
+  }
+  const sport = resolveSportBucket(resolvedSport);
   const registry = APPROVED_MARKET_KEYS[sport];
   if (!registry) return false;
   return registry.has(marketKeyForProp(prop));
 }
 
 export function getApprovedMarketRejectReason(prop = {}) {
-  const disabledReason = getSportDisabledReason(prop.sport);
+  const resolvedSport = resolvePropSport(prop) || inferMlbSportForProp(prop);
+  const disabledReason = getSportDisabledReason(resolvedSport);
   if (disabledReason) return disabledReason;
   if (isApprovedMarket(prop)) return "";
   const label = prop.marketLabel || prop.statType || marketKeyForProp(prop);
-  return `unapproved market: ${label} (${prop.sport || "Unknown"})`;
+  return `unapproved market: ${label} (${resolvedSport || "Unknown"})`;
 }
 
 export function filterApprovedMarkets(props = [], audit = null, recordFilterReason = null) {
@@ -105,7 +118,7 @@ export function filterApprovedMarketsOnly(props = []) {
 export function applySportProcessingLimits(props = []) {
   const buckets = new Map();
   props.forEach((prop) => {
-    const sport = String(prop.sport || "Other");
+    const sport = resolvePropSport(prop) || inferMlbSportForProp(prop);
     if (MLB_ONLY_MODE && sport !== "MLB") return;
     if (!buckets.has(sport)) buckets.set(sport, []);
     buckets.get(sport).push(prop);

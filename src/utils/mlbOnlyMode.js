@@ -1,5 +1,8 @@
 import { APP_SPORTS } from "./marketClassification.js";
 import { canonicalMarketKey } from "./marketNormalization.js";
+import { normalizeSportLabel } from "./sportMappings.js";
+import { lockSportFromStatType } from "./propStatSportLock.js";
+import { hasMlbStatIndicator, resolvePropSportLabel } from "./underdogSportDetection.js";
 
 /**
  * Multi-sport decision engine (MLB primary, NBA/WNBA/Tennis/Soccer enabled).
@@ -74,12 +77,16 @@ const DISABLED_SPORTS = new Set([
   APP_SPORTS.NHL,
 ]);
 
-function normalizeSportLabel(value = "") {
-  return String(value || "").trim();
-}
-
 export function resolvePropSport(prop = {}) {
-  return normalizeSportLabel(prop.sport || prop.classifiedSport || prop.league || "");
+  const labeled =
+    normalizeSportLabel(
+      resolvePropSportLabel(prop) || prop.classifiedSport || prop.sport || prop.league || "",
+      prop.league || ""
+    ) || normalizeSportLabel(prop.sport || "", prop.league || "");
+  if (labeled === MLB_SPORT) return MLB_SPORT;
+  const statType = prop.statType || prop.market || prop.propType || "";
+  if (lockSportFromStatType(statType) === MLB_SPORT || hasMlbStatIndicator(statType)) return MLB_SPORT;
+  return labeled || normalizeSportLabel(prop.sport || "", prop.league || "");
 }
 
 export function isSportActiveInApp(sport = "") {

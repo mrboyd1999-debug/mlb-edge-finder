@@ -109,6 +109,7 @@ export function inferSportFromText(text = "", context = {}) {
   if (compact.includes("mlb") || key.includes("baseball") || compact.includes("baseballmlb") || key.includes("baseball_mlb")) {
     return "MLB";
   }
+  if (key.includes("major league baseball") || compact.includes("majorleaguebaseball")) return "MLB";
   if (key.includes("nhl") || key.includes("hockey")) return "NHL";
   if (key.includes("ncaaf") || key.includes("college football")) return "NCAAF";
   if (key.includes("nfl") && !key.includes("soccer")) return "NFL";

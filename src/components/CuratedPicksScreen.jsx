@@ -14,6 +14,7 @@ function CuratedPicksScreen({
   fallbackLabel = "",
   pipelineDebug = null,
   fetchFailureReasons = [],
+  loadedPropCount = 0,
   showDebugPanels = false,
   onSectionError,
 }) {
@@ -21,7 +22,12 @@ function CuratedPicksScreen({
 
   return (
     <div className="curated-picks-screen curated-picks-mlb-only">
-      <LiveStatusHeader debug={pipelineDebug} failureReasons={fetchFailureReasons} loading={loading} />
+      <LiveStatusHeader
+        debug={pipelineDebug}
+        failureReasons={fetchFailureReasons}
+        loading={loading}
+        loadedPropCount={loadedPropCount}
+      />
       {showDebugPanels ? <PipelineDebugBar debug={pipelineDebug} /> : null}
       {usedFallback && fallbackLabel ? (
         <p style={styles.pipelineDebugFallback} role="alert">
@@ -32,11 +38,13 @@ function CuratedPicksScreen({
         <div style={styles.emptyStateCompact}>Loading MLB props…</div>
       ) : !hasSections ? (
         <div style={styles.emptyStateCompact}>
-          {fetchFailureReasons?.length
-            ? fetchFailureReasons.join(" · ")
-            : waitingForProjections
-              ? "Loading projections…"
-              : "No live MLB props available"}
+          {loadedPropCount > 0
+            ? `${loadedPropCount} props loaded — adjust filters to view picks.`
+            : fetchFailureReasons?.length
+              ? fetchFailureReasons.join(" · ")
+              : waitingForProjections
+                ? "Loading projections…"
+                : "No live MLB props available"}
         </div>
       ) : (
         sections.map((section) => (

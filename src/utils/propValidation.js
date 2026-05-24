@@ -3,7 +3,8 @@ import { isParserMergeComboBug } from "./comboMarkets.js";
 import { isOverseasOrPlaceholderProp, OVERSEAS_BLOCKED_PATTERN, getIngestionPropRejectReason } from "./ingestionFilter.js";
 import { isUsableParsedProp, normalizePropShape } from "./propShape.js";
 import { lockSportFromStatType, sportStatMismatchReason } from "./propStatSportLock.js";
-import { resolvePropSportLabel } from "./underdogSportDetection.js";
+import { resolvePropSportLabel, hasMlbStatIndicator } from "./underdogSportDetection.js";
+import { normalizeSportLabel } from "./sportMappings.js";
 import { computeAbsoluteProjectionEdge } from "./projectionQuality.js";
 import { recommendSideFromProjection } from "./propSanity.js";
 
@@ -37,7 +38,7 @@ function normalizeBadge(value = "") {
   return String(value || "").toUpperCase().trim();
 }
 
-function isSupportedSportsbookSource(prop = {}) {
+export function isSupportedSportsbookSource(prop = {}) {
   const platform = normalizePlatform(prop.platform);
   if (VERIFIED_SPORTSBOOK_PLATFORMS.has(platform)) return true;
   const source = String(prop.source || prop.feedSource || "").toLowerCase();
@@ -197,7 +198,15 @@ export function validatePropRejectReason(prop = {}) {
   const line = Number(shaped.line);
   if (!Number.isFinite(line) || line <= 0) return "invalid line";
   if (!(shaped.market || shaped.statType)) return "missing market/stat";
-  if (!(shaped.sport || shaped.league)) return "missing sport/league";
+  let sportOrLeague = shaped.sport || shaped.league;
+  if (!sportOrLeague) {
+    sportOrLeague =
+      normalizeSportLabel(shaped.sport, shaped.league) ||
+      lockSportFromStatType(shaped.market || shaped.statType) ||
+      (hasMlbStatIndicator(shaped.market || shaped.statType) ? "MLB" : "");
+  }
+  if (!sportOrLeague && isSupportedSportsbookSource(shaped)) sportOrLeague = "MLB";
+  if (!sportOrLeague) return "missing sport/league";
   if (!String(shaped.source || shaped.platform || "").trim()) return "missing source";
   return "";
 }

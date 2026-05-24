@@ -277,6 +277,16 @@ export function resolveTopMlbPlaySections(
     logPipelineStage("rank.liveLine", { pool: liveLinePool.length, ranked: ranked.length });
   }
 
+  if (!ranked.length && displayProps.length) {
+    const baseFeedPool = displayProps.filter(isVerifiedSportsbookProp).slice(0, 150);
+    ranked = rankPool(baseFeedPool, { relaxed: true, liveLine: true });
+    if (ranked.length) {
+      usedFallback = true;
+      fallbackLabel = "Base Feed Projection";
+    }
+    logPipelineStage("rank.baseFeed", { pool: baseFeedPool.length, ranked: ranked.length });
+  }
+
   const sportsDataProps = mergedInput.filter(isSportsDataProjectionProp);
   if (!ranked.length && sportsDataProps.length) {
     ranked = rankPool(sportsDataProps, { relaxed: true });
@@ -378,23 +388,23 @@ export function resolveTopMlbPlaySections(
     rejectedAudit: audit,
     sourceStatus,
     lastUpdated,
-    usedFallback: isDemoBoard,
-    fallbackLabel: isDemoBoard ? fallbackLabel : "",
-    livePropCount: countLiveUnifiedProps(ranked),
+    usedFallback: usedFallback || isDemoBoard,
+    fallbackLabel: usedFallback ? fallbackLabel : "",
+    livePropCount: countLiveUnifiedProps(ranked) || displayProps.length,
     fetchFailureReasons,
     isLive: liveVerifiedCount > 0 && !isDemoBoard,
   });
 
   logPipelineStage("render.final", {
     sections: nonEmptySections.map((s) => ({ id: s.id, count: s.picks.length })),
-    usedFallback: isDemoBoard,
+    usedFallback: usedFallback || isDemoBoard,
     liveVerified: liveVerifiedCount,
   });
 
   return {
     waitingForProjections: false,
-    usedFallback: isDemoBoard,
-    fallbackLabel: isDemoBoard ? fallbackLabel : "",
+    usedFallback: usedFallback || isDemoBoard,
+    fallbackLabel: usedFallback ? fallbackLabel : "",
     fetchFailureReasons,
     isLive: liveVerifiedCount > 0 && !isDemoBoard,
     pipelineDebug,

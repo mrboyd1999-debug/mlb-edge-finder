@@ -1,5 +1,7 @@
 import { APP_SPORTS } from "./marketClassification.js";
 import { MLB_ONLY_MODE, shouldSilenceIngestionReject } from "./mlbOnlyMode.js";
+import { lockSportFromStatType } from "./propStatSportLock.js";
+import { hasMlbStatIndicator } from "./underdogSportDetection.js";
 import {
   PRIZEPICKS_LEAGUE_SPORTS,
   inferSportFromText,
@@ -135,9 +137,17 @@ export function getIngestionRejectReason(context = {}) {
 }
 
 export function buildContextFromProp(prop = {}) {
+  let sport = prop.sport || prop.classifiedSport;
+  if (!sport || sport === "Other") {
+    const statType = prop.statType || prop.market || prop.propType || "";
+    const fromStat = lockSportFromStatType(statType);
+    if (fromStat === APP_SPORTS.MLB || hasMlbStatIndicator(statType)) sport = APP_SPORTS.MLB;
+    const platform = String(prop.platform || prop.source || "").toLowerCase();
+    if (!sport && /prizepicks|underdog/.test(platform)) sport = APP_SPORTS.MLB;
+  }
   return {
     platform: prop.platform,
-    sport: prop.sport || prop.classifiedSport,
+    sport,
     league: prop.league,
     leagueId: prop.leagueId,
     leagueName: prop.leagueName || prop.league,

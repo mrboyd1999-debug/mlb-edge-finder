@@ -8,23 +8,22 @@ function formatTime(value = "") {
   return text;
 }
 
-function LiveStatusHeader({ debug = null, failureReasons = [], loading = false }) {
+function LiveStatusHeader({ debug = null, failureReasons = [], loading = false, loadedPropCount = 0 }) {
   if (loading) return null;
   if (!debug) return null;
 
   const sources = debug.sourceStatus || {};
-  const activeSources = Object.entries(sources)
-    .filter(([, status]) => /connected|live|ok|partial|cached/i.test(String(status)))
-    .map(([name]) => name);
+  const displayedCount = loadedPropCount || (debug.livePropCount ?? debug.rankedCount ?? debug.parsedCount ?? 0);
+  const visibleFailures = displayedCount > 0 ? [] : failureReasons;
 
   return (
     <section className="live-status-header" style={styles.liveStatusHeader} aria-label="Live data status">
       <div style={styles.liveStatusRow}>
         <span style={styles.liveStatusPill}>
-          {debug.isLive ? "🟢 Live" : debug.usedFallback ? "🟡 Fallback" : "🔴 Offline"}
+          {displayedCount > 0 ? "🟢 Live" : debug.isLive ? "🟢 Live" : debug.usedFallback ? "🟡 Fallback" : "🔴 Offline"}
         </span>
         <span style={styles.liveStatusMeta}>Updated {formatTime(debug.lastSuccessfulRefresh)}</span>
-        <span style={styles.liveStatusMeta}>{debug.livePropCount ?? debug.rankedCount ?? 0} props</span>
+        <span style={styles.liveStatusMeta}>{displayedCount} props loaded</span>
       </div>
       <div style={styles.liveStatusSources}>
         {Object.entries(sources).map(([name, status]) => (
@@ -33,9 +32,9 @@ function LiveStatusHeader({ debug = null, failureReasons = [], loading = false }
           </span>
         ))}
       </div>
-      {failureReasons?.length ? (
+      {visibleFailures?.length ? (
         <p style={styles.liveStatusFailure} role="alert">
-          {failureReasons.join(" · ")}
+          {visibleFailures.join(" · ")}
         </p>
       ) : null}
     </section>

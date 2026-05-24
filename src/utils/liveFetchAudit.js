@@ -34,11 +34,25 @@ export function resolveLiveFetchFailureReason(sourceMeta = {}) {
   return "";
 }
 
-export function buildLiveFetchFailureSummary(sources = {}) {
+export function buildLiveFetchFailureSummary(sources = {}, { suppressWhenPrimaryLoaded = false } = {}) {
   const reasons = [];
+  const ppUsable = Number(sources?.PrizePicks?.usablePropsCount ?? sources?.PrizePicks?.propsAfterParsing ?? 0);
+  const udUsable = Number(sources?.Underdog?.usablePropsCount ?? sources?.Underdog?.propsAfterParsing ?? 0);
+  const primaryLoaded = ppUsable + udUsable > 0;
   Object.entries(sources || {}).forEach(([name, meta]) => {
     const reason = resolveLiveFetchFailureReason(meta);
-    if (reason) reasons.push(`${name}: ${reason}`);
+    if (!reason) return;
+    if (suppressWhenPrimaryLoaded || primaryLoaded) {
+      if (/no mlb props|none matched mlb|0 mlb props|empty response|parser returned 0 props/i.test(reason)) {
+        if (name !== "PrizePicks" && name !== "Underdog") return;
+        const usable = Number(meta?.usablePropsCount ?? meta?.propsAfterParsing ?? 0);
+        if (usable > 0) return;
+      }
+      if ((name === "The Odds API" || name === "SportsDataIO") && /invalid|timeout|failed|empty|no props/i.test(reason)) {
+        return;
+      }
+    }
+    reasons.push(`${name}: ${reason}`);
   });
   return reasons;
 }
