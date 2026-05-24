@@ -4,7 +4,7 @@
  */
 
 import { withNormalizedSource } from "./normalizeSource.js";
-import { detectUnderdogSport, isMlbUnderdogPropStrict, isNbaUnderdogProp, resolvePropSportLabel } from "./underdogSportDetection.js";
+import { detectUnderdogSport, attachSportInference, inferSportFromProp } from "./underdogSportDetection.js";
 import { resolveUnderdogCategory } from "./underdogRowCard.js";
 import { normalizeGameStartTime } from "./normalizeGameStartTime.js";
 
@@ -352,18 +352,23 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
   const hasProjection = Number.isFinite(projection);
   const overUnder = sideFromRaw(raw, line, hasProjection ? projection : line);
   const edge = computeProjectionEdge(line, hasProjection ? projection : line, overUnder);
-  const resolvedSport = resolvePropSportLabel({
-    sport,
-    statType,
-    player,
-    playerName: player,
-    team,
-    opponent,
-    matchup,
-    normalizedSource: "underdog",
-    raw,
-    _lookup: lookup,
-  }) || sport;
+  const sportInference = inferSportFromProp(
+    {
+      sport,
+      statType,
+      player,
+      playerName: player,
+      team,
+      opponent,
+      matchup,
+      normalizedSource: "underdog",
+      raw,
+      _lookup: lookup,
+      selectedSportTab: selectedSport,
+    },
+    { selectedSport }
+  );
+  const resolvedSport = sportInference.sport || sport || "Unknown";
   const oddsType = inferOddsType(raw);
   const startTime = resolveStartTimeFromRaw(raw, lookup);
   const streakOptions = resolveStreakOptionsFromRaw(raw);
@@ -388,6 +393,9 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
     opponent,
     sport: resolvedSport,
     league: resolvedSport === "MLB" ? "MLB" : resolvedSport,
+    inferredSport: sportInference.sport || "",
+    sportInferenceReason: sportInference.reason || "",
+    classifiedSport: resolvedSport,
     underdogCategory,
     startTime,
     gameTime: startTime,

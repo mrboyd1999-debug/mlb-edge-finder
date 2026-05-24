@@ -14,6 +14,7 @@ const UNDER_PREFERRED_MARKETS = new Set([
 ]);
 
 const UNDER_PREFERENCE_BOOST = 8;
+const UNDER_MARKET_BONUS = 8;
 const STRONG_OVER_EDGE = 1.25;
 
 function finiteOr(value, fallback = 0) {
@@ -63,8 +64,8 @@ export function computeBestPlayRankScore(prop = {}) {
   if (normalizeSource(prop) === "prizepicks") score += 1;
 
   if (isUnderSide(prop)) {
-    if (projection < line) score += 4;
-    if (isUnderPreferredMarket(prop)) score += UNDER_PREFERENCE_BOOST;
+    score += UNDER_PREFERENCE_BOOST;
+    if (isUnderPreferredMarket(prop)) score += UNDER_MARKET_BONUS;
   } else if (isOverSide(prop)) {
     if (edge < STRONG_OVER_EDGE) score -= 5;
     else if (edge >= STRONG_OVER_EDGE * 2) score += 2;

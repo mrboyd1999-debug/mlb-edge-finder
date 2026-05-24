@@ -1,6 +1,6 @@
 /**
- * Underdog sport detection — ignores feed-type tokens (player_prop, core, etc.).
- * NBA signals win over MLB when both could apply (e.g. Fantasy Score).
+ * Underdog sport detection — never treats feed-type tokens (player_prop, core, etc.) as leagues.
+ * MLB indicators are evaluated before NBA. Unknown props are never defaulted to NBA.
  */
 
 import {
@@ -21,29 +21,31 @@ export const INVALID_SPORT_TOKENS = new Set([
   "unknown",
 ]);
 
-const MLB_TEAM_ABBRS = new Set([
-  "LAD", "MIL", "STL", "CIN", "SEA", "KC", "AZ", "ARI", "COL", "ATL", "WSH", "TOR", "PIT", "BAL", "DET", "CLE", "PHI",
-  "NYY", "NYM", "BOS", "CHC", "CWS", "HOU", "LAA", "MIA", "MIN", "OAK", "SD", "SF", "TB", "TEX", "ATH",
-]);
-
-const NBA_ONLY_TEAM_ABBRS = new Set([
-  "BKN", "CHA", "DAL", "DEN", "GSW", "IND", "LAC", "LAL", "MEM", "NOP", "NYK", "OKC", "ORL", "PHX", "POR", "SAC", "SAS", "UTA", "WAS",
-]);
-
-const MLB_PLAYER_HINTS =
-  /\b(ohtani|burleson|rodriguez|marte|acuña|acuna|naylor|herrera|varsho|abrams|judge|trout|betts|freeman|tatis|soto|harper|altuve|devers|bichette|guerrero|correa|semien|seager|alvarez|witt|julio|perdomo)\b/i;
-
-const NBA_PLAYER_HINTS =
-  /\b(wembanyama|gilgeous-alexander|shai|doncic|antetokounmpo|tatum|curry|lebron|jokic|embiid|luka|durant|booker|edwards|brunson|haliburton|maxey|morant|adebayo|banchero|holmgren|siakam|randle|kyrie|harden|kawhi|zion|lamelo|trae young)\b/i;
-
-const MLB_MARKET_PATTERN =
-  /hits?\s*(\+|and)?\s*runs?\s*(\+|and)?\s*rbis?|hits?\s*\+\s*runs?|total\s*bases?|home\s*runs?|pitcher\s*strikeouts?|earned\s*runs?|walks?\s*allowed|\brbis?\b|\bdoubles?\b|\bsingles?\b/i;
-
-const BASKETBALL_MARKET_PATTERN =
-  /\b(points?|rebounds?|assists?|pra|3pm|threes?|steals?|blocks?|double double|triple double|fantasy(?:\s+score|\s+points)?)\b/i;
-
 export const MLB_SPORT_MISMAP_MESSAGE =
   "Parsed Underdog props exist, but none mapped to MLB. Check sport mapper.";
+
+const MLB_TEAMS = new Set([
+  "LAD", "MIL", "ATL", "WSH", "TOR", "PIT", "STL", "CIN", "SEA", "KC", "AZ", "ARI", "COL", "DET", "BAL",
+  "NYY", "NYM", "BOS", "CHC", "CWS", "HOU", "LAA", "MIA", "MIN", "OAK", "SD", "SF", "TB", "TEX", "CLE", "PHI", "ATH",
+]);
+
+const NBA_TEAMS = new Set(["OKC", "SAS", "LAL", "BOS", "NYK", "CLE", "DAL", "DEN", "SAC"]);
+
+const MLB_PLAYERS = [
+  "ohtani", "acuña", "acuna", "varsho", "springer", "reynolds", "abrams", "marte", "burleson", "naylor", "rodriguez",
+  "judge", "trout", "betts", "freeman", "tatis", "soto", "harper", "altuve", "devers", "herrera", "perdomo",
+];
+
+const NBA_PLAYERS = [
+  "wembanyama", "sga", "shai", "gilgeous-alexander", "fox", "jokic", "luka", "doncic", "curry", "lebron", "tatum",
+  "antetokounmpo", "embiid", "durant", "booker", "edwards", "brunson", "haliburton", "maxey", "morant",
+];
+
+const MLB_STAT_PATTERN =
+  /\b(hits?\s*(\+|and)?\s*runs?\s*(\+|and)?\s*rbis?|hits?\s*\+\s*runs?|total\s*bases?|home\s*runs?|\brbis?\b|\bdoubles?\b|\bsingles?\b|\bruns?\b|strikeouts?|earned\s*runs?|walks?\s*allowed)\b/i;
+
+const NBA_STAT_PATTERN =
+  /\b(points?|rebounds?|assists?|pra|3pm|threes?|steals?|blocks?|double double|triple double)\b/i;
 
 function attrsOf(raw = {}) {
   return raw.attributes || raw.over_under || raw.overUnder || raw;
@@ -62,8 +64,7 @@ export function isInvalidSportToken(value = "") {
 
 function slugSport(value = "") {
   if (isInvalidSportToken(value)) return "";
-  const compact = sportToken(value);
-  return UNDERDOG_SPORT_SLUGS[compact] || "";
+  return UNDERDOG_SPORT_SLUGS[sportToken(value)] || "";
 }
 
 function canonicalizeSport(value = "", league = "") {
@@ -80,51 +81,42 @@ function tokenizeAbbrs(text = "") {
     .match(/\b[A-Z]{2,4}\b/g) || [];
 }
 
-function contextBlob(context = {}) {
-  return [
-    context.statType,
-    context.player,
-    context.team,
-    context.opponent,
-    context.matchup,
-    context.eventTitle,
-  ]
-    .filter(Boolean)
-    .join(" ");
+function countTeamHits(text = "", teamSet = new Set()) {
+  return tokenizeAbbrs(text).filter((t) => teamSet.has(t)).length;
 }
 
-export function hasMlbMarketSignal(...parts) {
+function playerMatches(name = "", hints = []) {
+  const lower = String(name || "").toLowerCase();
+  return hints.some((hint) => lower.includes(hint));
+}
+
+export function hasMlbStatIndicator(...parts) {
   const blob = parts.filter(Boolean).join(" ");
   if (!blob) return false;
-  if (BASKETBALL_MARKET_PATTERN.test(blob) && !MLB_MARKET_PATTERN.test(blob)) return false;
-  if (MLB_MARKET_PATTERN.test(blob)) return true;
+  if (MLB_STAT_PATTERN.test(blob)) return true;
   const compact = compactMarketKey(blob);
   return (
+    compact.includes("hits") ||
+    compact.includes("runs") ||
+    compact.includes("rbis") ||
     compact.includes("hitsrunsrbis") ||
     compact.includes("hitsrunsandrbis") ||
     compact.includes("totalbases") ||
     compact.includes("homerun") ||
     compact.includes("strikeout") ||
     compact.includes("earnedrun") ||
-    compact.includes("walksallowed")
+    compact.includes("double") ||
+    compact.includes("single")
   );
+}
+
+export function hasMlbMarketSignal(...parts) {
+  return hasMlbStatIndicator(...parts);
 }
 
 export function hasBasketballMarketSignal(...parts) {
   const blob = parts.filter(Boolean).join(" ");
-  return Boolean(blob && BASKETBALL_MARKET_PATTERN.test(blob));
-}
-
-function sportFromMlbTeams(team = "", opponent = "", matchup = "") {
-  const tokens = [...tokenizeAbbrs(team), ...tokenizeAbbrs(opponent), ...tokenizeAbbrs(matchup)];
-  if (!tokens.length) return "";
-  const mlbHits = tokens.filter((t) => MLB_TEAM_ABBRS.has(t)).length;
-  const nbaOnlyHits = tokens.filter((t) => NBA_ONLY_TEAM_ABBRS.has(t)).length;
-  if (nbaOnlyHits > 0 && mlbHits === 0) return "NBA";
-  if (mlbHits > 0 && nbaOnlyHits === 0) return "MLB";
-  if (mlbHits > nbaOnlyHits) return "MLB";
-  if (nbaOnlyHits > mlbHits) return "NBA";
-  return "";
+  return Boolean(blob && NBA_STAT_PATTERN.test(blob));
 }
 
 function sportFromEventCategory(raw = {}, lookup = {}) {
@@ -179,58 +171,98 @@ function sportFromEventCategory(raw = {}, lookup = {}) {
   return "";
 }
 
-export function isNbaUnderdogProp(prop = {}) {
+function collectPropContext(prop = {}) {
+  const raw = prop.raw || {};
+  const attrs = attrsOf(raw);
   const player = String(prop.player || prop.playerName || "");
-  const statType = prop.statType || prop.market || prop.propType || "";
-  const blob = contextBlob({
-    statType,
-    player,
-    team: prop.team,
-    opponent: prop.opponent,
-    matchup: prop.matchup,
-  });
+  const statType = String(prop.statType || prop.market || prop.propType || "");
+  const teamText = [prop.team, prop.opponent, prop.matchup].filter(Boolean).join(" ");
+  const eventText = [
+    raw.event_title,
+    raw.category,
+    raw.tab,
+    attrs.title,
+    attrs.selection_header,
+    attrs.group_name,
+    attrs.competition_name,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
-  if (NBA_PLAYER_HINTS.test(player)) return true;
-  if (hasBasketballMarketSignal(statType, blob) && !hasMlbMarketSignal(statType, blob)) return true;
-  if (sportFromMlbTeams(prop.team, prop.opponent, prop.matchup) === "NBA") return true;
+  return { raw, attrs, player, statType, teamText, eventText };
+}
 
-  const fromEvent = sportFromEventCategory(prop.raw || {}, prop._lookup || {});
-  if (fromEvent === "NBA") return true;
+/**
+ * Primary sport mapper — MLB indicators win over NBA. Returns { sport, reason }.
+ */
+export function inferSportFromProp(prop = {}, { selectedSport = "" } = {}) {
+  const tab = selectedSport || prop.selectedSportTab || prop.selectedSport || "";
+  const { raw, player, statType, teamText, eventText } = collectPropContext(prop);
 
-  const rawSport = String(prop.sport || prop.league || "").trim();
-  if (!isInvalidSportToken(rawSport) && canonicalizeSport(rawSport) === "NBA") return true;
+  if (playerMatches(player, MLB_PLAYERS)) {
+    return { sport: "MLB", reason: "mlb player name match" };
+  }
 
-  return false;
+  if (hasMlbStatIndicator(statType, eventText)) {
+    return { sport: "MLB", reason: "mlb stat type match" };
+  }
+
+  if (countTeamHits(teamText, MLB_TEAMS) > 0) {
+    return { sport: "MLB", reason: "mlb team abbreviation match" };
+  }
+
+  const fromEventMlb = sportFromEventCategory(raw, prop._lookup || {});
+  if (fromEventMlb === "MLB") {
+    return { sport: "MLB", reason: "event/category metadata (MLB)" };
+  }
+
+  const rawSport = String(prop.sport || prop.league || prop.classifiedSport || "").trim();
+  if (!isInvalidSportToken(rawSport)) {
+    const canon = canonicalizeSport(rawSport);
+    if (canon === "MLB") return { sport: "MLB", reason: "valid raw sport field" };
+  }
+
+  if (playerMatches(player, NBA_PLAYERS)) {
+    return { sport: "NBA", reason: "nba player name match" };
+  }
+
+  if (hasBasketballMarketSignal(statType, eventText) && !hasMlbStatIndicator(statType, eventText)) {
+    return { sport: "NBA", reason: "nba stat type match" };
+  }
+
+  if (countTeamHits(teamText, NBA_TEAMS) > 0 && countTeamHits(teamText, MLB_TEAMS) === 0) {
+    return { sport: "NBA", reason: "nba team abbreviation match" };
+  }
+
+  if (fromEventMlb === "NBA") {
+    return { sport: "NBA", reason: "event/category metadata (NBA)" };
+  }
+
+  if (!isInvalidSportToken(rawSport)) {
+    const canon = canonicalizeSport(rawSport);
+    if (canon === "NBA") return { sport: "NBA", reason: "valid raw sport field" };
+    if (canon && canon !== "Unknown" && canon !== "Unsupported") {
+      return { sport: canon, reason: "valid raw sport field" };
+    }
+  }
+
+  if (fromEventMlb && fromEventMlb !== "NBA") {
+    return { sport: fromEventMlb, reason: "event/category metadata" };
+  }
+
+  if (tab === "MLB" && hasMlbStatIndicator(statType, eventText)) {
+    return { sport: "MLB", reason: "selected MLB tab + mlb stat type fallback" };
+  }
+
+  return { sport: "", reason: "" };
+}
+
+export function isNbaUnderdogProp(prop = {}) {
+  return inferSportFromProp(prop).sport === "NBA";
 }
 
 export function isMlbUnderdogPropStrict(prop = {}) {
-  if (isNbaUnderdogProp(prop)) return false;
-
-  const player = String(prop.player || prop.playerName || "");
-  const statType = prop.statType || prop.market || prop.propType || "";
-  const blob = contextBlob({
-    statType,
-    player,
-    team: prop.team,
-    opponent: prop.opponent,
-    matchup: prop.matchup,
-  });
-
-  if (hasMlbMarketSignal(statType, blob)) return true;
-  if (MLB_PLAYER_HINTS.test(player)) return true;
-  if (sportFromMlbTeams(prop.team, prop.opponent, prop.matchup) === "MLB") return true;
-
-  const raw = prop.raw || {};
-  const attrs = attrsOf(raw);
-  if (hasMlbMarketSignal(attrs.title, attrs.selection_header, raw.event_title, raw.category)) return true;
-
-  const fromEvent = sportFromEventCategory(raw, prop._lookup || {});
-  if (fromEvent === "MLB") return true;
-
-  const rawSport = String(prop.sport || prop.league || "").trim();
-  if (!isInvalidSportToken(rawSport) && canonicalizeSport(rawSport) === "MLB") return true;
-
-  return false;
+  return inferSportFromProp(prop).sport === "MLB";
 }
 
 /** @deprecated use isMlbUnderdogPropStrict */
@@ -239,45 +271,26 @@ export function inferMlbUnderdogProp(prop = {}) {
 }
 
 export function detectUnderdogSport(raw = {}, lookup = {}, context = {}) {
-  const selectedSport = context.selectedSport || context.selectedSportTab || "";
-  const player = String(context.player || "");
-  const statType = context.statType || "";
-
-  if (NBA_PLAYER_HINTS.test(player)) return "NBA";
-  if (hasBasketballMarketSignal(statType) && !hasMlbMarketSignal(statType, player, context.team)) return "NBA";
-
-  const fromEvent = sportFromEventCategory(raw, lookup);
-  if (fromEvent === "NBA" && !hasMlbMarketSignal(statType, player)) return "NBA";
-  if (fromEvent === "MLB") return "MLB";
-  if (fromEvent && fromEvent !== "NBA") return fromEvent;
-
-  if (hasMlbMarketSignal(statType, player, context.team, context.opponent, context.matchup)) return "MLB";
-  if (MLB_PLAYER_HINTS.test(player)) return "MLB";
-
-  const fromTeams = sportFromMlbTeams(context.team, context.opponent, context.matchup);
-  if (fromTeams === "NBA") return "NBA";
-  if (fromTeams === "MLB") return "MLB";
-
-  if (selectedSport && selectedSport !== "all" && !isInvalidSportToken(selectedSport)) {
-    return canonicalizeSport(selectedSport) || selectedSport;
-  }
-
-  return "";
+  const prop = {
+    player: context.player,
+    playerName: context.player,
+    statType: context.statType,
+    team: context.team,
+    opponent: context.opponent,
+    matchup: context.matchup,
+    raw,
+    _lookup: lookup,
+    selectedSportTab: context.selectedSport || context.selectedSportTab,
+  };
+  const { sport } = inferSportFromProp(prop, { selectedSport: context.selectedSport || context.selectedSportTab });
+  return sport;
 }
 
 export function resolvePropSportLabel(prop = {}) {
-  if (isNbaUnderdogProp(prop)) return "NBA";
-  if (isMlbUnderdogPropStrict(prop)) return "MLB";
-
-  const rawSport = String(prop.sport || prop.league || prop.classifiedSport || "").trim();
-  if (!isInvalidSportToken(rawSport)) {
-    const canon = canonicalizeSport(rawSport);
-    if (canon === "NBA" && isNbaUnderdogProp(prop)) return "NBA";
-    if (canon === "MLB" && isMlbUnderdogPropStrict(prop)) return "MLB";
-    if (canon && canon !== "Unknown") return canon;
-  }
-
-  return "";
+  const { sport } = inferSportFromProp(prop, {
+    selectedSport: prop.selectedSportTab || prop.selectedSport,
+  });
+  return sport || "";
 }
 
 export function isUnderdogSport(prop = {}, sport = "MLB") {
@@ -291,7 +304,7 @@ export function filterUnderdogPropsBySport(props = [], sport = "MLB") {
   return (props || []).filter((prop) => {
     if (prop.normalizedSource !== "underdog") return false;
     const label = resolvePropSportLabel(prop);
-    if (want === "MLB" && isNbaUnderdogProp(prop)) return false;
+    if (want === "MLB" && label !== "MLB") return false;
     return label === want;
   });
 }
@@ -311,5 +324,18 @@ export function countUnderdogPropsBySport(props = []) {
     NHL: count("NHL"),
     Soccer: count("Soccer"),
     Tennis: count("Tennis"),
+  };
+}
+
+export function attachSportInference(prop = {}, options = {}) {
+  const inference = inferSportFromProp(prop, options);
+  if (!inference.sport) return prop;
+  return {
+    ...prop,
+    sport: inference.sport,
+    league: inference.sport,
+    inferredSport: inference.sport,
+    sportInferenceReason: inference.reason,
+    classifiedSport: inference.sport,
   };
 }

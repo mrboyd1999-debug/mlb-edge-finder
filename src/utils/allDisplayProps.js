@@ -33,18 +33,34 @@ function normalizeSourceLabel(value = "") {
 export function computeDisplayEdge(prop = {}) {
   const line = finiteOr(prop.line, 0);
   const projection = finiteOr(prop.projection, line);
-  const side = String(prop.side || "over").toLowerCase();
-  if (side.includes("under")) return line - projection;
-  return projection - line;
+  const side = String(prop.side || "").toLowerCase();
+  if (side.includes("under") || side.includes("less") || side.includes("lower")) return line - projection;
+  if (side.includes("over") || side.includes("more") || side.includes("higher")) return projection - line;
+  if (Number.isFinite(projection) && Number.isFinite(line) && projection !== line) {
+    return projection > line ? projection - line : line - projection;
+  }
+  return 0;
+}
+
+function resolveDisplaySide(raw = {}, prop = {}, line, projection) {
+  const sideRaw = String(raw.side || raw.pick || raw.bestPick || prop.side || prop.bestPick || "").toLowerCase();
+  if (sideRaw.includes("under") || sideRaw.includes("less") || sideRaw.includes("lower")) return "under";
+  if (sideRaw.includes("over") || sideRaw.includes("more") || sideRaw.includes("higher")) return "over";
+  const proj = Number(projection);
+  const ln = Number(line);
+  if (Number.isFinite(proj) && Number.isFinite(ln) && proj !== ln) {
+    return proj > ln ? "over" : "under";
+  }
+  return "";
 }
 
 /** Normalize any parsed prop — never reject for missing optional fields. */
 export function normalizeDisplayProp(prop = {}, { selectedSport = "MLB", source = "PrizePicks", status = "live" } = {}) {
   const raw = prop?.raw && typeof prop.raw === "object" ? prop.raw : prop;
   const line = finiteOr(raw.line ?? prop.line, 0);
-  const projection = finiteOr(raw.projection ?? raw.projectedValue ?? prop.projection ?? prop.projectedValue, line);
-  const sideRaw = String(raw.side || raw.pick || raw.bestPick || prop.side || prop.bestPick || "over").toLowerCase();
-  const side = sideRaw.includes("under") ? "under" : "over";
+  const projection = finiteOr(raw.projection ?? raw.projectedValue ?? prop.projection ?? prop.projectedValue, NaN);
+  const hasProjection = Number.isFinite(projection);
+  const side = resolveDisplaySide(raw, prop, line, hasProjection ? projection : line);
   const sportNorm =
     normalizeSportLabel(raw.sport || prop.sport, raw.league || prop.league) ||
     String(raw.sport || prop.sport || selectedSport || "MLB").trim() ||
@@ -58,7 +74,10 @@ export function normalizeDisplayProp(prop = {}, { selectedSport = "MLB", source 
     String(raw.lineSourceBadge || prop.lineSourceBadge || "").toUpperCase() === "CACHED" ||
     String(raw.status || prop.status || "").toLowerCase() === "cached";
   const confidence = finiteOr(raw.confidence ?? raw.confidenceScore ?? prop.confidence ?? prop.confidenceScore, 50);
-  const edge = finiteOr(raw.edge ?? prop.edge, computeDisplayEdge({ line, projection, side }));
+  const edge = finiteOr(
+    raw.edge ?? prop.edge,
+    computeDisplayEdge({ line, projection: hasProjection ? projection : line, side })
+  );
   const imageSource = prop?.raw && typeof prop.raw === "object" ? prop.raw : raw;
   const playerImageUrl =
     imageSource.playerImageUrl ||
@@ -91,8 +110,8 @@ export function normalizeDisplayProp(prop = {}, { selectedSport = "MLB", source 
       propType: statType,
       fullMarketLabel,
       line,
-      projection,
-      projectedValue: projection,
+      projection: hasProjection ? projection : null,
+      projectedValue: hasProjection ? projection : null,
       side,
       pick: side,
       bestPick: side,

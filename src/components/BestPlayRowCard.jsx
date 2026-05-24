@@ -20,8 +20,9 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
   const platform = normalizeSourceLabel(enriched);
   const platformPalette = platformBadgePalette(platform);
   const playerName = enriched.playerName || enriched.player || "Unknown";
-  const sport = displaySport(enriched) || "MLB";
+  const sport = displaySport(enriched) || enriched.inferredSport || enriched.sport || "—";
   const market = displayFullMarketLabel(enriched);
+  const propType = enriched.propType || enriched.statType || enriched.market || market;
   const line = formatNumber(enriched.line);
   const sideLabel = formatPlatformSideLabel(enriched);
   const multiplier = readPropMultiplier(enriched);
@@ -73,7 +74,7 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
             </span>
           </div>
           <p style={styles.bestPlayRowSubline}>
-            {sport} · {market} · Line {line}
+            {sport} · {propType} · Line {line}
           </p>
           <p style={styles.bestPlayRowReason}>{reason || "Model-ranked best play."}</p>
         </div>

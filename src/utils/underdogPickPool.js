@@ -13,8 +13,10 @@ import {
 } from "./underdogStreakPool.js";
 import { UNDERDOG_PARSER_MISMATCH_MESSAGE } from "./parseUnderdogProp.js";
 import {
+  attachSportInference,
   countUnderdogPropsBySport,
   filterUnderdogPropsBySport,
+  inferSportFromProp,
   isNbaUnderdogProp,
   MLB_SPORT_MISMAP_MESSAGE,
   resolvePropSportLabel,
@@ -27,16 +29,23 @@ function finiteOr(value, fallback = 0) {
 }
 
 function shapeUnderdogProp(prop = {}) {
-  const sport = resolvePropSportLabel(prop) || prop.sport || prop.league || "";
+  const enriched = attachSportInference(
+    {
+      ...prop,
+      playerName: prop.playerName || prop.player || "",
+      streakOptions: prop.streakOptions || [],
+      startTime: prop.startTime || prop.gameTime || "",
+      selectedSportTab: prop.selectedSportTab || "MLB",
+    },
+    { selectedSport: prop.selectedSportTab || "MLB" }
+  );
+  const sport = enriched.inferredSport || resolvePropSportLabel(enriched) || enriched.sport || enriched.league || "";
   return normalizePropsWithSource([
     normalizePropShape(
       {
-        ...prop,
-        playerName: prop.playerName || prop.player || "",
+        ...enriched,
         sport,
-        league: sport || prop.league || "",
-        streakOptions: prop.streakOptions || [],
-        startTime: prop.startTime || prop.gameTime || "",
+        league: sport || enriched.league || "",
       },
       { platform: "Underdog", source: "Underdog" }
     ),
@@ -235,23 +244,28 @@ export function buildUnderdogDebugSnapshot({
       platform: prop.platform,
       normalizedSource: prop.normalizedSource,
     })),
-    parsedPreview: parsedPool.slice(0, 5).map((prop) => ({
-      id: prop.id,
-      player: prop.player,
-      statType: prop.statType,
-      line: prop.line,
-      projection: prop.projection,
-      team: prop.team,
-      opponent: prop.opponent,
-      sport: prop.sport,
-      normalizedSource: prop.normalizedSource,
-      overUnder: prop.overUnder,
-      confidence: prop.confidence,
-      edge: prop.edge,
-      playable: prop.playable,
-      propType: prop.propType,
-      matchup: prop.matchup,
-    })),
+    parsedPreview: parsedPool.slice(0, 5).map((prop) => {
+      const inference = inferSportFromProp(prop, { selectedSport });
+      return {
+        id: prop.id,
+        player: prop.player,
+        statType: prop.statType,
+        line: prop.line,
+        projection: prop.projection,
+        team: prop.team,
+        opponent: prop.opponent,
+        rawSport: prop.sport,
+        inferredSport: prop.inferredSport || inference.sport || resolvePropSportLabel(prop),
+        sportInferenceReason: prop.sportInferenceReason || inference.reason || "",
+        normalizedSource: prop.normalizedSource,
+        overUnder: prop.overUnder,
+        confidence: prop.confidence,
+        edge: prop.edge,
+        playable: prop.playable,
+        propType: prop.propType,
+        matchup: prop.matchup,
+      };
+    }),
     parsedPool,
     streakEligible,
     parserEmpty: rawUdCount > 0 && parsedUdCount === 0 && parsedPool.length === 0,

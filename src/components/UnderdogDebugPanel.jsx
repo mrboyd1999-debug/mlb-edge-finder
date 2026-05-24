@@ -81,23 +81,30 @@ export default function UnderdogDebugPanel({ snapshot = null }) {
       </details>
       {snapshot.parsedPreview?.length ? (
         <details open style={{ marginTop: "8px" }}>
-          <summary style={{ ...styles.compactFlags, cursor: "pointer" }}>First 5 parsed Underdog props</summary>
-          <pre
-            style={{
-              margin: "6px 0 0",
-              padding: "8px",
-              borderRadius: "6px",
-              background: "#0b1220",
-              border: "1px solid #1e293b",
-              fontSize: "10px",
-              lineHeight: 1.4,
-              overflowX: "auto",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-            }}
-          >
-            {JSON.stringify(snapshot.parsedPreview, null, 2)}
-          </pre>
+          <summary style={{ ...styles.compactFlags, cursor: "pointer" }}>First 5 parsed Underdog props (sport inference)</summary>
+          <div style={{ marginTop: "6px", display: "grid", gap: "6px" }}>
+            {snapshot.parsedPreview.map((row) => (
+              <div
+                key={row.id || row.player}
+                style={{
+                  padding: "6px 8px",
+                  borderRadius: "6px",
+                  background: "#0b1220",
+                  border: "1px solid #1e293b",
+                  fontSize: "10px",
+                  lineHeight: 1.45,
+                }}
+              >
+                <div>
+                  <strong>{row.player}</strong> · {row.statType} · line {row.line}
+                </div>
+                <div>Raw sport: {row.rawSport || "—"}</div>
+                <div>Inferred sport: {row.inferredSport || "—"}</div>
+                <div>Why: {row.sportInferenceReason || "—"}</div>
+                <div>Tab: {snapshot.selectedSport ?? "MLB"} · Category: {snapshot.selectedCategory ?? "all"}</div>
+              </div>
+            ))}
+          </div>
         </details>
       ) : null}
     </div>
