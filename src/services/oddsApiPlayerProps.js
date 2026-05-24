@@ -11,6 +11,7 @@ import {
   ODDS_API_INVALID_KEY_MESSAGE,
   parseOddsApiAuthFailure,
 } from "./oddsApiClient.js";
+import { recordProviderResponse, recordParserPreview } from "../utils/rawResponseDebug.js";
 import {
   SOURCE_IDS,
   cachedLinesMessage,
@@ -118,6 +119,21 @@ async function fetchOddsApiDisplayPropsInternal({ sport = "all" } = {}) {
     .map((r) => String(r.reason?.message || r.reason || "Odds API fetch failed"));
 
   const props = normalizeOddsApiPropRows(rawRows);
+  recordProviderResponse("oddsapi", {
+    url: "odds-api/player-props",
+    status: props.length ? 200 : warnings.length ? 400 : 204,
+    payload: { rows: rawRows.slice(0, 3), totalRows: rawRows.length },
+    parsedCount: rawRows.length,
+    normalizedCount: props.length,
+    errors: warnings,
+    message: warnings[0] || "",
+  });
+  recordParserPreview("oddsapi", {
+    rawObjectCount: rawRows.length,
+    normalizedObjectCount: props.length,
+    parserErrors: warnings,
+    firstNormalizedProp: props[0] || null,
+  });
   if (props.length) {
     writeOddsPropsCache(props);
     recordSourceSuccess(SOURCE_IDS.ODDS_API);

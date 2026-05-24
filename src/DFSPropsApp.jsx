@@ -167,7 +167,10 @@ import {
   buildUnderdogParserFailureMessage,
   hasAnyProviderProps,
 } from "./services/providerOrchestration.js";
-import { enrichPropsWithSportsData } from "./services/propSportsDataEnrichment.js";
+import { enrichPropsWithSportsData, generateMlbPropsFromSportsData } from "./services/propSportsDataEnrichment.js";
+import { resolveIngestionFallback } from "./services/ingestionFallback.js";
+import { writeLastGoodBoard, readLastGoodBoard, boardFromLastGood } from "./services/lastGoodBoardCache.js";
+import { initRawResponseDebug } from "./utils/rawResponseDebug.js";
 import { logLiveFetchResult, buildLiveFetchFailureSummary } from "./utils/liveFetchAudit.js";
 import { isSafeModeEnabled, SAFE_MODE_FALLBACK_MESSAGE, SAFE_MODE_LOADING_MESSAGE } from "./utils/safeMode.js";
 import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks, resolveSafeMlbStreakPicks } from "./utils/safeModePipeline.js";
@@ -719,6 +722,24 @@ function countPropCacheLayers(props = []) {
   };
 }
 
+function applyLastGoodBoardFallback(applyBoardState, { notice = "Restored last working board from local storage." } = {}) {
+  const lastGood = readLastGoodBoard();
+  if (!lastGood) return false;
+  const board = boardFromLastGood(lastGood, DEFAULT_SOURCE_STATUS);
+  applyBoardState(
+    {
+      ...board,
+      cacheNotice: notice,
+      warnings: [],
+      degradedWarnings: [],
+      criticalWarnings: [],
+      debugInfo: { ingestionFallback: "last-good-board", parserPreview: typeof window !== "undefined" ? window.__DEBUG_PARSER_PREVIEW__ || [] : [] },
+    },
+    "cached"
+  );
+  return true;
+}
+
 function applyVerifiedCacheFallbackBoard(applyBoardState, fallbackBoard, { notice = VERIFIED_CACHE_FALLBACK_MESSAGE, rateLimited = false } = {}) {
   const prepared = prepareVerifiedCacheBoard(fallbackBoard) || fallbackBoard;
   if (!prepared?.props?.length && !prepared?.qualifiedReadyProps?.length) return false;
@@ -1116,6 +1137,7 @@ function enrichmentBackgroundFallback(label) {
 }
 
 async function fetchDFSProps({ platform = "both", sport = "all", statType = "all", onCoreReady } = {}) {
+  initRawResponseDebug();
   const fetchSport = getActiveFetchSport(sport);
   console.info("[DFS Source Audit] fetchDFSProps requested", {
     platform,
@@ -1136,6 +1158,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   let prizePicksResult = null;
   let underdogResult = null;
   let oddsApiPlayerResult = emptyOddsApiResult();
+  let pipelineFallback = false;
 
   const oddsApiPromise = withFetchTimeout(
     () =>
@@ -1370,6 +1393,47 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   } else if (allDisplayProps.length) {
     allDisplayProps = normalizePropsWithSource(allDisplayProps);
   }
+
+  if (!allDisplayProps.length) {
+    const generated = await generateMlbPropsFromSportsData({ limit: 48 });
+    if (generated.props?.length) {
+      rawProps.length = 0;
+      rawProps.push(...normalizePropsWithSource(generated.props));
+      allDisplayProps = normalizePropsWithSource(
+        enrichDisplayPropsPipeline(
+          rawProps.map((prop) =>
+            normalizeDisplayProp(prop, {
+              selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
+              source: "SportsDataIO",
+              status: "live",
+            })
+          )
+        )
+      );
+      sourceStatus.SportsDataIO = "Connected";
+      pipelineFallback = true;
+      debugInfo.ingestionFallback = "sportsdata-generated";
+    }
+  }
+
+  if (!allDisplayProps.length) {
+    const earlyFallback = await resolveIngestionFallback({
+      rawProps,
+      allDisplayProps,
+      underdogResult,
+      prizePicksResult,
+      sourceStatus,
+      fetchSport,
+    });
+    if (earlyFallback.allDisplayProps?.length) {
+      rawProps.length = 0;
+      rawProps.push(...earlyFallback.rawProps);
+      allDisplayProps = earlyFallback.allDisplayProps;
+      pipelineFallback = true;
+      debugInfo.ingestionFallback = earlyFallback.source;
+    }
+  }
+
   logAllDisplayPropsSample(allDisplayProps);
   logPipelineStage("fetch.allDisplayProps", { count: allDisplayProps.length, raw: rawProps.length, parsed: parsedCount });
   debugInfo.allDisplayPropsCount = allDisplayProps.length;
@@ -1431,8 +1495,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     logFilteredProp,
   });
   const { slateProps, canonicalProps, activeProps, normalProps } = filtered;
-  const usablePropsPool = buildUsablePropsPool(rawProps);
-  let pipelineFallback = false;
+  let usablePropsPool = buildUsablePropsPool(rawProps);
   let workingActiveProps = activeProps;
   let workingNormalProps = normalProps;
 
@@ -1471,10 +1534,27 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   debugInfo.pregameWindowHours = filterOptions.pregameWindowHours ?? DEFAULT_PREGAME_WINDOW_HOURS;
   if (shouldLogVerbose()) logPipelineAudit("board", pipelineAudit);
 
-  if (
-    !hasAnyProviderProps({ rawProps, allDisplayProps, usableProps: usablePropsPool }) &&
-    !workingActiveProps.length
-  ) {
+  if (!allDisplayProps.length) {
+    const fallback = await resolveIngestionFallback({
+      rawProps,
+      allDisplayProps,
+      underdogResult,
+      prizePicksResult,
+      sourceStatus,
+      fetchSport,
+    });
+    if (fallback.allDisplayProps?.length) {
+      allDisplayProps = fallback.allDisplayProps;
+      rawProps.length = 0;
+      rawProps.push(...fallback.rawProps);
+      pipelineFallback = true;
+      workingActiveProps = filterActiveSportProps(allDisplayProps);
+      workingNormalProps = workingActiveProps;
+      usablePropsPool = buildUsablePropsPool(rawProps);
+      debugInfo.ingestionFallback = fallback.source;
+      debugInfo.parserPreview =
+        typeof window !== "undefined" ? window.__DEBUG_PARSER_PREVIEW__ || [] : [];
+    } else {
     debugInfo.totals = {
       rawPropsLoaded: canonicalProps.length,
       upcomingSlateCount: pipelineAudit.upcomingSlate,
@@ -1518,6 +1598,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       debugInfo: attachDebugArtifacts(sanitizeDebugInfoForMlbOnly(debugInfo), pipelineAudit),
       pipelineAudit: coercePipelineAudit(pipelineAudit),
     };
+    }
   }
 
   const backgroundJobs = [
@@ -1788,6 +1869,18 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     streakProps,
     watchlist: watchlistProps,
   });
+
+  if (uiPayload.props?.length || allDisplayProps.length) {
+    writeLastGoodBoard({
+      props: uiPayload.props,
+      allDisplayProps,
+      usableProps: allDisplayProps.length ? allDisplayProps : usablePropsPool,
+      sourceStatus: finalStatus,
+      pipelineFallback,
+      ingestionSource: debugInfo.ingestionFallback || "live",
+      updatedAt: new Date().toISOString(),
+    });
+  }
 
   return {
     props: uiPayload.props,
@@ -2110,6 +2203,8 @@ export default function DFSPropsApp() {
             })
           ) {
             setError("");
+          } else if (applyLastGoodBoardFallback(applyBoardState)) {
+            setError("");
           }
           console.info("[DFS Refresh] kept verified cached board after empty fetch", {
             durationMs: Date.now() - fetchStartedAt,
@@ -2129,7 +2224,8 @@ export default function DFSPropsApp() {
           !applyVerifiedCacheFallbackBoard(applyBoardState, previousBoard, {
             notice: rateLimited ? VERIFIED_CACHE_COOLDOWN_MESSAGE : VERIFIED_CACHE_FALLBACK_MESSAGE,
             rateLimited,
-          })
+          }) &&
+          !applyLastGoodBoardFallback(applyBoardState)
         ) {
           const underdogOnlyEmptyBoard = isUnderdogOnlyFailure(board.criticalWarnings, board.degradedWarnings);
           if (!(MLB_ONLY_MODE && underdogOnlyEmptyBoard)) {
@@ -2175,6 +2271,12 @@ export default function DFSPropsApp() {
         ) {
           setError("");
           console.warn("[DFS Refresh] served verified cache after failure", {
+            durationMs: Date.now() - fetchStartedAt,
+            error: errMsg,
+          });
+        } else if (applyLastGoodBoardFallback(applyBoardState)) {
+          setError("");
+          console.warn("[DFS Refresh] served last-good board after failure", {
             durationMs: Date.now() - fetchStartedAt,
             error: errMsg,
           });

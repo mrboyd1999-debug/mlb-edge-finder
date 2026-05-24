@@ -9,6 +9,12 @@ import { MLB_ONLY_MODE } from "./mlbOnlyMode.js";
 import { resolveUnderdogCategory } from "./underdogRowCard.js";
 import { normalizeGameStartTime } from "./normalizeGameStartTime.js";
 import { sportFromUnderdogGame } from "./sportMappings.js";
+import {
+  buildDynamicUnderdogLookupMaps,
+  discoverUnderdogLineRecords,
+  flattenUnderdogLineRecord,
+} from "./underdogDynamicParser.js";
+import { recordParserPreview } from "./rawResponseDebug.js";
 
 export const UNDERDOG_PARSER_MISMATCH_MESSAGE = "Underdog parser mismatch detected.";
 
@@ -81,7 +87,13 @@ export function isMlbPickemRecord(raw = {}, lookup = {}) {
 
 export function filterMlbPickemRecords(rawRecords = [], lookup = {}) {
   if (!MLB_ONLY_MODE) return rawRecords;
-  return (rawRecords || []).filter((raw) => isMlbPickemRecord(raw, lookup));
+  const filtered = (rawRecords || []).filter((raw) => isMlbPickemRecord(raw, lookup));
+  if (filtered.length) return filtered;
+  return (rawRecords || []).filter((raw) => {
+    const line = resolveLineFromRaw(raw);
+    const player = resolvePlayerFromRaw(raw, lookup);
+    return Number.isFinite(line) && player.length >= 2;
+  });
 }
 
 export function extractRawUnderdogRecords(payload) {
@@ -536,6 +548,7 @@ function bumpReason(map, reason) {
 export function parseUnderdogRawBatch(rawRecords = [], options = {}) {
   const records = Array.isArray(rawRecords) ? rawRecords : [];
   const rejectionReasons = {};
+  const parserErrors = [];
   let rejectedCount = 0;
   const props = [];
 
@@ -544,25 +557,33 @@ export function parseUnderdogRawBatch(rawRecords = [], options = {}) {
   });
 
   records.forEach((raw) => {
-    const player = resolvePlayerFromRaw(raw, options.lookup || {});
-    const line = resolveLineFromRaw(raw);
-    if (!player || player.length < 2 || player === "Unknown") {
+    try {
+      const flattened = flattenUnderdogLineRecord(raw);
+      const player = resolvePlayerFromRaw(flattened, options.lookup || {});
+      const line = resolveLineFromRaw(flattened);
+      if (!player || player.length < 2 || player === "Unknown") {
+        rejectedCount += 1;
+        bumpReason(rejectionReasons, "missing player");
+        return;
+      }
+      if (Number.isNaN(line) || !Number.isFinite(line)) {
+        rejectedCount += 1;
+        bumpReason(rejectionReasons, "line is NaN");
+        return;
+      }
+      const parsed = parseUnderdogProp(flattened, options);
+      if (!parsed) {
+        rejectedCount += 1;
+        bumpReason(rejectionReasons, "parse returned null");
+        return;
+      }
+      props.push(parsed);
+    } catch (error) {
       rejectedCount += 1;
-      bumpReason(rejectionReasons, "missing player");
-      return;
+      const msg = error?.message || String(error);
+      parserErrors.push(msg);
+      bumpReason(rejectionReasons, "parser exception");
     }
-    if (Number.isNaN(line) || !Number.isFinite(line)) {
-      rejectedCount += 1;
-      bumpReason(rejectionReasons, "line is NaN");
-      return;
-    }
-    const parsed = parseUnderdogProp(raw, options);
-    if (!parsed) {
-      rejectedCount += 1;
-      bumpReason(rejectionReasons, "parse returned null");
-      return;
-    }
-    props.push(parsed);
   });
 
   const diagnostics = {
@@ -572,7 +593,16 @@ export function parseUnderdogRawBatch(rawRecords = [], options = {}) {
     rejectionReasons,
     parserMismatch: records.length > 0 && props.length === 0,
     sampleKeys: records[0] && typeof records[0] === "object" ? Object.keys(records[0]) : [],
+    parserErrors,
   };
+
+  recordParserPreview("underdog", {
+    rawObjectCount: records.length,
+    normalizedObjectCount: props.length,
+    parserErrors,
+    firstNormalizedProp: props[0] || null,
+    schemaKeys: diagnostics.sampleKeys,
+  });
 
   if (diagnostics.parserMismatch) {
     console.warn("[Underdog Parser] mismatch — raw records present but zero parsed props", diagnostics);
@@ -588,10 +618,16 @@ export function parseUnderdogRawBatch(rawRecords = [], options = {}) {
  */
 export function parseUnderdogPayloadDedicated(payload, lineSourceBadge = "LIVE", selectedSport = "MLB") {
   const responseShape = logUnderdogResponseShape(payload);
-  const lookup = buildUnderdogLookupMaps(payload);
-  const rawRecords = filterMlbPickemRecords(extractRawUnderdogRecords(payload), lookup);
+  const discovered = discoverUnderdogLineRecords(payload);
+  const lookup = buildDynamicUnderdogLookupMaps(payload);
+  const rawRecords = filterMlbPickemRecords(discovered.records, lookup);
+  const batch = parseUnderdogRawBatch(rawRecords, { lookup, lineSourceBadge, selectedSport });
   return {
-    ...parseUnderdogRawBatch(rawRecords, { lookup, lineSourceBadge, selectedSport }),
-    responseShape,
+    ...batch,
+    responseShape: {
+      ...responseShape,
+      discoveredPath: discovered.path,
+      schemaCollections: discovered.schema,
+    },
   };
 }

@@ -40,6 +40,7 @@ import {
   withSourceRequestLock,
 } from "./sourceRateLimit.js";
 import { getProxyUrl } from "../config/apiConfig.js";
+import { recordProviderResponse } from "../utils/rawResponseDebug.js";
 
 export const PRIZEPICKS_HTML_BANNER = "API route is serving source/HTML instead of JSON. Check proxy/backend routing.";
 export const PRIZEPICKS_RATE_LIMIT_MESSAGE = "PrizePicks rate limited, using other sources.";
@@ -178,6 +179,16 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all" } 
       }
       if (!hasUsable) warnings.push(EMPTY_SOURCE_MESSAGE);
       if (parsed.htmlError) warnings.push(PRIZEPICKS_HTML_BANNER);
+
+      recordProviderResponse("prizepicks", {
+        url: isFallback ? "server-cache:prizepicks" : endpoint,
+        status: isRateLimited ? 429 : parsed.attempt?.status ?? (hasUsable ? 200 : null),
+        payload: parsed.payload,
+        parsedCount: normalizedProps.length,
+        normalizedCount: usableCount,
+        errors: warnings,
+        message: warnings[0] || "",
+      });
 
       return {
         source: "PrizePicks",

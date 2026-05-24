@@ -48,6 +48,7 @@ import {
   UNDERDOG_PARSER_MISMATCH_MESSAGE,
 } from "../utils/parseUnderdogProp.js";
 import { filterResolvedSportProps } from "../utils/underdogSportDetection.js";
+import { recordProviderResponse } from "../utils/rawResponseDebug.js";
 
 const UNDERDOG_ENDPOINTS = [
   "/api/underdog",
@@ -167,6 +168,15 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all" } = 
         parsedPropsCount: parsedProps.length,
         filteredPropsCount: props.length,
         usablePropsCount: usableCount,
+      });
+      recordProviderResponse("underdog", {
+        url: apiUrl,
+        status: parsed.attempt?.status ?? attempts.at(-1)?.status ?? null,
+        payload,
+        parsedCount: parsedProps.length,
+        normalizedCount: props.length,
+        errors: diagnostics?.parserErrors || [],
+        message: diagnostics?.parserMismatch ? UNDERDOG_PARSER_MISMATCH_MESSAGE : "",
       });
 
       if (!usableCount) {
