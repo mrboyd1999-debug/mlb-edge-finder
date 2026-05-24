@@ -9,6 +9,7 @@ import {
   evaluateBothSides,
   isUnderPreferredMarket,
   variancePenalty,
+  TIER_LEAN,
 } from "./sideEvaluationEngine.js";
 
 export { readPropMultiplier, readPropProbability } from "./bestPlayRankingDisplay.js";
@@ -23,7 +24,7 @@ export function isRankableBestPlay(prop = {}) {
   const evaluation = prop.sideEvaluation || evaluateBothSides(prop);
   if (evaluation.pass) return false;
   if (evaluation.recommendedSide === "PASS") return false;
-  return finiteOr(evaluation.confidence ?? prop.confidenceScore ?? prop.confidence, 0) >= 65;
+  return finiteOr(evaluation.confidence ?? prop.confidenceScore ?? prop.confidence, 0) >= TIER_LEAN;
 }
 
 /** Rank score — uses dual-side evaluation output when present. */

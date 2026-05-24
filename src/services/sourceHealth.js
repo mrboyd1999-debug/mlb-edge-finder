@@ -1,5 +1,6 @@
 import { resolveCacheLayer, formatCacheLayerLabel, CACHE_TTL } from "./smartCache.js";
 import { countUsableProps } from "../utils/propShape.js";
+import { formatProviderStatusLabel, resolveLiveBadge } from "../utils/livePropUsability.js";
 
 export const HEALTH_STATES = {
   LIVE: "LIVE",
@@ -54,59 +55,61 @@ export function resolveFetchHealthBadge({
   ok = true,
   rateLimited = false,
   failed = false,
+  timedOut = false,
   cached = false,
   rawCount = 0,
   parsedCount = 0,
   usableCount = 0,
+  lastError = "",
 } = {}) {
-  if (rawCount > 0 && (usableCount > 0 || parsedCount > 0)) {
-    if (rateLimited || cached) {
-      return {
-        pipelineStatus: "Cached",
-        badge: HEALTH_STATES.CACHED,
-        message: "",
-      };
-    }
+  const badge = resolveLiveBadge({ usableCount, cached: cached || rateLimited, failed: failed || ok === false, timedOut });
+  const statusLabel = formatProviderStatusLabel({
+    badge,
+    usableCount,
+    rawCount,
+    parsedCount,
+    failed: failed || ok === false,
+    timedOut,
+    cached: cached || rateLimited,
+    lastError,
+  });
+
+  if (timedOut) {
+    return { pipelineStatus: "Timed out", badge: "TIMED OUT", message: statusLabel };
+  }
+  if (failed || ok === false) {
+    return { pipelineStatus: "Failed", badge: HEALTH_STATES.FAILED, message: statusLabel };
+  }
+  if (usableCount > 0) {
+    const pipelineStatus = cached || rateLimited ? "Cached" : "Full";
     return {
-      pipelineStatus: "Full",
-      badge: HEALTH_STATES.LIVE,
-      message: "",
+      pipelineStatus,
+      badge: cached || rateLimited ? HEALTH_STATES.CACHED : HEALTH_STATES.LIVE,
+      message: statusLabel,
     };
   }
-  if (rawCount > 0 && usableCount === 0 && parsedCount === 0) {
+  if (rawCount > 0 && parsedCount === 0) {
     return {
       pipelineStatus: "Empty",
       badge: HEALTH_STATES.EMPTY,
       message: "Underdog connected, but parser returned 0 props.",
     };
   }
-  if (failed || ok === false) {
-    return {
-      pipelineStatus: "Failed",
-      badge: HEALTH_STATES.DEGRADED,
-      message: "",
-    };
-  }
   if (rateLimited || cached) {
     return {
-      pipelineStatus: usableCount > 0 ? "Cached" : "Cached",
-      badge: usableCount > 0 ? HEALTH_STATES.CACHED : HEALTH_STATES.CACHED,
-      message: usableCount > 0 ? "" : rateLimited ? "Rate limited with no usable cached props." : EMPTY_SOURCE_MESSAGE,
-    };
-  }
-  if (rawCount > 0 && usableCount > 0) {
-    return {
-      pipelineStatus: "Full",
-      badge: HEALTH_STATES.LIVE,
-      message: "",
+      pipelineStatus: "Cached",
+      badge: HEALTH_STATES.CACHED,
+      message: rateLimited ? "Rate limited with no usable cached props." : EMPTY_SOURCE_MESSAGE,
     };
   }
   return {
     pipelineStatus: "Empty",
     badge: HEALTH_STATES.EMPTY,
-    message: rawCount > 0 || parsedCount > 0 ? EMPTY_SOURCE_MESSAGE : EMPTY_SOURCE_MESSAGE,
+    message: EMPTY_SOURCE_MESSAGE,
   };
 }
+
+export { formatProviderStatusLabel } from "../utils/livePropUsability.js";
 
 export function resolveSourceHealthState({
   status = "",
@@ -120,7 +123,7 @@ export function resolveSourceHealthState({
   if (Object.values(HEALTH_STATES).includes(badge)) return badge;
 
   const normalized = String(status || "").toLowerCase();
-  if ((normalized === "failed" || normalized === "not connected") && (usableCount > 0 || hasData)) {
+  if ((normalized === "failed" || normalized === "not connected") && usableCount > 0) {
     return HEALTH_STATES.LIVE;
   }
   if (normalized === "failed" || normalized === "not connected") {

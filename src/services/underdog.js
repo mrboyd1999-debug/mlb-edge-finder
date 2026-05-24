@@ -183,8 +183,8 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all" } = 
           props: parsedProps,
           parsedProps,
           warnings: [parserMessage],
-          health: rawCount > 0 ? "LIVE" : "EMPTY",
-          lineSourceBadge: rawCount > 0 ? "LIVE" : "EMPTY",
+          health: usableCount > 0 ? "LIVE" : "EMPTY",
+          lineSourceBadge: usableCount > 0 ? "LIVE" : "EMPTY",
           pipelineAudit: audit,
           debug: underdogDebug({
             apiUrl,
@@ -205,8 +205,8 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all" } = 
         props,
         parsedProps,
         pipelineAudit: audit,
-        lineSourceBadge: "LIVE",
-        health: "LIVE",
+        lineSourceBadge: usableCount > 0 ? "LIVE" : "EMPTY",
+        health: usableCount > 0 ? "LIVE" : "EMPTY",
         lastSuccessfulFetchAt: new Date().toISOString(),
         warnings: setupWarning
           ? [setupWarning]

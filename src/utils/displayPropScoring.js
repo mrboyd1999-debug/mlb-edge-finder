@@ -1,5 +1,7 @@
 /** Display scoring — dedupe, weighted confidence, rankings, category picks. */
 
+import { TIER_LEAN } from "./sideEvaluationEngine.js";
+
 import {
   applyPropCalibrationBundle,
   computeEdgePercent,
@@ -170,14 +172,27 @@ export function ensureDisplayProjection(prop = {}) {
 export function computeDisplayEdgeValue(prop = {}) {
   const line = finiteOr(prop.line, 0);
   const projection = finiteOr(prop.projection ?? prop.projectedValue, NaN);
-  if (!Number.isFinite(projection) || projection <= 0 || !Number.isFinite(line)) return 0;
+  const side = String(prop.side || prop.bestPick || prop.pick || "").toLowerCase();
+  if (!Number.isFinite(line)) return 0;
+  if (!Number.isFinite(projection) || projection <= 0) {
+    if ((side.includes("under") || side.includes("less") || side.includes("lower")) && line > 0) {
+      return round1(line);
+    }
+    return 0;
+  }
+  if (side.includes("under") || side.includes("less") || side.includes("lower")) {
+    return round1(line - projection);
+  }
+  if (side.includes("over") || side.includes("more") || side.includes("higher")) {
+    return round1(projection - line);
+  }
   return round1(projection - line);
 }
 
 export function confidenceTierLabel(confidence = BASE_CONFIDENCE) {
-  if (confidence >= 85) return "STRONG";
-  if (confidence >= 75) return "PLAYABLE";
-  if (confidence >= 65) return "LEAN";
+  if (confidence >= 80) return "STRONG";
+  if (confidence >= 70) return "PLAYABLE";
+  if (confidence >= 60) return "LEAN";
   return "RESEARCH ONLY";
 }
 
@@ -309,7 +324,7 @@ function computeWeightedConfidence(prop = {}, projection, line, edge) {
     confidence += clamp((enrichmentQuality - 50) * 0.08, -4, 3);
   }
 
-  confidence = clamp(Math.round(confidence), 48, 88);
+  confidence = clamp(Math.round(confidence), 48, 85);
 
   return { confidence, boostLabels, penaltyLabels };
 }
@@ -376,7 +391,7 @@ export function scoreDisplayProp(prop = {}) {
   const invalidProp = !isValidDisplayProp({ ...finalized, line, player: prop.player, playerName: prop.playerName });
   const displayResearchOnly = invalidProp
     ? true
-    : finiteOr(finalized.confidence, 0) < 65 || isDisplayResearchOnly(finalized);
+    : finiteOr(finalized.confidence, 0) < TIER_LEAN || isDisplayResearchOnly(finalized);
   const isDisplayPlayable = !displayResearchOnly && !invalidProp;
   const bandScore = resolveBandScore(finalized);
   const bettingLabel = displayResearchOnly ? "Research only" : confidenceBandDisplay(bandScore);
@@ -421,9 +436,9 @@ export function isValidDisplayProp(prop = {}) {
 }
 
 function labelForConfidence(confidence = BASE_CONFIDENCE, displayResearchOnly = false) {
-  if (displayResearchOnly || confidence < 65) return "Research only";
-  if (confidence >= 85) return "Strong Play";
-  if (confidence >= 75) return "Playable";
+  if (displayResearchOnly || confidence < TIER_LEAN) return "Research only";
+  if (confidence >= 80) return "Strong Play";
+  if (confidence >= 70) return "Playable";
   return "Lean";
 }
 

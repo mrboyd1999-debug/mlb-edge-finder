@@ -6,7 +6,7 @@ import {
   applyUnderdogProviderToDebug,
   UNDERDOG_SOFT_MESSAGE,
 } from "./services/providers/underdogProvider.js";
-import { resolveSourceHealthState, resolveFetchHealthBadge, summarizeSourceCounts, HEALTH_STATES, EMPTY_SOURCE_MESSAGE } from "./services/sourceHealth.js";
+import { resolveSourceHealthState, resolveFetchHealthBadge, summarizeSourceCounts, formatProviderStatusLabel, HEALTH_STATES, EMPTY_SOURCE_MESSAGE } from "./services/sourceHealth.js";
 import { enrichLineMovementWithTags } from "./services/lineMovementTrust.js";
 import { fetchSportsbookComparison } from "./services/sportsbookOdds";
 import { fetchOddsApiDisplayProps } from "./services/oddsApiPlayerProps.js";
@@ -168,6 +168,7 @@ import {
   isAbortOrTimeoutError,
   withFetchTimeout,
 } from "./utils/apiTimeout.js";
+import { auditPropRejections, formatProviderStatusLabel as formatLiveProviderLabel } from "./utils/livePropUsability.js";
 import NearMissBoard from "./components/NearMissBoard.jsx";
 import RejectionAnalyticsPanel from "./components/RejectionAnalyticsPanel.jsx";
 import QualificationAnalyticsPanel from "./components/QualificationAnalyticsPanel.jsx";
@@ -286,6 +287,7 @@ const PIPELINE_FALLBACK_MESSAGE = "Fallback mode: displaying usable props withou
 const INCLUDE_UNCERTAIN_KEY = "dfs-include-uncertain-props";
 const FILTER_PREFS_KEY = "dfs-filter-prefs";
 const COMPACT_MODE_KEY = "dfs-compact-mode";
+const QUICK_PICKS_MODE_KEY = "dfs-quick-picks-mode";
 const DEBUG_SAMPLE_LIMIT = 10;
 
 const DEFAULT_FILTER_PREFS = {
@@ -327,6 +329,22 @@ function readCompactModePreference() {
 function writeCompactModePreference(value) {
   try {
     window.localStorage.setItem(COMPACT_MODE_KEY, value ? "true" : "false");
+  } catch {
+    // ignore
+  }
+}
+
+function readQuickPicksModePreference() {
+  try {
+    return window.localStorage.getItem(QUICK_PICKS_MODE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function writeQuickPicksModePreference(value) {
+  try {
+    window.localStorage.setItem(QUICK_PICKS_MODE_KEY, value ? "true" : "false");
   } catch {
     // ignore
   }
@@ -725,21 +743,43 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
     const rawCount = Number(row.rawPropsLoaded ?? counts.rawCount ?? 0);
     const usableCount = Number(row.usablePropsCount ?? counts.usableCount ?? 0);
     const parsedCount = Number(row.propsAfterParsing ?? counts.parsedCount ?? 0);
-    if (rawCount > 0 && usableCount > 0) {
-      if (/cached/i.test(String(status || row.status || row.lineSourceBadge || ""))) return HEALTH_STATES.CACHED;
-      return HEALTH_STATES.LIVE;
-    }
-    if (rawCount > 0 && usableCount === 0 && parsedCount === 0) {
-      return HEALTH_STATES.EMPTY;
-    }
-    return resolveSourceHealthState({
-      status: status || row.status,
-      lineSourceBadge: row.lineSourceBadge || row.providerHealth || row.health,
-      lastFetchAt: row.lastSuccessfulFetchAt || fallbackTs,
-      hasData: counts.usableCount > 0,
+    const failed = /failed|unavailable|offline/i.test(String(status || row.status || ""));
+    const timedOut = /timed?\s*out/i.test(String(row.message || row.lastError || status || ""));
+    const cached = /cached/i.test(String(status || row.status || row.lineSourceBadge || ""));
+    return resolveFetchHealthBadge({
+      ok: !failed,
+      failed,
+      timedOut,
+      rateLimited: cached,
+      cached,
+      rawCount,
+      parsedCount,
       usableCount,
-    });
+      lastError: row.message || row.lastError || "",
+    }).badge;
   };
+  const buildRow = (row, status) => {
+    const counts = summarizeSourceCounts(row);
+    const badge = resolveBadge(row, status);
+    const failed = badge === HEALTH_STATES.FAILED;
+    const timedOut = String(badge).toUpperCase() === "TIMED OUT";
+    const cached = badge === HEALTH_STATES.CACHED;
+    const statusLabel = formatLiveProviderLabel({
+      badge,
+      status,
+      usableCount: counts.usableCount,
+      rawCount: counts.rawCount,
+      parsedCount: counts.parsedCount,
+      failed,
+      timedOut,
+      cached,
+      lastError: row.message || row.lastError || "",
+    });
+    return { ...counts, lineSourceBadge: badge, statusLabel };
+  };
+  const ppRow = buildRow(pp, board?.sourceStatus?.PrizePicks);
+  const udRow = buildRow(ud, board?.sourceStatus?.Underdog);
+  const oddsRow = buildRow(odds, board?.sourceStatus?.["The Odds API"]);
   const cacheUsableCount = boardPropCount;
   const cacheLayerLabel =
     cacheUsableCount === 0
@@ -757,10 +797,11 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
     PrizePicks: {
       status: sourceSnapshot[SOURCE_IDS.PRIZEPICKS]?.status || board?.sourceStatus?.PrizePicks || pp.status || "Pending",
       lastFetchAt: pp.lastSuccessfulFetchAt || sourceSnapshot.PrizePicks?.lastSuccessfulFetchAt || board?.updatedAt || "",
-      lineSourceBadge: resolveBadge(pp, board?.sourceStatus?.PrizePicks),
-      rawCount: Number(pp.rawPropsLoaded || 0),
-      parsedCount: Number(pp.propsAfterParsing || 0),
-      usableCount: Number(pp.usablePropsCount ?? pp.propsAfterParsing ?? 0),
+      lineSourceBadge: ppRow.lineSourceBadge,
+      statusLabel: ppRow.statusLabel,
+      rawCount: ppRow.rawCount,
+      parsedCount: ppRow.parsedCount,
+      usableCount: ppRow.usableCount,
       cooldownRemainingMs: sourceSnapshot.PrizePicks?.cooldownRemainingMs || 0,
       cacheAge: sourceSnapshot.PrizePicks?.cacheAge || "",
       requestCount: sourceSnapshot.PrizePicks?.requestCount || 0,
@@ -770,10 +811,11 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
     Underdog: {
       status: sourceSnapshot.Underdog?.status || board?.sourceStatus?.Underdog || ud.status || "Pending",
       lastFetchAt: ud.lastSuccessfulFetchAt || sourceSnapshot.Underdog?.lastSuccessfulFetchAt || board?.updatedAt || "",
-      lineSourceBadge: resolveBadge(ud, board?.sourceStatus?.Underdog),
-      rawCount: Number(ud.rawPropsLoaded || 0),
-      parsedCount: Number(ud.propsAfterParsing || 0),
-      usableCount: Number(ud.usablePropsCount ?? ud.propsAfterParsing ?? 0),
+      lineSourceBadge: udRow.lineSourceBadge,
+      statusLabel: udRow.statusLabel,
+      rawCount: udRow.rawCount,
+      parsedCount: udRow.parsedCount,
+      usableCount: udRow.usableCount,
       cooldownRemainingMs: sourceSnapshot.Underdog?.cooldownRemainingMs || 0,
       cacheAge: sourceSnapshot.Underdog?.cacheAge || "",
       requestCount: sourceSnapshot.Underdog?.requestCount || 0,
@@ -790,9 +832,8 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
     OddsAPI: {
       status: sourceSnapshot[SOURCE_IDS.ODDS_API]?.status || odds.status || board?.sourceStatus?.["The Odds API"] || "Pending",
       lastFetchAt: odds.lastSuccessfulFetchAt || sourceSnapshot[SOURCE_IDS.ODDS_API]?.lastSuccessfulFetchAt || "",
-      lineSourceBadge: oddsKeyConfigured
-        ? resolveBadge(odds, board?.sourceStatus?.["The Odds API"])
-        : "NOT CONFIGURED",
+      lineSourceBadge: oddsKeyConfigured ? oddsRow.lineSourceBadge : "NOT CONFIGURED",
+      statusLabel: oddsKeyConfigured ? oddsRow.statusLabel : "Not configured",
       rawCount: Number(odds.rawPropsLoaded || 0),
       parsedCount: Number(odds.propsAfterParsing || 0),
       usableCount: Number(odds.propsAfterParsing || 0),
@@ -808,6 +849,11 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
       status: sportsDataConfigured ? (statsLoadedCount > 0 ? "active" : "empty") : "not_configured",
       lastFetchAt: board?.updatedAt || "",
       lineSourceBadge: sportsDataConfigured ? (statsLoadedCount > 0 ? "LIVE" : "EMPTY") : "NOT CONFIGURED",
+      statusLabel: sportsDataConfigured
+        ? statsLoadedCount > 0
+          ? `Live — ${statsLoadedCount} stats loaded`
+          : "Empty — no stats loaded"
+        : "Not configured",
       rawCount: statsLoadedCount,
       parsedCount: statsLoadedCount,
       usableCount: statsLoadedCount,
@@ -818,6 +864,7 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
     },
     cache: {
       status: cacheLayerLabel,
+      statusLabel: cacheUsableCount > 0 ? `Cached — ${cacheUsableCount} board props` : "Empty — no board props",
       lastFetchAt: board?.updatedAt || "",
       cacheAge: boardTs ? formatCacheAge(board?.updatedAt) : "",
       rawCount: boardPropCount,
@@ -850,17 +897,20 @@ function applySourceResult({
     result.debug?.propsAfterParsing ?? result.parsedProps?.length ?? props.length
   );
   const usableCount = countUsableProps(props);
-  const failed = result.status === "Failed";
+  const failed = result.status === "Failed" || result.status === "Unavailable";
   const rateLimited = Boolean(result.rateLimited || result.cached);
   const cached = result.status === "Cached" || rateLimited;
+  const timedOut = /timed?\s*out/i.test(String(result.debug?.message || result.warnings?.join(" ") || ""));
   const health = resolveFetchHealthBadge({
     ok: !failed,
     failed,
+    timedOut,
     rateLimited,
     cached,
     rawCount,
     parsedCount,
     usableCount,
+    lastError: result.debug?.message || result.warnings?.join(" | ") || "",
   });
 
   if (label === "Underdog" && failed) {
@@ -936,6 +986,7 @@ function applySourceResult({
     message: health.message || result.debug?.message || "",
     lastSuccessfulFetchAt: result.lastSuccessfulFetchAt || "",
     lineSourceBadge: health.badge,
+    statusLabel: health.message,
     underdogParser: result.debug?.underdogParser || null,
     rawUnderdogSamples: result.debug?.rawUnderdogSamples || [],
   };
@@ -987,18 +1038,17 @@ function applyOddsApiSourceState(oddsApiPlayerResult, sourceStatus, debugInfo) {
 }
 
 function buildCoreBoardPreview({ rawProps = [], allDisplayProps = [], sourceStatus, debugInfo }) {
-  const boardProps = allDisplayProps.length ? allDisplayProps : rawProps;
-  const streakProps = resolveSafeMlbStreakPicks(boardProps, rawProps, 2);
+  const boardProps = allDisplayProps.length ? allDisplayProps : [];
   const status = finalizeSourceStatus({ ...sourceStatus });
   return {
     props: boardProps,
     allDisplayProps: boardProps,
     usableProps: boardProps,
-    streakProps,
+    streakProps: [],
     sourceStatus: status,
     sourceHealth: buildSourceHealth([], [], status),
     debugInfo: sanitizeDebugInfoForMlbOnly(debugInfo),
-    pipelineFallback: true,
+    pipelineFallback: false,
     partial: true,
   };
 }
@@ -1319,13 +1369,6 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   });
   logPipelineStageReport(pipelineStageCounts, "Prop Pipeline");
 
-  if (!workingActiveProps.length && usablePropsPool.length > 0) {
-    pipelineFallback = true;
-    workingActiveProps = usablePropsPool;
-    workingNormalProps = usablePropsPool.slice(0, MAX_PRE_SCORE_PROPS);
-    sourceWarnings.push(PIPELINE_FALLBACK_MESSAGE);
-  }
-
   pipelineAudit.normalized = Math.max(pipelineAudit.normalized, canonicalProps.length);
   pipelineAudit.active = workingActiveProps.length;
   pipelineAudit.preScoring = workingNormalProps.length;
@@ -1545,20 +1588,6 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     [...qualBoards.ready, ...qualBoards.allDisplayable.filter((prop) => !qualBoards.ready.some((ready) => ready.id === prop.id))]
   ).slice(0, MAX_RANKED_PROPS);
 
-  if (!displayProps.length && allDisplayProps.length > 0) {
-    pipelineFallback = true;
-    displayProps = allDisplayProps.slice(0, MAX_RANKED_PROPS);
-    if (!sourceWarnings.includes(PIPELINE_FALLBACK_MESSAGE)) {
-      sourceWarnings.push(PIPELINE_FALLBACK_MESSAGE);
-    }
-  } else if (!displayProps.length && usablePropsPool.length > 0) {
-    pipelineFallback = true;
-    displayProps = usablePropsPool.slice(0, MAX_RANKED_PROPS);
-    if (!sourceWarnings.includes(PIPELINE_FALLBACK_MESSAGE)) {
-      sourceWarnings.push(PIPELINE_FALLBACK_MESSAGE);
-    }
-  }
-
   pipelineStageCounts = buildPipelineStageReport({
     ...pipelineStageCounts,
     finalDisplayed: displayProps.length,
@@ -1581,13 +1610,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   let streakProps = filterVerifiedSportsbookProps(
     buildStreakFinderProps(workingActiveProps, modelSignalMap, lineMovementMap).sort(sortStreakProps)
   ).slice(0, MAX_STREAK_PROPS);
-  if (streakProps.length < 2 && (allDisplayProps.length || rawProps.length)) {
-    streakProps = resolveSafeMlbStreakPicks(
-      allDisplayProps.length ? allDisplayProps : usablePropsPool,
-      rawProps,
-      2
-    );
-  }
+
   attachScoredSourceCounts(debugInfo, {
     recommendedProps: displayProps,
     watchlistProps,
@@ -1609,6 +1632,10 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   debugInfo.rejectionAnalytics = qualBoards.rejectionAnalytics?.summary || pipelineAudit.rejectionAnalytics || null;
   debugInfo.rejectionSamples = qualBoards.rejectionAnalytics?.rejected?.slice(0, 40) || pipelineAudit.rejectionSamples || [];
   debugInfo.qualificationAnalytics = qualBoards.qualificationAnalytics || pipelineAudit.qualificationAnalytics || null;
+
+  debugInfo.rejectionAudit = auditPropRejections(
+    [...(qualBoards.allDisplayable || []), ...(allDisplayProps || [])]
+  );
 
   const finalStatus = finalizeSourceStatus(sourceStatus);
   const { criticalWarnings, degradedWarnings, sourceHealth } = partitionWarnings(
@@ -1692,6 +1719,7 @@ export default function DFSPropsApp() {
   const [dateFilter, setDateFilter] = useState("allUpcoming");
   const [readyOnly, setReadyOnly] = useState(false);
   const [compactMode, setCompactMode] = useState(() => readCompactModePreference());
+  const [quickPicksMode, setQuickPicksMode] = useState(() => readQuickPicksModePreference());
   const [showDebugPanels, setShowDebugPanels] = useState(() => readShowDebugPanelsPreference());
   const [marketQuickFilter, setMarketQuickFilter] = useState("all");
   const [searchText, setSearchText] = useState("");
@@ -2074,6 +2102,10 @@ export default function DFSPropsApp() {
   useEffect(() => {
     writeCompactModePreference(compactMode);
   }, [compactMode]);
+
+  useEffect(() => {
+    writeQuickPicksModePreference(quickPicksMode);
+  }, [quickPicksMode]);
 
   useEffect(() => {
     writeShowDebugPanelsPreference(showDebugPanels);
@@ -2840,6 +2872,14 @@ export default function DFSPropsApp() {
             />
             Compact Mode
           </label>
+          <label style={{ ...styles.selectLabel, alignItems: "center", flexDirection: "row", gap: "6px" }}>
+            <input
+              type="checkbox"
+              checked={quickPicksMode}
+              onChange={(event) => setQuickPicksMode(event.target.checked)}
+            />
+            Quick Picks
+          </label>
         </div>
       </section>
       </div>
@@ -2947,30 +2987,31 @@ export default function DFSPropsApp() {
       ) : null}
 
       {visibleError && !allDisplayProps.length ? <section style={styles.errorPanel}>{visibleError}</section> : null}
+      </div>
 
-      {debugModeEnabled && preFilterDebugProps.length ? (
-        <details className="all-props-debug-section dfs-section" style={styles.compactDetails}>
-          <summary style={styles.detailsSummary}>
-            <span className="details-summary-stack">
-              <span style={styles.eyebrow}>Debug</span>
-              <strong>All Props (pre-filter sample)</strong>
-            </span>
-            <span style={styles.countPill}>{allDisplayProps.length} display</span>
-          </summary>
-          <div className="all-props-debug-panel">
-            <p style={styles.compactFlags}>
-              raw: {liveDisplayDebugCounts.raw} · parsed: {liveDisplayDebugCounts.parsed} · normalized: {liveDisplayDebugCounts.normalized} · display: {liveDisplayDebugCounts.display} · selected sport: {liveDisplayDebugCounts.selectedSport} · top 2: {liveDisplayDebugCounts.top2} · ready: {liveDisplayDebugCounts.ready} · rejected: {liveDisplayDebugCounts.rejected}
-            </p>
-            <ul className="all-props-debug-list">
-              {preFilterDebugProps.map((prop) => (
-                <li key={prop.id}>
-                  {prop.player || prop.playerName} · {prop.sport || prop.league} · {prop.statType || prop.market} · {prop.line} · {prop.source || prop.platform}
-                </li>
-              ))}
-            </ul>
+      <div className="dfs-section dfs-order-api-health">
+      <SectionErrorBoundary
+        name="Source Status"
+        onError={handleSectionRenderError}
+        fallback={
+          <div style={{ padding: "8px 0", color: "#fcd34d", fontSize: 12 }}>
+            API diagnostics temporarily unavailable.
           </div>
-        </details>
-      ) : null}
+        }
+      >
+      <SourceStatusBar
+        sourceStatus={displaySourceStatus}
+        sourceHealth={sourceHealth}
+        cacheStatus={cacheStatus}
+        stale={Boolean(staleDataWarning)}
+        apiHealth={apiHealth}
+        lastUpdated={lastUpdated}
+        devMode={devEnvironment}
+        upcomingSlateCount={debugInfo.upcomingSlateCount ?? pipelineAudit.upcomingSlate ?? 0}
+        slateExcludedCount={debugInfo.slateExcludedCount ?? pipelineAudit.slateExcluded ?? 0}
+        pregameWindowHours={debugInfo.pregameWindowHours ?? filterPrefs.pregameWindowHours ?? DEFAULT_PREGAME_WINDOW_HOURS}
+      />
+      </SectionErrorBoundary>
       </div>
 
       <div id="section-top-picks" className="dfs-section dfs-order-top-picks">
@@ -2990,10 +3031,13 @@ export default function DFSPropsApp() {
             streakCategoryTab={streakCategoryTab}
             onStreakCategoryTabChange={setStreakCategoryTab}
             onSectionError={handleSectionRenderError}
+            quickMode={quickPicksMode}
           />
         </SectionErrorBoundary>
       </div>
 
+      {!quickPicksMode ? (
+      <>
       <div id="section-accepted" className="dfs-section dfs-order-accepted">
       <AcceptedPropsPanel props={finalAcceptedProps} onOpen={setSelectedEvaluation} compactMode={compactMode} />
       </div>
@@ -3061,31 +3105,8 @@ export default function DFSPropsApp() {
         )}
       </section>
       </div>
-
-      <div className="dfs-section dfs-order-api-health">
-      <SectionErrorBoundary
-        name="Source Status"
-        onError={handleSectionRenderError}
-        fallback={
-          <div style={{ padding: "8px 0", color: "#fcd34d", fontSize: 12 }}>
-            API diagnostics temporarily unavailable.
-          </div>
-        }
-      >
-      <SourceStatusBar
-        sourceStatus={displaySourceStatus}
-        sourceHealth={sourceHealth}
-        cacheStatus={cacheStatus}
-        stale={Boolean(staleDataWarning)}
-        apiHealth={apiHealth}
-        lastUpdated={lastUpdated}
-        devMode={devEnvironment}
-        upcomingSlateCount={debugInfo.upcomingSlateCount ?? pipelineAudit.upcomingSlate ?? 0}
-        slateExcludedCount={debugInfo.slateExcludedCount ?? pipelineAudit.slateExcluded ?? 0}
-        pregameWindowHours={debugInfo.pregameWindowHours ?? filterPrefs.pregameWindowHours ?? DEFAULT_PREGAME_WINDOW_HOURS}
-      />
-      </SectionErrorBoundary>
-      </div>
+      </>
+      ) : null}
       </>
       ) : null}
 
@@ -3099,6 +3120,8 @@ export default function DFSPropsApp() {
         lastUpdated={lastUpdated}
         feedHealthContext={feedHealthContext}
         underdogDebugSnapshot={underdogDebugSnapshot}
+        rejectionAudit={debugInfo.rejectionAudit}
+        apiHealth={apiHealth}
       />
       </SectionErrorBoundary>
       </div>

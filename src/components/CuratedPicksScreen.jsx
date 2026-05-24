@@ -58,10 +58,11 @@ function CuratedPicksScreen({
   streakCategoryTab = "all",
   onStreakCategoryTabChange,
   onSectionError,
+  quickMode = false,
 }) {
   if (MLB_ONLY_MODE) {
     return (
-      <div className="curated-picks-screen curated-picks-mlb-only">
+      <div className={`curated-picks-screen curated-picks-mlb-only${quickMode ? " curated-quick-mode" : ""}`}>
         <SectionErrorBoundary name="Featured MLB Plays" onError={onSectionError}>
           <MlbFeaturedPicksBoard
             bestPlays={featuredPicks.bestPlays}
@@ -85,6 +86,8 @@ function CuratedPicksScreen({
             onCategoryTabChange={onStreakCategoryTabChange}
           />
         </SectionErrorBoundary>
+        {quickMode ? null : (
+          <>
         <SectionErrorBoundary name="MLB 4-Man Builder" onError={onSectionError}>
           <ParlayBuilderSection picks={parlayPicks} loading={loading} onOpen={onOpen} hasMlbProps={hasMlbProps} />
         </SectionErrorBoundary>
@@ -108,6 +111,8 @@ function CuratedPicksScreen({
             useMlbCard
           />
         </SectionErrorBoundary>
+          </>
+        )}
       </div>
     );
   }

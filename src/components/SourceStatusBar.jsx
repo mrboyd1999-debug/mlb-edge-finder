@@ -49,13 +49,25 @@ function formatHealthTime(value) {
 }
 
 function chipStatusColor(status) {
-  const key = String(status || "").toUpperCase();
-  if (key === HEALTH_STATES.LIVE) return "#86efac";
-  if (key === HEALTH_STATES.CACHED) return "#93c5fd";
-  if (key === HEALTH_STATES.EMPTY) return "#cbd5e1";
+  const text = String(status || "");
+  const key = text.toUpperCase();
+  if (/^LIVE\b/i.test(text) || key === HEALTH_STATES.LIVE) return "#86efac";
+  if (/^CACHED\b/i.test(text) || key === HEALTH_STATES.CACHED) return "#93c5fd";
+  if (/^TIMED OUT\b/i.test(text)) return "#fde047";
+  if (key === HEALTH_STATES.EMPTY || /^EMPTY\b/i.test(text)) return "#cbd5e1";
   if (key === HEALTH_STATES.DEGRADED) return "#fdba74";
-  if (key === HEALTH_STATES.FAILED) return "#fca5a5";
+  if (key === HEALTH_STATES.FAILED || /^FAILED\b/i.test(text)) return "#fca5a5";
   return "#cbd5e1";
+}
+
+function formatChipStatus(row = {}) {
+  if (row.statusLabel) return row.statusLabel;
+  return mapStatus(row.status || row.lineSourceBadge);
+}
+
+function formatHealthRowStatus(row = {}) {
+  if (row.statusLabel) return row.statusLabel;
+  return mapStatus(row.status || row.lineSourceBadge);
 }
 
 function formatCountLine(row = {}) {
@@ -85,11 +97,11 @@ export default function SourceStatusBar({
   });
 
   const items = [
-    ["PrizePicks", mapStatus(apiHealth?.PrizePicks?.lineSourceBadge || sourceStatus.PrizePicks)],
-    ["Underdog", mapStatus(apiHealth?.Underdog?.lineSourceBadge || sourceStatus.Underdog)],
-    ["Odds", mapStatus(apiHealth?.OddsAPI?.lineSourceBadge || sourceStatus["The Odds API"])],
-    ["SportsData", mapStatus(apiHealth?.SportsData?.lineSourceBadge || sourceHealth.SportsDataIO || HEALTH_STATES.NOT_CONFIGURED)],
-    ["Cache", boardHealth],
+    ["PrizePicks", formatChipStatus(apiHealth?.PrizePicks || { status: sourceStatus.PrizePicks })],
+    ["Underdog", formatChipStatus(apiHealth?.Underdog || { status: sourceStatus.Underdog })],
+    ["Odds", formatChipStatus(apiHealth?.OddsAPI || { status: sourceStatus["The Odds API"] })],
+    ["SportsData", formatChipStatus(apiHealth?.SportsData || { status: sourceHealth.SportsDataIO || HEALTH_STATES.NOT_CONFIGURED })],
+    ["Cache", apiHealth?.cache?.statusLabel || boardHealth],
   ];
 
   const healthRows = [
@@ -183,7 +195,7 @@ export default function SourceStatusBar({
             </div>
             <div style={styles.apiHealthGrid}>
               {healthRows.map((row) => {
-                const health = mapStatus(row.status);
+                const health = formatHealthRowStatus(row);
                 const hint = connectionHint(row);
                 const sessionCount = row.sessionRequestCount ?? row.requestCount;
                 const countLine = formatCountLine(row);

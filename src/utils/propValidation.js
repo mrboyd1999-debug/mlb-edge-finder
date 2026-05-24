@@ -123,16 +123,56 @@ export function hasValidProjection(prop = {}) {
   return Number.isFinite(projection) && projection > 0;
 }
 
+function resolvePickSideKey(prop = {}) {
+  const side = String(prop.side || prop.bestPick || prop.pick || prop.overUnder || "").toLowerCase();
+  if (side.includes("under") || side.includes("less") || side.includes("lower")) return "under";
+  if (side.includes("over") || side.includes("more") || side.includes("higher")) return "over";
+  return "";
+}
+
 export function computeCuratedPropEdge(prop = {}) {
-  if (!hasValidProjection(prop)) return null;
   const line = Number(prop.line);
   const projection = Number(prop.projection ?? prop.projectedValue);
   if (!Number.isFinite(line)) return null;
-  return projection - line;
+
+  const side = resolvePickSideKey(prop);
+  if (!Number.isFinite(projection) || projection <= 0) {
+    if (side === "under" && line > 0) return line;
+    return null;
+  }
+
+  if (side === "under") return line - projection;
+  if (side === "over") return projection - line;
+
+  if (projection !== line) {
+    return projection > line ? projection - line : line - projection;
+  }
+  return null;
+}
+
+function resolveValidatedSide(prop = {}) {
+  const explicit = resolvePickSideKey(prop);
+  if (explicit) return explicit;
+  const line = Number(prop.line);
+  const projection = Number(prop.projection ?? prop.projectedValue);
+  if (Number.isFinite(line) && Number.isFinite(projection) && projection > 0 && projection !== line) {
+    return projection > line ? "over" : "under";
+  }
+  return "";
+}
+
+function hasMatchupContext(prop = {}) {
+  const matchup = String(prop.matchup || "").trim();
+  const team = String(prop.team || "").trim();
+  const opponent = String(prop.opponent || "").trim();
+  return Boolean(matchup || (team && opponent) || team);
 }
 
 export function validateCuratedPropRejectReason(prop = {}) {
   if (!prop) return "Rejected: missing prop";
+  if (prop.isDemoData || prop.manualEntry || prop.isFallback || prop.displayFallback) {
+    return "Rejected: fallback/non-live prop";
+  }
   if (isMalformedPlayerName(prop.playerName || prop.player)) {
     return "Rejected: player missing";
   }
@@ -143,7 +183,10 @@ export function validateCuratedPropRejectReason(prop = {}) {
   const statType = prop.statType || prop.market || prop.propType || "";
   if (!statType) return "Rejected: missing stat type";
 
-  const sport = resolvePropSportLabel(prop) || prop.inferredSport || prop.sport || "";
+  const sport = resolvePropSportLabel(prop) || prop.inferredSport || prop.sport || prop.league || "";
+  if (!sport || sport === "Unknown" || sport === "Unsupported") {
+    return "Rejected: sport missing";
+  }
   const mismatch = sportStatMismatchReason(sport, statType);
   if (mismatch) return mismatch;
 
@@ -154,6 +197,15 @@ export function validateCuratedPropRejectReason(prop = {}) {
 
   if (!hasValidProjection(prop)) {
     return "Rejected: projection missing";
+  }
+
+  if (!hasMatchupContext(prop)) {
+    return "Rejected: matchup missing";
+  }
+
+  const side = resolveValidatedSide(prop);
+  if (!side) {
+    return "Rejected: side undetermined";
   }
 
   return "";

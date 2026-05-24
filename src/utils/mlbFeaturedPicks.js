@@ -1,25 +1,28 @@
 import { filterAllDisplayPropsBySport } from "./allDisplayProps.js";
-import { filterActiveSportProps } from "./mlbOnlyMode.js";
 import { isLooseDisplayProp, dedupeLooseProps } from "./safeModePipeline.js";
 import { buildPropSoftDedupeKey } from "./displayPropScoring.js";
 import { filterByDisplayConfidenceFloor } from "./mlbConfidenceEngine.js";
 import { formatRiskLevel } from "./pickRecommendation.js";
 import { withPlayerImageUrl } from "./playerImageFields.js";
-import { filterUnderdogStreakPool } from "./underdogStreakPool.js";
 import { filterUnderdogPropsBySport } from "./underdogSportDetection.js";
 import { sortBestPlayProps, prepareBestPlayProps, isRankableBestPlay } from "./bestPlayRanking.js";
 import { buildAnalyticsReason } from "./propReasonEngine.js";
-import { isCuratedDisplayProp, computeCuratedPropEdge } from "./propValidation.js";
+import { isCuratedDisplayProp, computeCuratedPropEdge, isVerifiedSportsbookProp } from "./propValidation.js";
 import { enrichPropWithSideEvaluation } from "./sideEvaluationEngine.js";
+import { normalizeSource } from "./normalizeSource.js";
 
-function buildBestPlayPool(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
-  const mlbDisplay = filterAllDisplayPropsBySport(displayProps, "MLB", "all");
-  const mlbRaw = filterActiveSportProps(rawProps || []);
-  const udMlb = filterUnderdogPropsBySport(parsedUnderdogProps || [], "MLB");
+function isPrizePicksOrUnderdog(prop = {}) {
+  const src = normalizeSource(prop);
+  return src === "prizepicks" || src === "underdog";
+}
+
+function buildBestPlayPool(displayProps = [], _rawProps = [], parsedUnderdogProps = []) {
+  const mlbDisplay = filterAllDisplayPropsBySport(displayProps, "MLB", "all")
+    .filter(isVerifiedSportsbookProp)
+    .filter(isPrizePicksOrUnderdog);
+  const udMlb = filterUnderdogPropsBySport(parsedUnderdogProps || [], "MLB").filter(isVerifiedSportsbookProp);
   return dedupeLooseProps(
-    [...mlbDisplay, ...mlbRaw, ...filterUnderdogStreakPool(udMlb)]
-      .filter(isLooseDisplayProp)
-      .filter(isCuratedDisplayProp)
+    [...mlbDisplay, ...udMlb].filter(isLooseDisplayProp).filter(isCuratedDisplayProp)
   );
 }
 
@@ -63,7 +66,7 @@ export function resolveFeaturedMlbPicks(displayProps = [], rawProps = [], parsed
   const byEdge = [...pool]
     .filter((prop) => {
       const edge = Number(computeCuratedPropEdge(prop));
-      return Number.isFinite(edge) && edge !== 0;
+      return Number.isFinite(edge) && edge > 0;
     })
     .sort((a, b) => Math.abs(computeCuratedPropEdge(b) ?? 0) - Math.abs(computeCuratedPropEdge(a) ?? 0));
   const bySafety = [...pool]

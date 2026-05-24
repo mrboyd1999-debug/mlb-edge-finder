@@ -7,6 +7,7 @@ import { withNormalizedSource } from "./normalizeSource.js";
 import { detectUnderdogSport, attachSportInference, inferSportFromProp } from "./underdogSportDetection.js";
 import { resolveUnderdogCategory } from "./underdogRowCard.js";
 import { normalizeGameStartTime } from "./normalizeGameStartTime.js";
+import { sportFromUnderdogGame } from "./sportMappings.js";
 
 export const UNDERDOG_PARSER_MISMATCH_MESSAGE = "Underdog parser mismatch detected.";
 
@@ -54,13 +55,25 @@ export function extractRawUnderdogRecords(payload) {
 export function buildUnderdogLookupMaps(payload) {
   const normalized = unwrapUnderdogPayload(payload);
   if (Array.isArray(normalized)) {
-    return { players: new Map(), games: new Map(), appearances: new Map(), teams: new Map() };
+    return {
+      players: new Map(),
+      games: new Map(),
+      appearances: new Map(),
+      teams: new Map(),
+      overUnders: new Map(),
+    };
   }
+  const overUnderRows =
+    normalized.over_under_lines ||
+    normalized.overUnders ||
+    normalized.over_under ||
+    [];
   return {
     players: mapById(normalized.players || normalized.athletes || []),
     games: mapById(normalized.games || normalized.matches || []),
     appearances: mapById(normalized.appearances || []),
     teams: mapById(normalized.teams || []),
+    overUnders: mapById(Array.isArray(overUnderRows) ? overUnderRows : []),
   };
 }
 
@@ -170,7 +183,26 @@ function resolveStatTypeFromRaw(raw = {}) {
   ).trim();
 }
 
+function resolveSportFromGameChain(raw = {}, lookup = {}) {
+  const attrs = attrsOf(raw);
+  const { games, appearances } = lookup;
+  if (!appearances?.size) return "";
+  const appearanceId =
+    attrs.appearance_id ||
+    raw.appearance_id ||
+    raw.relationships?.appearance?.data?.id ||
+    attrs.relationships?.appearance?.data?.id;
+  const appearance = appearances.get(String(appearanceId)) || {};
+  const game = games?.get(String(appearance.game_id || appearance.match_id || attrs.game_id)) || {};
+  const fromGame = sportFromUnderdogGame(game, attrs);
+  if (fromGame && fromGame !== "Unknown") return fromGame;
+  const league = game.league || game.sport || game.competition_name || game.sport_name || "";
+  return String(league || "").trim();
+}
+
 function resolveSportFromRaw(raw = {}, lookup = {}, context = {}) {
+  const fromChain = resolveSportFromGameChain(raw, lookup);
+  if (fromChain && fromChain !== "Unknown") return fromChain;
   const detected = detectUnderdogSport(raw, lookup, context);
   if (detected) return detected;
   return "Unknown";
@@ -244,11 +276,18 @@ function sideFromRaw(raw = {}, line, projection) {
   return "";
 }
 
-function computeProjectionEdge(line, projection) {
+function computeSignedEdge(line, projection, side = "") {
   const ln = Number(line);
   const proj = Number(projection);
-  if (!Number.isFinite(ln) || !Number.isFinite(proj) || proj <= 0) return null;
-  return proj - ln;
+  if (!Number.isFinite(ln)) return null;
+  const sideKey = String(side || "").toLowerCase();
+  if (!Number.isFinite(proj) || proj <= 0) {
+    if (sideKey.includes("under") || sideKey.includes("less")) return ln > 0 ? ln : null;
+    return null;
+  }
+  if (sideKey.includes("under") || sideKey.includes("less")) return ln - proj;
+  if (sideKey.includes("over") || sideKey.includes("more")) return proj - ln;
+  return proj > ln ? proj - ln : ln - proj;
 }
 
 function normalizeStreakSide(value = "") {
@@ -349,7 +388,7 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
   );
   const hasProjection = Number.isFinite(projection) && projection > 0;
   const overUnder = sideFromRaw(raw, line, hasProjection ? projection : null);
-  const edge = computeProjectionEdge(line, hasProjection ? projection : null);
+  const edge = computeSignedEdge(line, hasProjection ? projection : null, overUnder);
   const sportInference = inferSportFromProp(
     {
       sport,

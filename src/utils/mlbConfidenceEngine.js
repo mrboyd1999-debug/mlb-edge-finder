@@ -93,7 +93,7 @@ function booksOrModelSupport(prop = {}) {
 }
 
 export function calibrateRealisticConfidence(rawConfidence, prop = {}, edge = null) {
-  let score = Math.round(finiteOr(rawConfidence, 54));
+  let score = Math.round(finiteOr(rawConfidence, 50));
   const edgeVal = finiteOr(edge ?? prop.edge, 0);
   const sampleSize = Number(prop.sampleSize || prop.modelSignal?.sampleSize || 0);
 
@@ -104,17 +104,33 @@ export function calibrateRealisticConfidence(rawConfidence, prop = {}, edge = nu
     score -= 3;
   }
 
-  if (prop.displayFallback || prop.isFallbackMlbPick) score -= 5;
+  if (prop.displayFallback || prop.isFallbackMlbPick || prop.isFallback) score -= 5;
 
   const enrichmentQuality = finiteOr(prop.dataQualityScore, NaN);
   if (Number.isFinite(enrichmentQuality)) {
     score += clamp((enrichmentQuality - 52) * 0.08, -5, 4);
   }
 
-  score = Math.round(score * 0.78 + 56 * 0.22);
+  score = Math.round(score * 0.78 + 50 * 0.22);
 
   const elite = isEliteConfidenceEligible(prop, edgeVal);
-  const maxCap = elite ? 82 : 75;
+  let maxCap = elite ? 82 : 75;
+  if (!hasMeaningfulEnrichment(prop)) maxCap = Math.min(maxCap, 65);
+  if (!Number.isFinite(Number(prop.last10HitRate ?? prop.recentHitRate ?? prop.last5HitRate)) && sampleSize < 5) {
+    maxCap = Math.min(maxCap, 65);
+  }
+  if (
+    !prop.sportsDataSeason &&
+    !prop.sportsDataRecentGames?.length &&
+    Number.isFinite(Number(prop.projection ?? prop.projectedValue)) &&
+    !prop.matchupNote
+  ) {
+    maxCap = Math.min(maxCap, 60);
+  }
+  if (prop.displayFallback || prop.isFallback || prop.estimatedProjection || prop.projectionSource === "fallback-player-stats") {
+    maxCap = Math.min(maxCap, 55);
+  }
+
   score = clamp(score, 50, maxCap);
 
   if (!elite && score > 75) score = 75;

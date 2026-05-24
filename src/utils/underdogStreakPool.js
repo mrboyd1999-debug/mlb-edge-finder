@@ -4,7 +4,7 @@ export const UNDERDOG_STREAK_EMPTY_MESSAGE =
   "No Underdog streak props loaded. Check Underdog feed/API connection.";
 
 export const MLB_UNDERDOG_STREAK_EMPTY_MESSAGE =
-  "No MLB Underdog streak props loaded yet.";
+  "No valid MLB Underdog streak props found from live feed.";
 
 export const UNDERDOG_PARSER_EMPTY_MESSAGE =
   "Underdog connected, but parser returned 0 props.";

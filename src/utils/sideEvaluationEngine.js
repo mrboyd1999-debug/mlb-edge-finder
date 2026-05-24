@@ -5,13 +5,13 @@
 import { canonicalMarketKey } from "./marketNormalization.js";
 import { hasValidProjection } from "./propValidation.js";
 
-export const TIER_STRONG = 85;
-export const TIER_PLAYABLE = 75;
-export const TIER_LEAN = 65;
+export const TIER_STRONG = 80;
+export const TIER_PLAYABLE = 70;
+export const TIER_LEAN = 60;
 export const PASS_CONFIDENCE_GAP = 5;
 
-const UNDER_PREFERENCE_BOOST = 8;
-const UNDER_MARKET_BONUS = 5;
+const UNDER_PREFERENCE_BOOST = 10;
+const UNDER_MARKET_BONUS = 6;
 const WEAK_HALF_LINE = 0.5;
 const WEAK_HALF_EDGE = 0.7;
 const WEAK_HALF_PENALTY = 14;
@@ -152,7 +152,7 @@ function projectionQualityScore(prop = {}) {
 }
 
 function sideConfidence(prop = {}, side = "OVER", edge = 0) {
-  const base = finiteOr(prop.confidenceScore ?? prop.confidence, 62);
+  const base = finiteOr(prop.confidenceScore ?? prop.confidence, 50);
   const line = finiteOr(prop.line, 1);
   const edgePct = line > 0 ? (Math.max(0, edge) / line) * 100 : 0;
 
@@ -160,12 +160,28 @@ function sideConfidence(prop = {}, side = "OVER", edge = 0) {
   conf -= variancePenalty(prop) * 0.35;
   conf += projectionQualityScore(prop);
 
-  if (side === "UNDER") conf += 3;
+  if (side === "UNDER") conf += 4;
 
-  if (edge >= 0.5 && base >= 70) conf = Math.max(conf, 65);
-  if (edge >= 0.75 && base >= 75) conf = Math.max(conf, 72);
+  if (!hasMeaningfulRecentStats(prop)) conf = Math.min(conf, 65);
+  if (isLineProjectionOnly(prop)) conf = Math.min(conf, 60);
+  if (prop.displayFallback || prop.isFallback || prop.estimatedProjection) conf = Math.min(conf, 55);
 
-  return Math.max(35, Math.min(92, Math.round(conf)));
+  if (edge >= 0.5 && base >= 68) conf = Math.max(conf, 62);
+  if (edge >= 0.75 && base >= 72) conf = Math.max(conf, 68);
+
+  return Math.max(35, Math.min(88, Math.round(conf)));
+}
+
+function hasMeaningfulRecentStats(prop = {}) {
+  return (
+    Number.isFinite(Number(prop.last10HitRate ?? prop.recentHitRate ?? prop.last5HitRate)) ||
+    Number(prop.sampleSize || prop.modelSignal?.sampleSize || 0) >= 5 ||
+    Boolean(prop.sportsDataSeason || prop.sportsDataRecentGames?.length)
+  );
+}
+
+function isLineProjectionOnly(prop = {}) {
+  return !hasMeaningfulRecentStats(prop) && Number.isFinite(Number(prop.projection ?? prop.projectedValue));
 }
 
 function sideRankScore(prop = {}, side = "OVER") {

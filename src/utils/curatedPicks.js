@@ -5,6 +5,7 @@ import {
   markDisplayFallbackProps,
   sortPropsForDisplay,
 } from "./displayPropScoring.js";
+import { isCuratedDisplayProp } from "./propValidation.js";
 import { MLB_ONLY_MODE } from "./mlbOnlyMode.js";
 import { isSafeModeEnabled } from "./safeMode.js";
 import {
@@ -235,7 +236,7 @@ export function countUnderdogStreakProps(displayProps = [], rawProps = [], parse
   return filterUnderdogPropsForSport(pool, sport).filter(isStreakEligibleUdProp).length;
 }
 
-/** Return up to 2 MLB streak picks from parsed Underdog props only — never PrizePicks. */
+/** Return up to 2 MLB streak picks from validated Underdog props only — never PrizePicks or fallback pool. */
 export function resolveMlbStreakPicks(
   streakBoards = {},
   displayProps = [],
@@ -244,37 +245,20 @@ export function resolveMlbStreakPicks(
   parsedUnderdogProps = []
 ) {
   const udParsedPool = resolveUnderdogPickPool(displayProps, rawProps, parsedUnderdogProps, "MLB");
-  const streakEligible = filterMlbUnderdogStreakEligible(udParsedPool);
+  const streakEligible = filterMlbUnderdogStreakEligible(udParsedPool).filter(isCuratedDisplayProp);
 
-  if (isSafeModeEnabled()) {
-    const safe = resolveSafeMlbStreakPicks(displayProps, rawProps, limit, parsedUnderdogProps);
-    return filterUnderdogStreakPool(safe)
-      .filter((prop) => !isPrizePicksProp(prop) && resolvePropSportLabel(prop) === "MLB")
-      .slice(0, limit);
-  }
-
-  const mlbUnderdogProps = streakEligible;
   const boardPicks = filterUnderdogStreakPool(streakBoards.MLB?.picks || [])
     .filter((prop) => !isPrizePicksProp(prop) && resolvePropSportLabel(prop) === "MLB")
+    .filter(isCuratedDisplayProp)
     .slice(0, limit)
     .map((prop) => annotateMlbPick(prop, false));
 
-  const fallbackPool = sortPropsForDisplay(
-    mlbUnderdogProps.filter((prop) => isValidDisplayProp(prop) || filterMlbUnderdogStreakEligible([prop]).length)
-  ).map((prop) => annotateMlbPick(prop, true));
+  const validated = sortPropsForDisplay(streakEligible)
+    .slice(0, limit)
+    .map((prop) => annotateMlbPick(prop, false));
 
-  const merged = mergeUniquePicks(boardPicks, fallbackPool, limit)
-    .filter((prop) => !isPrizePicksProp(prop));
-  if (merged.length) return markDisplayFallbackProps(filterByDisplayConfidenceFloor(merged));
-
-  if (mlbUnderdogProps.length) {
-    return markDisplayFallbackProps(
-      sortPropsForDisplay(mlbUnderdogProps)
-        .slice(0, limit)
-        .map((prop) => annotateMlbPick(prop, true))
-    );
-  }
-
+  const merged = mergeUniquePicks(boardPicks, validated, limit).filter((prop) => !isPrizePicksProp(prop));
+  if (merged.length) return filterByDisplayConfidenceFloor(merged);
   return [];
 }
 

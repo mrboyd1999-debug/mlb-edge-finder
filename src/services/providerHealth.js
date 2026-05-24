@@ -165,9 +165,9 @@ export function buildFeedHealthContext({
       provider,
       boardCount,
       parsedCount: finiteOr(sourceRow.propsAfterParsing, 0),
-      usableCount: boardCount,
+      usableCount: finiteOr(sourceRow.usablePropsCount, boardCount),
       rawCount: finiteOr(sourceRow.rawPropsLoaded, 0),
-      hasUsableProps: boardCount > 0,
+      hasUsableProps: finiteOr(sourceRow.usablePropsCount, boardCount) > 0,
       cached,
       live: boardCount > 0 && !cached,
       lastSuccessfulFetchAt: sourceRow.lastSuccessfulFetchAt || lastUpdated || "",
@@ -253,33 +253,27 @@ function resolveLineProviderStatus(provider = "", { probe = {}, feed = {} } = {}
   }
 
   if (name === "PrizePicks" || name === "Underdog") {
-    const rawCount = finiteOr(feed.rawCount ?? probe?.rawPropsLoaded, 0);
-    const parsedCount = finiteOr(feed.parsedCount ?? feed.boardCount, 0);
-    if (rawCount > 0 && (parsedCount > 0 || hasBoardProps)) {
+    const rawCount = finiteOr(feed.rawCount ?? feed.rawPropsLoaded, 0);
+    const parsedCount = finiteOr(feed.parsedCount ?? feed.propsAfterParsing, 0);
+    const usableCount = finiteOr(feed.usableCount ?? feed.usablePropsCount, 0);
+    if (usableCount > 0) {
       return {
         settingsStatus: PROVIDER_UI_STATUS.LIVE,
-        settingsLine: PROVIDER_UI_STATUS.LIVE,
+        settingsLine: `Live — ${usableCount} usable props`,
         showError: false,
       };
     }
-    if (rawCount > 0 && parsedCount === 0 && !hasBoardProps) {
+    if (rawCount > 0 && parsedCount === 0) {
       return {
         settingsStatus: "Connected",
-        settingsLine: "Connected — 0 props",
+        settingsLine: "Connected — parser returned 0 props",
         showError: false,
       };
     }
-    if ((probe?.ok || probe?.lastSuccessfulFetchAt) && rawCount === 0) {
+    if (rawCount > 0) {
       return {
         settingsStatus: "Connected",
-        settingsLine: "Connected — 0 props",
-        showError: false,
-      };
-    }
-    if (hasBoardProps) {
-      return {
-        settingsStatus: PROVIDER_UI_STATUS.LIVE,
-        settingsLine: PROVIDER_UI_STATUS.LIVE,
+        settingsLine: "Connected — no usable props",
         showError: false,
       };
     }

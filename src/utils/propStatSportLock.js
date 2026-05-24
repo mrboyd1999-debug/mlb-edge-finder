@@ -8,7 +8,7 @@ function statText(statType = "") {
   return String(statType || "").trim().toLowerCase();
 }
 
-/** NBA-only markets — if matched, sport MUST be NBA. */
+/** NBA/WNBA-only markets — if matched, sport MUST be NBA or WNBA. */
 export function isNbaOnlyStatType(statType = "") {
   const text = statText(statType);
   if (!text) return false;
@@ -23,10 +23,10 @@ export function isNbaOnlyStatType(statType = "") {
   if (/\bpra\b/.test(text)) return true;
   if (/\bthrees?\b/.test(text) || /\b3pm\b/.test(text)) return true;
   if (/\bsteals?\b/.test(text) || /\bblocks?\b/.test(text)) return true;
-  if (/fantasy\s*(score|points?).*nba/.test(text) || /nba.*fantasy/.test(text)) return true;
+  if (/fantasy\s*(score|points?)/.test(text) && !/\bmlb\b/.test(text)) return true;
 
   const compact = compactMarketKey(statType);
-  return compact === "pra" || compact === "pointsrebounds" || compact === "ptsrebs";
+  return compact === "pra" || compact === "pointsrebounds" || compact === "ptsrebs" || compact === "fantasyscore" || compact === "fantasypoints";
 }
 
 /** MLB-only markets — if matched, sport MUST be MLB. */
@@ -40,6 +40,7 @@ export function isMlbOnlyStatType(statType = "") {
   if (/\bhome\s*runs?\b/.test(text)) return true;
   if (/\bstrikeouts?\b/.test(text)) return true;
   if (/\bearned\s*runs?\b/.test(text)) return true;
+  if (/\bwalks?\s*allowed\b/.test(text)) return true;
   if (/\bsingles?\b/.test(text)) return true;
   if (/\bdoubles?\b/.test(text)) return true;
   if (/\bstolen\s*bases?\b/.test(text)) return true;
@@ -61,9 +62,13 @@ export function isMlbOnlyStatType(statType = "") {
   );
 }
 
-/** Returns "NBA", "MLB", or "" — NBA checked before MLB when both could apply. */
+/** Returns "NBA", "WNBA", "MLB", or "" — basketball checked before MLB when both could apply. */
 export function lockSportFromStatType(statType = "") {
-  if (isNbaOnlyStatType(statType)) return "NBA";
+  if (isNbaOnlyStatType(statType)) {
+    const text = statText(statType);
+    if (/\bwnba\b/.test(text)) return "WNBA";
+    return "NBA";
+  }
   if (isMlbOnlyStatType(statType)) return "MLB";
   return "";
 }
@@ -79,6 +84,8 @@ export function sportStatMismatchReason(sport = "", statType = "") {
   const lock = lockSportFromStatType(statType);
   if (!lock || !sport || lock === sport) return "";
   if (lock === "NBA" && sport === "MLB") return "Rejected: NBA stat under MLB";
-  if (lock === "MLB" && sport === "NBA") return "Rejected: MLB stat under NBA";
+  if (lock === "MLB" && (sport === "NBA" || sport === "WNBA")) return "Rejected: MLB stat under NBA";
+  if (lock === "WNBA" && sport === "MLB") return "Rejected: WNBA stat under MLB";
+  if (lock === "MLB" && sport === "WNBA") return "Rejected: MLB stat under WNBA";
   return "Rejected: invalid sport/stat combo";
 }
