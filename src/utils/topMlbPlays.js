@@ -7,8 +7,10 @@ import { enrichPropWithSideEvaluation } from "./sideEvaluationEngine.js";
 import { normalizeSource } from "./normalizeSource.js";
 import {
   annotateProjectionFields,
+  hasRenderableProjection,
   isTopMlbPlayCandidate,
 } from "./projectionQuality.js";
+import { auditPropSanityRejections, validatePropSanityRejectReason } from "./propSanity.js";
 import { sortTopMlbPlays } from "./topMlbPlaysRanking.js";
 
 export const TOP_MLB_PLAYS_LIMIT = 10;
@@ -26,12 +28,29 @@ function buildTopMlbPlayPool(displayProps = [], rawProps = [], parsedUnderdogPro
     .filter(isVerifiedSportsbookProp)
     .filter((prop) => normalizeSource(prop) === "prizepicks");
   const udMlb = filterUnderdogPropsBySport(parsedUnderdogProps || [], "MLB").filter(isVerifiedSportsbookProp);
-  return dedupeLooseProps(
-    [...mlbDisplay, ...ppRaw, ...udMlb]
-      .filter(isLooseDisplayProp)
-      .map(annotateProjectionFields)
-      .filter(isTopMlbPlayCandidate)
+  const merged = dedupeLooseProps(
+    [...mlbDisplay, ...ppRaw, ...udMlb].filter(isLooseDisplayProp).map(annotateProjectionFields)
   );
+
+  const pool = [];
+  merged.forEach((prop) => {
+    if (validatePropSanityRejectReason(prop)) return;
+    if (!isTopMlbPlayCandidate(prop)) return;
+    pool.push(prop);
+  });
+
+  return pool;
+}
+
+export function auditTopMlbPlayPool(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
+  const candidates = dedupeLooseProps(
+    [
+      ...filterResolvedSportProps(displayProps, "MLB", { selectedSportTab: "MLB" }),
+      ...filterResolvedSportProps(rawProps || [], "MLB", { selectedSportTab: "MLB" }),
+      ...filterUnderdogPropsBySport(parsedUnderdogProps || [], "MLB"),
+    ].filter(isLooseDisplayProp)
+  );
+  return auditPropSanityRejections(candidates);
 }
 
 function annotateTopPlay(prop, rank) {
@@ -68,7 +87,17 @@ export function resolveTopMlbPlays(
   const pool = buildTopMlbPlayPool(displayProps, rawProps, parsedUnderdogProps);
   if (!pool.length) return [];
 
-  return sortTopMlbPlays(pool)
-    .slice(0, limit)
-    .map((prop, idx) => annotateTopPlay(prop, idx + 1));
+  const withProjection = [];
+  const researchOnly = [];
+
+  pool.forEach((prop) => {
+    if (hasRenderableProjection(prop)) withProjection.push(prop);
+    else researchOnly.push(prop);
+  });
+
+  const rankedValid = sortTopMlbPlays(withProjection);
+  const rankedResearch = sortTopMlbPlays(researchOnly);
+
+  const combined = [...rankedValid, ...rankedResearch].slice(0, limit);
+  return combined.map((prop, idx) => annotateTopPlay(prop, idx + 1));
 }

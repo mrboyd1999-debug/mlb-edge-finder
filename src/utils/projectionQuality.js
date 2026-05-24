@@ -2,6 +2,8 @@
  * Projection quality gates — ranked sections require verified or estimated projections.
  */
 
+import { playerRoleStatMismatchReason } from "./propPlayerRole.js";
+import { validatePropSanityRejectReason, isPropSanityValid } from "./propSanity.js";
 import { resolvePropSportLabel } from "./underdogSportDetection.js";
 import { lockSportFromStatType, sportStatMismatchReason } from "./propStatSportLock.js";
 
@@ -98,7 +100,9 @@ export function resolveProjectionQuality(prop = {}) {
   if (projection == null) return PROJECTION_QUALITY.MISSING;
 
   const key = normalizeProjectionSourceKey(prop.projectionSource);
-  if (MISSING_SOURCES.has(key) || key === "line-neutral") return PROJECTION_QUALITY.MISSING;
+  if (key === "line-neutral" || key === "missing" || key === "none") {
+    return PROJECTION_QUALITY.MISSING;
+  }
 
   if (prop.estimatedProjection || ESTIMATED_SOURCES.has(key)) {
     return PROJECTION_QUALITY.ESTIMATED;
@@ -257,6 +261,9 @@ export function isTopMlbPlayCandidate(prop = {}) {
   const base = baseSportStatRejectReason(prop);
   if (base) return false;
 
+  const sanity = validatePropSanityRejectReason(prop);
+  if (sanity) return false;
+
   const sport = resolvePropSportLabel(prop) || prop.inferredSport || prop.sport || "";
   const statType = prop.statType || prop.market || prop.propType || "";
   const statLock = lockSportFromStatType(statType);
@@ -269,6 +276,8 @@ export function isTopMlbPlayCandidate(prop = {}) {
 
   return true;
 }
+
+export { isPropSanityValid, validatePropSanityRejectReason, playerRoleStatMismatchReason };
 
 export function annotateProjectionFields(prop = {}) {
   const quality = resolveProjectionQuality(prop);

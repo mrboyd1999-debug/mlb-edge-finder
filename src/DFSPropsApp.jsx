@@ -159,7 +159,7 @@ import {
   mergeUnderdogIntoFinderPool,
   resolveUnderdogStreakEmptyMessage,
 } from "./utils/underdogPickPool.js";
-import { resolveTopMlbPlays } from "./utils/topMlbPlays.js";
+import { resolveTopMlbPlays, auditTopMlbPlayPool } from "./utils/topMlbPlays.js";
 import { isSafeModeEnabled, SAFE_MODE_FALLBACK_MESSAGE, SAFE_MODE_LOADING_MESSAGE } from "./utils/safeMode.js";
 import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks, resolveSafeMlbStreakPicks } from "./utils/safeModePipeline.js";
 import {
@@ -1636,6 +1636,23 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   debugInfo.rejectionAudit = auditPropRejections(
     [...(qualBoards.allDisplayable || []), ...(allDisplayProps || [])]
   );
+  const propSanityAudit = auditTopMlbPlayPool(
+    displayProps,
+    canonicalProps,
+    debugInfo.parsedUnderdogProps || []
+  );
+  debugInfo.propSanityAudit = propSanityAudit;
+  if (propSanityAudit?.reasons) {
+    debugInfo.rejectionAudit = {
+      ...debugInfo.rejectionAudit,
+      reasons: {
+        ...(debugInfo.rejectionAudit?.reasons || {}),
+        ...Object.fromEntries(
+          Object.entries(propSanityAudit.reasons).map(([key, count]) => [`[sanity] ${key}`, count])
+        ),
+      },
+    };
+  }
 
   const finalStatus = finalizeSourceStatus(sourceStatus);
   const { criticalWarnings, degradedWarnings, sourceHealth } = partitionWarnings(
