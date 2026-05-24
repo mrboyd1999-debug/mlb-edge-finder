@@ -4,7 +4,9 @@
 
 import { isVerifiedSportsbookProp } from "./propValidation.js";
 import { validatePropSanityRejectReason } from "./propSanity.js";
+import { unsupportedMarketRejectReason } from "./mlbAllowedMarkets.js";
 import { evaluateBothSides } from "./sideEvaluationEngine.js";
+import { getStaleFilterReason } from "./stalePropFilter.js";
 import {
   hasMatchupContext,
   hasRenderableProjection,
@@ -13,7 +15,8 @@ import {
   validateProjectionRejectReason,
 } from "./projectionQuality.js";
 
-const MIN_RANKABLE_CONFIDENCE = 51;
+export const MIN_RANKABLE_EDGE = 0.3;
+export const MIN_RANKABLE_CONFIDENCE = 55;
 
 function finiteOr(value, fallback = NaN) {
   const num = Number(value);
@@ -23,6 +26,9 @@ function finiteOr(value, fallback = NaN) {
 export function validateTopMlbPlayRejectReason(prop = {}) {
   if (!prop) return "Rejected: missing prop";
   if (!isVerifiedSportsbookProp(prop)) return "Rejected: unverified sportsbook prop";
+
+  const unsupported = unsupportedMarketRejectReason(prop);
+  if (unsupported) return unsupported;
 
   const sanity = validatePropSanityRejectReason(prop);
   if (sanity) return sanity;
@@ -37,14 +43,19 @@ export function validateTopMlbPlayRejectReason(prop = {}) {
 
   if (!hasMatchupContext(prop)) return "Rejected: matchup missing";
 
+  const stale = getStaleFilterReason(prop);
+  if (stale) return `Rejected: stale line (${stale})`;
+
   const evaluation = prop.sideEvaluation || evaluateBothSides(prop);
   if (evaluation.pass || evaluation.recommendedSide === "PASS") {
     return "Rejected: PASS — insufficient edge";
   }
-  if (finiteOr(evaluation.edge, 0) <= 0) return "Rejected: zero signed edge";
+
+  const edge = finiteOr(evaluation.edge, 0);
+  if (edge < MIN_RANKABLE_EDGE) return "Rejected: edge below floor";
 
   const conf = finiteOr(evaluation.confidence ?? prop.confidenceScore ?? prop.confidence, NaN);
-  if (!Number.isFinite(conf) || conf <= MIN_RANKABLE_CONFIDENCE) {
+  if (!Number.isFinite(conf) || conf < MIN_RANKABLE_CONFIDENCE) {
     return "Rejected: confidence too low";
   }
 

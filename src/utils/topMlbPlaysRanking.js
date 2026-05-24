@@ -14,13 +14,6 @@ import {
 import { isTopMlbPlayRankable } from "./mlbRankableProp.js";
 
 const UNDER_SIDE_BOOST = 18;
-const UNDER_MARKET_BOOST = 12;
-const PITCHER_K_UNDER_BOOST = 10;
-const FANTASY_UNDER_BOOST = 8;
-const OUTS_UNDER_BOOST = 8;
-const ER_UNDER_BOOST = 8;
-const WALKS_UNDER_BOOST = 6;
-const HITTER_K_UNDER_BOOST = 6;
 
 function finiteOr(value, fallback = 0) {
   const num = Number(value);
@@ -36,13 +29,38 @@ function isPitcherStrikeoutMarket(prop = {}) {
   return key === "strikeouts" || /pitcher\s*strikeout|strikeouts?\s*thrown/i.test(statBlob(prop));
 }
 
-function isHitterStrikeoutMarket(prop = {}) {
-  return resolvePlayerRole(prop) === "hitter" && /strikeout|\bk\b/.test(statBlob(prop));
+function isFantasyMarket(prop = {}) {
+  return /fantasy/.test(statBlob(prop));
 }
 
-function isHrMarket(prop = {}) {
+function isTotalBasesMarket(prop = {}) {
   const key = canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
-  return key === "homeruns" || /home\s*run|\bhr\b/.test(statBlob(prop));
+  return key === "totalbases" || /total\s*bases?/.test(statBlob(prop));
+}
+
+function isHrrMarket(prop = {}) {
+  const key = canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
+  return key === "hrr" || /hits?\s*(\+|and|&)\s*runs?\s*(\+|and|&)\s*rbis?/.test(statBlob(prop));
+}
+
+function isEarnedRunMarket(prop = {}) {
+  return /earned\s*run/.test(statBlob(prop));
+}
+
+function isWalkMarket(prop = {}) {
+  return /walks?\s*allowed/.test(statBlob(prop)) || (resolvePlayerRole(prop) === "pitcher" && /\bwalk/.test(statBlob(prop)));
+}
+
+/** Unders priority tier — higher = sort first. */
+export function underPriorityTier(prop = {}) {
+  if (prop.recommendedSide !== "UNDER") return 0;
+  if (isPitcherStrikeoutMarket(prop)) return 6;
+  if (isFantasyMarket(prop)) return 5;
+  if (isTotalBasesMarket(prop)) return 4;
+  if (isHrrMarket(prop)) return 3;
+  if (isEarnedRunMarket(prop)) return 2;
+  if (isWalkMarket(prop)) return 1;
+  return isUnderPreferredMarket(prop) ? 1 : 0;
 }
 
 export function computeTopMlbPlayRankScore(prop = {}) {
@@ -56,20 +74,14 @@ export function computeTopMlbPlayRankScore(prop = {}) {
   const confidence = finiteOr(evaluation.confidence ?? prop.confidenceScore ?? prop.confidence, NaN);
   const edge = finiteOr(evaluation.edge, 0);
 
-  if (!Number.isFinite(confidence) || edge <= 0) return -Infinity;
+  if (!Number.isFinite(confidence) || edge < 0.3) return -Infinity;
 
   score += confidence * 0.35;
   score += edge * 4;
+  score += underPriorityTier(prop) * 8;
 
   if (evaluation.recommendedSide === "UNDER") {
     score += UNDER_SIDE_BOOST;
-    if (isUnderPreferredMarket(prop)) score += UNDER_MARKET_BOOST;
-    if (isPitcherStrikeoutMarket(prop)) score += PITCHER_K_UNDER_BOOST;
-    if (isHitterStrikeoutMarket(prop)) score += HITTER_K_UNDER_BOOST;
-    if (/fantasy/.test(statBlob(prop))) score += FANTASY_UNDER_BOOST;
-    if (/outs?\s*recorded|pitching\s*outs/.test(statBlob(prop))) score += OUTS_UNDER_BOOST;
-    if (/earned\s*run/.test(statBlob(prop))) score += ER_UNDER_BOOST;
-    if (/walks?\s*allowed/.test(statBlob(prop))) score += WALKS_UNDER_BOOST;
   }
 
   if (resolveProjectionQuality(prop) === PROJECTION_QUALITY.MISSING) {
@@ -91,10 +103,11 @@ export function sortTopMlbPlays(props = []) {
     .filter(isTopMlbPlayRankable)
     .sort(
       (a, b) =>
+        underPriorityTier(b) - underPriorityTier(a) ||
         computeTopMlbPlayRankScore(b) - computeTopMlbPlayRankScore(a) ||
         finiteOr(b.confidenceScore ?? b.confidence) - finiteOr(a.confidenceScore ?? a.confidence) ||
         computeAbsoluteProjectionEdge(b) - computeAbsoluteProjectionEdge(a)
     );
 }
 
-export { isHrMarket, isPitcherStrikeoutMarket };
+export { isPitcherStrikeoutMarket };

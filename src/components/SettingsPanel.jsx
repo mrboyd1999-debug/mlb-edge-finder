@@ -222,47 +222,59 @@ export default function SettingsPanel({
         >
           <ApiHealthPanel connectionReport={connectionReport} lastTestedAt={meta.lastTestedAt} />
         </SectionErrorBoundary>
-        <UnderdogDebugPanel snapshot={underdogDebugSnapshot} />
-        <details className="settings-feed-debug" style={{ ...styles.compactDetails, marginTop: "8px" }}>
-          <summary style={styles.detailsSummary}>
-            <span>
-              <span className="mobile-hide-verbose" style={styles.eyebrow}>Feed audit</span>
-              <strong>Provider parse counts</strong>
-            </span>
-          </summary>
-          <div style={{ display: "grid", gap: "6px", marginTop: "8px" }}>
-            {["PrizePicks", "Underdog"].map((name) => {
-              const row = apiHealth?.[name === "Odds API" ? "OddsAPI" : name] || feedHealthContext?.[name] || {};
-              const raw = row.rawCount ?? row.rawPropsLoaded ?? 0;
-              const parsed = row.parsedCount ?? row.propsAfterParsing ?? 0;
-              const usable = row.usableCount ?? row.boardCount ?? 0;
-              return (
-                <p key={name} style={styles.compactFlags}>
-                  {name}: raw {raw} · parsed {parsed} · usable {usable}
-                  {row.statusLabel ? ` · ${row.statusLabel}` : ""}
-                </p>
-              );
-            })}
-            <p style={styles.compactFlags}>
-              MLB usable on board: {feedHealthContext?.Underdog?.boardCount ?? apiHealth?.Underdog?.usableCount ?? 0}
-            </p>
-            {rejectionAudit?.reasons && Object.keys(rejectionAudit.reasons).length ? (
-              <div>
-                <p style={{ ...styles.compactFlags, marginBottom: 4 }}>Rejected by reason:</p>
-                {Object.entries(rejectionAudit.reasons)
-                  .sort((a, b) => b[1] - a[1])
-                  .slice(0, 12)
-                  .map(([reason, count]) => (
-                    <p key={reason} style={{ ...styles.compactFlags, margin: "2px 0" }}>
-                      {reason}: {count}
-                    </p>
-                  ))}
-              </div>
-            ) : null}
-          </div>
-        </details>
-        {showDebugPanels && underdogDebugSnapshot?.parsedPreview?.length ? (
-          <ParsedUnderdogDebugCard picks={underdogDebugSnapshot.parsedPreview} />
+        {showDebugPanels && debugModeEnabled ? (
+          <details className="settings-advanced-debug" style={{ ...styles.compactDetails, marginTop: "8px" }} open>
+            <summary style={styles.detailsSummary}>
+              <span>
+                <span className="mobile-hide-verbose" style={styles.eyebrow}>Diagnostics</span>
+                <strong>Advanced Debug</strong>
+              </span>
+            </summary>
+            <div style={{ display: "grid", gap: "8px", marginTop: "8px" }}>
+              <UnderdogDebugPanel snapshot={underdogDebugSnapshot} />
+              <details className="settings-feed-debug" style={styles.compactDetails}>
+                <summary style={styles.detailsSummary}>
+                  <span>
+                    <span className="mobile-hide-verbose" style={styles.eyebrow}>Feed audit</span>
+                    <strong>Provider parse counts</strong>
+                  </span>
+                </summary>
+                <div style={{ display: "grid", gap: "6px", marginTop: "8px" }}>
+                  {["PrizePicks", "Underdog"].map((name) => {
+                    const row = apiHealth?.[name === "Odds API" ? "OddsAPI" : name] || feedHealthContext?.[name] || {};
+                    const raw = row.rawCount ?? row.rawPropsLoaded ?? 0;
+                    const parsed = row.parsedCount ?? row.propsAfterParsing ?? 0;
+                    const usable = row.usableCount ?? row.boardCount ?? 0;
+                    return (
+                      <p key={name} style={styles.compactFlags}>
+                        {name}: raw {raw} · parsed {parsed} · usable {usable}
+                        {row.statusLabel ? ` · ${row.statusLabel}` : ""}
+                      </p>
+                    );
+                  })}
+                  <p style={styles.compactFlags}>
+                    MLB usable on board: {feedHealthContext?.Underdog?.boardCount ?? apiHealth?.Underdog?.usableCount ?? 0}
+                  </p>
+                  {rejectionAudit?.reasons && Object.keys(rejectionAudit.reasons).length ? (
+                    <div>
+                      <p style={{ ...styles.compactFlags, marginBottom: 4 }}>Rejected by reason:</p>
+                      {Object.entries(rejectionAudit.reasons)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 12)
+                        .map(([reason, count]) => (
+                          <p key={reason} style={{ ...styles.compactFlags, margin: "2px 0" }}>
+                            {reason}: {count}
+                          </p>
+                        ))}
+                    </div>
+                  ) : null}
+                </div>
+              </details>
+              {underdogDebugSnapshot?.parsedPreview?.length ? (
+                <ParsedUnderdogDebugCard picks={underdogDebugSnapshot.parsedPreview} />
+              ) : null}
+            </div>
+          </details>
         ) : null}
         <details className="settings-keys-expand" style={{ ...styles.compactDetails, marginTop: "8px" }}>
           <summary style={styles.detailsSummary}>

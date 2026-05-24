@@ -2846,7 +2846,7 @@ export default function DFSPropsApp() {
             Verified PrizePicks and Underdog lines only — no mock, fallback, or generated props.
           </p>
           <p className="mobile-hide-verbose" style={styles.lastUpdated}>Last updated: {lastUpdatedLabel}</p>
-          {rateLimitNotice ? (
+          {debugPanelsVisible && rateLimitNotice ? (
             <p className="mobile-hide-soft-notice" style={{ ...styles.streakNotice, margin: "6px 0 0" }}>
               {rateLimitNotice}
             </p>
@@ -2927,7 +2927,7 @@ export default function DFSPropsApp() {
 
       <div className="dfs-section dfs-order-notices">
       {learningSaveNotice ? <p className="mobile-hide-verbose" style={styles.streakNotice}>{learningSaveNotice}</p> : null}
-      {MLB_ONLY_MODE ? (
+      {debugPanelsVisible && MLB_ONLY_MODE ? (
         <section className="mobile-hide-verbose" style={styles.compactPanel}>
           <p style={styles.compactFlags}>
             <strong>MLB-only mode</strong> — NBA, WNBA, Tennis, Soccer, and NHL are temporarily disabled while the engine focuses on MLB accuracy.
@@ -2950,19 +2950,19 @@ export default function DFSPropsApp() {
         </section>
       ) : null}
 
-      {underdogDegraded ? (
+      {debugPanelsVisible && underdogDegraded ? (
         <section className="mobile-hide-soft-notice" style={styles.compactPanel}>
           <p style={{ ...styles.compactFlags, color: "#fbbf24", margin: 0 }}>{UNDERDOG_DEGRADED_MESSAGE}</p>
         </section>
       ) : null}
 
-      {compactSourceWarning ? (
+      {debugPanelsVisible && compactSourceWarning ? (
         <section className="mobile-warning-banner" role="status">
           <p>{compactSourceWarning}</p>
         </section>
       ) : null}
 
-      {cacheNotice && !compactSourceWarning ? (
+      {debugPanelsVisible && cacheNotice && !compactSourceWarning ? (
         <section className="mobile-hide-soft-notice" style={{ ...styles.compactPanel, background: "rgba(251, 191, 36, 0.08)", borderColor: "rgba(251, 191, 36, 0.25)" }}>
           <p style={{ ...styles.compactFlags, color: "#fbbf24", margin: 0 }}>{cacheNotice}</p>
         </section>
@@ -2974,7 +2974,7 @@ export default function DFSPropsApp() {
         </section>
       ) : null}
 
-      {safeModeFallbackActive ? (
+      {debugPanelsVisible && safeModeFallbackActive ? (
         <section className="mobile-warning-banner" role="status">
           <p>{isSafeModeEnabled() ? SAFE_MODE_FALLBACK_MESSAGE : PIPELINE_FALLBACK_MESSAGE}</p>
         </section>

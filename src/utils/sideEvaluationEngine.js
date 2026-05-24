@@ -11,6 +11,7 @@ import {
 } from "./projectionQuality.js";
 import { recommendSideFromProjection } from "./propSanity.js";
 import { resolvePlayerRole } from "./propPlayerRole.js";
+import { computeEdgeBasedConfidence } from "./mlbEdgeConfidence.js";
 
 export const TIER_STRONG = 80;
 export const TIER_PLAYABLE = 70;
@@ -168,37 +169,7 @@ function hasMeaningfulRecentStats(prop = {}) {
 }
 
 function sideConfidence(prop = {}, side = "OVER", edge = 0) {
-  const projection = resolveProjectionValue(prop);
-  if (projection == null || edge <= 0) return null;
-
-  const line = finiteOr(prop.line, 1);
-  const edgePct = line > 0 ? (Math.max(0, edge) / line) * 100 : 0;
-  const quality = resolveProjectionQuality(prop);
-
-  let conf = 54;
-  conf += Math.min(14, edgePct * 0.42);
-  conf += consistencyScore(prop, side, line) * 0.75;
-  conf -= variancePenalty(prop) * 0.4;
-  conf += projectionQualityScore(prop);
-
-  if (quality === PROJECTION_QUALITY.VERIFIED && hasMeaningfulRecentStats(prop)) {
-    conf += 4;
-  }
-  if (prop.estimatedProjection || quality === PROJECTION_QUALITY.ESTIMATED) {
-    conf = Math.min(conf, 65);
-  }
-  if (!hasMeaningfulRecentStats(prop)) {
-    conf = Math.min(conf, 62);
-  }
-
-  const elite =
-    edge >= 2.5 &&
-    edgePct >= 18 &&
-    hasMeaningfulRecentStats(prop) &&
-    quality === PROJECTION_QUALITY.VERIFIED;
-  const maxCap = elite ? 82 : 74;
-
-  return Math.max(54, Math.min(maxCap, Math.round(conf)));
+  return computeEdgeBasedConfidence(prop, edge);
 }
 
 function sideRankScore(prop = {}, side = "OVER") {
@@ -331,7 +302,8 @@ export function enrichPropWithSideEvaluation(prop = {}) {
   const displayResearchOnly =
     evaluation.pass ||
     evaluation.confidence == null ||
-    evaluation.confidence <= 50 ||
+    evaluation.confidence < 55 ||
+    finiteOr(evaluation.edge, 0) < 0.3 ||
     resolveProjectionQuality(prop) === PROJECTION_QUALITY.MISSING;
 
   return {

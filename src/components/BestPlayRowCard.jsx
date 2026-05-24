@@ -20,25 +20,17 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
   const platform = normalizeSourceLabel(enriched);
   const platformPalette = platformBadgePalette(platform);
   const playerName = enriched.playerName || enriched.player || "Unknown";
-  const market = displayFullMarketLabel(enriched);
-  const propType = enriched.propType || enriched.statType || enriched.market || market;
+  const propType = enriched.propType || enriched.statType || enriched.market || displayFullMarketLabel(enriched);
   const line = formatNumber(enriched.line);
   const sideLabel = side === "WATCH" ? "PASS" : formatPlatformSideLabel(enriched);
   const evaluation = enriched.sideEvaluation || {};
   const edge = evaluation.edge ?? enriched.edge ?? null;
-  const edgeLabel = edge != null && Number(edge) > 0 ? formatSignedNumber(edge) : "—";
+  const edgeLabel = edge != null && Number(edge) >= 0.3 ? formatSignedNumber(edge) : "—";
   const confidence = evaluation.confidence ?? enriched.confidenceScore ?? enriched.confidence;
-  const confidenceLabel = enriched.bettingLabel || enriched.confidenceTier || "Insufficient data";
   const projection = resolveProjectionValue(enriched);
-  const projectionLabel =
-    projection != null ? formatNumber(projection) : enriched.projectionLabel || "Unavailable";
-  const matchup = enriched.matchup || (enriched.team && enriched.opponent ? `${enriched.team} vs ${enriched.opponent}` : "");
-  const reason =
-    evaluation.reason ||
-    enriched.reason ||
-    enriched.analyticsReason ||
-    enriched.premiumWhySummary ||
-    "";
+  const projectionLabel = projection != null ? formatNumber(projection) : "—";
+  const matchup =
+    enriched.matchup || (enriched.team && enriched.opponent ? `${enriched.team} vs ${enriched.opponent}` : "");
 
   function openDetails(event) {
     event?.stopPropagation?.();
@@ -77,10 +69,9 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
             </span>
           </div>
           <p style={styles.bestPlayRowSubline}>
-            {propType} · Line {line} · Proj {projectionLabel}
+            {propType} · {line} · Proj {projectionLabel}
             {matchup ? ` · ${matchup}` : ""}
           </p>
-          {reason ? <p style={styles.bestPlayRowReason}>{reason}</p> : null}
         </div>
       </div>
 
@@ -96,10 +87,9 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
           {sideLabel}
         </div>
         <span style={styles.bestPlayMetric}>
-          Conf {confidence != null && confidence > 50 ? `${Math.round(confidence)}%` : "—"}
+          {confidence != null && confidence >= 55 ? `${Math.round(confidence)}%` : "—"}
         </span>
-        <span style={styles.bestPlayMetric}>Edge {edgeLabel}</span>
-        <span style={styles.bestPlayMetric}>{confidenceLabel}</span>
+        <span style={styles.bestPlayMetric}>{edgeLabel !== "—" ? `+${edgeLabel}` : "—"}</span>
       </div>
     </article>
   );
