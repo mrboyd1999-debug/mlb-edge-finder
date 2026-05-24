@@ -453,13 +453,29 @@ body,
   }
 
   .pick-detail-modal {
-    max-height: 88vh !important;
+    max-height: 84vh !important;
+    padding: 8px 10px !important;
   }
 
   .pick-detail-modal-sticky {
     position: sticky;
     top: 0;
     z-index: 2;
+    padding-bottom: 4px !important;
+    margin-bottom: 4px !important;
+  }
+
+  .pick-detail-modal .value-tag,
+  .pick-detail-modal [style*="valueTag"] {
+    padding: 2px 5px !important;
+    font-size: 9px !important;
+  }
+
+  .pick-detail-modal .comparison-box,
+  .pick-detail-modal [style*="comparisonBox"] {
+    padding: 4px 6px !important;
+    margin-top: 4px !important;
+    font-size: 10px !important;
   }
 
   .pick-detail-modal .modal-grid,
@@ -503,8 +519,13 @@ body,
   }
 
   .prop-card-compact .prop-card-badge-row .score-badge {
-    font-size: 9px !important;
-    padding: 1px 4px !important;
+    font-size: 8px !important;
+    padding: 1px 3px !important;
+    letter-spacing: 0.02em !important;
+  }
+
+  .prop-card-compact .prop-card-why-link {
+    margin-top: 1px !important;
   }
 
   .prop-card-compact .prop-card-player-name {

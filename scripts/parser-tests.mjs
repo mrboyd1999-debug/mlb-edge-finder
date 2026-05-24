@@ -105,6 +105,16 @@ import {
   getSlateFilterReason,
   normalizeGameStatus,
 } from "../src/utils/slateFilter.js";
+import {
+  buildOfflineManualAnalyzedProp,
+  analyzeManualProp,
+  selectManualTopPicks,
+} from "../src/utils/manualPropBuilder.js";
+import {
+  scoreManualPropInput,
+  getManualStatVolatility,
+  rankManualPropScore,
+} from "../src/utils/manualPropScoring.js";
 
 function parseJsonEnvelope(text, source) {
   const trimmed = String(text || "").trim();
@@ -1037,5 +1047,65 @@ const preparedBoard = prepareVerifiedCacheBoard({
 });
 assert.ok(preparedBoard?.props?.length >= 1);
 assert.ok(computeFreshnessScore(adaptiveProp, 4 * 60 * 1000) > 0);
+
+const goblinHit = buildOfflineManualAnalyzedProp({
+  playerName: "Juan Soto",
+  sport: "MLB",
+  statType: "Hits",
+  line: 0.5,
+  side: "over",
+  source: "PrizePicks",
+  payoutType: "goblin",
+});
+const demonHrr = buildOfflineManualAnalyzedProp({
+  playerName: "Aaron Judge",
+  sport: "MLB",
+  statType: "Hits+Runs+RBIs",
+  line: 2.5,
+  side: "under",
+  source: "Underdog",
+  payoutType: "demon",
+});
+const nbaAst = buildOfflineManualAnalyzedProp({
+  playerName: "Trae Young",
+  sport: "NBA",
+  statType: "Assists",
+  line: 10.5,
+  side: "under",
+  source: "PrizePicks",
+  payoutType: "standard",
+});
+
+assert.ok(goblinHit.confidenceScore >= 72 && goblinHit.confidenceScore <= 85);
+assert.ok(demonHrr.confidenceScore >= 45 && demonHrr.confidenceScore <= 60);
+assert.ok(nbaAst.confidenceScore >= 58 && nbaAst.confidenceScore <= 72);
+assert.ok(goblinHit.edge >= 0.1 && goblinHit.edge <= 2.5);
+assert.ok(demonHrr.edge >= 0.1 && demonHrr.edge <= 2.5);
+assert.notEqual(goblinHit.confidenceScore, demonHrr.confidenceScore);
+assert.notEqual(goblinHit.edge, demonHrr.edge);
+assert.equal(goblinHit.bestPick, "over");
+assert.equal(demonHrr.bestPick, "under");
+assert.ok(goblinHit.whyThisPick.includes("Goblin") || goblinHit.whyThisPick.includes("margin"));
+assert.ok(demonHrr.whyThisPick.length > 20);
+assert.equal(getManualStatVolatility("MLB", "Hits+Runs+RBIs").tier, "HIGH");
+assert.equal(getManualStatVolatility("MLB", "Hits").tier, "LOW");
+assert.equal(getManualStatVolatility("NBA", "Assists").tier, "HIGH");
+assert.equal(getManualStatVolatility("NBA", "Rebounds").tier, "LOW");
+
+const topTwo = selectManualTopPicks([demonHrr, goblinHit, nbaAst], 2);
+assert.equal(topTwo.length, 2);
+assert.ok(rankManualPropScore(topTwo[0]) >= rankManualPropScore(topTwo[1]));
+
+const analyzedNoScoreFn = analyzeManualProp({
+  playerName: "Shohei Ohtani",
+  sport: "MLB",
+  statType: "Pitcher Strikeouts",
+  line: 6.5,
+  side: "over",
+  source: "PrizePicks",
+  payoutType: "standard",
+});
+assert.ok(analyzedNoScoreFn.riskLevel === "Low" || analyzedNoScoreFn.riskLevel === "Medium" || analyzedNoScoreFn.riskLevel === "High");
+assert.ok(analyzedNoScoreFn.whyThisPick !== "Manual prop analyzed offline using base scoring. API enrichment unavailable.");
 
 console.log("Parser smoke tests passed.");

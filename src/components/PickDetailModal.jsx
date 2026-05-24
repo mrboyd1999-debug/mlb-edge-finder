@@ -129,7 +129,7 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
     <div style={styles.modalBackdrop} role="presentation" onClick={onClose}>
       <section
         className="pick-detail-modal"
-        style={{ ...styles.modalPanel, maxHeight: "88vh", padding: "10px 12px" }}
+        style={{ ...styles.modalPanel, maxHeight: "84vh", padding: "8px 10px" }}
         role="dialog"
         aria-modal="true"
         aria-label={`${prop.playerName} evaluation`}

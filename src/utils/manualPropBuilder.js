@@ -1,6 +1,12 @@
 import { normalizePropShape } from "./propShape.js";
 import { normalize } from "./formatters.js";
 import { normalizeSportLabel } from "./sportMappings.js";
+import {
+  mergeManualPropScoring,
+  scoreManualPropInput,
+  selectManualTopPicksByRank,
+  sortManualPropsByRank,
+} from "./manualPropScoring.js";
 
 export const MANUAL_SOURCES = ["PrizePicks", "Underdog"];
 
@@ -93,7 +99,7 @@ export function validateManualPropFields(form = {}) {
 export const MANUAL_OFFLINE_REASON =
   "Manual prop analyzed offline using base scoring. API enrichment unavailable.";
 
-export function buildOfflineManualAnalyzedProp(form = {}) {
+export function buildOfflineManualAnalyzedProp(form = {}, liveScored = null) {
   const validated = validateManualPropFields(form);
   if (!validated.ok) throw new Error(validated.error);
   const { manualProp } = validated;
@@ -104,43 +110,26 @@ export function buildOfflineManualAnalyzedProp(form = {}) {
     opponent: manualProp.opponent || "",
     side: manualProp.pick,
   });
-  const numericLine = Number(manualProp.line);
-  const lean = manualProp.pick;
-  const confidence = lean === "under" ? 67 : 63;
-
-  return {
-    ...built,
-    player: built.playerName,
-    line: numericLine,
-    bestPick: lean,
-    side: lean,
-    pick: lean,
-    team: manualProp.team || "",
-    opponent: manualProp.opponent || "",
-    confidence,
-    confidenceScore: confidence,
-    calibratedConfidence: confidence,
-    riskLevel: "Medium",
-    edge: 0.35,
-    whyThisPick: MANUAL_OFFLINE_REASON,
-    qualificationReason: MANUAL_OFFLINE_REASON,
-    premiumWhySummary: MANUAL_OFFLINE_REASON,
-    projectionLabel: "Base Feed Projection",
-    projectionSource: "manual-offline",
-    manualOfflineAnalysis: true,
-    isDisplayPlayable: true,
-    bettingLabel: "Manual Analyze",
-    displayTier: "research",
-    dataQualityScore: 42,
-    lineSourceBadge: "MANUAL",
-    analyzedAt: new Date().toISOString(),
-  };
+  const manualScore = scoreManualPropInput(manualProp, liveScored);
+  return mergeManualPropScoring(
+    {
+      ...built,
+      player: built.playerName,
+      team: manualProp.team || "",
+      opponent: manualProp.opponent || "",
+      projectionLabel: liveScored?.projectionLabel || "Manual Dynamic Projection",
+      manualOfflineAnalysis: !liveScored?.projectionSource || liveScored?.projectionSource === "missing",
+    },
+    manualScore,
+    liveScored
+  );
 }
 
 export function analyzeManualProp(form = {}, scoreFn = null) {
   const validated = validateManualPropFields(form);
   if (!validated.ok) throw new Error(validated.error);
 
+  let liveScored = null;
   if (typeof scoreFn === "function") {
     try {
       const built = buildManualPropFromInput({
@@ -148,25 +137,13 @@ export function analyzeManualProp(form = {}, scoreFn = null) {
         ...validated.manualProp,
         side: validated.manualProp.pick,
       });
-      const scored = scoreFn(built);
-      if (scored && scored.playerName) {
-        const confidence = Number(scored.confidenceScore ?? scored.confidence ?? 0);
-        if (confidence > 0) {
-          return {
-            ...scored,
-            team: validated.manualProp.team || scored.team || "",
-            opponent: validated.manualProp.opponent || scored.opponent || "",
-            whyThisPick: scored.whyThisPick || MANUAL_OFFLINE_REASON,
-            manualOfflineAnalysis: Boolean(scored.manualOfflineAnalysis || scored.projectionSource === "missing"),
-          };
-        }
-      }
+      liveScored = scoreFn(built);
     } catch (error) {
-      console.warn("[Manual Analyzer] live scoring failed, using offline fallback", error);
+      console.warn("[Manual Analyzer] live scoring failed, using dynamic manual scoring", error);
     }
   }
 
-  return buildOfflineManualAnalyzedProp(form);
+  return buildOfflineManualAnalyzedProp(form, liveScored?.playerName ? liveScored : null);
 }
 
 export function normalizeSide(value = "") {
@@ -247,13 +224,9 @@ export function buildManualPropFromInput(form = {}) {
 }
 
 export function sortManualPropsByConfidence(props = []) {
-  return [...(props || [])].sort((a, b) => {
-    const confDiff = Number(b.confidenceScore ?? b.confidence ?? 0) - Number(a.confidenceScore ?? a.confidence ?? 0);
-    if (confDiff !== 0) return confDiff;
-    return Number(b.edge ?? 0) - Number(a.edge ?? 0);
-  });
+  return sortManualPropsByRank(props);
 }
 
 export function selectManualTopPicks(props = [], limit = 2) {
-  return sortManualPropsByConfidence(props).slice(0, Math.max(0, limit));
+  return selectManualTopPicksByRank(props, limit);
 }

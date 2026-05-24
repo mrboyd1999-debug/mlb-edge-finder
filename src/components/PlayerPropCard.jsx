@@ -221,6 +221,11 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
                   EDGE {edgeDisplay}
                 </span>
               ) : null}
+              {lean && lean !== "Watch" ? (
+                <span style={{ ...styles.scoreBadge, borderColor: "#6d28d9", color: "#ddd6fe" }}>
+                  {lean.toUpperCase()}
+                </span>
+              ) : null}
               {riskShort ? (
                 <span style={{ ...styles.scoreBadge, borderColor: riskShort === "LOW" ? "#166534" : riskShort === "HIGH" ? "#991b1b" : "#854d0e", color: riskShort === "LOW" ? "#86efac" : riskShort === "HIGH" ? "#fca5a5" : "#fde68a" }}>
                   RISK {riskShort}

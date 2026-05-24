@@ -3,6 +3,21 @@ import { styles } from "../theme/styles.js";
 import { playerInitials } from "../utils/propLabels.js";
 import { hasCachedPlayerImage, preloadPlayerImage, rememberPlayerImage } from "../utils/playerImageCache.js";
 
+function initialsBadgeColor(name = "") {
+  const text = String(name || "").trim().toLowerCase();
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = (hash << 5) - hash + text.charCodeAt(i);
+    hash |= 0;
+  }
+  const hue = Math.abs(hash) % 360;
+  return {
+    background: `hsl(${hue} 42% 22%)`,
+    color: `hsl(${hue} 78% 88%)`,
+    border: `1px solid hsl(${hue} 38% 34%)`,
+  };
+}
+
 function buildHeadshotCandidates(prop = {}) {
   const candidates = [];
   const direct = prop.playerImageUrl || prop.playerImage || prop.headshot || prop.imageUrl || prop.photo || "";
@@ -30,7 +45,9 @@ function buildHeadshotCandidates(prop = {}) {
 }
 
 export default function PlayerImage({ prop, large = false }) {
-  const initials = playerInitials(prop.playerName || prop.player);
+  const playerLabel = prop.playerName || prop.player || "";
+  const initials = playerInitials(playerLabel);
+  const initialsStyle = initialsBadgeColor(playerLabel);
   const candidates = useMemo(() => buildHeadshotCandidates(prop), [prop]);
   const [index, setIndex] = useState(0);
   const [failed, setFailed] = useState(candidates.length === 0);
@@ -51,7 +68,13 @@ export default function PlayerImage({ prop, large = false }) {
   return (
     <div className="player-image-wrap" style={wrapStyle} aria-hidden="true">
       {showInitials ? (
-        <span className="player-initials-text" style={styles.playerInitials}>{initials}</span>
+        <span
+          className="player-initials-text"
+          style={{ ...styles.playerInitials, ...initialsStyle }}
+          aria-label={playerLabel ? `${playerLabel} initials` : "Player initials"}
+        >
+          {initials}
+        </span>
       ) : (
         <img
           src={currentUrl}
