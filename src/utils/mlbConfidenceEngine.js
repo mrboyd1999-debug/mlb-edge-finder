@@ -2,10 +2,10 @@
 
 import { isDebugModeEnabled } from "./devMode.js";
 
-export const MIN_DISPLAY_CONFIDENCE = 55;
-export const MIN_BEST_PLAY_CONFIDENCE = 55;
-export const MIN_GOBLIN_DEMON_CONFIDENCE = 50;
-export const MIN_STREAK_CONFIDENCE = 50;
+export const MIN_DISPLAY_CONFIDENCE = 54;
+export const MIN_BEST_PLAY_CONFIDENCE = 54;
+export const MIN_GOBLIN_DEMON_CONFIDENCE = 54;
+export const MIN_STREAK_CONFIDENCE = 54;
 
 export const CONFIDENCE_TOOLTIP =
   "Confidence combines projection edge, matchup quality, recent form, and line difficulty.";
@@ -20,7 +20,8 @@ function finiteOr(value, fallback = 0) {
 }
 
 export function confidenceBandLabel(score) {
-  const c = finiteOr(score, 50);
+  const c = finiteOr(score, NaN);
+  if (!Number.isFinite(c)) return "weak";
   if (c >= 80) return "strong";
   if (c >= 70) return "playable";
   if (c >= 60) return "lean";
@@ -47,7 +48,8 @@ export function confidenceBandPalette(score) {
 export function resolveBandScore(prop = {}) {
   const playability = finiteOr(prop.playabilityScore, NaN);
   if (Number.isFinite(playability)) return Math.round(playability);
-  return Math.round(finiteOr(prop.confidenceScore ?? prop.confidence, 50));
+  const conf = finiteOr(prop.confidenceScore ?? prop.confidence, NaN);
+  return Number.isFinite(conf) ? Math.round(conf) : null;
 }
 
 function computeEdgePercentLocal(prop = {}, edge = null) {
@@ -96,7 +98,10 @@ function booksOrModelSupport(prop = {}) {
 }
 
 export function calibrateRealisticConfidence(rawConfidence, prop = {}, edge = null) {
-  let score = Math.round(finiteOr(rawConfidence, 50));
+  const raw = finiteOr(rawConfidence, NaN);
+  if (!Number.isFinite(raw)) return null;
+
+  let score = Math.round(raw);
   const edgeVal = finiteOr(edge ?? prop.edge, 0);
   const sampleSize = Number(prop.sampleSize || prop.modelSignal?.sampleSize || 0);
 
@@ -114,7 +119,7 @@ export function calibrateRealisticConfidence(rawConfidence, prop = {}, edge = nu
     score += clamp((enrichmentQuality - 52) * 0.08, -5, 4);
   }
 
-  score = Math.round(score * 0.78 + 50 * 0.22);
+  score = Math.round(score * 0.78 + 54 * 0.22);
 
   const elite = isEliteConfidenceEligible(prop, edgeVal);
   let maxCap = elite ? 82 : 75;
@@ -137,7 +142,7 @@ export function calibrateRealisticConfidence(rawConfidence, prop = {}, edge = nu
     maxCap = Math.min(maxCap, 55);
   }
 
-  score = clamp(score, 50, maxCap);
+  score = clamp(score, 54, maxCap);
 
   if (!elite && score > 75) score = 75;
   if (elite && score >= 74) score = clamp(score, 76, 82);
@@ -147,7 +152,8 @@ export function calibrateRealisticConfidence(rawConfidence, prop = {}, edge = nu
 
 export function passesDisplayConfidenceFloor(prop = {}, floor = MIN_DISPLAY_CONFIDENCE) {
   if (isDebugModeEnabled()) return true;
-  return finiteOr(prop.confidenceScore ?? prop.confidence, 50) >= floor;
+  const conf = finiteOr(prop.confidenceScore ?? prop.confidence, NaN);
+  return Number.isFinite(conf) && conf > floor;
 }
 
 export function filterByDisplayConfidenceFloor(props = [], floor = MIN_DISPLAY_CONFIDENCE) {

@@ -11,11 +11,10 @@ import {
   resolvePickSide,
 } from "../utils/pickRecommendation.js";
 import { displayFullMarketLabel } from "../utils/propLabels.js";
-import { enrichPropWithSideEvaluation } from "../utils/sideEvaluationEngine.js";
-import { resolveProjectionSourceLabel } from "../utils/projectionQuality.js";
+import { resolveProjectionValue } from "../utils/projectionQuality.js";
 
 function BestPlayRowCard({ prop, onOpen, rank }) {
-  const enriched = withPlayerImageUrl(enrichPropWithSideEvaluation(prop || {}));
+  const enriched = withPlayerImageUrl(prop || {});
   const side = resolvePickSide(enriched);
   const sidePalette = recommendationPalette(side);
   const platform = normalizeSourceLabel(enriched);
@@ -24,22 +23,21 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
   const market = displayFullMarketLabel(enriched);
   const propType = enriched.propType || enriched.statType || enriched.market || market;
   const line = formatNumber(enriched.line);
-  const sideLabel = formatPlatformSideLabel(enriched);
+  const sideLabel = side === "WATCH" ? "PASS" : formatPlatformSideLabel(enriched);
   const evaluation = enriched.sideEvaluation || {};
   const edge = evaluation.edge ?? enriched.edge ?? null;
-  const edgeLabel = edge != null && Number(edge) !== 0 ? formatSignedNumber(edge) : "—";
+  const edgeLabel = edge != null && Number(edge) > 0 ? formatSignedNumber(edge) : "—";
   const confidence = evaluation.confidence ?? enriched.confidenceScore ?? enriched.confidence;
-  const confidenceLabel =
-    enriched.displayResearchOnly || enriched.projectionLabel === "No projection data available"
-      ? "Research Only"
-      : enriched.confidenceTier || enriched.bettingLabel || "Research Only";
-  const projectionSource = enriched.projectionSourceLabel || resolveProjectionSourceLabel(enriched);
+  const confidenceLabel = enriched.bettingLabel || enriched.confidenceTier || "Insufficient data";
+  const projection = resolveProjectionValue(enriched);
+  const projectionLabel =
+    projection != null ? formatNumber(projection) : enriched.projectionLabel || "Unavailable";
+  const matchup = enriched.matchup || (enriched.team && enriched.opponent ? `${enriched.team} vs ${enriched.opponent}` : "");
   const reason =
     evaluation.reason ||
     enriched.reason ||
     enriched.analyticsReason ||
     enriched.premiumWhySummary ||
-    enriched.whyThisPick?.compact ||
     "";
 
   function openDetails(event) {
@@ -79,9 +77,10 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
             </span>
           </div>
           <p style={styles.bestPlayRowSubline}>
-            {platformPalette.label} · {propType} · Line {line}
+            {propType} · Line {line} · Proj {projectionLabel}
+            {matchup ? ` · ${matchup}` : ""}
           </p>
-          <p style={styles.bestPlayRowReason}>{reason || "Model-ranked MLB play."}</p>
+          {reason ? <p style={styles.bestPlayRowReason}>{reason}</p> : null}
         </div>
       </div>
 
@@ -97,10 +96,10 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
           {sideLabel}
         </div>
         <span style={styles.bestPlayMetric}>
-          Conf {confidence != null ? `${Math.round(confidence)}%` : "—"} · {confidenceLabel}
+          Conf {confidence != null && confidence > 50 ? `${Math.round(confidence)}%` : "—"}
         </span>
         <span style={styles.bestPlayMetric}>Edge {edgeLabel}</span>
-        <span style={styles.bestPlayMetric}>Proj {projectionSource}</span>
+        <span style={styles.bestPlayMetric}>{confidenceLabel}</span>
       </div>
     </article>
   );

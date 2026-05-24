@@ -159,7 +159,7 @@ import {
   mergeUnderdogIntoFinderPool,
   resolveUnderdogStreakEmptyMessage,
 } from "./utils/underdogPickPool.js";
-import { resolveTopMlbPlays, auditTopMlbPlayPool } from "./utils/topMlbPlays.js";
+import { resolveTopMlbPlaySections, auditTopMlbPlayPool } from "./utils/topMlbPlays.js";
 import { isSafeModeEnabled, SAFE_MODE_FALLBACK_MESSAGE, SAFE_MODE_LOADING_MESSAGE } from "./utils/safeMode.js";
 import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks, resolveSafeMlbStreakPicks } from "./utils/safeModePipeline.js";
 import {
@@ -1607,9 +1607,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   }
   const acceptedPropsForRender = qualifiedReadyProps;
   const modelSignalMap = buildModelSignalMap(filterVerifiedSportsbookProps(qualBoards.allDisplayable));
-  let streakProps = filterVerifiedSportsbookProps(
-    buildStreakFinderProps(workingActiveProps, modelSignalMap, lineMovementMap).sort(sortStreakProps)
-  ).slice(0, MAX_STREAK_PROPS);
+  let streakProps = [];
 
   attachScoredSourceCounts(debugInfo, {
     recommendedProps: displayProps,
@@ -2274,17 +2272,10 @@ export default function DFSPropsApp() {
     [boardDisplayProps]
   );
   const visibleHistory = useMemo(() => history.filter(isSupportedHistoryPick), [history]);
-  const streakSportBoards = useMemo(() => {
-    if (isSafeModeEnabled()) {
-      return Object.fromEntries(STREAK_TAB_OPTIONS.map((option) => [option.value, emptyStreakSportBoard(option.value)]));
-    }
-    try {
-      return buildStreakSportCategoryBoards(streakFinderProps, visibleHistory);
-    } catch (error) {
-      console.error("[SAFE_MODE] buildStreakSportCategoryBoards failed", error);
-      return Object.fromEntries(STREAK_TAB_OPTIONS.map((option) => [option.value, emptyStreakSportBoard(option.value)]));
-    }
-  }, [streakFinderProps, visibleHistory]);
+  const streakSportBoards = useMemo(
+    () => Object.fromEntries(STREAK_TAB_OPTIONS.map((option) => [option.value, emptyStreakSportBoard(option.value)])),
+    []
+  );
   const visibleStreakSports = useMemo(() => {
     const sportCounts = new Map();
     allDisplayProps.forEach((prop) => {
@@ -2325,8 +2316,8 @@ export default function DFSPropsApp() {
         .slice(0, 40),
     [visibleHistory]
   );
-  const topMlbPlays = useMemo(
-    () => resolveTopMlbPlays(boardDisplayProps, props, parsedUnderdogProps),
+  const topMlbPlayBoard = useMemo(
+    () => resolveTopMlbPlaySections(boardDisplayProps, props, parsedUnderdogProps),
     [boardDisplayProps, props, parsedUnderdogProps]
   );
   const curatedSportPicks = useMemo(() => {
@@ -3028,7 +3019,8 @@ export default function DFSPropsApp() {
       <div id="section-top-picks" className="dfs-section dfs-order-top-picks">
         <SectionErrorBoundary name="MLB Picks Screen" onError={handleSectionRenderError}>
           <CuratedPicksScreen
-            topPlays={topMlbPlays}
+            sections={topMlbPlayBoard.sections}
+            waitingForProjections={topMlbPlayBoard.waitingForProjections}
             loading={loading}
             onOpen={setSelectedEvaluation}
             hasMlbProps={mlbDisplayPropCount > 0}

@@ -5,15 +5,19 @@ import { buildAnalyticsReason } from "./propReasonEngine.js";
 import { isVerifiedSportsbookProp } from "./propValidation.js";
 import { enrichPropWithSideEvaluation } from "./sideEvaluationEngine.js";
 import { normalizeSource } from "./normalizeSource.js";
-import {
-  annotateProjectionFields,
-  hasRenderableProjection,
-  isTopMlbPlayCandidate,
-} from "./projectionQuality.js";
+import { annotateProjectionFields, isTopMlbPlayCandidate } from "./projectionQuality.js";
 import { auditPropSanityRejections, validatePropSanityRejectReason } from "./propSanity.js";
-import { sortTopMlbPlays } from "./topMlbPlaysRanking.js";
+import {
+  auditTopMlbPlayRankableRejections,
+  filterTopMlbPlayRankable,
+  isTopMlbPlayRankable,
+} from "./mlbRankableProp.js";
+import { sortTopMlbPlays, isHrMarket } from "./topMlbPlaysRanking.js";
+import { resolveCuratedGoblinDemonBoards } from "./goblinDemonPairs.js";
 
 export const TOP_MLB_PLAYS_LIMIT = 10;
+export const TOP_MLB_SECTION_LIMIT = 5;
+export const WAITING_FOR_PROJECTIONS_MESSAGE = "Waiting for verified projections…";
 
 function isPrizePicksOrUnderdog(prop = {}) {
   const src = normalizeSource(prop);
@@ -43,18 +47,28 @@ function buildTopMlbPlayPool(displayProps = [], rawProps = [], parsedUnderdogPro
 }
 
 export function auditTopMlbPlayPool(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
-  const candidates = dedupeLooseProps(
-    [
-      ...filterResolvedSportProps(displayProps, "MLB", { selectedSportTab: "MLB" }),
-      ...filterResolvedSportProps(rawProps || [], "MLB", { selectedSportTab: "MLB" }),
-      ...filterUnderdogPropsBySport(parsedUnderdogProps || [], "MLB"),
-    ].filter(isLooseDisplayProp)
+  const candidates = buildTopMlbPlayPool(displayProps, rawProps, parsedUnderdogProps);
+  const sanity = auditPropSanityRejections(candidates);
+  const rankable = auditTopMlbPlayRankableRejections(
+    candidates.map((prop) => enrichPropWithSideEvaluation(prop))
   );
-  return auditPropSanityRejections(candidates);
+  return {
+    sanity,
+    rankable,
+    reasons: {
+      ...(sanity.reasons || {}),
+      ...Object.fromEntries(
+        Object.entries(rankable.reasons || {}).map(([k, v]) => [`[rank] ${k}`, v])
+      ),
+    },
+    accepted: rankable.accepted,
+    rejected: rankable.rejected,
+  };
 }
 
 function annotateTopPlay(prop, rank) {
   const enriched = enrichPropWithSideEvaluation(annotateProjectionFields(prop));
+  if (!isTopMlbPlayRankable(enriched)) return null;
   return withPlayerImageUrl({
     ...enriched,
     topMlbPlayRank: rank,
@@ -65,6 +79,18 @@ function annotateTopPlay(prop, rank) {
       buildAnalyticsReason(enriched) ||
       "",
   });
+}
+
+function dedupeSectionPicks(picks = []) {
+  const seen = new Set();
+  const out = [];
+  picks.forEach((prop) => {
+    const key = prop.id || `${prop.playerName}|${prop.statType}|${prop.line}|${prop.source}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(prop);
+  });
+  return out;
 }
 
 /** @deprecated use resolveTopMlbPlays */
@@ -84,20 +110,54 @@ export function resolveTopMlbPlays(
   parsedUnderdogProps = [],
   limit = TOP_MLB_PLAYS_LIMIT
 ) {
+  const { sections } = resolveTopMlbPlaySections(displayProps, rawProps, parsedUnderdogProps);
+  const merged = dedupeSectionPicks(sections.flatMap((section) => section.picks));
+  return merged.slice(0, limit);
+}
+
+export function resolveTopMlbPlaySections(
+  displayProps = [],
+  rawProps = [],
+  parsedUnderdogProps = [],
+  sectionLimit = TOP_MLB_SECTION_LIMIT
+) {
   const pool = buildTopMlbPlayPool(displayProps, rawProps, parsedUnderdogProps);
-  if (!pool.length) return [];
+  const ranked = sortTopMlbPlays(pool)
+    .map((prop, idx) => annotateTopPlay(prop, idx + 1))
+    .filter(Boolean);
 
-  const withProjection = [];
-  const researchOnly = [];
+  if (!ranked.length) {
+    return { waitingForProjections: true, sections: [] };
+  }
 
-  pool.forEach((prop) => {
-    if (hasRenderableProjection(prop)) withProjection.push(prop);
-    else researchOnly.push(prop);
+  const goblinBoards = resolveCuratedGoblinDemonBoards(displayProps, rawProps, {
+    goblinLimit: sectionLimit,
+    demonLimit: 0,
+    parsedUnderdogProps,
   });
 
-  const rankedValid = sortTopMlbPlays(withProjection);
-  const rankedResearch = sortTopMlbPlays(researchOnly);
+  const bestUnders = ranked.filter((p) => p.recommendedSide === "UNDER").slice(0, sectionLimit);
+  const safestGoblins = (goblinBoards.goblins || [])
+    .map((prop) => annotateTopPlay(prop))
+    .filter(Boolean)
+    .slice(0, sectionLimit);
+  const bestPrizePicks = ranked
+    .filter((p) => normalizeSource(p) === "prizepicks")
+    .slice(0, sectionLimit);
+  const bestUnderdog = ranked
+    .filter((p) => normalizeSource(p) === "underdog")
+    .slice(0, sectionLimit);
+  const hrUpside = ranked
+    .filter((p) => isHrMarket(p) && p.recommendedSide === "OVER")
+    .slice(0, sectionLimit);
 
-  const combined = [...rankedValid, ...rankedResearch].slice(0, limit);
-  return combined.map((prop, idx) => annotateTopPlay(prop, idx + 1));
+  const sections = [
+    { id: "best-unders", title: "Best Unders", eyebrow: "Unders prioritized", picks: bestUnders },
+    { id: "safest-goblins", title: "Safest Goblins", eyebrow: "Easier payout lines", picks: safestGoblins },
+    { id: "best-prizepicks", title: "Best PrizePicks Lines", eyebrow: "PrizePicks", picks: bestPrizePicks },
+    { id: "best-underdog", title: "Best Underdog Lines", eyebrow: "Underdog", picks: bestUnderdog },
+    { id: "hr-upside", title: "HR Upside Plays", eyebrow: "Ceiling overs", picks: hrUpside },
+  ].filter((section) => section.picks.length > 0);
+
+  return { waitingForProjections: false, sections };
 }

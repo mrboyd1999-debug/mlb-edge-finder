@@ -169,20 +169,36 @@ function hasMeaningfulRecentStats(prop = {}) {
 
 function sideConfidence(prop = {}, side = "OVER", edge = 0) {
   const projection = resolveProjectionValue(prop);
-  if (projection == null) return null;
+  if (projection == null || edge <= 0) return null;
 
-  const base = finiteOr(prop.confidenceScore ?? prop.confidence, 50);
   const line = finiteOr(prop.line, 1);
   const edgePct = line > 0 ? (Math.max(0, edge) / line) * 100 : 0;
+  const quality = resolveProjectionQuality(prop);
 
-  let conf = base * 0.55 + edgePct * 0.35 + consistencyScore(prop, side, line) * 1.2;
-  conf -= variancePenalty(prop) * 0.35;
+  let conf = 54;
+  conf += Math.min(14, edgePct * 0.42);
+  conf += consistencyScore(prop, side, line) * 0.75;
+  conf -= variancePenalty(prop) * 0.4;
   conf += projectionQualityScore(prop);
 
-  if (prop.estimatedProjection) conf = Math.min(conf, 65);
-  if (!hasMeaningfulRecentStats(prop)) conf = Math.min(conf, 60);
+  if (quality === PROJECTION_QUALITY.VERIFIED && hasMeaningfulRecentStats(prop)) {
+    conf += 4;
+  }
+  if (prop.estimatedProjection || quality === PROJECTION_QUALITY.ESTIMATED) {
+    conf = Math.min(conf, 65);
+  }
+  if (!hasMeaningfulRecentStats(prop)) {
+    conf = Math.min(conf, 62);
+  }
 
-  return Math.max(35, Math.min(82, Math.round(conf)));
+  const elite =
+    edge >= 2.5 &&
+    edgePct >= 18 &&
+    hasMeaningfulRecentStats(prop) &&
+    quality === PROJECTION_QUALITY.VERIFIED;
+  const maxCap = elite ? 82 : 74;
+
+  return Math.max(54, Math.min(maxCap, Math.round(conf)));
 }
 
 function sideRankScore(prop = {}, side = "OVER") {
@@ -190,7 +206,17 @@ function sideRankScore(prop = {}, side = "OVER") {
   const line = Number(prop.line);
   const edge = sideEdge(projection, line, side);
   const edgePct = line > 0 ? (Math.max(0, edge) / line) * 100 : 0;
-  const confidence = sideConfidence(prop, side, edge) ?? 50;
+  const confidence = sideConfidence(prop, side, edge);
+  if (confidence == null) {
+    return {
+      side,
+      edge: round2(edge),
+      edgePct: round2(edgePct),
+      confidence: null,
+      rankScore: -Infinity,
+      tier: "Insufficient data",
+    };
+  }
 
   let score = confidence * 0.42 + edgePct * 0.38 + consistencyScore(prop, side, line) * 0.9;
   score += projectionQualityScore(prop);
@@ -229,18 +255,17 @@ export function evaluateBothSides(prop = {}) {
   const hasProjection = projection != null;
 
   if (!hasProjection) {
-    const underLean = isUnderPreferredMarket(prop);
     return {
-      recommendedSide: underLean ? "UNDER" : "PASS",
-      pass: !underLean,
+      recommendedSide: "PASS",
+      pass: true,
       over: null,
       under: null,
       edge: 0,
-      confidence: underLean ? 50 : null,
-      tier: "Research Only",
+      confidence: null,
+      tier: "Insufficient data",
       varianceLevel: varianceLevel(prop),
-      reason: "No projection data available",
-      rankScore: underLean ? 30 : -Infinity,
+      reason: "Projection unavailable",
+      rankScore: -Infinity,
       estimatedProjection: false,
     };
   }
@@ -258,9 +283,9 @@ export function evaluateBothSides(prop = {}) {
       under: sideRankScore(evalProp, "UNDER"),
       edge: 0,
       confidence: null,
-      tier: "Research Only",
+      tier: "Insufficient data",
       varianceLevel: varianceLevel(prop),
-      reason: "Projection equals line — no edge",
+      reason: "Insufficient data — projection equals line",
       rankScore: -Infinity,
       estimatedProjection: estimated,
     };
@@ -298,17 +323,22 @@ export function enrichPropWithSideEvaluation(prop = {}) {
         ? "under"
         : "";
 
-  const tier = evaluation.pass ? "Research Only" : confidenceTierFromScore(evaluation.confidence ?? 50);
+  const tier = evaluation.pass
+    ? "Insufficient data"
+    : evaluation.confidence == null
+      ? "Insufficient data"
+      : confidenceTierFromScore(evaluation.confidence);
   const displayResearchOnly =
     evaluation.pass ||
-    isResearchTier(evaluation.confidence ?? 50) ||
+    evaluation.confidence == null ||
+    evaluation.confidence <= 50 ||
     resolveProjectionQuality(prop) === PROJECTION_QUALITY.MISSING;
 
   return {
     ...prop,
     estimatedProjection: evaluation.estimatedProjection || prop.estimatedProjection,
     projectionLabel: evaluation.pass
-      ? "No projection data available"
+      ? "Projection unavailable"
       : evaluation.estimatedProjection
         ? "Estimated projection"
         : prop.projectionLabel || "Verified Projection",
@@ -319,10 +349,10 @@ export function enrichPropWithSideEvaluation(prop = {}) {
     overUnder: sidePick || prop.overUnder || "",
     edge: evaluation.pass ? 0 : evaluation.edge ?? 0,
     projectionEdge: evaluation.edge ?? prop.projectionEdge ?? null,
-    confidence: evaluation.confidence ?? prop.confidence ?? null,
-    confidenceScore: evaluation.confidence ?? prop.confidenceScore ?? null,
+    confidence: evaluation.pass ? null : evaluation.confidence ?? null,
+    confidenceScore: evaluation.pass ? null : evaluation.confidence ?? null,
     confidenceTier: tier,
-    bettingLabel: displayResearchOnly ? "Research Only" : tier,
+    bettingLabel: displayResearchOnly ? "Insufficient data" : tier,
     displayResearchOnly,
     isDisplayPlayable: !displayResearchOnly && !evaluation.pass,
     varianceLevel: evaluation.varianceLevel,

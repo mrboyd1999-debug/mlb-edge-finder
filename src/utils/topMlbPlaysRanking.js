@@ -1,5 +1,6 @@
 import { canonicalMarketKey } from "./marketNormalization.js";
 import { normalizeSource } from "./normalizeSource.js";
+import { resolvePlayerRole } from "./propPlayerRole.js";
 import {
   computeAbsoluteProjectionEdge,
   PROJECTION_QUALITY,
@@ -10,47 +11,69 @@ import {
   evaluateBothSides,
   isUnderPreferredMarket,
 } from "./sideEvaluationEngine.js";
+import { isTopMlbPlayRankable } from "./mlbRankableProp.js";
 
-const UNDER_SIDE_BOOST = 15;
-const UNDER_MARKET_BOOST = 10;
-const STRIKEOUT_UNDER_BOOST = 8;
-const MISSING_PROJECTION_PENALTY = 18;
-const LOW_CONFIDENCE_PENALTY = 8;
-const LOW_CONFIDENCE_FLOOR = 55;
+const UNDER_SIDE_BOOST = 18;
+const UNDER_MARKET_BOOST = 12;
+const PITCHER_K_UNDER_BOOST = 10;
+const FANTASY_UNDER_BOOST = 8;
+const OUTS_UNDER_BOOST = 8;
+const ER_UNDER_BOOST = 8;
+const WALKS_UNDER_BOOST = 6;
+const HITTER_K_UNDER_BOOST = 6;
 
 function finiteOr(value, fallback = 0) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
 }
 
+function statBlob(prop = {}) {
+  return String(prop.statType || prop.market || prop.propType || "").toLowerCase();
+}
+
 function isPitcherStrikeoutMarket(prop = {}) {
   const key = canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
-  return key === "strikeouts" || /pitcher\s*strikeout|strikeouts?\s*thrown/i.test(String(prop.statType || prop.market || ""));
+  return key === "strikeouts" || /pitcher\s*strikeout|strikeouts?\s*thrown/i.test(statBlob(prop));
+}
+
+function isHitterStrikeoutMarket(prop = {}) {
+  return resolvePlayerRole(prop) === "hitter" && /strikeout|\bk\b/.test(statBlob(prop));
+}
+
+function isHrMarket(prop = {}) {
+  const key = canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
+  return key === "homeruns" || /home\s*run|\bhr\b/.test(statBlob(prop));
 }
 
 export function computeTopMlbPlayRankScore(prop = {}) {
   const evaluation = prop.sideEvaluation || evaluateBothSides(prop);
+  if (!isTopMlbPlayRankable(prop)) return -Infinity;
+
   let score = Number.isFinite(evaluation.rankScore) && evaluation.rankScore > -Infinity
     ? evaluation.rankScore
-    : 45;
+    : 0;
 
-  const confidence = finiteOr(evaluation.confidence ?? prop.confidenceScore ?? prop.confidence, 50);
-  const edge = computeAbsoluteProjectionEdge(prop) || finiteOr(evaluation.edge, 0);
+  const confidence = finiteOr(evaluation.confidence ?? prop.confidenceScore ?? prop.confidence, NaN);
+  const edge = finiteOr(evaluation.edge, 0);
+
+  if (!Number.isFinite(confidence) || edge <= 0) return -Infinity;
 
   score += confidence * 0.35;
   score += edge * 4;
 
-  if (evaluation.recommendedSide === "UNDER") score += UNDER_SIDE_BOOST;
-  if (isUnderPreferredMarket(prop)) score += UNDER_MARKET_BOOST;
-  if (isPitcherStrikeoutMarket(prop) && evaluation.recommendedSide === "UNDER") {
-    score += STRIKEOUT_UNDER_BOOST;
+  if (evaluation.recommendedSide === "UNDER") {
+    score += UNDER_SIDE_BOOST;
+    if (isUnderPreferredMarket(prop)) score += UNDER_MARKET_BOOST;
+    if (isPitcherStrikeoutMarket(prop)) score += PITCHER_K_UNDER_BOOST;
+    if (isHitterStrikeoutMarket(prop)) score += HITTER_K_UNDER_BOOST;
+    if (/fantasy/.test(statBlob(prop))) score += FANTASY_UNDER_BOOST;
+    if (/outs?\s*recorded|pitching\s*outs/.test(statBlob(prop))) score += OUTS_UNDER_BOOST;
+    if (/earned\s*run/.test(statBlob(prop))) score += ER_UNDER_BOOST;
+    if (/walks?\s*allowed/.test(statBlob(prop))) score += WALKS_UNDER_BOOST;
   }
 
   if (resolveProjectionQuality(prop) === PROJECTION_QUALITY.MISSING) {
-    score -= MISSING_PROJECTION_PENALTY;
-  }
-  if (confidence < LOW_CONFIDENCE_FLOOR) {
-    score -= LOW_CONFIDENCE_PENALTY;
+    return -Infinity;
   }
 
   if (normalizeSource(prop) === "underdog") score += 1;
@@ -64,10 +87,14 @@ export function prepareTopMlbPlayProps(props = []) {
 }
 
 export function sortTopMlbPlays(props = []) {
-  return prepareTopMlbPlayProps(props).sort(
-    (a, b) =>
-      computeTopMlbPlayRankScore(b) - computeTopMlbPlayRankScore(a) ||
-      finiteOr(b.confidenceScore ?? b.confidence) - finiteOr(a.confidenceScore ?? a.confidence) ||
-      computeAbsoluteProjectionEdge(b) - computeAbsoluteProjectionEdge(a)
-  );
+  return prepareTopMlbPlayProps(props)
+    .filter(isTopMlbPlayRankable)
+    .sort(
+      (a, b) =>
+        computeTopMlbPlayRankScore(b) - computeTopMlbPlayRankScore(a) ||
+        finiteOr(b.confidenceScore ?? b.confidence) - finiteOr(a.confidenceScore ?? a.confidence) ||
+        computeAbsoluteProjectionEdge(b) - computeAbsoluteProjectionEdge(a)
+    );
 }
+
+export { isHrMarket, isPitcherStrikeoutMarket };
