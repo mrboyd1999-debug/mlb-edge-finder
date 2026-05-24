@@ -12,6 +12,7 @@ import {
 import { validateApiConfig } from "../config/apiConfig.js";
 import ApiHealthPanel from "./ApiHealthPanel.jsx";
 import UnderdogDebugPanel from "./UnderdogDebugPanel.jsx";
+import ParsedUnderdogDebugCard from "./ParsedUnderdogDebugCard.jsx";
 import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import { testAllApiConnections, testSportsDataIO, mergeConnectionReportWithFeeds } from "../services/apiConnectionTest.js";
 import { isDebugModeEnabled } from "../utils/devMode.js";
@@ -220,6 +221,9 @@ export default function SettingsPanel({
           <ApiHealthPanel connectionReport={connectionReport} lastTestedAt={meta.lastTestedAt} />
         </SectionErrorBoundary>
         <UnderdogDebugPanel snapshot={underdogDebugSnapshot} />
+        {showDebugPanels && underdogDebugSnapshot?.parsedPreview?.length ? (
+          <ParsedUnderdogDebugCard picks={underdogDebugSnapshot.parsedPreview} />
+        ) : null}
         <details className="settings-keys-expand" style={{ ...styles.compactDetails, marginTop: "8px" }}>
           <summary style={styles.detailsSummary}>
             <span>

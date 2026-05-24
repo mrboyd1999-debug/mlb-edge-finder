@@ -14,7 +14,6 @@ import {
 } from "./safeModePipeline.js";
 import { filterByDisplayConfidenceFloor } from "./mlbConfidenceEngine.js";
 import { resolveCuratedGoblinDemonBoards } from "./goblinDemonPairs.js";
-import { filterActiveSportProps } from "./mlbOnlyMode.js";
 import { isGoblinProp, isDemonProp } from "./propLabels.js";
 import {
   filterUnderdogStreakPool,
@@ -23,8 +22,11 @@ import {
 } from "./underdogStreakPool.js";
 import {
   extractParsedUnderdogProps,
-  filterStreakEligibleUdProps,
+  filterMlbUnderdogStreakEligible,
+  filterUnderdogPropsForSport,
+  isStreakEligibleUdProp,
 } from "./underdogPickPool.js";
+import { resolvePropSportLabel } from "./underdogSportDetection.js";
 
 export { UNDERDOG_STREAK_EMPTY_MESSAGE } from "./underdogStreakPool.js";
 export { UNDERDOG_PARSER_EMPTY_MESSAGE } from "./underdogStreakPool.js";
@@ -77,18 +79,17 @@ function mergeUniquePicks(primary = [], fallback = [], limit = 2) {
   return merged.slice(0, limit);
 }
 
-function resolveUnderdogPickPool(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
+function resolveUnderdogPickPool(displayProps = [], rawProps = [], parsedUnderdogProps = [], sport = "MLB") {
   const parsed = extractParsedUnderdogProps({
     parsedUnderdogProps,
     rawProps,
     displayProps,
   });
-  if (parsed.length) return parsed;
-  return filterUnderdogStreakPool(buildSafeMlbPropPool(displayProps, rawProps));
+  return filterUnderdogPropsForSport(parsed, sport);
 }
 
-function buildUnderdogConfidencePool(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
-  return sortLoosePropsByConfidence(resolveUnderdogPickPool(displayProps, rawProps, parsedUnderdogProps));
+function buildUnderdogConfidencePool(displayProps = [], rawProps = [], parsedUnderdogProps = [], sport = "MLB") {
+  return sortLoosePropsByConfidence(resolveUnderdogPickPool(displayProps, rawProps, parsedUnderdogProps, sport));
 }
 
 function pickLowCorrelationUdProps(pool = [], limit = 4, excludeKeys = new Set()) {
@@ -139,16 +140,19 @@ export function resolveUnderdogSectionFallbacks(
     goblins = [],
     demons = [],
     parsedUnderdogProps = [],
+    selectedSport = "MLB",
     streakLimit = DISPLAY_LIMITS.streakPerSport,
     parlayLimit = DISPLAY_LIMITS.parlayLegs,
     goblinLimit = DISPLAY_LIMITS.goblins,
     demonLimit = DISPLAY_LIMITS.demons,
   } = {}
 ) {
-  const udPool = buildUnderdogConfidencePool(displayProps, rawProps, parsedUnderdogProps);
+  const udPool = buildUnderdogConfidencePool(displayProps, rawProps, parsedUnderdogProps, selectedSport);
   if (!udPool.length) {
     return { streakPicks, parlayPicks, goblins, demons, udPoolCount: 0 };
   }
+
+  const streakUdPool = selectedSport === "MLB" ? udPool : filterUnderdogPropsForSport(udPool, selectedSport);
 
   const usedKeys = new Set([
     ...streakPicks,
@@ -159,7 +163,7 @@ export function resolveUnderdogSectionFallbacks(
 
   let nextStreakPicks = [...streakPicks];
   if (nextStreakPicks.length < streakLimit) {
-    const extras = udPool
+    const extras = streakUdPool
       .filter((prop) => !usedKeys.has(buildPropSoftDedupeKey(prop)))
       .slice(0, streakLimit - nextStreakPicks.length)
       .map((prop) => annotateMlbPick(prop, true));
@@ -223,9 +227,12 @@ export function countMlbDisplayProps(displayProps = [], rawProps = []) {
   return filterAllDisplayPropsBySport(displayProps, "MLB", "all").filter(isValidDisplayProp).length;
 }
 
-export function countUnderdogStreakProps(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
-  const pool = resolveUnderdogPickPool(displayProps, rawProps, parsedUnderdogProps);
-  return filterStreakEligibleUdProps(pool).length || pool.length;
+export function countUnderdogStreakProps(displayProps = [], rawProps = [], parsedUnderdogProps = [], sport = "MLB") {
+  const pool = resolveUnderdogPickPool(displayProps, rawProps, parsedUnderdogProps, sport);
+  if (sport === "MLB") {
+    return filterMlbUnderdogStreakEligible(pool).length;
+  }
+  return filterUnderdogPropsForSport(pool, sport).filter(isStreakEligibleUdProp).length;
 }
 
 /** Return up to 2 MLB streak picks from parsed Underdog props only — never PrizePicks. */
@@ -236,22 +243,24 @@ export function resolveMlbStreakPicks(
   rawProps = [],
   parsedUnderdogProps = []
 ) {
-  const udParsedPool = resolveUnderdogPickPool(displayProps, rawProps, parsedUnderdogProps);
-  const streakEligible = filterStreakEligibleUdProps(udParsedPool);
+  const udParsedPool = resolveUnderdogPickPool(displayProps, rawProps, parsedUnderdogProps, "MLB");
+  const streakEligible = filterMlbUnderdogStreakEligible(udParsedPool);
 
   if (isSafeModeEnabled()) {
     const safe = resolveSafeMlbStreakPicks(displayProps, rawProps, limit, parsedUnderdogProps);
-    return filterUnderdogStreakPool(safe).filter((prop) => !isPrizePicksProp(prop)).slice(0, limit);
+    return filterUnderdogStreakPool(safe)
+      .filter((prop) => !isPrizePicksProp(prop) && resolvePropSportLabel(prop) === "MLB")
+      .slice(0, limit);
   }
 
-  const mlbUnderdogProps = streakEligible.length ? streakEligible : filterUnderdogStreakPool(udParsedPool);
+  const mlbUnderdogProps = streakEligible;
   const boardPicks = filterUnderdogStreakPool(streakBoards.MLB?.picks || [])
-    .filter((prop) => !isPrizePicksProp(prop))
+    .filter((prop) => !isPrizePicksProp(prop) && resolvePropSportLabel(prop) === "MLB")
     .slice(0, limit)
     .map((prop) => annotateMlbPick(prop, false));
 
   const fallbackPool = sortPropsForDisplay(
-    mlbUnderdogProps.filter((prop) => isValidDisplayProp(prop) || filterStreakEligibleUdProps([prop]).length)
+    mlbUnderdogProps.filter((prop) => isValidDisplayProp(prop) || filterMlbUnderdogStreakEligible([prop]).length)
   ).map((prop) => annotateMlbPick(prop, true));
 
   const merged = mergeUniquePicks(boardPicks, fallbackPool, limit)

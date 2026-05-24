@@ -1,16 +1,22 @@
 import { filterAllDisplayPropsBySport } from "./allDisplayProps.js";
 import { enrichDisplayPropsPipeline } from "./displayPropScoring.js";
-import { filterActiveSportProps } from "./mlbOnlyMode.js";
 import { normalizePropsWithSource } from "./normalizeSource.js";
 import { normalizePropShape } from "./propShape.js";
 import { dedupeLooseProps, isLooseDisplayProp } from "./safeModePipeline.js";
 import {
   filterUnderdogStreakPool,
   isUnderdogProp,
+  isPrizePicksProp,
+  MLB_UNDERDOG_STREAK_EMPTY_MESSAGE,
   UNDERDOG_PARSER_EMPTY_MESSAGE,
   UNDERDOG_STREAK_EMPTY_MESSAGE,
 } from "./underdogStreakPool.js";
 import { UNDERDOG_PARSER_MISMATCH_MESSAGE } from "./parseUnderdogProp.js";
+import {
+  countUnderdogPropsBySport,
+  filterUnderdogPropsBySport,
+  resolvePropSportLabel,
+} from "./underdogSportDetection.js";
 
 function finiteOr(value, fallback = 0) {
   const num = Number(value);
@@ -26,12 +32,25 @@ function shapeUnderdogProp(prop = {}) {
   ])[0];
 }
 
-function mlbUnderdogProps(props = []) {
-  return filterUnderdogStreakPool(filterActiveSportProps(props || []));
-}
-
 function dedupeUnderdogProps(...groups) {
   return dedupeLooseProps(groups.flat().filter(Boolean));
+}
+
+export function isMlbUnderdogStreakProp(prop = {}) {
+  return (
+    prop.normalizedSource === "underdog" &&
+    resolvePropSportLabel(prop) === "MLB" &&
+    !isPrizePicksProp(prop)
+  );
+}
+
+/** Underdog props for a selected sport — streak pool excludes PrizePicks. */
+export function filterUnderdogPropsForSport(props = [], sport = "MLB") {
+  return filterUnderdogPropsBySport(filterUnderdogStreakPool(props || []), sport);
+}
+
+function mlbUnderdogProps(props = []) {
+  return filterUnderdogPropsForSport(props, "MLB");
 }
 
 /**
@@ -53,10 +72,10 @@ export function extractParsedUnderdogProps({
   );
   if (fromResult.length) return dedupeUnderdogProps(fromResult);
 
-  const fromRaw = mlbUnderdogProps(rawProps);
+  const fromRaw = filterUnderdogStreakPool(rawProps);
   if (fromRaw.length) return dedupeUnderdogProps(fromRaw);
 
-  const fromDisplay = mlbUnderdogProps(filterAllDisplayPropsBySport(displayProps, "MLB", "all"));
+  const fromDisplay = filterUnderdogStreakPool(filterAllDisplayPropsBySport(displayProps, "all", "all"));
   return dedupeUnderdogProps(fromDisplay);
 }
 
@@ -73,10 +92,15 @@ export function filterStreakEligibleUdProps(props = []) {
   return filterUnderdogStreakPool(props).filter(isStreakEligibleUdProp);
 }
 
+export function filterMlbUnderdogStreakEligible(props = []) {
+  return filterStreakEligibleUdProps(mlbUnderdogProps(props));
+}
+
 /** Merge parsed UD props into finder pool so Goblins/Demons use the same path as PP lines. */
-export function mergeUnderdogIntoFinderPool(displayProps = [], parsedUnderdogProps = []) {
+export function mergeUnderdogIntoFinderPool(displayProps = [], parsedUnderdogProps = [], sport = "MLB") {
+  const sportUd = filterUnderdogPropsForSport(parsedUnderdogProps, sport);
   const udScored = enrichDisplayPropsPipeline(
-    normalizePropsWithSource(parsedUnderdogProps.map((prop) => shapeUnderdogProp(prop)))
+    normalizePropsWithSource(sportUd.map((prop) => shapeUnderdogProp(prop)))
   );
   const seen = new Set();
   const merged = [];
@@ -128,8 +152,9 @@ export function buildUnderdogDebugSnapshot({
     ),
     parsedPool.length
   );
+  const sportCounts = countUnderdogPropsBySport(parsedPool);
   const mlbUdProps = mlbUnderdogProps(parsedPool);
-  const streakEligible = filterStreakEligibleUdProps(parsedPool);
+  const streakEligible = filterMlbUnderdogStreakEligible(parsedPool);
   const parserMismatch =
     Boolean(parserDiagnostics?.parserMismatch) || (rawUdCount > 0 && parsedUdCount === 0);
 
@@ -154,6 +179,7 @@ export function buildUnderdogDebugSnapshot({
     rawUdCount,
     parsedUdCount,
     mlbUdCount: mlbUdProps.length,
+    sportCounts,
     streakEligibleCount: streakEligible.length,
     parserDiagnostics,
     parserMismatch,
@@ -190,17 +216,23 @@ export function buildUnderdogDebugSnapshot({
     parserEmpty: rawUdCount > 0 && parsedUdCount === 0 && parsedPool.length === 0,
     hasRawUnderdog: rawUdCount > 0,
     hasParsedUnderdog: parsedPool.length > 0,
+    hasMlbUnderdog: mlbUdProps.length > 0,
   };
 }
 
 export function resolveUnderdogStreakEmptyMessage(snapshot = {}) {
   if (snapshot.parserMismatch) return UNDERDOG_PARSER_MISMATCH_MESSAGE;
   if (snapshot.parserEmpty) return UNDERDOG_PARSER_EMPTY_MESSAGE;
+  if (snapshot.hasParsedUnderdog && !snapshot.hasMlbUnderdog) {
+    return MLB_UNDERDOG_STREAK_EMPTY_MESSAGE;
+  }
   if (snapshot.hasParsedUnderdog && snapshot.streakEligibleCount === 0) {
-    return "No Underdog streak picks ranked yet.";
+    return MLB_UNDERDOG_STREAK_EMPTY_MESSAGE;
   }
   if (snapshot.hasRawUnderdog && !snapshot.hasParsedUnderdog) {
     return UNDERDOG_PARSER_EMPTY_MESSAGE;
   }
-  return UNDERDOG_STREAK_EMPTY_MESSAGE;
+  return MLB_UNDERDOG_STREAK_EMPTY_MESSAGE;
 }
+
+export { MLB_UNDERDOG_STREAK_EMPTY_MESSAGE, UNDERDOG_STREAK_EMPTY_MESSAGE };

@@ -11,6 +11,7 @@ import { isDemonProp, isGoblinProp } from "./propLabels.js";
 import { resolvePickSide } from "./pickRecommendation.js";
 import { filterAllDisplayPropsBySport } from "./allDisplayProps.js";
 import { filterActiveSportProps } from "./mlbOnlyMode.js";
+import { filterUnderdogPropsBySport } from "./underdogSportDetection.js";
 import { isLooseDisplayProp, dedupeLooseProps } from "./safeModePipeline.js";
 import { filterByDisplayConfidenceFloor } from "./mlbConfidenceEngine.js";
 import { normalizeSource } from "./normalizeSource.js";
@@ -178,12 +179,12 @@ function pickBestPair(group = []) {
   return best;
 }
 
-function buildPropPool(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
-  const mlbDisplay = filterAllDisplayPropsBySport(displayProps, "MLB", "all");
-  const mlbRaw = filterActiveSportProps(rawProps || []);
-  const udParsed = Array.isArray(parsedUnderdogProps) ? parsedUnderdogProps : [];
+function buildPropPool(displayProps = [], rawProps = [], parsedUnderdogProps = [], sport = "MLB") {
+  const sportDisplay = filterAllDisplayPropsBySport(displayProps, sport, "all");
+  const sportRaw = filterActiveSportProps(rawProps || []);
+  const udParsed = filterUnderdogPropsBySport(Array.isArray(parsedUnderdogProps) ? parsedUnderdogProps : [], sport);
   return filterByDisplayConfidenceFloor(
-    dedupeLooseProps([...udParsed, ...mlbDisplay, ...mlbRaw].filter(isLooseDisplayProp))
+    dedupeLooseProps([...udParsed, ...sportDisplay, ...sportRaw].filter(isLooseDisplayProp))
   );
 }
 
@@ -253,9 +254,9 @@ export function resolveGoblinDemonBoards(
 export function resolveCuratedGoblinDemonBoards(
   displayProps = [],
   rawProps = [],
-  { goblinBoardPicks = [], demonBoardPicks = [], goblinLimit = 6, demonLimit = 6, parsedUnderdogProps = [] } = {}
+  { goblinBoardPicks = [], demonBoardPicks = [], goblinLimit = 6, demonLimit = 6, parsedUnderdogProps = [], selectedSport = "MLB" } = {}
 ) {
-  const pool = buildPropPool(displayProps, rawProps, parsedUnderdogProps);
+  const pool = buildPropPool(displayProps, rawProps, parsedUnderdogProps, selectedSport);
   const paired = resolveGoblinDemonBoards(pool, { goblinLimit, demonLimit });
 
   let goblins = paired.goblins;

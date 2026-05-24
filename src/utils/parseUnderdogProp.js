@@ -3,8 +3,8 @@
  * Only rejects: missing player, line is NaN.
  */
 
-import { inferSportFromText } from "./sportMappings.js";
 import { withNormalizedSource } from "./normalizeSource.js";
+import { detectUnderdogSport } from "./underdogSportDetection.js";
 
 export const UNDERDOG_PARSER_MISMATCH_MESSAGE = "Underdog parser mismatch detected.";
 
@@ -158,21 +158,8 @@ function resolveStatTypeFromRaw(raw = {}) {
   ).trim();
 }
 
-function resolveSportFromRaw(raw = {}, lookup = {}, statType = "") {
-  const attrs = attrsOf(raw);
-  const sportDirect = raw.sport || raw.league || attrs.sport || attrs.league || attrs.sport_id;
-  if (sportDirect) return String(sportDirect).trim();
-
-  const { games, appearances } = lookup;
-  if (games?.size && appearances?.size) {
-    const appearanceId = attrs.appearance_id || raw.appearance_id;
-    const appearance = appearances.get(String(appearanceId)) || {};
-    const game = games.get(String(appearance.game_id || appearance.match_id || attrs.game_id)) || {};
-    const fromGame = game.sport || game.sport_id || game.league || game.competition_name;
-    if (fromGame) return String(fromGame).trim();
-  }
-
-  return inferSportFromText(statType) || inferSportFromText(raw.description || attrs.title || "") || "MLB";
+function resolveSportFromRaw(raw = {}, lookup = {}, context = {}) {
+  return detectUnderdogSport(raw, lookup, context) || "Unknown";
 }
 
 function resolveTeamOpponent(raw = {}, lookup = {}) {
@@ -263,13 +250,19 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
 
   const statType = resolveStatTypeFromRaw(raw);
   const { team, opponent } = resolveTeamOpponent(raw, lookup);
-  const sport = resolveSportFromRaw(raw, lookup, statType);
+  const matchup = [team, opponent ? `vs ${opponent}` : ""].filter(Boolean).join(" ").trim();
+  const sport = resolveSportFromRaw(raw, lookup, {
+    player,
+    team,
+    opponent,
+    matchup,
+    statType,
+  });
   const projection = Number(
     raw.projection ?? raw.projected_value ?? raw.projectedValue ?? attrsOf(raw).projection ?? line
   );
   const overUnder = sideFromRaw(raw);
   const oddsType = inferOddsType(raw);
-  const matchup = [team, opponent ? `vs ${opponent}` : ""].filter(Boolean).join(" ").trim();
   const id =
     raw.id ||
     raw.sourceId ||

@@ -26,8 +26,13 @@ export default function UnderdogDebugPanel({ snapshot = null }) {
         <span style={styles.compactFlags}>API status: {snapshot.apiStatus ?? "—"}</span>
         <span style={styles.compactFlags}>Raw UD props count: {snapshot.rawUdCount ?? 0}</span>
         <span style={styles.compactFlags}>Parsed UD props count: {snapshot.parsedUdCount ?? 0}</span>
-        <span style={styles.compactFlags}>MLB UD props count: {snapshot.mlbUdCount ?? 0}</span>
-        <span style={styles.compactFlags}>Streak eligible UD props count: {snapshot.streakEligibleCount ?? 0}</span>
+        <span style={styles.compactFlags}>MLB UD props: {snapshot.sportCounts?.MLB ?? snapshot.mlbUdCount ?? 0}</span>
+        <span style={styles.compactFlags}>NBA UD props: {snapshot.sportCounts?.NBA ?? 0}</span>
+        <span style={styles.compactFlags}>WNBA UD props: {snapshot.sportCounts?.WNBA ?? 0}</span>
+        <span style={styles.compactFlags}>NHL UD props: {snapshot.sportCounts?.NHL ?? 0}</span>
+        <span style={styles.compactFlags}>Soccer UD props: {snapshot.sportCounts?.Soccer ?? 0}</span>
+        <span style={styles.compactFlags}>Tennis UD props: {snapshot.sportCounts?.Tennis ?? 0}</span>
+        <span style={styles.compactFlags}>Streak eligible MLB UD props: {snapshot.streakEligibleCount ?? 0}</span>
         <span style={styles.compactFlags}>Parser accepted: {parser.acceptedCount ?? snapshot.parsedUdCount ?? 0}</span>
         <span style={styles.compactFlags}>Parser rejected: {parser.rejectedCount ?? 0}</span>
       </div>
