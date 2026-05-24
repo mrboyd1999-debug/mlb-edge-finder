@@ -58,6 +58,24 @@ export function buildPropDedupeKey(prop = {}) {
   return `${player}-${statType}-${line}-${source}`;
 }
 
+/** Buckets similar lines (±0.25) for player+market+source dedupe. */
+export function buildPropSoftDedupeKey(prop = {}) {
+  const player = String(prop.player || prop.playerName || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-");
+  const statType = String(prop.statType || prop.market || prop.propType || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-");
+  const line = finiteOr(prop.line, 0);
+  const lineBucket = Math.round(line * 2) / 2;
+  const source = String(prop.source || prop.platform || "")
+    .trim()
+    .toLowerCase();
+  return `${player}-${statType}-${lineBucket}-${source}`;
+}
+
 function playerKey(prop = {}) {
   return String(prop.player || prop.playerName || "")
     .trim()
@@ -93,7 +111,7 @@ function isBetterDuplicate(candidate = {}, incumbent = {}) {
 export function dedupeDisplayProps(props = []) {
   const map = new Map();
   (props || []).forEach((prop) => {
-    const key = buildPropDedupeKey(prop);
+    const key = buildPropSoftDedupeKey(prop);
     const existing = map.get(key);
     if (!existing || isBetterDuplicate(prop, existing)) map.set(key, prop);
   });

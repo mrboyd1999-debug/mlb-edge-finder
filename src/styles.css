@@ -64,7 +64,7 @@ body,
     width: 100%;
     max-width: 100%;
     padding: 8px !important;
-    padding-bottom: 80px !important;
+    padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)) !important;
   }
 
   .dfs-app-page {
@@ -310,8 +310,24 @@ body,
   }
 
   .prop-card-compact {
-    padding: 4px 5px !important;
+    padding: 3px 4px !important;
+    gap: 1px !important;
+    min-height: 0 !important;
+  }
+
+  .prop-card-compact .player-image-wrap {
+    width: 28px !important;
+    height: 28px !important;
+    min-width: 28px !important;
+  }
+
+  .prop-card-compact .prop-card-meta-primary {
     gap: 2px !important;
+  }
+
+  .prop-card-compact .prop-card-badge-row .score-badge {
+    font-size: 9px !important;
+    padding: 1px 4px !important;
   }
 
   .prop-card-compact .prop-card-player-name {
@@ -450,6 +466,7 @@ body,
     left: 0;
     right: 0;
     bottom: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
     z-index: 1000;
     display: flex;
     gap: 4px;

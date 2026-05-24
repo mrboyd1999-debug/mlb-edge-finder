@@ -59,10 +59,24 @@ export function resolveFetchHealthBadge({
   parsedCount = 0,
   usableCount = 0,
 } = {}) {
+  if (usableCount > 0 || parsedCount > 0) {
+    if (rateLimited || cached) {
+      return {
+        pipelineStatus: "Cached",
+        badge: HEALTH_STATES.CACHED,
+        message: "",
+      };
+    }
+    return {
+      pipelineStatus: "Full",
+      badge: HEALTH_STATES.LIVE,
+      message: "",
+    };
+  }
   if (failed || ok === false) {
     return {
       pipelineStatus: "Failed",
-      badge: HEALTH_STATES.FAILED,
+      badge: HEALTH_STATES.DEGRADED,
       message: "",
     };
   }
@@ -99,6 +113,9 @@ export function resolveSourceHealthState({
   if (Object.values(HEALTH_STATES).includes(badge)) return badge;
 
   const normalized = String(status || "").toLowerCase();
+  if ((normalized === "failed" || normalized === "not connected") && (usableCount > 0 || hasData)) {
+    return HEALTH_STATES.LIVE;
+  }
   if (normalized === "failed" || normalized === "not connected") {
     return lastFetchAt ? HEALTH_STATES.DEGRADED : HEALTH_STATES.OFFLINE;
   }

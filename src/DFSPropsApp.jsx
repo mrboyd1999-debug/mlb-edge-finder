@@ -168,6 +168,8 @@ import AcceptedPropsPanel from "./components/AcceptedPropsPanel.jsx";
 import AccuracyReview from "./components/AccuracyReview.jsx";
 import SourceStatusBar from "./components/SourceStatusBar.jsx";
 import SettingsPanel from "./components/SettingsPanel.jsx";
+import ProviderDebugDrawer from "./components/ProviderDebugDrawer.jsx";
+import { buildFeedHealthContext } from "./services/providerHealth.js";
 import { getOddsApiKey, getSportsDataApiKey } from "./services/runtimeSettings.js";
 import {
   isUpstreamAcceptedProp,
@@ -707,12 +709,17 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
   const boardPropCount = (board?.props || []).length;
   const resolveBadge = (row, status, fallbackTs = boardTs) => {
     const counts = summarizeSourceCounts(row);
+    const usableCount = Number(row.usablePropsCount ?? counts.usableCount ?? 0);
+    if (usableCount > 0) {
+      if (/cached/i.test(String(status || row.status || row.lineSourceBadge || ""))) return HEALTH_STATES.CACHED;
+      return "LIVE FEED AVAILABLE";
+    }
     return resolveSourceHealthState({
       status: status || row.status,
       lineSourceBadge: row.lineSourceBadge || row.providerHealth || row.health,
       lastFetchAt: row.lastSuccessfulFetchAt || fallbackTs,
       hasData: counts.usableCount > 0,
-      usableCount: counts.usableCount,
+      usableCount,
     });
   };
   const cacheUsableCount = boardPropCount;
@@ -2038,6 +2045,16 @@ export default function DFSPropsApp() {
     () => resolveCuratedBoardPicks(streakSportBoards.demons?.picks, selectDemonProps, boardDisplayProps, 6),
     [streakSportBoards, boardDisplayProps]
   );
+  const feedHealthContext = useMemo(
+    () =>
+      buildFeedHealthContext({
+        allDisplayProps: scoredDisplayProps,
+        debugInfo,
+        sourceStatus,
+        lastUpdated,
+      }),
+    [scoredDisplayProps, debugInfo, sourceStatus, lastUpdated]
+  );
   const topPickPool = useMemo(() => boardDisplayProps, [boardDisplayProps]);
   const topPicksDisplay = useMemo(() => selectTop2FromDisplayProps(topPickPool), [topPickPool]);
 
@@ -2742,8 +2759,18 @@ export default function DFSPropsApp() {
         showDebugPanels={showDebugPanels}
         onShowDebugPanelsChange={setShowDebugPanels}
         lastUpdated={lastUpdated}
+        feedHealthContext={feedHealthContext}
       />
       </div>
+
+      {debugModeEnabled ? (
+        <ProviderDebugDrawer
+          debugInfo={debugInfo}
+          pipelineAudit={pipelineAudit}
+          apiHealth={apiHealth}
+          lastUpdated={lastUpdated}
+        />
+      ) : null}
 
       {debugPanelsVisible ? (
       <div className="dfs-section dfs-order-debug">

@@ -1,6 +1,7 @@
 import { getOddsApiKey, getProxyUrl, getSportsDataApiKey, getStatmuseApiKey } from "../config/apiConfig.js";
 import { getSourceState, isSourceInCooldown, SOURCE_IDS } from "./sourceRateLimit.js";
 import { readCachedBoard, readVerifiedCacheBoard } from "./pickStore.js";
+import { buildFeedHealthContext, mergeConnectionReportWithFeeds } from "./providerHealth.js";
 
 export const CONNECTION_STATUS = {
   LIVE: "LIVE",
@@ -53,8 +54,9 @@ async function probeFetch(url, { method = "GET", headers = {} } = {}) {
       url,
     };
     if (!result.ok) {
+      const redactedUrl = String(url).replace(/apiKey=[^&]+/gi, "apiKey=[REDACTED]");
       console.error(
-        `[API Health] Probe failed — url=${url} status=${result.status} preview=${result.preview}`
+        `[API Health] Probe failed — url=${redactedUrl} status=${result.status} preview=${result.preview}`
       );
     }
     return result;
@@ -192,15 +194,35 @@ async function testOddsApi() {
       provider: "Odds API",
       status: CONNECTION_STATUS.NOT_CONFIGURED,
       message: CONNECTION_MESSAGES.NOT_CONFIGURED,
-      route: "/api/sportsbookOdds",
+      route: "/api/sportsbookOdds?path=/v4/sports",
       preview: "No VITE_ODDS_API_KEY configured",
       durationMs: 0,
+      keyConfigured: false,
     };
   }
   const url = new URL("/api/sportsbookOdds", window.location.origin);
   url.searchParams.set("path", "/v4/sports");
   url.searchParams.set("apiKey", key);
-  const result = await probeFetch(url.pathname + url.search);
+  const route = url.pathname + url.search;
+  const result = await probeFetch(route);
+  const sportsListOk = result.ok && Array.isArray(result.payload) && result.payload.length > 0;
+  if (sportsListOk) {
+    const state = getSourceState(SOURCE_IDS.ODDS_API);
+    return {
+      provider: "Odds API",
+      route,
+      keyConfigured: true,
+      status: CONNECTION_STATUS.LIVE,
+      message: CONNECTION_MESSAGES.CONNECTED,
+      sportsListOk: true,
+      sportsCount: result.payload.length,
+      ...result,
+      lastSuccessfulFetchAt: state.lastSuccessfulFetchAt || new Date().toISOString(),
+      requestCount: state.requestCount || 0,
+      lastError: "",
+      cooldownRemainingMs: Math.max(0, Number(state.cooldownUntil || 0) - Date.now()),
+    };
+  }
   const classified = classifyLineSourceProbe(result, {
     requiresKey: true,
     keyConfigured: true,
@@ -209,12 +231,14 @@ async function testOddsApi() {
   const state = getSourceState(SOURCE_IDS.ODDS_API);
   return {
     provider: "Odds API",
-    route: url.pathname + url.search,
+    route,
+    keyConfigured: true,
+    sportsListOk: false,
     ...classified,
     ...result,
     lastSuccessfulFetchAt: state.lastSuccessfulFetchAt || "",
     requestCount: state.requestCount || 0,
-    lastError: state.lastError || "",
+    lastError: classified.status === CONNECTION_STATUS.FAILED ? result.preview : "",
     cooldownRemainingMs: Math.max(0, Number(state.cooldownUntil || 0) - Date.now()),
   };
 }
@@ -356,7 +380,7 @@ function testVerifiedCache() {
 }
 
 /** Test all configured providers without throwing when keys are missing. */
-export async function testAllApiConnections() {
+export async function testAllApiConnections(options = {}) {
   const startedAt = Date.now();
   const results = await Promise.all([
     testPrizePicks(),
@@ -366,18 +390,35 @@ export async function testAllApiConnections() {
     testStatmuseProvider(),
   ]);
   results.push(testVerifiedCache());
-  return {
+  const report = {
     testedAt: new Date().toISOString(),
     durationMs: Date.now() - startedAt,
     results,
   };
+  const feedContext =
+    options.feedContext ||
+    buildFeedHealthContext({
+      allDisplayProps: options.allDisplayProps || [],
+      debugInfo: options.debugInfo || {},
+      sourceStatus: options.sourceStatus || {},
+      lastUpdated: options.lastUpdated || "",
+    });
+  return mergeConnectionReportWithFeeds(report, feedContext);
 }
+
+export { mergeConnectionReportWithFeeds, buildFeedHealthContext } from "./providerHealth.js";
 
 export function connectionStatusStyle(status = "") {
   const key = String(status || "").toUpperCase();
   const colors = {
     LIVE: { bg: "rgba(34,197,94,0.18)", text: "#86efac" },
+    "LIVE FEED AVAILABLE": { bg: "rgba(34,197,94,0.18)", text: "#86efac" },
+    CONNECTED: { bg: "rgba(34,197,94,0.18)", text: "#86efac" },
     CACHED: { bg: "rgba(59,130,246,0.18)", text: "#93c5fd" },
+    "CACHED FEED": { bg: "rgba(59,130,246,0.18)", text: "#93c5fd" },
+    "PROXY REQUIRED": { bg: "rgba(234,179,8,0.18)", text: "#fde047" },
+    "INVALID API KEY": { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
+    "RATE LIMITED": { bg: "rgba(59,130,246,0.18)", text: "#93c5fd" },
     DEGRADED: { bg: "rgba(249,115,22,0.18)", text: "#fdba74" },
     FAILED: { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
     "NOT CONFIGURED": { bg: "rgba(148,163,184,0.15)", text: "#cbd5e1" },

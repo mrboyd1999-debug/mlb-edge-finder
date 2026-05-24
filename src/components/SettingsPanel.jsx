@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { styles } from "../theme/styles.js";
 import { formatDateTime } from "../utils/formatters.js";
 import {
@@ -11,7 +11,7 @@ import {
 } from "../services/runtimeSettings.js";
 import { validateApiConfig } from "../config/apiConfig.js";
 import ApiHealthPanel from "./ApiHealthPanel.jsx";
-import { testAllApiConnections } from "../services/apiConnectionTest.js";
+import { testAllApiConnections, mergeConnectionReportWithFeeds } from "../services/apiConnectionTest.js";
 import { isDebugModeEnabled } from "../utils/devMode.js";
 
 export default function SettingsPanel({
@@ -20,6 +20,7 @@ export default function SettingsPanel({
   showDebugPanels = false,
   onShowDebugPanelsChange,
   lastUpdated = "",
+  feedHealthContext = null,
 }) {
   const panelRef = useRef(null);
   const [draft, setDraft] = useState(() => readRuntimeSettings());
@@ -46,7 +47,10 @@ export default function SettingsPanel({
   async function runConnectionTest({ collapseAfter = false } = {}) {
     setTesting(true);
     try {
-      const report = await testAllApiConnections();
+      const report = await testAllApiConnections({
+        feedContext: feedHealthContext || undefined,
+        lastUpdated,
+      });
       setConnectionReport(report);
       writeSettingsMeta({
         ...readSettingsMeta(),
@@ -54,13 +58,11 @@ export default function SettingsPanel({
         lastConnectionReport: report.results,
       });
       setMeta(readSettingsMeta());
-      const failed = (report.results || []).filter((row) =>
-        ["FAILED", "INVALID"].includes(String(row.status || "").toUpperCase())
-      );
+      const failed = (report.results || []).filter((row) => row.showError === true);
       setNotice(
         failed.length
-          ? `${failed.length} provider${failed.length === 1 ? "" : "s"} failed — see API Health below.`
-          : "All probed providers responded."
+          ? `${failed.length} provider${failed.length === 1 ? "" : "s"} need attention — see API Health below.`
+          : "Provider health updated from live feed + probe."
       );
       if (collapseAfter) collapsePanel();
       return report;
@@ -86,6 +88,22 @@ export default function SettingsPanel({
   async function handleTestConnections() {
     await runConnectionTest({ collapseAfter: true });
   }
+
+  useEffect(() => {
+    if (!feedHealthContext) return;
+    setConnectionReport((current) => {
+      const base = current?.results?.length
+        ? current
+        : readSettingsMeta().lastConnectionReport?.length
+          ? {
+              testedAt: readSettingsMeta().lastTestedAt,
+              results: readSettingsMeta().lastConnectionReport,
+            }
+          : null;
+      if (!base?.results?.length) return current;
+      return mergeConnectionReportWithFeeds(base, feedHealthContext);
+    });
+  }, [feedHealthContext]);
 
   return (
     <details id="section-settings" ref={panelRef} className="settings-panel" style={styles.compactDetails}>

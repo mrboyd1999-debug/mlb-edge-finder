@@ -1,8 +1,16 @@
 import { filterAllDisplayPropsBySport, selectTop2FromDisplayProps } from "./allDisplayProps.js";
-import { buildPropDedupeKey, markDisplayFallbackProps } from "./displayPropScoring.js";
+import { buildPropSoftDedupeKey, markDisplayFallbackProps } from "./displayPropScoring.js";
 import { MLB_ONLY_MODE } from "./mlbOnlyMode.js";
 
 export const CURATED_SPORT_ORDER = MLB_ONLY_MODE ? ["MLB"] : ["MLB", "WNBA", "NBA", "Tennis"];
+
+export const DISPLAY_LIMITS = {
+  streakPerSport: 2,
+  parlayLegs: 4,
+  parlayCards: 1,
+  goblins: 6,
+  demons: 6,
+};
 
 export const CURATED_SPORT_LABELS = {
   MLB: "MLB",
@@ -16,7 +24,7 @@ function mergeUniquePicks(primary = [], fallback = [], limit = 2) {
   const merged = [];
   for (const prop of [...primary, ...fallback]) {
     if (!prop || merged.length >= limit) break;
-    const key = buildPropDedupeKey(prop);
+    const key = buildPropSoftDedupeKey(prop);
     if (seen.has(key)) continue;
     seen.add(key);
     merged.push(prop);
@@ -24,7 +32,7 @@ function mergeUniquePicks(primary = [], fallback = [], limit = 2) {
   return markDisplayFallbackProps(merged.slice(0, limit));
 }
 
-export function resolveCuratedSportPicks(sport, streakBoards = {}, displayProps = [], limit = 2) {
+export function resolveCuratedSportPicks(sport, streakBoards = {}, displayProps = [], limit = DISPLAY_LIMITS.streakPerSport) {
   const boardPicks = (streakBoards[sport]?.picks || []).slice(0, limit);
   if (boardPicks.length >= limit) return markDisplayFallbackProps(boardPicks);
 
@@ -32,7 +40,7 @@ export function resolveCuratedSportPicks(sport, streakBoards = {}, displayProps 
   return mergeUniquePicks(boardPicks, fallback, limit);
 }
 
-export function resolveCuratedBoardPicks(boardPicks = [], selector, displayProps = [], limit = 6) {
+export function resolveCuratedBoardPicks(boardPicks = [], selector, displayProps = [], limit = DISPLAY_LIMITS.goblins) {
   const primary = (boardPicks || []).slice(0, limit);
   if (primary.length >= limit) return markDisplayFallbackProps(primary);
 

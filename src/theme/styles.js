@@ -155,7 +155,7 @@ export const styles = {
     transition: "border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease",
   },
   cardMobileTight: {
-    padding: "4px 5px",
+    padding: "3px 4px",
     borderRadius: "6px",
   },
   cardInlineDetails: {

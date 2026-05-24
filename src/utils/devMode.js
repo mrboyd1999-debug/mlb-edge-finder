@@ -3,11 +3,14 @@ import { isDevEnvironment } from "../services/fetchUtil.js";
 /** When false, debug panels and grouped debug storage are disabled. */
 export const DEV_MODE = isDevEnvironment();
 
-/** Explicit debug feed — set VITE_DEBUG_MODE=true or localStorage DEBUG_MODE=true. */
+/** Explicit debug feed — set VITE_DEBUG_MODE=true or localStorage DEBUG_MODE/DEBUG=true. */
 export function isDebugModeEnabled() {
   if (import.meta.env.VITE_DEBUG_MODE === "true") return true;
   try {
-    return window.localStorage.getItem("DEBUG_MODE") === "true";
+    return (
+      window.localStorage.getItem("DEBUG_MODE") === "true" ||
+      window.localStorage.getItem("DEBUG") === "true"
+    );
   } catch {
     return false;
   }
