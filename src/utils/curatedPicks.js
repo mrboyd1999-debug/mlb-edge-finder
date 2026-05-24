@@ -1,5 +1,10 @@
-import { filterAllDisplayPropsBySport, selectTop2FromDisplayProps } from "./allDisplayProps.js";
-import { buildPropSoftDedupeKey, markDisplayFallbackProps } from "./displayPropScoring.js";
+import { filterAllDisplayPropsBySport } from "./allDisplayProps.js";
+import {
+  buildPropSoftDedupeKey,
+  isValidDisplayProp,
+  markDisplayFallbackProps,
+  sortPropsForDisplay,
+} from "./displayPropScoring.js";
 import { MLB_ONLY_MODE } from "./mlbOnlyMode.js";
 
 export const CURATED_SPORT_ORDER = MLB_ONLY_MODE ? ["MLB"] : ["MLB", "WNBA", "NBA", "Tennis"];
@@ -12,12 +17,24 @@ export const DISPLAY_LIMITS = {
   demons: 6,
 };
 
+export const MLB_EMPTY_MESSAGE = "No MLB props loaded. Check provider feed, API key, or proxy.";
+
 export const CURATED_SPORT_LABELS = {
   MLB: "MLB",
   WNBA: "WNBA",
   NBA: "NBA",
   Tennis: "Tennis",
 };
+
+function annotateMlbPick(prop = {}, isFallback = false) {
+  return {
+    ...prop,
+    isFallbackMlbPick: isFallback,
+    fallbackLabel: isFallback ? "Fallback MLB pick" : prop.fallbackLabel || "",
+    bettingLabel: isFallback ? "Fallback MLB pick" : prop.bettingLabel,
+    displayFallback: isFallback || prop.displayFallback,
+  };
+}
 
 function mergeUniquePicks(primary = [], fallback = [], limit = 2) {
   const seen = new Set();
@@ -29,23 +46,54 @@ function mergeUniquePicks(primary = [], fallback = [], limit = 2) {
     seen.add(key);
     merged.push(prop);
   }
-  return markDisplayFallbackProps(merged.slice(0, limit));
+  return merged.slice(0, limit);
+}
+
+export function countMlbDisplayProps(displayProps = []) {
+  return filterAllDisplayPropsBySport(displayProps, "MLB", "all").filter(isValidDisplayProp).length;
+}
+
+/** Always return up to 2 MLB streak picks when MLB props exist. */
+export function resolveMlbStreakPicks(streakBoards = {}, displayProps = [], limit = DISPLAY_LIMITS.streakPerSport) {
+  const mlbProps = filterAllDisplayPropsBySport(displayProps, "MLB", "all");
+  const boardPicks = (streakBoards.MLB?.picks || []).slice(0, limit).map((prop) => annotateMlbPick(prop, false));
+
+  const fallbackPool = sortPropsForDisplay(mlbProps.filter(isValidDisplayProp)).map((prop) =>
+    annotateMlbPick(prop, true)
+  );
+
+  const merged = mergeUniquePicks(boardPicks, fallbackPool, limit);
+  if (merged.length) return markDisplayFallbackProps(merged);
+
+  if (mlbProps.length) {
+    return markDisplayFallbackProps(
+      sortPropsForDisplay(mlbProps.filter(isValidDisplayProp))
+        .slice(0, limit)
+        .map((prop) => annotateMlbPick(prop, true))
+    );
+  }
+
+  return [];
 }
 
 export function resolveCuratedSportPicks(sport, streakBoards = {}, displayProps = [], limit = DISPLAY_LIMITS.streakPerSport) {
-  const boardPicks = (streakBoards[sport]?.picks || []).slice(0, limit);
-  if (boardPicks.length >= limit) return markDisplayFallbackProps(boardPicks);
+  if (sport === "MLB") return resolveMlbStreakPicks(streakBoards, displayProps, limit);
 
-  const fallback = selectTop2FromDisplayProps(filterAllDisplayPropsBySport(displayProps, sport, "all"));
-  return mergeUniquePicks(boardPicks, fallback, limit);
+  const boardPicks = (streakBoards[sport]?.picks || []).slice(0, limit);
+  const sportProps = filterAllDisplayPropsBySport(displayProps, sport, "all");
+  const fallback = sortPropsForDisplay(sportProps.filter(isValidDisplayProp)).slice(0, limit);
+  return markDisplayFallbackProps(mergeUniquePicks(boardPicks, fallback, limit));
 }
 
 export function resolveCuratedBoardPicks(boardPicks = [], selector, displayProps = [], limit = DISPLAY_LIMITS.goblins) {
+  const mlbProps = filterAllDisplayPropsBySport(displayProps, "MLB", "all");
+  const pool = mlbProps.length ? mlbProps : displayProps;
   const primary = (boardPicks || []).slice(0, limit);
-  if (primary.length >= limit) return markDisplayFallbackProps(primary);
-
-  const fallback = selector(displayProps, limit);
-  return mergeUniquePicks(primary, fallback, limit);
+  let fallback = selector(pool, limit);
+  if (!fallback.length && pool.length) {
+    fallback = sortPropsForDisplay(pool.filter(isValidDisplayProp)).slice(0, limit);
+  }
+  return markDisplayFallbackProps(mergeUniquePicks(primary, fallback, limit));
 }
 
 export function isManuallySavedPick(pick = {}) {

@@ -6,7 +6,7 @@ function EmptyState({ text }) {
   return <div style={styles.emptyState}>{text}</div>;
 }
 
-function GoblinBoard({ picks = [], loading, onOpen, compactMode = true, limit = 6 }) {
+function GoblinBoard({ picks = [], loading, onOpen, compactMode = true, limit = 6, title = "Goblin Picks" }) {
   const goblins = useMemo(() => (picks || []).filter(Boolean).slice(0, limit), [picks, limit]);
 
   const renderCard = useMemo(
@@ -21,7 +21,7 @@ function GoblinBoard({ picks = [], loading, onOpen, compactMode = true, limit = 
       <div style={styles.sectionHeading}>
         <div>
           <p style={styles.eyebrow}>High hit rate · low variance</p>
-          <h2 style={styles.sectionTitle}>Goblin Picks</h2>
+          <h2 style={styles.sectionTitle}>{title}</h2>
         </div>
         <p style={styles.countPill}>{goblins.length}/{limit}</p>
       </div>

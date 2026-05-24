@@ -148,7 +148,7 @@ import {
   BOARD_SORT_MODES,
 } from "./services/propPriority.js";
 import CuratedPicksScreen from "./components/CuratedPicksScreen.jsx";
-import { DISPLAY_LIMITS, resolveCuratedBoardPicks, resolveCuratedSportPicks, CURATED_SPORT_ORDER, isManuallySavedPick, historyPickToDisplayProp } from "./utils/curatedPicks.js";
+import { DISPLAY_LIMITS, resolveCuratedBoardPicks, resolveMlbStreakPicks, countMlbDisplayProps, isManuallySavedPick, historyPickToDisplayProp } from "./utils/curatedPicks.js";
 import NearMissBoard from "./components/NearMissBoard.jsx";
 import RejectionAnalyticsPanel from "./components/RejectionAnalyticsPanel.jsx";
 import QualificationAnalyticsPanel from "./components/QualificationAnalyticsPanel.jsx";
@@ -2024,13 +2024,11 @@ export default function DFSPropsApp() {
         .slice(0, 40),
     [visibleHistory]
   );
-  const curatedSportPicks = useMemo(() => {
-    const entries = CURATED_SPORT_ORDER.map((sport) => [
-      sport,
-      resolveCuratedSportPicks(sport, streakSportBoards, scoredDisplayProps),
-    ]);
-    return Object.fromEntries(entries);
-  }, [streakSportBoards, scoredDisplayProps]);
+  const curatedSportPicks = useMemo(
+    () => resolveMlbStreakPicks(streakSportBoards, scoredDisplayProps),
+    [streakSportBoards, scoredDisplayProps]
+  );
+  const mlbDisplayPropCount = useMemo(() => countMlbDisplayProps(scoredDisplayProps), [scoredDisplayProps]);
   const curatedGoblinPicks = useMemo(
     () => resolveCuratedBoardPicks(streakSportBoards.goblins?.picks, selectGoblinProps, boardDisplayProps, DISPLAY_LIMITS.goblins),
     [streakSportBoards, boardDisplayProps]
@@ -2628,13 +2626,14 @@ export default function DFSPropsApp() {
 
       <div id="section-top-picks" className="dfs-section dfs-order-top-picks">
         <CuratedPicksScreen
-          sportPicks={curatedSportPicks}
-          parlayPicks={quickParlayPicks.slice(0, 4)}
+          mlbStreakPicks={curatedSportPicks}
+          parlayPicks={quickParlayPicks.slice(0, DISPLAY_LIMITS.parlayLegs)}
           goblinPicks={curatedGoblinPicks}
           demonPicks={curatedDemonPicks}
           loading={loading}
           onOpen={setSelectedEvaluation}
           compactMode={compactMode}
+          hasMlbProps={mlbDisplayPropCount > 0}
         />
       </div>
 

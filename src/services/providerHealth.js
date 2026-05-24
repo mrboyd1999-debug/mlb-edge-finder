@@ -19,7 +19,66 @@ const PROVIDER_KEYS = {
   PrizePicks: "PrizePicks",
   Underdog: "Underdog",
   "Odds API": "Odds API",
+  SportsDataIO: "SportsDataIO",
 };
+
+export const SPORTSDATA_SETTINGS_STATUS = {
+  CONNECTED: "Connected",
+  INVALID_KEY: "Invalid Key",
+  NOT_TESTED: "Not Tested",
+  RATE_LIMITED: "Rate Limited",
+  ERROR: "Error",
+};
+
+function resolveSportsDataSettingsStatus(probe = {}) {
+  const keySaved = Boolean(probe.keyConfigured);
+  if (!keySaved) {
+    return {
+      settingsStatus: SPORTSDATA_SETTINGS_STATUS.NOT_TESTED,
+      settingsLine: SPORTSDATA_SETTINGS_STATUS.NOT_TESTED,
+      keySaved: false,
+      showError: false,
+    };
+  }
+  if (probe.unauthorized) {
+    return {
+      settingsStatus: SPORTSDATA_SETTINGS_STATUS.INVALID_KEY,
+      settingsLine: SPORTSDATA_SETTINGS_STATUS.INVALID_KEY,
+      keySaved: true,
+      showError: true,
+    };
+  }
+  if (probe.rateLimited) {
+    return {
+      settingsStatus: SPORTSDATA_SETTINGS_STATUS.RATE_LIMITED,
+      settingsLine: SPORTSDATA_SETTINGS_STATUS.RATE_LIMITED,
+      keySaved: true,
+      showError: false,
+    };
+  }
+  if (probe.ok && Array.isArray(probe.payload) && probe.payload.length) {
+    return {
+      settingsStatus: SPORTSDATA_SETTINGS_STATUS.CONNECTED,
+      settingsLine: SPORTSDATA_SETTINGS_STATUS.CONNECTED,
+      keySaved: true,
+      showError: false,
+    };
+  }
+  if (!probe.ok || probe.networkError) {
+    return {
+      settingsStatus: SPORTSDATA_SETTINGS_STATUS.ERROR,
+      settingsLine: SPORTSDATA_SETTINGS_STATUS.ERROR,
+      keySaved: true,
+      showError: true,
+    };
+  }
+  return {
+    settingsStatus: SPORTSDATA_SETTINGS_STATUS.NOT_TESTED,
+    settingsLine: SPORTSDATA_SETTINGS_STATUS.NOT_TESTED,
+    keySaved: true,
+    showError: false,
+  };
+}
 
 function finiteOr(value, fallback = 0) {
   const num = Number(value);
@@ -228,6 +287,13 @@ export function resolveEffectiveProviderStatus(provider = "", context = {}) {
 export function mergeConnectionReportWithFeeds(report = {}, feedContext = {}) {
   const results = (report.results || []).map((row) => {
     const provider = row.provider || "";
+    if (provider === "SportsDataIO") {
+      const effective = resolveSportsDataSettingsStatus(row);
+      return {
+        ...row,
+        ...effective,
+      };
+    }
     if (!PROVIDER_KEYS[provider] && provider !== "Odds API") return row;
     const feed = feedContext[provider] || {};
     const effective = resolveEffectiveProviderStatus(provider, { probe: row, feed });
@@ -265,6 +331,9 @@ export function providerStatusStyle(status = "") {
     "NOT USED": { bg: "rgba(148,163,184,0.15)", text: "#cbd5e1" },
     "PROXY REQUIRED": { bg: "rgba(234,179,8,0.18)", text: "#fde047" },
     "INVALID API KEY": { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
+    "INVALID KEY": { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
+    "NOT TESTED": { bg: "rgba(148,163,184,0.15)", text: "#cbd5e1" },
+    ERROR: { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
     "RATE LIMITED": { bg: "rgba(59,130,246,0.18)", text: "#93c5fd" },
     "NOT CONFIGURED": { bg: "rgba(148,163,184,0.15)", text: "#cbd5e1" },
     DEGRADED: { bg: "rgba(249,115,22,0.18)", text: "#fdba74" },

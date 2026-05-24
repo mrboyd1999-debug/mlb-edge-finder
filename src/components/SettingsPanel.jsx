@@ -11,7 +11,7 @@ import {
 } from "../services/runtimeSettings.js";
 import { validateApiConfig } from "../config/apiConfig.js";
 import ApiHealthPanel from "./ApiHealthPanel.jsx";
-import { testAllApiConnections, mergeConnectionReportWithFeeds } from "../services/apiConnectionTest.js";
+import { testAllApiConnections, testSportsDataIO, mergeConnectionReportWithFeeds } from "../services/apiConnectionTest.js";
 import { isDebugModeEnabled } from "../utils/devMode.js";
 
 export default function SettingsPanel({
@@ -28,6 +28,7 @@ export default function SettingsPanel({
   const [meta, setMeta] = useState(() => readSettingsMeta());
   const [notice, setNotice] = useState("");
   const [testing, setTesting] = useState(false);
+  const [testingSportsData, setTestingSportsData] = useState(false);
   const [connectionReport, setConnectionReport] = useState(() => {
     const storedMeta = readSettingsMeta();
     if (storedMeta.lastTestedAt && Array.isArray(storedMeta.lastConnectionReport)) {
@@ -85,6 +86,43 @@ export default function SettingsPanel({
     await runConnectionTest();
   }
 
+  async function handleTestSportsData() {
+    setTestingSportsData(true);
+    try {
+      const report = await testSportsDataIO();
+      setConnectionReport((current) => {
+        const otherResults = (current?.results || []).filter(
+          (row) => String(row.provider || "").toLowerCase() !== "sportsdataio"
+        );
+        const merged = mergeConnectionReportWithFeeds(
+          {
+            testedAt: report.testedAt,
+            durationMs: report.durationMs,
+            results: [...otherResults, ...(report.results || [])],
+          },
+          feedHealthContext || {}
+        );
+        writeSettingsMeta({
+          ...readSettingsMeta(),
+          lastTestedAt: merged.testedAt,
+          lastConnectionReport: merged.results,
+        });
+        return merged;
+      });
+      setMeta(readSettingsMeta());
+      const sdRow = (report.results || [])[0];
+      setNotice(
+        sdRow?.settingsLine === "Connected"
+          ? "SportsDataIO connected — MLB Teams endpoint OK."
+          : `SportsDataIO: ${sdRow?.settingsLine || "test complete"} — see console for details.`
+      );
+    } catch (error) {
+      setNotice(error?.message || "SportsDataIO test failed.");
+    } finally {
+      setTestingSportsData(false);
+    }
+  }
+
   async function handleTestConnections() {
     await runConnectionTest({ collapseAfter: true });
   }
@@ -122,6 +160,9 @@ export default function SettingsPanel({
           <button type="button" style={styles.secondaryButton} onClick={handleTestConnections} disabled={testing}>
             {testing ? "Testing…" : "Test API"}
           </button>
+          <button type="button" style={styles.secondaryButton} onClick={handleTestSportsData} disabled={testingSportsData}>
+            {testingSportsData ? "Testing…" : "Test SportsDataIO"}
+          </button>
         </div>
         {debugModeEnabled ? (
         <label
@@ -154,7 +195,7 @@ export default function SettingsPanel({
             ))}
           </ul>
         ) : null}
-        <ApiHealthPanel connectionReport={connectionReport} />
+        <ApiHealthPanel connectionReport={connectionReport} lastTestedAt={meta.lastTestedAt} />
         <details className="settings-keys-expand" style={{ ...styles.compactDetails, marginTop: "8px" }}>
           <summary style={styles.detailsSummary}>
             <span>

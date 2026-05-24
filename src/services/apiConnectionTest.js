@@ -245,29 +245,33 @@ async function testOddsApi() {
 
 async function testSportsDataProvider() {
   const sportsDataKey = getSportsDataApiKey();
-  const mlbProbe = await probeFetch(
-    "https://statsapi.mlb.com/api/v1/sports/1/leaders?leaderCategories=homeRuns&season=2024&limit=1"
-  );
-  const mlbOk = mlbProbe.ok && mlbProbe.payload;
+  const route = sportsDataKey
+    ? `/api/sportsdata/scores/json/Teams?key=${encodeURIComponent(sportsDataKey)}`
+    : "/api/sportsdata/scores/json/Teams";
+  const redactedUrl = route.replace(/key=[^&]+/gi, "key=[REDACTED]");
+  console.log("[SportsDataIO Test] URL:", redactedUrl);
 
   if (!sportsDataKey) {
+    console.log("[SportsDataIO Test] Status: skipped — no key saved");
     return {
       provider: "SportsDataIO",
-      route: "https://statsapi.mlb.com (public MLB API fallback)",
+      route: "/api/sportsdata/scores/json/Teams",
       keyConfigured: false,
-      status: mlbOk ? CONNECTION_STATUS.DEGRADED : CONNECTION_STATUS.NOT_CONFIGURED,
-      message: mlbOk
-        ? "No SportsDataIO key — using public MLB Stats API for player history."
-        : CONNECTION_MESSAGES.NOT_CONFIGURED,
-      ...mlbProbe,
-      preview: mlbOk ? "Public MLB Stats API reachable" : mlbProbe.preview,
+      status: CONNECTION_STATUS.NOT_CONFIGURED,
+      message: CONNECTION_MESSAGES.NOT_CONFIGURED,
+      preview: "No VITE_SPORTSDATA_API_KEY configured",
+      durationMs: 0,
+      settingsLine: "Not Tested",
+      keySaved: false,
     };
   }
 
-  // The proxy injects Ocp-Apim-Subscription-Key from the server env, but the
-  // SportsDataIO API also accepts the key as a query string for browser probes.
-  const route = `/api/sportsdata/scores/json/Teams?key=${encodeURIComponent(sportsDataKey)}`;
   const probe = await probeFetch(route);
+  console.log("[SportsDataIO Test] Status:", probe.status);
+  if (!probe.ok) {
+    console.error("[SportsDataIO Test] Error response:", probe.preview);
+  }
+
   const state = getSourceState(SOURCE_IDS.SPORTSDATA);
 
   let classified;
@@ -279,11 +283,6 @@ async function testSportsDataProvider() {
     classified = { status: CONNECTION_STATUS.LIVE, message: CONNECTION_MESSAGES.CONNECTED };
   } else if (probe.ok) {
     classified = { status: CONNECTION_STATUS.DEGRADED, message: CONNECTION_MESSAGES.DEGRADED };
-  } else if (mlbOk) {
-    classified = {
-      status: CONNECTION_STATUS.DEGRADED,
-      message: "SportsDataIO unreachable — public MLB API fallback live.",
-    };
   } else {
     classified = { status: CONNECTION_STATUS.FAILED, message: CONNECTION_MESSAGES.FAILED };
   }
@@ -292,15 +291,26 @@ async function testSportsDataProvider() {
     provider: "SportsDataIO",
     route: "/api/sportsdata/scores/json/Teams",
     keyConfigured: true,
-    mlbStatsApi: mlbOk ? CONNECTION_STATUS.LIVE : CONNECTION_STATUS.DEGRADED,
+    keySaved: true,
     ...classified,
     ...probe,
     lastSuccessfulFetchAt: state.lastSuccessfulFetchAt || "",
     requestCount: state.requestCount || 0,
     lastError: state.lastError || (classified.status === CONNECTION_STATUS.FAILED ? probe.preview : ""),
     cooldownRemainingMs: Math.max(0, Number(state.cooldownUntil || 0) - Date.now()),
-    preview: probe.preview || mlbProbe.preview,
   };
+}
+
+/** Standalone SportsDataIO probe — logs URL, status, and error body to console. */
+export async function testSportsDataIO() {
+  const startedAt = Date.now();
+  const result = await testSportsDataProvider();
+  const report = {
+    testedAt: new Date().toISOString(),
+    durationMs: Date.now() - startedAt,
+    results: [result],
+  };
+  return mergeConnectionReportWithFeeds(report, {});
 }
 
 async function testStatmuseProvider() {

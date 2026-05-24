@@ -12,7 +12,7 @@ import { canonicalMarketKey } from "./marketNormalization.js";
  * downstream consumer reads the same flag and will narrow ingestion, fetch,
  * and rendering automatically.
  */
-export const MLB_ONLY_MODE = false;
+export const MLB_ONLY_MODE = true;
 
 export const MLB_SPORT = APP_SPORTS.MLB;
 
