@@ -112,9 +112,10 @@ export default function SettingsPanel({
       setMeta(readSettingsMeta());
       const sdRow = (report.results || [])[0];
       setNotice(
-        sdRow?.settingsLine === "Connected"
-          ? "SportsDataIO connected — MLB Teams endpoint OK."
-          : `SportsDataIO: ${sdRow?.settingsLine || "test complete"} — see console for details.`
+        sdRow?.debugLine ||
+          (sdRow?.settingsLine === "Connected"
+            ? "SportsDataIO endpoint tested successfully."
+            : `SportsDataIO: ${sdRow?.settingsLine || "test complete"} — see console for details.`)
       );
     } catch (error) {
       setNotice(error?.message || "SportsDataIO test failed.");

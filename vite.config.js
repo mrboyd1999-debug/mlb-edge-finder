@@ -82,7 +82,7 @@ function dfsApiProxy() {
               res,
               "https://api.sportsdata.io/v3/mlb",
               (p) => p.replace(/^\/api\/sportsdata/, ""),
-              sportsDataHeaders(),
+              sportsDataHeaders(req.url || ""),
               "SportsDataIO"
             );
             return;
@@ -427,11 +427,21 @@ function underdogHeaders() {
   };
 }
 
-function sportsDataHeaders() {
-  return {
+function sportsDataHeaders(requestUrl = "") {
+  const headers = {
     accept: "application/json",
     ...(SPORTSDATA_API_KEY ? { "Ocp-Apim-Subscription-Key": SPORTSDATA_API_KEY } : {}),
   };
+  try {
+    const parsed = new URL(requestUrl, "http://localhost");
+    const keyFromQuery = parsed.searchParams.get("key");
+    if (keyFromQuery) {
+      headers["Ocp-Apim-Subscription-Key"] = keyFromQuery;
+    }
+  } catch {
+    // ignore malformed request URLs
+  }
+  return headers;
 }
 
 function apiFootballHeaders() {

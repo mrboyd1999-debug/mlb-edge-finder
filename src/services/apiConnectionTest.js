@@ -243,60 +243,210 @@ async function testOddsApi() {
   };
 }
 
+const SPORTSDATA_PROBE_TIMEOUT_MS = 5_000;
+const SPORTSDATA_HEALTH_PATH = "/scores/json/AreAnyGamesInProgress";
+const SPORTSDATA_UPSTREAM_BASE = "https://api.sportsdata.io/v3/mlb";
+
+function redactSportsDataUrl(url = "") {
+  return String(url).replace(/key=[^&]+/gi, "key=[REDACTED]");
+}
+
+function isSportsDataHealthPayload(payload) {
+  if (payload === true || payload === false) return true;
+  if (Array.isArray(payload)) return true;
+  return Boolean(payload && typeof payload === "object");
+}
+
+function isLikelyCorsError(error) {
+  const message = String(error?.message || error || "");
+  return /failed to fetch|cors|networkerror|network error|load failed/i.test(message);
+}
+
+async function probeSportsDataHealth({ apiKey, useDirect = false } = {}) {
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), SPORTSDATA_PROBE_TIMEOUT_MS);
+
+  const query = apiKey ? `?key=${encodeURIComponent(apiKey)}` : "";
+  const route = useDirect
+    ? `${SPORTSDATA_UPSTREAM_BASE}${SPORTSDATA_HEALTH_PATH}${query}`
+    : `/api/sportsdata${SPORTSDATA_HEALTH_PATH}${query}`;
+
+  const headers = {
+    accept: "application/json",
+    ...(apiKey ? { "Ocp-Apim-Subscription-Key": apiKey } : {}),
+  };
+
+  console.log("[SportsDataIO Test] Full request URL:", redactSportsDataUrl(route));
+  console.log("[SportsDataIO Test] Auth: header + query param", apiKey ? "present" : "missing");
+
+  try {
+    const response = await fetch(route, {
+      cache: "no-store",
+      signal: controller.signal,
+      headers,
+    });
+    const text = await response.text();
+    const trimmed = text.trim();
+    console.log("[SportsDataIO Test] Response status:", response.status);
+    console.log("[SportsDataIO Test] Response text:", trimmed.slice(0, 500) || "(empty)");
+
+    let payload = null;
+    try {
+      payload = trimmed ? JSON.parse(trimmed) : null;
+    } catch {
+      payload = null;
+    }
+
+    const unauthorized = response.status === 401 || response.status === 403;
+    const rateLimited = response.status === 429;
+    const ok = response.status === 200 && isSportsDataHealthPayload(payload);
+
+    return {
+      ok,
+      status: response.status,
+      preview: trimmed.slice(0, 160).replace(/\s+/g, " ").trim() || "(empty)",
+      durationMs: Date.now() - startedAt,
+      payload,
+      rateLimited,
+      unauthorized,
+      timedOut: false,
+      corsBlocked: false,
+      networkError: false,
+      url: route,
+      usedDirect: useDirect,
+    };
+  } catch (error) {
+    const message = error?.message || "Failed to fetch";
+    const timedOut = error?.name === "AbortError" || /abort/i.test(message);
+    const corsBlocked = !timedOut && isLikelyCorsError(error);
+
+    if (timedOut) {
+      console.error("[SportsDataIO Test] Timeout reason: aborted after 5 seconds");
+    } else if (corsBlocked) {
+      console.error("[SportsDataIO Test] CORS blocked direct request:", message);
+    } else {
+      console.error("[SportsDataIO Test] Network error:", message);
+    }
+
+    return {
+      ok: false,
+      status: timedOut ? "timeout" : corsBlocked ? "cors" : "?",
+      preview: timedOut
+        ? "Request timed out after 5s"
+        : corsBlocked
+          ? "Browser blocked direct request — backend proxy recommended."
+          : message,
+      durationMs: Date.now() - startedAt,
+      payload: null,
+      rateLimited: false,
+      unauthorized: false,
+      timedOut,
+      corsBlocked,
+      networkError: !timedOut && !corsBlocked,
+      url: route,
+      usedDirect: useDirect,
+    };
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+function classifySportsDataProbe(probe = {}) {
+  if (probe.corsBlocked) {
+    return {
+      settingsLine: "Browser blocked direct request — backend proxy recommended.",
+      status: CONNECTION_STATUS.FAILED,
+      message: probe.preview,
+      showError: true,
+    };
+  }
+  if (probe.timedOut) {
+    return {
+      settingsLine: "Timed out",
+      status: CONNECTION_STATUS.FAILED,
+      message: "Request timed out after 5s",
+      showError: true,
+    };
+  }
+  if (probe.unauthorized) {
+    return {
+      settingsLine: "Invalid key or subscription",
+      status: CONNECTION_STATUS.FAILED,
+      message: CONNECTION_MESSAGES.INVALID,
+      showError: true,
+    };
+  }
+  if (probe.rateLimited) {
+    return {
+      settingsLine: "Rate limited",
+      status: CONNECTION_STATUS.CACHED,
+      message: CONNECTION_MESSAGES.RATE_LIMITED,
+      showError: false,
+    };
+  }
+  if (probe.ok) {
+    return {
+      settingsLine: "Connected",
+      status: CONNECTION_STATUS.LIVE,
+      message: CONNECTION_MESSAGES.CONNECTED,
+      showError: false,
+      debugLine: "SportsDataIO endpoint tested successfully.",
+    };
+  }
+  return {
+    settingsLine: "Failed",
+    status: CONNECTION_STATUS.FAILED,
+    message: probe.preview || CONNECTION_MESSAGES.FAILED,
+    showError: true,
+  };
+}
+
 async function testSportsDataProvider() {
   const sportsDataKey = getSportsDataApiKey();
-  const route = sportsDataKey
-    ? `/api/sportsdata/scores/json/Teams?key=${encodeURIComponent(sportsDataKey)}`
-    : "/api/sportsdata/scores/json/Teams";
-  const redactedUrl = route.replace(/key=[^&]+/gi, "key=[REDACTED]");
-  console.log("[SportsDataIO Test] URL:", redactedUrl);
 
   if (!sportsDataKey) {
     console.log("[SportsDataIO Test] Status: skipped — no key saved");
     return {
       provider: "SportsDataIO",
-      route: "/api/sportsdata/scores/json/Teams",
+      route: `${SPORTSDATA_UPSTREAM_BASE}${SPORTSDATA_HEALTH_PATH}`,
       keyConfigured: false,
       status: CONNECTION_STATUS.NOT_CONFIGURED,
       message: CONNECTION_MESSAGES.NOT_CONFIGURED,
-      preview: "No VITE_SPORTSDATA_API_KEY configured",
+      preview: "No SportsDataIO key configured",
       durationMs: 0,
-      settingsLine: "Not Tested",
+      settingsLine: "Not Used",
       keySaved: false,
     };
   }
 
-  const probe = await probeFetch(route);
-  console.log("[SportsDataIO Test] Status:", probe.status);
-  if (!probe.ok) {
-    console.error("[SportsDataIO Test] Error response:", probe.preview);
+  let probe = await probeSportsDataHealth({ apiKey: sportsDataKey, useDirect: false });
+
+  if (!probe.ok && (probe.timedOut || probe.networkError) && !probe.corsBlocked) {
+    const directProbe = await probeSportsDataHealth({ apiKey: sportsDataKey, useDirect: true });
+    if (directProbe.corsBlocked) {
+      probe = { ...probe, corsBlocked: true, preview: directProbe.preview };
+    }
   }
 
+  const classified = classifySportsDataProbe(probe);
   const state = getSourceState(SOURCE_IDS.SPORTSDATA);
-
-  let classified;
-  if (probe.unauthorized) {
-    classified = { status: CONNECTION_STATUS.FAILED, message: CONNECTION_MESSAGES.INVALID };
-  } else if (probe.rateLimited) {
-    classified = { status: CONNECTION_STATUS.CACHED, message: CONNECTION_MESSAGES.RATE_LIMITED };
-  } else if (probe.ok && Array.isArray(probe.payload) && probe.payload.length) {
-    classified = { status: CONNECTION_STATUS.LIVE, message: CONNECTION_MESSAGES.CONNECTED };
-  } else if (probe.ok) {
-    classified = { status: CONNECTION_STATUS.DEGRADED, message: CONNECTION_MESSAGES.DEGRADED };
-  } else {
-    classified = { status: CONNECTION_STATUS.FAILED, message: CONNECTION_MESSAGES.FAILED };
-  }
 
   return {
     provider: "SportsDataIO",
-    route: "/api/sportsdata/scores/json/Teams",
+    route: `${SPORTSDATA_UPSTREAM_BASE}${SPORTSDATA_HEALTH_PATH}`,
     keyConfigured: true,
     keySaved: true,
-    ...classified,
+    settingsLine: classified.settingsLine,
+    settingsStatus: classified.settingsLine,
+    showError: classified.showError,
+    debugLine: classified.debugLine || "",
+    status: classified.status,
+    message: classified.message,
     ...probe,
-    lastSuccessfulFetchAt: state.lastSuccessfulFetchAt || "",
+    lastSuccessfulFetchAt: probe.ok ? new Date().toISOString() : state.lastSuccessfulFetchAt || "",
     requestCount: state.requestCount || 0,
-    lastError: state.lastError || (classified.status === CONNECTION_STATUS.FAILED ? probe.preview : ""),
+    lastError: classified.showError ? probe.preview || classified.message : "",
     cooldownRemainingMs: Math.max(0, Number(state.cooldownUntil || 0) - Date.now()),
   };
 }

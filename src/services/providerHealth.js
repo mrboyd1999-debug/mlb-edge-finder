@@ -47,24 +47,53 @@ function resolveSportsDataSettingsStatus(probe = {}, feed = {}) {
       settingsLine: PROVIDER_UI_STATUS.NOT_USED,
       keySaved: false,
       showError: false,
+      debugLine: "",
+    };
+  }
+  if (probe.corsBlocked) {
+    return {
+      settingsStatus: "Failed",
+      settingsLine: "Browser blocked direct request — backend proxy recommended.",
+      keySaved: true,
+      showError: true,
+      debugLine: "",
+    };
+  }
+  if (probe.timedOut) {
+    return {
+      settingsStatus: "Failed",
+      settingsLine: "Timed out",
+      keySaved: true,
+      showError: true,
+      debugLine: "",
     };
   }
   if (probe.unauthorized) {
     return {
       settingsStatus: "Failed",
-      settingsLine: "Failed",
+      settingsLine: "Invalid key or subscription",
       keySaved: true,
       showError: true,
+      debugLine: "",
     };
   }
-  const apiConnected =
-    probe.ok && (!Array.isArray(probe.payload) || probe.payload.length > 0);
+  if (probe.rateLimited) {
+    return {
+      settingsStatus: "Rate limited",
+      settingsLine: "Rate limited",
+      keySaved: true,
+      showError: false,
+      debugLine: "",
+    };
+  }
+  const apiConnected = probe.ok || probe.settingsLine === "Connected";
   if (apiConnected && !feed.usedOnBoard) {
     return {
       settingsStatus: PROVIDER_UI_STATUS.CONNECTED,
       settingsLine: "Connected — not used for current board",
       keySaved: true,
       showError: false,
+      debugLine: probe.debugLine || "SportsDataIO endpoint tested successfully.",
     };
   }
   if (apiConnected) {
@@ -73,13 +102,15 @@ function resolveSportsDataSettingsStatus(probe = {}, feed = {}) {
       settingsLine: PROVIDER_UI_STATUS.CONNECTED,
       keySaved: true,
       showError: false,
+      debugLine: probe.debugLine || "SportsDataIO endpoint tested successfully.",
     };
   }
   return {
     settingsStatus: "Failed",
-    settingsLine: "Failed",
+    settingsLine: probe.settingsLine || "Failed",
     keySaved: true,
     showError: true,
+    debugLine: "",
   };
 }
 
@@ -256,6 +287,7 @@ export function mergeConnectionReportWithFeeds(report = {}, feedContext = {}) {
       return {
         ...row,
         ...effective,
+        debugLine: row.debugLine || effective.debugLine || "",
       };
     }
     if (!PROVIDER_KEYS[provider] && provider !== "Odds API") return row;
@@ -297,8 +329,13 @@ export function providerStatusStyle(status = "") {
     "INVALID API KEY": { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
     "INVALID KEY": { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
     "NOT TESTED": { bg: "rgba(148,163,184,0.15)", text: "#cbd5e1" },
-    ERROR: { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
+    "TIMED OUT": { bg: "rgba(234,179,8,0.18)", text: "#fde047" },
     "RATE LIMITED": { bg: "rgba(59,130,246,0.18)", text: "#93c5fd" },
+    "INVALID KEY OR SUBSCRIPTION": { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
+    "BROWSER BLOCKED DIRECT REQUEST — BACKEND PROXY RECOMMENDED.": {
+      bg: "rgba(234,179,8,0.18)",
+      text: "#fde047",
+    },
     "NOT CONFIGURED": { bg: "rgba(148,163,184,0.15)", text: "#cbd5e1" },
     DEGRADED: { bg: "rgba(249,115,22,0.18)", text: "#fdba74" },
     FAILED: { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },

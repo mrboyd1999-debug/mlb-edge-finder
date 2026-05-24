@@ -19,6 +19,7 @@ function providerDetails(label, row, testedAt) {
       lastTested: testedAt ? formatDateTime(testedAt) : "Not tested",
       result: row?.settingsLine || "Not Used",
       error: row?.showError ? row?.lastError || row?.preview || "Connection failed" : "",
+      debugLine: row?.debugLine || "",
     };
   }
   return {
@@ -71,6 +72,9 @@ export default function ApiHealthPanel({ connectionReport = null, lastTestedAt =
               )}
               {details.error ? (
                 <span style={{ ...styles.compactFlags, color: "#fca5a5" }}>Error: {details.error}</span>
+              ) : null}
+              {isSportsData && details.debugLine ? (
+                <span style={{ ...styles.compactFlags, color: "#86efac" }}>{details.debugLine}</span>
               ) : null}
             </div>
           );
