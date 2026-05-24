@@ -10,8 +10,9 @@ import { validatePropSanityRejectReason } from "./propSanity.js";
 import { unsupportedMarketRejectReason } from "./mlbAllowedMarkets.js";
 import {
   auditTopMlbPlayRankableRejections,
-  filterTopMlbPlayRankable,
+  isLiveLineRankable,
   isRelaxedRankable,
+  isRelaxedRankableOrLiveLine,
   isTopMlbPlayRankable,
 } from "./mlbRankableProp.js";
 import { sortTopMlbPlays } from "./topMlbPlaysRanking.js";
@@ -19,7 +20,11 @@ import { resolveCuratedGoblinDemonBoards } from "./goblinDemonPairs.js";
 import { buildDemoMlbProps, DEMO_FALLBACK_LABEL } from "./mlbDemoFallback.js";
 import { preparePropsForRanking } from "./mlbPropPrep.js";
 import { buildPipelineDebugSnapshot, logPipelineStage } from "./mlbPipelineDebug.js";
-import { isGoblinProp, isDemonProp } from "./propLabels.js";
+import { filterDemonCandidates, filterGoblinCandidates } from "./goblinDemonClassifier.js";
+import { normalizeUnifiedProps, countLiveUnifiedProps } from "./unifiedPropNormalizer.js";
+import { computeLiveConfidence } from "./liveConfidenceEngine.js";
+import { applyCrossSectionPlayerCap } from "./sectionPlayerDedupe.js";
+import { buildLiveFetchFailureSummary } from "./liveFetchAudit.js";
 
 export const TOP_MLB_PLAYS_LIMIT = 20;
 export const SECTION_BEST_PLAYS = 4;
@@ -28,12 +33,13 @@ export const SECTION_GOBLINS = 6;
 export const SECTION_DEMONS = 6;
 export const SECTION_UNDERS = 4;
 export const SECTION_PARLAY = 4;
+export const MAX_PLAYER_APPEARANCES = 2;
 export const WAITING_FOR_PROJECTIONS_MESSAGE = "Waiting for verified projections…";
-export const FALLBACK_PROJECTIONS_LABEL = "Fallback projections loaded";
+export const FALLBACK_PROJECTIONS_LABEL = "Relaxed ranking applied";
 
 function isPrizePicksOrUnderdog(prop = {}) {
   const src = normalizeSource(prop);
-  return src === "prizepicks" || src === "underdog" || prop.isDemoData;
+  return src === "prizepicks" || src === "underdog";
 }
 
 function mergeInputProps(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
@@ -43,17 +49,23 @@ function mergeInputProps(displayProps = [], rawProps = [], parsedUnderdogProps =
   return dedupeLooseProps([...mlbDisplay, ...ppRaw, ...udMlb].filter(isLooseDisplayProp));
 }
 
+function countLiveVerifiedProps(props = []) {
+  return (props || []).filter((prop) => !prop.isDemoData && isVerifiedSportsbookProp(prop)).length;
+}
+
+function shouldUseDemoFallback(liveVerifiedCount = 0, options = {}) {
+  if (liveVerifiedCount > 0) return false;
+  return Boolean(options.fetchTimedOut || options.liveFetchFailed || options.allSourcesEmpty);
+}
+
 function buildTopMlbPlayPool(displayProps = [], rawProps = [], parsedUnderdogProps = [], { relaxed = false } = {}) {
   const merged = preparePropsForRanking(mergeInputProps(displayProps, rawProps, parsedUnderdogProps));
 
-  logPipelineStage("pool.merged", { count: merged.length });
+  logPipelineStage("pool.merged", { count: merged.length, live: countLiveVerifiedProps(merged) });
 
   const pool = [];
   merged.forEach((prop) => {
-    if (prop.isDemoData) {
-      pool.push(prop);
-      return;
-    }
+    if (prop.isDemoData) return;
     if (!relaxed && unsupportedMarketRejectReason(prop)) return;
     if (!relaxed && validatePropSanityRejectReason(prop)) return;
     if (!isTopMlbPlayCandidate(prop)) return;
@@ -74,9 +86,47 @@ export function auditTopMlbPlayPool(displayProps = [], rawProps = [], parsedUnde
   return { strict, relaxed: relaxedAudit, accepted: strict.accepted, rejected: strict.rejected, reasons: strict.reasons };
 }
 
-function annotateTopPlay(prop, rank, { allowRelaxed = false } = {}) {
+function enrichLiveLineProp(prop = {}) {
   const enriched = enrichPropWithSideEvaluation(prop);
-  const rankable = allowRelaxed ? isRelaxedRankable(enriched) : isTopMlbPlayRankable(enriched);
+  if (!enriched.sideEvaluation?.pass) return enriched;
+
+  const platformSide = String(prop.side || prop.pick || prop.bestPick || "under").toLowerCase();
+  const recommendedSide = platformSide.includes("over") ? "OVER" : "UNDER";
+  const conf = computeLiveConfidence(prop) ?? 58;
+
+  return {
+    ...enriched,
+    recommendedSide,
+    side: recommendedSide === "OVER" ? "over" : "under",
+    pick: recommendedSide === "OVER" ? "over" : "under",
+    confidence: conf,
+    confidenceScore: conf,
+    edge: 0.1,
+    sideEvaluation: {
+      ...enriched.sideEvaluation,
+      recommendedSide,
+      pass: false,
+      edge: 0.1,
+      confidence: conf,
+      reason: "Live platform line",
+    },
+    isLiveLineOnly: true,
+  };
+}
+
+function enrichForBoard(prop = {}) {
+  const withEval = enrichPropWithSideEvaluation(prop);
+  if (!withEval.sideEvaluation?.pass) return withEval;
+  if (isLiveLineRankable(prop)) return enrichLiveLineProp(prop);
+  return withEval;
+}
+
+function annotateTopPlay(prop, rank, { allowRelaxed = false, allowLiveLine = false } = {}) {
+  const enriched = enrichForBoard(prop);
+  const rankable =
+    enriched.isDemoData ||
+    (allowLiveLine && isLiveLineRankable(enriched)) ||
+    (allowRelaxed ? isRelaxedRankableOrLiveLine(enriched) : isTopMlbPlayRankable(enriched));
   if (!rankable && !enriched.isDemoData) return null;
   return withPlayerImageUrl({
     ...enriched,
@@ -102,12 +152,13 @@ function dedupeSectionPicks(picks = []) {
   return out;
 }
 
-function fillMinimum(existing = [], source = [], limit = 0, allowRelaxed = false) {
+function fillMinimum(existing = [], source = [], limit = 0, { allowRelaxed = false, allowLiveLine = false, allowDemo = false } = {}) {
   const out = [...existing];
   const seen = new Set(out.map((p) => p.id));
   source.forEach((prop) => {
     if (out.length >= limit) return;
-    const annotated = annotateTopPlay(prop, out.length + 1, { allowRelaxed });
+    if (!allowDemo && prop.isDemoData) return;
+    const annotated = annotateTopPlay(prop, out.length + 1, { allowRelaxed, allowLiveLine });
     if (!annotated || seen.has(annotated.id)) return;
     seen.add(annotated.id);
     out.push(annotated);
@@ -149,14 +200,20 @@ export function buildRankableParlayPicks(ranked = [], limit = SECTION_PARLAY) {
   return selected;
 }
 
-function rankPool(pool = [], { relaxed = false } = {}) {
-  const sorted = sortTopMlbPlays(pool, { relaxed });
-  return prepareRanked(sorted, { allowRelaxed: relaxed });
+function rankPool(pool = [], { relaxed = false, liveLine = false } = {}) {
+  const enriched = pool.map((prop) => enrichForBoard(prop));
+  const filtered = enriched.filter((prop) => {
+    if (prop.isDemoData) return true;
+    if (liveLine && isLiveLineRankable(prop)) return true;
+    return relaxed ? isRelaxedRankableOrLiveLine(prop) : isTopMlbPlayRankable(prop);
+  });
+  const sorted = sortTopMlbPlays(filtered, { relaxed: relaxed || liveLine });
+  return prepareRanked(sorted, { allowRelaxed: relaxed || liveLine, allowLiveLine: liveLine });
 }
 
-function prepareRanked(sorted = [], { allowRelaxed = false } = {}) {
+function prepareRanked(sorted = [], { allowRelaxed = false, allowLiveLine = false } = {}) {
   return sorted
-    .map((prop, idx) => annotateTopPlay(prop, idx + 1, { allowRelaxed }))
+    .map((prop, idx) => annotateTopPlay(prop, idx + 1, { allowRelaxed, allowLiveLine }))
     .filter(Boolean);
 }
 
@@ -173,34 +230,58 @@ export function resolveTopMlbPlaySections(
 ) {
   const sourceStatus = options.sourceStatus || {};
   const lastUpdated = options.lastUpdated || "";
+  const mergedInput = mergeInputProps(displayProps, rawProps, parsedUnderdogProps);
+  const liveVerifiedCount = countLiveVerifiedProps(mergedInput);
+  const fetchFailureReasons =
+    options.fetchFailureReasons?.length > 0
+      ? options.fetchFailureReasons
+      : buildLiveFetchFailureSummary(options.debugInfo?.sources || sourceStatus);
 
   logPipelineStage("fetch.input", {
     display: displayProps.length,
     raw: rawProps.length,
     underdog: parsedUnderdogProps.length,
+    liveVerified: liveVerifiedCount,
   });
 
   const strictPool = buildTopMlbPlayPool(displayProps, rawProps, parsedUnderdogProps, { relaxed: false });
   let ranked = rankPool(strictPool, { relaxed: false });
   let usedFallback = false;
   let fallbackLabel = "";
+  let isDemoBoard = false;
 
   logPipelineStage("rank.strict", { pool: strictPool.length, ranked: ranked.length });
 
-  if (!ranked.length) {
+  if (!ranked.length && liveVerifiedCount > 0) {
     const relaxedPool = buildTopMlbPlayPool(displayProps, rawProps, parsedUnderdogProps, { relaxed: true });
     ranked = rankPool(relaxedPool, { relaxed: true });
-    usedFallback = ranked.length > 0;
-    fallbackLabel = ranked.length ? FALLBACK_PROJECTIONS_LABEL : "";
+    if (ranked.length) {
+      usedFallback = true;
+      fallbackLabel = FALLBACK_PROJECTIONS_LABEL;
+    }
     logPipelineStage("rank.relaxed", { pool: relaxedPool.length, ranked: ranked.length });
   }
 
-  if (!ranked.length) {
+  if (!ranked.length && liveVerifiedCount > 0) {
+    const liveLinePool = strictPool.filter(isLiveLineRankable);
+    ranked = rankPool(liveLinePool, { relaxed: true, liveLine: true });
+    if (ranked.length) {
+      usedFallback = true;
+      fallbackLabel = "Live platform lines";
+    }
+    logPipelineStage("rank.liveLine", { pool: liveLinePool.length, ranked: ranked.length });
+  }
+
+  if (!ranked.length && shouldUseDemoFallback(liveVerifiedCount, options)) {
     ranked = buildDemoMlbProps(12);
     usedFallback = true;
+    isDemoBoard = true;
     fallbackLabel = DEMO_FALLBACK_LABEL;
-    logPipelineStage("rank.demo", { count: ranked.length });
+    logPipelineStage("rank.demo", { count: ranked.length, reason: fetchFailureReasons.join("; ") || "no live props" });
   }
+
+  const unifiedRanked = normalizeUnifiedProps(ranked, enrichForBoard);
+  ranked = unifiedRanked;
 
   const payoutBoards = resolveCuratedGoblinDemonBoards(displayProps, rawProps, {
     goblinLimit: SECTION_GOBLINS,
@@ -208,42 +289,67 @@ export function resolveTopMlbPlaySections(
     parsedUnderdogProps,
   });
 
-  let goblins = (payoutBoards.goblins || [])
-    .map((prop) => annotateTopPlay(prop, 0, { allowRelaxed: true }))
-    .filter(Boolean);
-  let demons = (payoutBoards.demons || [])
-    .map((prop) => annotateTopPlay(prop, 0, { allowRelaxed: true }))
-    .filter(Boolean);
+  const livePool = strictPool.filter((p) => !p.isDemoData);
+  let goblins = filterGoblinCandidates(livePool.length ? livePool : ranked);
+  let demons = filterDemonCandidates(livePool.length ? livePool : ranked);
 
   if (!goblins.length) {
-    goblins = ranked.filter(isGoblinProp).slice(0, SECTION_GOBLINS);
+    goblins = (payoutBoards.goblins || [])
+      .map((prop) => annotateTopPlay(prop, 0, { allowRelaxed: true, allowLiveLine: true }))
+      .filter(Boolean);
   }
   if (!demons.length) {
-    demons = ranked.filter(isDemonProp).slice(0, SECTION_DEMONS);
+    demons = (payoutBoards.demons || [])
+      .map((prop) => annotateTopPlay(prop, 0, { allowRelaxed: true, allowLiveLine: true }))
+      .filter(Boolean);
   }
 
-  goblins = fillMinimum(goblins, ranked, SECTION_GOBLINS, true);
-  demons = fillMinimum(demons, ranked, SECTION_DEMONS, true);
+  goblins = fillMinimum(goblins, ranked, SECTION_GOBLINS, {
+    allowRelaxed: true,
+    allowLiveLine: true,
+    allowDemo: isDemoBoard,
+  });
+  demons = fillMinimum(demons, ranked, SECTION_DEMONS, {
+    allowRelaxed: true,
+    allowLiveLine: true,
+    allowDemo: isDemoBoard,
+  });
 
   const bestPlays = ranked.slice(0, SECTION_BEST_PLAYS);
-  const streakPlays = ranked.filter((p) => p.recommendedSide === "UNDER").slice(0, SECTION_STREAK);
+  const streakPlays = fillMinimum(
+    ranked.filter((p) => p.recommendedSide === "UNDER").slice(0, SECTION_STREAK),
+    ranked,
+    SECTION_STREAK,
+    { allowRelaxed: true, allowLiveLine: true, allowDemo: isDemoBoard }
+  );
   const safeUnders = fillMinimum(
     ranked.filter((p) => p.recommendedSide === "UNDER").slice(0, SECTION_UNDERS),
     ranked,
     SECTION_UNDERS,
-    true
+    { allowRelaxed: true, allowLiveLine: true, allowDemo: isDemoBoard }
   );
   let parlayPicks = buildRankableParlayPicks(ranked, SECTION_PARLAY);
-  parlayPicks = fillMinimum(parlayPicks, ranked, SECTION_PARLAY, true);
+  parlayPicks = fillMinimum(parlayPicks, ranked, SECTION_PARLAY, {
+    allowRelaxed: true,
+    allowLiveLine: true,
+    allowDemo: isDemoBoard,
+  });
 
-  const sections = [
-    { id: "best-plays", title: "Best Plays", eyebrow: usedFallback ? fallbackLabel : "Top verified MLB edges", picks: bestPlays },
+  let sections = [
+    {
+      id: "best-plays",
+      title: "Best Plays",
+      eyebrow: isDemoBoard ? fallbackLabel : "Top verified MLB edges",
+      picks: bestPlays,
+    },
     { id: "streak-plays", title: "Streak Plays", eyebrow: "Strongest unders", picks: streakPlays },
     { id: "goblins", title: "Goblins", eyebrow: "Safer payout lines", picks: goblins },
     { id: "demons", title: "Demons", eyebrow: "Higher payout lines", picks: demons },
     { id: "safe-unders", title: "Safe Unders", eyebrow: "Unders prioritized", picks: safeUnders },
     { id: "4-man-builder", title: "4-Man Builder", eyebrow: "Low-correlation legs", picks: parlayPicks },
   ].map((section) => ({ ...section, picks: section.picks.filter(Boolean) }));
+
+  sections = applyCrossSectionPlayerCap(sections, MAX_PLAYER_APPEARANCES);
 
   const nonEmptySections = sections.filter((section) => section.picks.length > 0);
   const audit = auditTopMlbPlayRankableRejections(
@@ -253,25 +359,31 @@ export function resolveTopMlbPlaySections(
 
   const pipelineDebug = buildPipelineDebugSnapshot({
     rawProps: rawProps,
-    parsedProps: mergeInputProps(displayProps, rawProps, parsedUnderdogProps),
+    parsedProps: mergedInput,
     pool: strictPool,
     ranked,
     rejectedAudit: audit,
     sourceStatus,
     lastUpdated,
-    usedFallback,
-    fallbackLabel,
+    usedFallback: isDemoBoard,
+    fallbackLabel: isDemoBoard ? fallbackLabel : "",
+    livePropCount: countLiveUnifiedProps(ranked),
+    fetchFailureReasons,
+    isLive: liveVerifiedCount > 0 && !isDemoBoard,
   });
 
   logPipelineStage("render.final", {
     sections: nonEmptySections.map((s) => ({ id: s.id, count: s.picks.length })),
-    usedFallback,
+    usedFallback: isDemoBoard,
+    liveVerified: liveVerifiedCount,
   });
 
   return {
     waitingForProjections: false,
-    usedFallback,
-    fallbackLabel,
+    usedFallback: isDemoBoard,
+    fallbackLabel: isDemoBoard ? fallbackLabel : "",
+    fetchFailureReasons,
+    isLive: liveVerifiedCount > 0 && !isDemoBoard,
     pipelineDebug,
     sections: nonEmptySections.length ? nonEmptySections : sections,
   };

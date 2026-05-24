@@ -105,6 +105,30 @@ export function filterTopMlbPlayRankable(props = [], { relaxed = false } = {}) {
   return (props || []).filter(fn);
 }
 
+/** Verified platform line — no synthetic projection required. */
+export function validateLiveLineRejectReason(prop = {}) {
+  if (prop.isDemoData) return "Rejected: demo prop";
+  if (!isVerifiedSportsbookProp(prop)) return "Rejected: unverified sportsbook prop";
+  const unsupported = unsupportedMarketRejectReason(prop);
+  if (unsupported) return unsupported;
+  const sanity = validatePropSanityRejectReason(prop);
+  if (sanity) return sanity;
+  if (!isTopMlbPlayCandidate(prop)) return "Rejected: not MLB candidate";
+  const line = finiteOr(prop.line, NaN);
+  if (!Number.isFinite(line) || line <= 0) return "Rejected: invalid line";
+  if (!prop.playerName && !prop.player) return "Rejected: missing player";
+  if (!prop.statType && !prop.market && !prop.propType) return "Rejected: missing stat";
+  return "";
+}
+
+export function isLiveLineRankable(prop = {}) {
+  return !validateLiveLineRejectReason(prop);
+}
+
+export function isRelaxedRankableOrLiveLine(prop = {}) {
+  return isRelaxedRankable(prop) || isLiveLineRankable(prop);
+}
+
 export function auditTopMlbPlayRankableRejections(props = [], { relaxed = false } = {}) {
   const reasons = {};
   let accepted = 0;

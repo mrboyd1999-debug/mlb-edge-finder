@@ -17,6 +17,9 @@ export function buildPipelineDebugSnapshot({
   lastUpdated = "",
   usedFallback = false,
   fallbackLabel = "",
+  livePropCount = 0,
+  fetchFailureReasons = [],
+  isLive = false,
 } = {}) {
   const verified = (parsedProps || []).filter(isVerifiedSportsbookProp);
   return {
@@ -25,12 +28,18 @@ export function buildPipelineDebugSnapshot({
     verifiedPropsCount: verified.length,
     poolCount: pool.length,
     rankedCount: ranked.length,
+    livePropCount: livePropCount || ranked.filter((p) => !p.isDemoData).length,
     rejectedPropsCount: rejectedAudit?.rejected ?? Math.max(0, pool.length - ranked.length),
     rejectionReasons: rejectedAudit?.reasons || {},
     sourceStatus: summarizeSourceStatus(sourceStatus),
     lastSuccessfulRefresh: lastUpdated || "",
     usedFallback,
     fallbackLabel,
+    fetchFailureReasons,
+    isLive,
+    activeSources: Object.keys(summarizeSourceStatus(sourceStatus)).filter(
+      (k) => !/failed|offline|empty/i.test(String(summarizeSourceStatus(sourceStatus)[k]))
+    ),
   };
 }
 

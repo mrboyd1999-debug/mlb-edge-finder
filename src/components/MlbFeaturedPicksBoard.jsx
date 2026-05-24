@@ -11,7 +11,7 @@ function MlbFeaturedPicksBoard({
   const rows = picks || [];
 
   return (
-    <section className="mlb-featured-picks-section" style={styles.section} aria-label={title}>
+    <section className="mlb-featured-picks-section lazy-section" style={styles.section} aria-label={title}>
       <div style={styles.sectionHeading}>
         <div>
           <p style={styles.eyebrow}>{eyebrow}</p>

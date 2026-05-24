@@ -1,6 +1,7 @@
 import { memo } from "react";
 import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import MlbFeaturedPicksBoard from "./MlbFeaturedPicksBoard.jsx";
+import LiveStatusHeader from "./LiveStatusHeader.jsx";
 import PipelineDebugBar from "./PipelineDebugBar.jsx";
 import { styles } from "../theme/styles.js";
 
@@ -12,21 +13,30 @@ function CuratedPicksScreen({
   usedFallback = false,
   fallbackLabel = "",
   pipelineDebug = null,
+  fetchFailureReasons = [],
+  showDebugPanels = false,
   onSectionError,
 }) {
   const hasSections = sections.some((section) => section.picks?.length);
 
   return (
     <div className="curated-picks-screen curated-picks-mlb-only">
-      <PipelineDebugBar debug={pipelineDebug} />
+      <LiveStatusHeader debug={pipelineDebug} failureReasons={fetchFailureReasons} loading={loading} />
+      {showDebugPanels ? <PipelineDebugBar debug={pipelineDebug} /> : null}
       {usedFallback && fallbackLabel ? (
-        <p style={styles.pipelineDebugFallback}>{fallbackLabel}</p>
+        <p style={styles.pipelineDebugFallback} role="alert">
+          {fallbackLabel}
+        </p>
       ) : null}
       {loading ? (
         <div style={styles.emptyStateCompact}>Loading MLB props…</div>
       ) : !hasSections ? (
         <div style={styles.emptyStateCompact}>
-          {waitingForProjections ? "Loading projections…" : "Loading MLB board…"}
+          {fetchFailureReasons?.length
+            ? fetchFailureReasons.join(" · ")
+            : waitingForProjections
+              ? "Loading projections…"
+              : "No live MLB props available"}
         </div>
       ) : (
         sections.map((section) => (

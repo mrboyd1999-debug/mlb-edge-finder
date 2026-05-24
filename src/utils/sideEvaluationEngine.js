@@ -12,6 +12,7 @@ import {
 import { recommendSideFromProjection } from "./propSanity.js";
 import { resolvePlayerRole } from "./propPlayerRole.js";
 import { computeEdgeBasedConfidence } from "./mlbEdgeConfidence.js";
+import { computeLiveConfidence } from "./liveConfidenceEngine.js";
 
 export const TIER_STRONG = 80;
 export const TIER_PLAYABLE = 70;
@@ -294,15 +295,21 @@ export function enrichPropWithSideEvaluation(prop = {}) {
         ? "under"
         : "";
 
+  let resolvedConfidence = evaluation.confidence;
+  if (!prop.isDemoData && !evaluation.pass && finiteOr(evaluation.edge, 0) > 0) {
+    const liveConf = computeLiveConfidence(prop, evaluation.edge);
+    if (liveConf != null) resolvedConfidence = liveConf;
+  }
+
   const tier = evaluation.pass
     ? "Insufficient data"
-    : evaluation.confidence == null
+    : resolvedConfidence == null
       ? "Insufficient data"
-      : confidenceTierFromScore(evaluation.confidence);
+      : confidenceTierFromScore(resolvedConfidence);
   const displayResearchOnly =
     evaluation.pass ||
-    evaluation.confidence == null ||
-    evaluation.confidence < 52 ||
+    resolvedConfidence == null ||
+    resolvedConfidence < 52 ||
     finiteOr(evaluation.edge, 0) < 0.15 ||
     resolveProjectionQuality(prop) === PROJECTION_QUALITY.MISSING;
 
@@ -321,8 +328,8 @@ export function enrichPropWithSideEvaluation(prop = {}) {
     overUnder: sidePick || prop.overUnder || "",
     edge: evaluation.pass ? 0 : evaluation.edge ?? 0,
     projectionEdge: evaluation.edge ?? prop.projectionEdge ?? null,
-    confidence: evaluation.pass ? null : evaluation.confidence ?? null,
-    confidenceScore: evaluation.pass ? null : evaluation.confidence ?? null,
+    confidence: evaluation.pass ? null : resolvedConfidence ?? null,
+    confidenceScore: evaluation.pass ? null : resolvedConfidence ?? null,
     confidenceTier: tier,
     bettingLabel: displayResearchOnly ? "Insufficient data" : tier,
     displayResearchOnly,

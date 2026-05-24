@@ -1,8 +1,8 @@
-/** Normalize props before ranking — matchup, projection, sport keys. */
+/** Normalize live props without fabricating lines or projections. */
 
-import { ensureDisplayProjection } from "./displayPropScoring.js";
 import { annotateProjectionFields } from "./projectionQuality.js";
 import { normalizeSportLabel } from "./sportMappings.js";
+import { resolveProjectionValue } from "./projectionQuality.js";
 
 export function normalizePropSportFields(prop = {}) {
   const sport = normalizeSportLabel(prop.sport || prop.league || prop.inferredSport || "", prop.league || "");
@@ -15,17 +15,11 @@ export function normalizePropSportFields(prop = {}) {
 }
 
 export function ensureMatchupFields(prop = {}) {
-  if (prop.matchup || (prop.team && prop.opponent)) {
+  if (prop.matchup || (prop.team && prop.opponent && prop.opponent !== "TBD")) {
     return { ...prop, matchup: prop.matchup || `${prop.team} vs ${prop.opponent}` };
   }
 
-  const blob = [
-    prop.description,
-    prop.gameDescription,
-    prop.matchupNote,
-    prop.eventName,
-    prop.gameTitle,
-  ]
+  const blob = [prop.description, prop.gameDescription, prop.matchupNote, prop.eventName, prop.gameTitle]
     .filter(Boolean)
     .join(" ");
 
@@ -39,27 +33,44 @@ export function ensureMatchupFields(prop = {}) {
     };
   }
 
-  return {
-    ...prop,
-    team: prop.team || "MLB",
-    opponent: prop.opponent || "TBD",
-    matchup: prop.matchup || "MLB slate",
-  };
+  return prop.matchup || prop.team ? prop : { ...prop, matchup: prop.matchup || "" };
 }
 
-export function preparePropForRanking(prop = {}) {
+/** Live prep — preserves platform line; never invents projection. */
+export function prepareLiveProp(prop = {}) {
   const withSport = normalizePropSportFields(prop);
   const withMatchup = ensureMatchupFields(withSport);
-  const projection = ensureDisplayProjection(withMatchup);
+  const existing = resolveProjectionValue(withMatchup);
+
   return annotateProjectionFields({
     ...withMatchup,
-    projection,
-    projectedValue: projection,
-    projectionSource: withMatchup.projectionSource || "estimated",
-    estimatedProjection: !withMatchup.projectionSource || withMatchup.projectionSource === "estimated",
+    projection: existing ?? null,
+    projectedValue: existing ?? null,
+    projectionSource: withMatchup.projectionSource || (existing ? withMatchup.projectionSource : "missing"),
+    estimatedProjection: Boolean(withMatchup.estimatedProjection),
+    isLiveLine: !withMatchup.isDemoData,
   });
 }
 
-export function preparePropsForRanking(props = []) {
-  return (props || []).map(preparePropForRanking);
+export function prepareLiveProps(props = []) {
+  return (props || []).map(prepareLiveProp);
+}
+
+import { ensureDisplayProjection } from "./displayPropScoring.js";
+
+/** @deprecated synthetic prep for emergency demo path only */
+export function preparePropsForRanking(props = [], { synthetic = false } = {}) {
+  if (!synthetic) return prepareLiveProps(props);
+  return props.map((prop) => {
+    const live = prepareLiveProp(prop);
+    if (resolveProjectionValue(live) != null) return live;
+    const projection = ensureDisplayProjection(live);
+    return annotateProjectionFields({
+      ...live,
+      projection,
+      projectedValue: projection,
+      projectionSource: "estimated",
+      estimatedProjection: true,
+    });
+  });
 }

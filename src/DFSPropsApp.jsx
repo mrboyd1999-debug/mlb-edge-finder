@@ -161,6 +161,7 @@ import {
 } from "./utils/underdogPickPool.js";
 import { resolveTopMlbPlaySections, auditTopMlbPlayPool } from "./utils/topMlbPlays.js";
 import { logPipelineStage } from "./utils/mlbPipelineDebug.js";
+import { logLiveFetchResult, buildLiveFetchFailureSummary } from "./utils/liveFetchAudit.js";
 import { isSafeModeEnabled, SAFE_MODE_FALLBACK_MESSAGE, SAFE_MODE_LOADING_MESSAGE } from "./utils/safeMode.js";
 import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks, resolveSafeMlbStreakPicks } from "./utils/safeModePipeline.js";
 import {
@@ -898,6 +899,7 @@ function applySourceResult({
     result.debug?.propsAfterParsing ?? result.parsedProps?.length ?? props.length
   );
   const usableCount = countUsableProps(props);
+  logLiveFetchResult(label, result);
   const failed = result.status === "Failed" || result.status === "Unavailable";
   const rateLimited = Boolean(result.rateLimited || result.cached);
   const cached = result.status === "Cached" || rateLimited;
@@ -1004,6 +1006,17 @@ function emptyOddsApiResult({ timedOut = false, warnings = [] } = {}) {
 }
 
 function applyOddsApiSourceState(oddsApiPlayerResult, sourceStatus, debugInfo) {
+  logLiveFetchResult("OddsAPI", {
+    status: oddsApiPlayerResult?.timedOut ? "Failed" : oddsApiPlayerResult?.props?.length ? "OK" : "Empty",
+    debug: {
+      apiUrl: oddsApiPlayerResult?.apiUrl || "odds-api/player-props",
+      apiStatus: oddsApiPlayerResult?.timedOut ? "Timeout" : "Connected",
+      rawPropsLoaded: Number(oddsApiPlayerResult?.parsedCount || 0),
+      propsAfterParsing: Number(oddsApiPlayerResult?.props?.length || 0),
+      message: (oddsApiPlayerResult?.warnings || []).join(" "),
+    },
+    warnings: oddsApiPlayerResult?.warnings || [],
+  });
   const timedOut = Boolean(oddsApiPlayerResult?.timedOut);
   const hasProps = Number(oddsApiPlayerResult?.props?.length || 0) > 0;
   if (timedOut) {
@@ -1961,7 +1974,7 @@ export default function DFSPropsApp() {
                 if (!autoRefresh) setLoading(false);
               },
             }),
-          getApiTimeoutMs() * 4,
+          10000,
           { fallback: null, label: "board-fetch" }
         );
         if (!result) {
@@ -2328,9 +2341,19 @@ export default function DFSPropsApp() {
     [visibleHistory]
   );
   const topMlbPlayBoard = useMemo(() => {
+    const liveInputCount =
+      (boardDisplayProps || []).filter((p) => !p.isDemoData).length +
+      (props || []).filter((p) => !p.isDemoData).length +
+      (parsedUnderdogProps || []).filter((p) => !p.isDemoData).length;
+    const fetchFailureReasons = buildLiveFetchFailureSummary(debugInfo?.sources || {});
     const board = resolveTopMlbPlaySections(boardDisplayProps, props, parsedUnderdogProps, {
       sourceStatus,
       lastUpdated,
+      debugInfo,
+      fetchFailureReasons,
+      liveFetchFailed: liveInputCount === 0,
+      fetchTimedOut: /timed?\s*out|board fetch timed out/i.test(String(error || "")),
+      allSourcesEmpty: liveInputCount === 0,
     });
     if (board.pipelineDebug) {
       board.pipelineDebug.apiKeys = {
@@ -2341,7 +2364,7 @@ export default function DFSPropsApp() {
       };
     }
     return board;
-  }, [boardDisplayProps, props, parsedUnderdogProps, sourceStatus, lastUpdated]);
+  }, [boardDisplayProps, props, parsedUnderdogProps, sourceStatus, lastUpdated, debugInfo, error]);
   const curatedSportPicks = useMemo(() => {
     const primary = resolveMlbStreakPicks(
       streakSportBoards,
@@ -3046,6 +3069,8 @@ export default function DFSPropsApp() {
             usedFallback={topMlbPlayBoard.usedFallback}
             fallbackLabel={topMlbPlayBoard.fallbackLabel}
             pipelineDebug={topMlbPlayBoard.pipelineDebug}
+            fetchFailureReasons={topMlbPlayBoard.fetchFailureReasons}
+            showDebugPanels={debugPanelsVisible}
             loading={loading}
             onOpen={setSelectedEvaluation}
             onSectionError={handleSectionRenderError}
