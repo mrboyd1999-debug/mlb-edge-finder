@@ -1,4 +1,5 @@
 import { memo } from "react";
+import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import MlbStreakPicksBoard from "./MlbStreakPicksBoard.jsx";
 import GoblinBoard from "./GoblinBoard.jsx";
 import DemonBoard from "./DemonBoard.jsx";
@@ -6,6 +7,7 @@ import MlbPickCard from "./MlbPickCard.jsx";
 import { styles } from "../theme/styles.js";
 import { DISPLAY_LIMITS, MLB_EMPTY_MESSAGE } from "../utils/curatedPicks.js";
 import { MLB_ONLY_MODE } from "../utils/mlbOnlyMode.js";
+import { SAFE_MODE_LOADING_MESSAGE } from "../utils/safeMode.js";
 
 function ParlayBuilderSection({ picks = [], loading, onOpen, hasMlbProps = false }) {
   const legs = (picks || []).filter(Boolean).slice(0, DISPLAY_LIMITS.parlayLegs);
@@ -20,7 +22,7 @@ function ParlayBuilderSection({ picks = [], loading, onOpen, hasMlbProps = false
         <p style={styles.countPill}>{legs.length}/{DISPLAY_LIMITS.parlayLegs}</p>
       </div>
       {loading ? (
-        <div style={styles.emptyStateCompact}>Building MLB parlay legs…</div>
+        <div style={styles.emptyStateCompact}>{SAFE_MODE_LOADING_MESSAGE}</div>
       ) : legs.length === 0 ? (
         <div style={styles.emptyStateCompact}>{hasMlbProps ? "No strong MLB 4-man combo yet." : MLB_EMPTY_MESSAGE}</div>
       ) : (
@@ -48,33 +50,42 @@ function CuratedPicksScreen({
   loading = false,
   onOpen,
   hasMlbProps = false,
+  onSectionError,
 }) {
   if (MLB_ONLY_MODE) {
     return (
       <div className="curated-picks-screen curated-picks-mlb-only">
-        <MlbStreakPicksBoard
-          picks={mlbStreakPicks}
-          loading={loading}
-          onOpen={onOpen}
-          hasMlbProps={hasMlbProps}
-        />
-        <ParlayBuilderSection picks={parlayPicks} loading={loading} onOpen={onOpen} hasMlbProps={hasMlbProps} />
-        <GoblinBoard
-          picks={goblinPicks.slice(0, DISPLAY_LIMITS.goblins)}
-          loading={loading}
-          onOpen={onOpen}
-          limit={DISPLAY_LIMITS.goblins}
-          title="MLB Goblins"
-          useMlbCard
-        />
-        <DemonBoard
-          picks={demonPicks.slice(0, DISPLAY_LIMITS.demons)}
-          loading={loading}
-          onOpen={onOpen}
-          limit={DISPLAY_LIMITS.demons}
-          title="MLB Demons"
-          useMlbCard
-        />
+        <SectionErrorBoundary name="MLB Streak Picks" onError={onSectionError}>
+          <MlbStreakPicksBoard
+            picks={mlbStreakPicks}
+            loading={loading}
+            onOpen={onOpen}
+            hasMlbProps={hasMlbProps}
+          />
+        </SectionErrorBoundary>
+        <SectionErrorBoundary name="MLB 4-Man Builder" onError={onSectionError}>
+          <ParlayBuilderSection picks={parlayPicks} loading={loading} onOpen={onOpen} hasMlbProps={hasMlbProps} />
+        </SectionErrorBoundary>
+        <SectionErrorBoundary name="MLB Goblins" onError={onSectionError}>
+          <GoblinBoard
+            picks={goblinPicks.slice(0, DISPLAY_LIMITS.goblins)}
+            loading={loading}
+            onOpen={onOpen}
+            limit={DISPLAY_LIMITS.goblins}
+            title="MLB Goblins"
+            useMlbCard
+          />
+        </SectionErrorBoundary>
+        <SectionErrorBoundary name="MLB Demons" onError={onSectionError}>
+          <DemonBoard
+            picks={demonPicks.slice(0, DISPLAY_LIMITS.demons)}
+            loading={loading}
+            onOpen={onOpen}
+            limit={DISPLAY_LIMITS.demons}
+            title="MLB Demons"
+            useMlbCard
+          />
+        </SectionErrorBoundary>
       </div>
     );
   }

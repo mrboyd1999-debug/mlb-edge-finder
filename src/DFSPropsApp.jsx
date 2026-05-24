@@ -148,7 +148,10 @@ import {
   BOARD_SORT_MODES,
 } from "./services/propPriority.js";
 import CuratedPicksScreen from "./components/CuratedPicksScreen.jsx";
+import SectionErrorBoundary from "./components/SectionErrorBoundary.jsx";
 import { DISPLAY_LIMITS, resolveCuratedBoardPicks, resolveMlbStreakPicks, countMlbDisplayProps, isManuallySavedPick, historyPickToDisplayProp } from "./utils/curatedPicks.js";
+import { isSafeModeEnabled, SAFE_MODE_FALLBACK_MESSAGE, SAFE_MODE_LOADING_MESSAGE } from "./utils/safeMode.js";
+import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks } from "./utils/safeModePipeline.js";
 import NearMissBoard from "./components/NearMissBoard.jsx";
 import RejectionAnalyticsPanel from "./components/RejectionAnalyticsPanel.jsx";
 import QualificationAnalyticsPanel from "./components/QualificationAnalyticsPanel.jsx";
@@ -1114,7 +1117,14 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   }
 
   const filterOptions = { includeUncertain: readIncludeUncertainPreference(), ...readFilterPrefs() };
-  const filtered = runFilterPipeline({
+  const filtered = isSafeModeEnabled()
+    ? {
+        slateProps: filterActiveSportProps(rawProps),
+        canonicalProps: filterActiveSportProps(rawProps),
+        activeProps: filterActiveSportProps(rawProps),
+        normalProps: filterActiveSportProps(rawProps),
+      }
+    : runFilterPipeline({
     rawProps,
     pipelineAudit,
     recordFilterReason,
@@ -1524,6 +1534,10 @@ export default function DFSPropsApp() {
   const [displayDebugCounts, setDisplayDebugCounts] = useState({});
   const [usableProps, setUsableProps] = useState([]);
   const [pipelineFallback, setPipelineFallback] = useState(false);
+  const [renderErrors, setRenderErrors] = useState([]);
+  const handleSectionRenderError = useCallback((error, name) => {
+    setRenderErrors((current) => [...current, { name, message: error?.message || String(error) }].slice(-12));
+  }, []);
   const [pipelineStageCounts, setPipelineStageCounts] = useState({});
   const [watchlist, setWatchlist] = useState([]);
   const [nearQualification, setNearQualification] = useState([]);
@@ -1582,13 +1596,24 @@ export default function DFSPropsApp() {
 
   const applyBoardState = useCallback((board, cacheLayer = "fresh") => {
     const scopedBoard = sanitizeBoardForMlbOnly(board || {});
-    const masterProps = enrichDisplayPropsPipeline(
+    const sourceRows =
       scopedBoard.allDisplayProps?.length
         ? scopedBoard.allDisplayProps
         : scopedBoard.usableProps?.length
           ? scopedBoard.usableProps
-          : scopedBoard.props || []
-    );
+          : scopedBoard.props || [];
+    let masterProps = [];
+    try {
+      masterProps = isSafeModeEnabled()
+        ? filterActiveSportProps(sourceRows)
+        : enrichDisplayPropsPipeline(sourceRows);
+    } catch (error) {
+      console.error("[SAFE_MODE] enrichDisplayPropsPipeline failed — using parsed props", error);
+      masterProps = filterActiveSportProps(sourceRows);
+    }
+    if (!masterProps.length && sourceRows.length) {
+      masterProps = filterActiveSportProps(sourceRows);
+    }
     const boardProps = masterProps.length ? masterProps : scopedBoard.props || [];
     const boardSourceStatus = finalizeSourceStatus(scopedBoard.sourceStatus || DEFAULT_SOURCE_STATUS);
     setAllDisplayProps(masterProps);
@@ -1980,10 +2005,17 @@ export default function DFSPropsApp() {
     [boardDisplayProps]
   );
   const visibleHistory = useMemo(() => history.filter(isSupportedHistoryPick), [history]);
-  const streakSportBoards = useMemo(
-    () => buildStreakSportCategoryBoards(streakFinderProps, visibleHistory),
-    [streakFinderProps, visibleHistory]
-  );
+  const streakSportBoards = useMemo(() => {
+    if (isSafeModeEnabled()) {
+      return Object.fromEntries(STREAK_TAB_OPTIONS.map((option) => [option.value, emptyStreakSportBoard(option.value)]));
+    }
+    try {
+      return buildStreakSportCategoryBoards(streakFinderProps, visibleHistory);
+    } catch (error) {
+      console.error("[SAFE_MODE] buildStreakSportCategoryBoards failed", error);
+      return Object.fromEntries(STREAK_TAB_OPTIONS.map((option) => [option.value, emptyStreakSportBoard(option.value)]));
+    }
+  }, [streakFinderProps, visibleHistory]);
   const visibleStreakSports = useMemo(() => {
     const sportCounts = new Map();
     allDisplayProps.forEach((prop) => {
@@ -2025,18 +2057,43 @@ export default function DFSPropsApp() {
     [visibleHistory]
   );
   const curatedSportPicks = useMemo(
-    () => resolveMlbStreakPicks(streakSportBoards, scoredDisplayProps),
-    [streakSportBoards, scoredDisplayProps]
+    () => resolveMlbStreakPicks(streakSportBoards, scoredDisplayProps, DISPLAY_LIMITS.streakPerSport, props),
+    [streakSportBoards, scoredDisplayProps, props]
   );
-  const mlbDisplayPropCount = useMemo(() => countMlbDisplayProps(scoredDisplayProps), [scoredDisplayProps]);
+  const mlbDisplayPropCount = useMemo(
+    () => countMlbDisplayProps(scoredDisplayProps, props),
+    [scoredDisplayProps, props]
+  );
   const curatedGoblinPicks = useMemo(
-    () => resolveCuratedBoardPicks(streakSportBoards.goblins?.picks, selectGoblinProps, boardDisplayProps, DISPLAY_LIMITS.goblins),
-    [streakSportBoards, boardDisplayProps]
+    () =>
+      resolveCuratedBoardPicks(
+        streakSportBoards.goblins?.picks,
+        selectGoblinProps,
+        boardDisplayProps,
+        DISPLAY_LIMITS.goblins,
+        props
+      ),
+    [streakSportBoards, boardDisplayProps, props]
   );
   const curatedDemonPicks = useMemo(
-    () => resolveCuratedBoardPicks(streakSportBoards.demons?.picks, selectDemonProps, boardDisplayProps, DISPLAY_LIMITS.demons),
-    [streakSportBoards, boardDisplayProps]
+    () =>
+      resolveCuratedBoardPicks(
+        streakSportBoards.demons?.picks,
+        selectDemonProps,
+        boardDisplayProps,
+        DISPLAY_LIMITS.demons,
+        props
+      ),
+    [streakSportBoards, boardDisplayProps, props]
   );
+  const safeModeFallbackActive = useMemo(() => {
+    if (!isSafeModeEnabled()) return pipelineFallback || boardDisplayProps.some((prop) => prop.displayFallback);
+    return (
+      pipelineFallback ||
+      curatedSportPicks.some((prop) => prop.isFallbackMlbPick) ||
+      boardDisplayProps.some((prop) => prop.displayFallback)
+    );
+  }, [pipelineFallback, curatedSportPicks, boardDisplayProps]);
   const feedHealthContext = useMemo(
     () =>
       buildFeedHealthContext({
@@ -2068,7 +2125,7 @@ export default function DFSPropsApp() {
   useEffect(() => {
     if (!visibleStreakSports.length) return;
     if (!visibleStreakSports.some((option) => option.value === streakSport)) {
-      setStreakSport(visibleStreakSports[0].value);
+      setStreakSport(visibleStreakSports[0]?.value || "MLB");
     }
   }, [visibleStreakSports, streakSport]);
 
@@ -2161,10 +2218,17 @@ export default function DFSPropsApp() {
     [compactMode]
   );
   const dashboard = useMemo(() => buildOutcomeDashboard(visibleHistory), [visibleHistory]);
-  const quickParlayPicks = useMemo(
-    () => buildQuickParlayPicks(streakSportBoards, parlayRiskMode),
-    [streakSportBoards, parlayRiskMode]
-  );
+  const quickParlayPicks = useMemo(() => {
+    if (isSafeModeEnabled()) {
+      return resolveSafeMlbBoardPicks(scoredDisplayProps, props, DISPLAY_LIMITS.parlayLegs);
+    }
+    try {
+      return buildQuickParlayPicks(streakSportBoards, parlayRiskMode);
+    } catch (error) {
+      console.error("[SAFE_MODE] buildQuickParlayPicks failed", error);
+      return resolveSafeMlbBoardPicks(scoredDisplayProps, props, DISPLAY_LIMITS.parlayLegs);
+    }
+  }, [streakSportBoards, parlayRiskMode, scoredDisplayProps, props]);
   const parlayDashboard = useMemo(() => buildParlayDashboard(parlayHistory), [parlayHistory]);
   const refreshBlocked = loading || refreshCooldownSec > 0 || sourceCooldownSec > 0;
   const refreshCountdownSec = Math.max(refreshCooldownSec, sourceCooldownSec);
@@ -2229,6 +2293,29 @@ export default function DFSPropsApp() {
   const platformOptions = useMemo(() => platformOptionsForStatus(sourceStatus), [sourceStatus]);
 
   useEffect(() => {
+    if (!isSafeModeEnabled()) return;
+    const failedEndpoints = Object.entries(sourceStatus || {})
+      .filter(([, value]) => /fail|error|offline|invalid/i.test(String(value || "")))
+      .map(([key]) => key);
+    logSafeModePipelineCounts({
+      rawCount: Number(displayDebugCounts.raw ?? props.length ?? 0),
+      mlbCount: mlbDisplayPropCount,
+      acceptedCount: acceptedPropsForRender.length,
+      rejectedCount: Number(displayDebugCounts.rejected ?? Math.max(0, (displayDebugCounts.raw ?? 0) - allDisplayProps.length)),
+      renderErrors,
+      failedEndpoints,
+    });
+  }, [
+    displayDebugCounts,
+    props.length,
+    mlbDisplayPropCount,
+    acceptedPropsForRender.length,
+    allDisplayProps.length,
+    sourceStatus,
+    renderErrors,
+  ]);
+
+  useEffect(() => {
     if (!MLB_ONLY_MODE || loading || !prizePicksHasUsableProps(props, sourceStatus)) return;
     setCriticalWarnings((current) => {
       const next = filterCriticalUiMessages(current, props, sourceStatus);
@@ -2241,13 +2328,9 @@ export default function DFSPropsApp() {
     });
   }, [loading, props, sourceStatus]);
 
-  useEffect(() => {
-    if (!visibleStreakSports.some((option) => option.value === streakSport)) {
-      setStreakSport(visibleStreakSports[0]?.value || "MLB");
-    }
-  }, [visibleStreakSports, streakSport]);
 
   useEffect(() => {
+    if (isSafeModeEnabled()) return;
     if (loading || !lastUpdated) return;
     const generatedPicks = [...generatedStreakPicks(streakSportBoards), ...quickParlayPicks];
     const statsMap = scoringContextRef.current?.stats || new Map();
@@ -2549,6 +2632,7 @@ export default function DFSPropsApp() {
         <section className="mobile-hide-verbose" style={styles.compactPanel}>
           <p style={styles.compactFlags}>
             <strong>MLB-only mode</strong> — NBA, WNBA, Tennis, Soccer, and NHL are temporarily disabled while the engine focuses on MLB accuracy.
+            {isSafeModeEnabled() ? " Safe mode is ON — showing parsed MLB props with minimal filtering." : ""}
           </p>
         </section>
       ) : null}
@@ -2585,9 +2669,15 @@ export default function DFSPropsApp() {
         </section>
       ) : null}
 
-      {pipelineFallback || boardDisplayProps.some((prop) => prop.displayFallback) ? (
+      {loading && isSafeModeEnabled() ? (
         <section className="mobile-warning-banner" role="status">
-          <p>{PIPELINE_FALLBACK_MESSAGE}</p>
+          <p>{SAFE_MODE_LOADING_MESSAGE}</p>
+        </section>
+      ) : null}
+
+      {safeModeFallbackActive ? (
+        <section className="mobile-warning-banner" role="status">
+          <p>{isSafeModeEnabled() ? SAFE_MODE_FALLBACK_MESSAGE : PIPELINE_FALLBACK_MESSAGE}</p>
         </section>
       ) : null}
 
@@ -2625,16 +2715,18 @@ export default function DFSPropsApp() {
       </div>
 
       <div id="section-top-picks" className="dfs-section dfs-order-top-picks">
-        <CuratedPicksScreen
-          mlbStreakPicks={curatedSportPicks}
-          parlayPicks={quickParlayPicks.slice(0, DISPLAY_LIMITS.parlayLegs)}
-          goblinPicks={curatedGoblinPicks}
-          demonPicks={curatedDemonPicks}
-          loading={loading}
-          onOpen={setSelectedEvaluation}
-          compactMode={compactMode}
-          hasMlbProps={mlbDisplayPropCount > 0}
-        />
+        <SectionErrorBoundary name="MLB Picks Screen" onError={handleSectionRenderError}>
+          <CuratedPicksScreen
+            mlbStreakPicks={curatedSportPicks}
+            parlayPicks={quickParlayPicks.slice(0, DISPLAY_LIMITS.parlayLegs)}
+            goblinPicks={curatedGoblinPicks}
+            demonPicks={curatedDemonPicks}
+            loading={loading}
+            onOpen={setSelectedEvaluation}
+            hasMlbProps={mlbDisplayPropCount > 0}
+            onSectionError={handleSectionRenderError}
+          />
+        </SectionErrorBoundary>
       </div>
 
       <div id="section-accepted" className="dfs-section dfs-order-accepted">
@@ -2723,6 +2815,7 @@ export default function DFSPropsApp() {
       ) : null}
 
       <div className="dfs-section dfs-order-settings">
+      <SectionErrorBoundary name="API Health / Settings" onError={handleSectionRenderError}>
       <SettingsPanel
         onSaved={handleSettingsSaved}
         onClearCaches={handleSettingsSaved}
@@ -2731,6 +2824,7 @@ export default function DFSPropsApp() {
         lastUpdated={lastUpdated}
         feedHealthContext={feedHealthContext}
       />
+      </SectionErrorBoundary>
       </div>
 
       {debugModeEnabled ? (

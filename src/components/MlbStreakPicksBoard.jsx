@@ -2,6 +2,7 @@ import { memo } from "react";
 import MlbPickCard from "./MlbPickCard.jsx";
 import { styles } from "../theme/styles.js";
 import { MLB_EMPTY_MESSAGE } from "../utils/curatedPicks.js";
+import { SAFE_MODE_LOADING_MESSAGE } from "../utils/safeMode.js";
 
 function MlbStreakPicksBoard({ picks = [], onOpen, hasMlbProps = false, loading = false }) {
   const streakPicks = (picks || []).filter(Boolean).slice(0, 2);
@@ -16,7 +17,7 @@ function MlbStreakPicksBoard({ picks = [], onOpen, hasMlbProps = false, loading 
         <p style={styles.countPill}>{streakPicks.length}/2</p>
       </div>
       {loading ? (
-        <div style={styles.emptyStateCompact}>Loading MLB streak picks…</div>
+        <div style={styles.emptyStateCompact}>{SAFE_MODE_LOADING_MESSAGE}</div>
       ) : streakPicks.length > 0 ? (
         <div className="mlb-streak-picks-grid" style={styles.topPicksList}>
           {streakPicks.map((prop, idx) => (

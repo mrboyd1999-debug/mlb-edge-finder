@@ -6,6 +6,12 @@ import {
   sortPropsForDisplay,
 } from "./displayPropScoring.js";
 import { MLB_ONLY_MODE } from "./mlbOnlyMode.js";
+import { isSafeModeEnabled } from "./safeMode.js";
+import {
+  buildSafeMlbPropPool,
+  resolveSafeMlbBoardPicks,
+  resolveSafeMlbStreakPicks,
+} from "./safeModePipeline.js";
 
 export const CURATED_SPORT_ORDER = MLB_ONLY_MODE ? ["MLB"] : ["MLB", "WNBA", "NBA", "Tennis"];
 
@@ -49,12 +55,25 @@ function mergeUniquePicks(primary = [], fallback = [], limit = 2) {
   return merged.slice(0, limit);
 }
 
-export function countMlbDisplayProps(displayProps = []) {
+export function countMlbDisplayProps(displayProps = [], rawProps = []) {
+  if (isSafeModeEnabled()) {
+    return buildSafeMlbPropPool(displayProps, rawProps).length;
+  }
   return filterAllDisplayPropsBySport(displayProps, "MLB", "all").filter(isValidDisplayProp).length;
 }
 
 /** Always return up to 2 MLB streak picks when MLB props exist. */
-export function resolveMlbStreakPicks(streakBoards = {}, displayProps = [], limit = DISPLAY_LIMITS.streakPerSport) {
+export function resolveMlbStreakPicks(
+  streakBoards = {},
+  displayProps = [],
+  limit = DISPLAY_LIMITS.streakPerSport,
+  rawProps = []
+) {
+  if (isSafeModeEnabled()) {
+    const safe = resolveSafeMlbStreakPicks(displayProps, rawProps, limit);
+    if (safe.length) return safe;
+  }
+
   const mlbProps = filterAllDisplayPropsBySport(displayProps, "MLB", "all");
   const boardPicks = (streakBoards.MLB?.picks || []).slice(0, limit).map((prop) => annotateMlbPick(prop, false));
 
@@ -73,11 +92,15 @@ export function resolveMlbStreakPicks(streakBoards = {}, displayProps = [], limi
     );
   }
 
+  if (isSafeModeEnabled()) {
+    return resolveSafeMlbStreakPicks(displayProps, rawProps, limit);
+  }
+
   return [];
 }
 
-export function resolveCuratedSportPicks(sport, streakBoards = {}, displayProps = [], limit = DISPLAY_LIMITS.streakPerSport) {
-  if (sport === "MLB") return resolveMlbStreakPicks(streakBoards, displayProps, limit);
+export function resolveCuratedSportPicks(sport, streakBoards = {}, displayProps = [], limit = DISPLAY_LIMITS.streakPerSport, rawProps = []) {
+  if (sport === "MLB") return resolveMlbStreakPicks(streakBoards, displayProps, limit, rawProps);
 
   const boardPicks = (streakBoards[sport]?.picks || []).slice(0, limit);
   const sportProps = filterAllDisplayPropsBySport(displayProps, sport, "all");
@@ -85,7 +108,12 @@ export function resolveCuratedSportPicks(sport, streakBoards = {}, displayProps 
   return markDisplayFallbackProps(mergeUniquePicks(boardPicks, fallback, limit));
 }
 
-export function resolveCuratedBoardPicks(boardPicks = [], selector, displayProps = [], limit = DISPLAY_LIMITS.goblins) {
+export function resolveCuratedBoardPicks(boardPicks = [], selector, displayProps = [], limit = DISPLAY_LIMITS.goblins, rawProps = []) {
+  if (isSafeModeEnabled()) {
+    const safe = resolveSafeMlbBoardPicks(displayProps, rawProps, limit);
+    if (safe.length) return safe;
+  }
+
   const mlbProps = filterAllDisplayPropsBySport(displayProps, "MLB", "all");
   const pool = mlbProps.length ? mlbProps : displayProps;
   const primary = (boardPicks || []).slice(0, limit);

@@ -3,11 +3,14 @@ import { styles } from "../theme/styles.js";
 import { displayMarketLabel } from "../utils/propLabels.js";
 import { formatNumber, shortReason } from "../utils/formatters.js";
 import {
+  formatRecommendationLabel,
   formatRiskShort,
   normalizeSourceLabel,
   recommendationPalette,
   resolvePickSide,
 } from "../utils/pickRecommendation.js";
+import { isSafeModeEnabled } from "../utils/safeMode.js";
+import SimplePropCard from "./SimplePropCard.jsx";
 
 function RecommendationBanner({ side, streakAction = false }) {
   const palette = recommendationPalette(side);
@@ -53,6 +56,17 @@ function MlbPickCard({
   cardStyle,
   streakAction = false,
 }) {
+  if (isSafeModeEnabled()) {
+    return (
+      <SimplePropCard
+        prop={prop}
+        index={rank || 0}
+        onOpen={onOpen}
+        className="mlb-pick-card mlb-pick-card-simple"
+      />
+    );
+  }
+
   const side = resolvePickSide(prop);
   const playerName = prop.playerName || prop.player || "Unknown";
   const market = displayMarketLabel(prop);
