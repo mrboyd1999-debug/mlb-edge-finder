@@ -1,35 +1,33 @@
 import { memo } from "react";
 import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import MlbFeaturedPicksBoard from "./MlbFeaturedPicksBoard.jsx";
-import { WAITING_FOR_PROJECTIONS_MESSAGE } from "../utils/topMlbPlays.js";
+import PipelineDebugBar from "./PipelineDebugBar.jsx";
 import { styles } from "../theme/styles.js";
-
-function EmptyState({ text }) {
-  return <div style={styles.emptyStateCompact}>{text}</div>;
-}
 
 function CuratedPicksScreen({
   sections = [],
   loading = false,
   onOpen,
-  hasMlbProps = false,
   waitingForProjections = false,
+  usedFallback = false,
+  fallbackLabel = "",
+  pipelineDebug = null,
   onSectionError,
 }) {
   const hasSections = sections.some((section) => section.picks?.length);
 
   return (
     <div className="curated-picks-screen curated-picks-mlb-only">
+      <PipelineDebugBar debug={pipelineDebug} />
+      {usedFallback && fallbackLabel ? (
+        <p style={styles.pipelineDebugFallback}>{fallbackLabel}</p>
+      ) : null}
       {loading ? (
-        <EmptyState text="Loading MLB props…" />
+        <div style={styles.emptyStateCompact}>Loading MLB props…</div>
       ) : !hasSections ? (
-        <EmptyState
-          text={
-            waitingForProjections || hasMlbProps
-              ? WAITING_FOR_PROJECTIONS_MESSAGE
-              : "No verified MLB props available."
-          }
-        />
+        <div style={styles.emptyStateCompact}>
+          {waitingForProjections ? "Loading projections…" : "Loading MLB board…"}
+        </div>
       ) : (
         sections.map((section) => (
           <SectionErrorBoundary key={section.id} name={section.title} onError={onSectionError}>

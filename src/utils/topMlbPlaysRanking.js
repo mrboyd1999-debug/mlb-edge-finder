@@ -11,7 +11,7 @@ import {
   evaluateBothSides,
   isUnderPreferredMarket,
 } from "./sideEvaluationEngine.js";
-import { isTopMlbPlayRankable } from "./mlbRankableProp.js";
+import { isTopMlbPlayRankable, isRelaxedRankable } from "./mlbRankableProp.js";
 
 const UNDER_SIDE_BOOST = 18;
 
@@ -63,9 +63,10 @@ export function underPriorityTier(prop = {}) {
   return isUnderPreferredMarket(prop) ? 1 : 0;
 }
 
-export function computeTopMlbPlayRankScore(prop = {}) {
+export function computeTopMlbPlayRankScore(prop = {}, { relaxed = false } = {}) {
+  const rankable = relaxed ? isRelaxedRankable : isTopMlbPlayRankable;
   const evaluation = prop.sideEvaluation || evaluateBothSides(prop);
-  if (!isTopMlbPlayRankable(prop)) return -Infinity;
+  if (!rankable(prop)) return -Infinity;
 
   let score = Number.isFinite(evaluation.rankScore) && evaluation.rankScore > -Infinity
     ? evaluation.rankScore
@@ -73,8 +74,9 @@ export function computeTopMlbPlayRankScore(prop = {}) {
 
   const confidence = finiteOr(evaluation.confidence ?? prop.confidenceScore ?? prop.confidence, NaN);
   const edge = finiteOr(evaluation.edge, 0);
+  const minEdge = relaxed ? 0.1 : 0.15;
 
-  if (!Number.isFinite(confidence) || edge < 0.3) return -Infinity;
+  if (!Number.isFinite(confidence) || edge < minEdge) return -Infinity;
 
   score += confidence * 0.35;
   score += edge * 4;
@@ -84,7 +86,7 @@ export function computeTopMlbPlayRankScore(prop = {}) {
     score += UNDER_SIDE_BOOST;
   }
 
-  if (resolveProjectionQuality(prop) === PROJECTION_QUALITY.MISSING) {
+  if (resolveProjectionQuality(prop) === PROJECTION_QUALITY.MISSING && !prop.isDemoData && !relaxed) {
     return -Infinity;
   }
 
@@ -98,13 +100,14 @@ export function prepareTopMlbPlayProps(props = []) {
   return (props || []).map((prop) => (prop.sideEvaluation ? prop : enrichPropWithSideEvaluation(prop)));
 }
 
-export function sortTopMlbPlays(props = []) {
+export function sortTopMlbPlays(props = [], { relaxed = false } = {}) {
+  const isRankable = relaxed ? isRelaxedRankable : isTopMlbPlayRankable;
   return prepareTopMlbPlayProps(props)
-    .filter(isTopMlbPlayRankable)
+    .filter(isRankable)
     .sort(
       (a, b) =>
         underPriorityTier(b) - underPriorityTier(a) ||
-        computeTopMlbPlayRankScore(b) - computeTopMlbPlayRankScore(a) ||
+        computeTopMlbPlayRankScore(b, { relaxed }) - computeTopMlbPlayRankScore(a, { relaxed }) ||
         finiteOr(b.confidenceScore ?? b.confidence) - finiteOr(a.confidenceScore ?? a.confidence) ||
         computeAbsoluteProjectionEdge(b) - computeAbsoluteProjectionEdge(a)
     );

@@ -1,5 +1,5 @@
 /**
- * Hard gates for Top MLB Plays — only verified, projected, positive-edge props rank.
+ * Hard gates for Top MLB Plays — strict + relaxed + demo fallback tiers.
  */
 
 import { isVerifiedSportsbookProp } from "./propValidation.js";
@@ -15,51 +15,79 @@ import {
   validateProjectionRejectReason,
 } from "./projectionQuality.js";
 
-export const MIN_RANKABLE_EDGE = 0.3;
-export const MIN_RANKABLE_CONFIDENCE = 55;
+export const MIN_RANKABLE_EDGE = 0.15;
+export const MIN_RANKABLE_CONFIDENCE = 52;
+export const RELAXED_MIN_EDGE = 0.1;
+export const RELAXED_MIN_CONFIDENCE = 50;
 
 function finiteOr(value, fallback = NaN) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
 }
 
-export function validateTopMlbPlayRejectReason(prop = {}) {
+function baseRejectReason(prop = {}, { requireVerified = true, requireMatchup = true } = {}) {
   if (!prop) return "Rejected: missing prop";
-  if (!isVerifiedSportsbookProp(prop)) return "Rejected: unverified sportsbook prop";
-
-  const unsupported = unsupportedMarketRejectReason(prop);
-  if (unsupported) return unsupported;
-
-  const sanity = validatePropSanityRejectReason(prop);
-  if (sanity) return sanity;
-
-  if (!isTopMlbPlayCandidate(prop)) return "Rejected: not MLB candidate";
-
+  if (requireVerified && !prop.isDemoData && !isVerifiedSportsbookProp(prop)) {
+    return "Rejected: unverified sportsbook prop";
+  }
+  if (!prop.isDemoData) {
+    const unsupported = unsupportedMarketRejectReason(prop);
+    if (unsupported) return unsupported;
+    const sanity = validatePropSanityRejectReason(prop);
+    if (sanity) return sanity;
+    if (!isTopMlbPlayCandidate(prop)) return "Rejected: not MLB candidate";
+  }
   const projection = resolveProjectionValue(prop);
   if (projection == null) return "Rejected: no projection data available";
+  if (requireMatchup && !hasMatchupContext(prop)) return "Rejected: matchup missing";
+  return "";
+}
+
+export function validateTopMlbPlayRejectReason(prop = {}) {
+  const base = baseRejectReason(prop, { requireVerified: true, requireMatchup: true });
+  if (base) return base;
 
   const projectionReject = validateProjectionRejectReason(prop);
-  if (projectionReject) return projectionReject;
-
-  if (!hasMatchupContext(prop)) return "Rejected: matchup missing";
+  if (projectionReject && !prop.estimatedProjection && !prop.isDemoData) return projectionReject;
 
   const stale = getStaleFilterReason(prop);
-  if (stale) return `Rejected: stale line (${stale})`;
+  if (stale && !prop.isDemoData) return `Rejected: stale line (${stale})`;
 
   const evaluation = prop.sideEvaluation || evaluateBothSides(prop);
   if (evaluation.pass || evaluation.recommendedSide === "PASS") {
     return "Rejected: PASS — insufficient edge";
   }
-
-  const edge = finiteOr(evaluation.edge, 0);
-  if (edge < MIN_RANKABLE_EDGE) return "Rejected: edge below floor";
+  if (finiteOr(evaluation.edge, 0) < MIN_RANKABLE_EDGE) return "Rejected: edge below floor";
 
   const conf = finiteOr(evaluation.confidence ?? prop.confidenceScore ?? prop.confidence, NaN);
   if (!Number.isFinite(conf) || conf < MIN_RANKABLE_CONFIDENCE) {
     return "Rejected: confidence too low";
   }
 
-  if (!hasRenderableProjection(prop)) return "Rejected: projection not renderable";
+  if (!hasRenderableProjection(prop) && !prop.isDemoData) return "Rejected: projection not renderable";
+
+  return "";
+}
+
+export function validateRelaxedRankableRejectReason(prop = {}) {
+  if (prop.isDemoData) return "";
+
+  const base = baseRejectReason(prop, { requireVerified: false, requireMatchup: false });
+  if (base && !/unverified/.test(base)) return base;
+
+  const projection = resolveProjectionValue(prop);
+  if (projection == null) return "Rejected: no projection data available";
+
+  const evaluation = prop.sideEvaluation || evaluateBothSides(prop);
+  if (evaluation.pass || evaluation.recommendedSide === "PASS") {
+    return "Rejected: PASS — insufficient edge";
+  }
+  if (finiteOr(evaluation.edge, 0) < RELAXED_MIN_EDGE) return "Rejected: edge below relaxed floor";
+
+  const conf = finiteOr(evaluation.confidence ?? prop.confidenceScore ?? prop.confidence, NaN);
+  if (!Number.isFinite(conf) || conf < RELAXED_MIN_CONFIDENCE) {
+    return "Rejected: confidence below relaxed floor";
+  }
 
   return "";
 }
@@ -68,15 +96,21 @@ export function isTopMlbPlayRankable(prop = {}) {
   return !validateTopMlbPlayRejectReason(prop);
 }
 
-export function filterTopMlbPlayRankable(props = []) {
-  return (props || []).filter(isTopMlbPlayRankable);
+export function isRelaxedRankable(prop = {}) {
+  return !validateRelaxedRankableRejectReason(prop);
 }
 
-export function auditTopMlbPlayRankableRejections(props = []) {
+export function filterTopMlbPlayRankable(props = [], { relaxed = false } = {}) {
+  const fn = relaxed ? isRelaxedRankable : isTopMlbPlayRankable;
+  return (props || []).filter(fn);
+}
+
+export function auditTopMlbPlayRankableRejections(props = [], { relaxed = false } = {}) {
   const reasons = {};
   let accepted = 0;
+  const rejectFn = relaxed ? validateRelaxedRankableRejectReason : validateTopMlbPlayRejectReason;
   (props || []).forEach((prop) => {
-    const reason = validateTopMlbPlayRejectReason(prop);
+    const reason = rejectFn(prop);
     if (!reason) {
       accepted += 1;
       return;

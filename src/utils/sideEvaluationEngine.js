@@ -302,8 +302,8 @@ export function enrichPropWithSideEvaluation(prop = {}) {
   const displayResearchOnly =
     evaluation.pass ||
     evaluation.confidence == null ||
-    evaluation.confidence < 55 ||
-    finiteOr(evaluation.edge, 0) < 0.3 ||
+    evaluation.confidence < 52 ||
+    finiteOr(evaluation.edge, 0) < 0.15 ||
     resolveProjectionQuality(prop) === PROJECTION_QUALITY.MISSING;
 
   return {

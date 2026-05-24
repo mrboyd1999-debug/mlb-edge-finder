@@ -106,7 +106,9 @@ export function inferSportFromText(text = "", context = {}) {
 
   if (compact.includes("wnba") || compact.includes("basketballwnba") || key.includes("women's basketball") || key.includes("womens basketball")) return "WNBA";
   if ((compact === "nba" || compact.includes("basketballnba") || key.includes("nba")) && !key.includes("wnba")) return "NBA";
-  if (compact.includes("mlb") || key.includes("baseball") || compact.includes("baseballmlb")) return "MLB";
+  if (compact.includes("mlb") || key.includes("baseball") || compact.includes("baseballmlb") || key.includes("baseball_mlb")) {
+    return "MLB";
+  }
   if (key.includes("nhl") || key.includes("hockey")) return "NHL";
   if (key.includes("ncaaf") || key.includes("college football")) return "NCAAF";
   if (key.includes("nfl") && !key.includes("soccer")) return "NFL";

@@ -67,6 +67,11 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
             >
               {platformPalette.label}
             </span>
+            {enriched.isDemoData || enriched.displayDemoData ? (
+              <span style={{ ...styles.bestPlayPlatformBadge, border: "1px solid #fbbf24", color: "#fbbf24", background: "#422006" }}>
+                DEMO
+              </span>
+            ) : null}
           </div>
           <p style={styles.bestPlayRowSubline}>
             {propType} · {line} · Proj {projectionLabel}

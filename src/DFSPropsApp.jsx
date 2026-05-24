@@ -160,6 +160,7 @@ import {
   resolveUnderdogStreakEmptyMessage,
 } from "./utils/underdogPickPool.js";
 import { resolveTopMlbPlaySections, auditTopMlbPlayPool } from "./utils/topMlbPlays.js";
+import { logPipelineStage } from "./utils/mlbPipelineDebug.js";
 import { isSafeModeEnabled, SAFE_MODE_FALLBACK_MESSAGE, SAFE_MODE_LOADING_MESSAGE } from "./utils/safeMode.js";
 import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks, resolveSafeMlbStreakPicks } from "./utils/safeModePipeline.js";
 import {
@@ -1287,6 +1288,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     allDisplayProps = normalizePropsWithSource(allDisplayProps);
   }
   logAllDisplayPropsSample(allDisplayProps);
+  logPipelineStage("fetch.allDisplayProps", { count: allDisplayProps.length, raw: rawProps.length, parsed: parsedCount });
   debugInfo.allDisplayPropsCount = allDisplayProps.length;
   debugInfo.displayDebugCounts = buildDisplayDebugCounts({
     raw: rawProps.length,
@@ -1945,18 +1947,26 @@ export default function DFSPropsApp() {
           }
         }
 
-        const result = await fetchDFSProps({
-          platform: "both",
-          sport: MLB_ONLY_MODE ? "MLB" : "all",
-          statType: "all",
-          onCoreReady: (coreBoard) => {
-            const hasProps =
-              coreBoard.allDisplayProps?.length || coreBoard.props?.length || coreBoard.usableProps?.length;
-            if (!hasProps) return;
-            applyBoardState({ ...coreBoard, updatedAt: new Date().toISOString() }, "live");
-            if (!autoRefresh) setLoading(false);
-          },
-        });
+        const result = await withFetchTimeout(
+          () =>
+            fetchDFSProps({
+              platform: "both",
+              sport: MLB_ONLY_MODE ? "MLB" : "all",
+              statType: "all",
+              onCoreReady: (coreBoard) => {
+                const hasProps =
+                  coreBoard.allDisplayProps?.length || coreBoard.props?.length || coreBoard.usableProps?.length;
+                if (!hasProps) return;
+                applyBoardState({ ...coreBoard, updatedAt: new Date().toISOString() }, "live");
+                if (!autoRefresh) setLoading(false);
+              },
+            }),
+          getApiTimeoutMs() * 4,
+          { fallback: null, label: "board-fetch" }
+        );
+        if (!result) {
+          throw new Error("Board fetch timed out");
+        }
         scoringContextRef.current = result.scoringContext || null;
         const boardSourceStatus = finalizeSourceStatus(result.sourceStatus || DEFAULT_SOURCE_STATUS);
         const boardProps = result.allDisplayProps?.length
@@ -2180,10 +2190,11 @@ export default function DFSPropsApp() {
     return rows;
   }, [scoredDisplayProps, sport, platform, marketQuickFilter]);
   const boardDisplayProps = useMemo(() => {
+    if (acceptedPropsForRender?.length) return acceptedPropsForRender;
     if (selectedSportProps.length) return selectedSportProps;
     if (allDisplayProps.length) return allDisplayProps;
     return [];
-  }, [selectedSportProps, allDisplayProps]);
+  }, [acceptedPropsForRender, selectedSportProps, allDisplayProps]);
   const displayStatusMessage = useMemo(() => {
     if (!debugModeEnabled || loading) return "";
     if (allDisplayProps.length > 0) return "Showing live/cached props";
@@ -2316,10 +2327,21 @@ export default function DFSPropsApp() {
         .slice(0, 40),
     [visibleHistory]
   );
-  const topMlbPlayBoard = useMemo(
-    () => resolveTopMlbPlaySections(boardDisplayProps, props, parsedUnderdogProps),
-    [boardDisplayProps, props, parsedUnderdogProps]
-  );
+  const topMlbPlayBoard = useMemo(() => {
+    const board = resolveTopMlbPlaySections(boardDisplayProps, props, parsedUnderdogProps, {
+      sourceStatus,
+      lastUpdated,
+    });
+    if (board.pipelineDebug) {
+      board.pipelineDebug.apiKeys = {
+        PrizePicks: "configured",
+        Underdog: "configured",
+        OddsAPI: getOddsApiKey() ? "detected" : "missing",
+        SportsDataIO: getSportsDataApiKey() ? "detected" : "missing",
+      };
+    }
+    return board;
+  }, [boardDisplayProps, props, parsedUnderdogProps, sourceStatus, lastUpdated]);
   const curatedSportPicks = useMemo(() => {
     const primary = resolveMlbStreakPicks(
       streakSportBoards,
@@ -3021,9 +3043,11 @@ export default function DFSPropsApp() {
           <CuratedPicksScreen
             sections={topMlbPlayBoard.sections}
             waitingForProjections={topMlbPlayBoard.waitingForProjections}
+            usedFallback={topMlbPlayBoard.usedFallback}
+            fallbackLabel={topMlbPlayBoard.fallbackLabel}
+            pipelineDebug={topMlbPlayBoard.pipelineDebug}
             loading={loading}
             onOpen={setSelectedEvaluation}
-            hasMlbProps={mlbDisplayPropCount > 0}
             onSectionError={handleSectionRenderError}
           />
         </SectionErrorBoundary>
