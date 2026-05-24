@@ -10,6 +10,7 @@ import {
   UNDERDOG_PARSER_EMPTY_MESSAGE,
   UNDERDOG_STREAK_EMPTY_MESSAGE,
 } from "./underdogStreakPool.js";
+import { UNDERDOG_PARSER_MISMATCH_MESSAGE } from "./parseUnderdogProp.js";
 
 function finiteOr(value, fallback = 0) {
   const num = Number(value);
@@ -18,7 +19,10 @@ function finiteOr(value, fallback = 0) {
 
 function shapeUnderdogProp(prop = {}) {
   return normalizePropsWithSource([
-    normalizePropShape(prop, { platform: "Underdog", source: "Underdog" }),
+    normalizePropShape(
+      { ...prop, playerName: prop.playerName || prop.player || "" },
+      { platform: "Underdog", source: "Underdog" }
+    ),
   ])[0];
 }
 
@@ -57,11 +61,12 @@ export function extractParsedUnderdogProps({
 }
 
 export function isStreakEligibleUdProp(prop = {}) {
-  if (!isLooseDisplayProp(prop) || !isUnderdogProp(prop)) return false;
-  const line = Number(prop.line);
-  if (!Number.isFinite(line) || line <= 0) return false;
+  if (!isUnderdogProp(prop)) return false;
   const name = String(prop.player || prop.playerName || "").trim();
-  return name.length >= 2 && !/^unknown player$/i.test(name);
+  const line = Number(prop.line);
+  if (!name || name.length < 2 || /^unknown player$/i.test(name)) return false;
+  if (!Number.isFinite(line)) return false;
+  return true;
 }
 
 export function filterStreakEligibleUdProps(props = []) {
@@ -93,8 +98,16 @@ export function buildUnderdogDebugSnapshot({
   displayProps = [],
 } = {}) {
   const udSource = debugInfo?.sources?.Underdog || {};
+  const parserDiagnostics =
+    debugInfo?.underdogParser ||
+    udSource.underdogParser ||
+    udSource.providerDiagnostics ||
+    null;
   const rawUdCount = finiteOr(
-    udSource.rawPropsLoaded ?? underdogResult?.debug?.rawPropsLoaded ?? underdogResult?.diagnostics?.rawPropsLoaded,
+    parserDiagnostics?.rawCount ??
+      udSource.rawPropsLoaded ??
+      underdogResult?.debug?.rawPropsLoaded ??
+      underdogResult?.diagnostics?.rawPropsLoaded,
     0
   );
 
@@ -106,13 +119,19 @@ export function buildUnderdogDebugSnapshot({
   });
   const parsedUdCount = Math.max(
     finiteOr(
-      udSource.propsAfterParsing ?? underdogResult?.props?.length ?? underdogResult?.diagnostics?.parsedPropsCount,
+      parserDiagnostics?.acceptedCount ??
+        udSource.propsAfterParsing ??
+        underdogResult?.parsedProps?.length ??
+        underdogResult?.props?.length ??
+        underdogResult?.diagnostics?.parsedPropsCount,
       0
     ),
     parsedPool.length
   );
   const mlbUdProps = mlbUnderdogProps(parsedPool);
   const streakEligible = filterStreakEligibleUdProps(parsedPool);
+  const parserMismatch =
+    Boolean(parserDiagnostics?.parserMismatch) || (rawUdCount > 0 && parsedUdCount === 0);
 
   let apiStatus =
     udSource.lineSourceBadge ||
@@ -122,6 +141,8 @@ export function buildUnderdogDebugSnapshot({
     "Unknown";
   if (rawUdCount > 0 && parsedUdCount === 0) {
     apiStatus = "Connected — parser returned 0";
+  } else if (parserMismatch) {
+    apiStatus = UNDERDOG_PARSER_MISMATCH_MESSAGE;
   } else if (rawUdCount === 0 && String(apiStatus).toUpperCase() === "LIVE") {
     apiStatus = "Connected — 0 props";
   } else if (rawUdCount > 0 && parsedUdCount > 0 && String(apiStatus).toUpperCase() !== "LIVE") {
@@ -134,6 +155,9 @@ export function buildUnderdogDebugSnapshot({
     parsedUdCount,
     mlbUdCount: mlbUdProps.length,
     streakEligibleCount: streakEligible.length,
+    parserDiagnostics,
+    parserMismatch,
+    rawPreview: debugInfo?.rawUnderdogSamples || [],
     preview: parsedPool.slice(0, 3).map((prop) => ({
       id: prop.id,
       player: prop.playerName || prop.player,
@@ -144,6 +168,23 @@ export function buildUnderdogDebugSnapshot({
       platform: prop.platform,
       normalizedSource: prop.normalizedSource,
     })),
+    parsedPreview: parsedPool.slice(0, 5).map((prop) => ({
+      id: prop.id,
+      player: prop.player,
+      statType: prop.statType,
+      line: prop.line,
+      projection: prop.projection,
+      team: prop.team,
+      opponent: prop.opponent,
+      sport: prop.sport,
+      normalizedSource: prop.normalizedSource,
+      overUnder: prop.overUnder,
+      confidence: prop.confidence,
+      edge: prop.edge,
+      playable: prop.playable,
+      propType: prop.propType,
+      matchup: prop.matchup,
+    })),
     parsedPool,
     streakEligible,
     parserEmpty: rawUdCount > 0 && parsedUdCount === 0 && parsedPool.length === 0,
@@ -153,6 +194,7 @@ export function buildUnderdogDebugSnapshot({
 }
 
 export function resolveUnderdogStreakEmptyMessage(snapshot = {}) {
+  if (snapshot.parserMismatch) return UNDERDOG_PARSER_MISMATCH_MESSAGE;
   if (snapshot.parserEmpty) return UNDERDOG_PARSER_EMPTY_MESSAGE;
   if (snapshot.hasParsedUnderdog && snapshot.streakEligibleCount === 0) {
     return "No Underdog streak picks ranked yet.";

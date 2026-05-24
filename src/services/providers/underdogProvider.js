@@ -44,7 +44,8 @@ export function buildUnderdogDiagnostics(result = {}, durationMs = 0) {
 }
 
 function normalizeProviderResult(result, durationMs) {
-  const degraded = DEGRADED_STATUSES.has(String(result?.status || "")) || !result?.props?.length;
+  const hasProps = Boolean(result?.props?.length || result?.parsedProps?.length);
+  const degraded = DEGRADED_STATUSES.has(String(result?.status || "")) || !hasProps;
   const health = resolveUnderdogHealth(result);
   const diagnostics = buildUnderdogDiagnostics(result, durationMs);
 
@@ -120,12 +121,17 @@ export function applyUnderdogProviderToDebug(debugInfo = {}, providerResult = {}
     message: diag.message || debugInfo.sources.Underdog?.message || "",
     providerHealth: diag.health || providerResult.health,
     providerDiagnostics: diag,
+    underdogParser: diag.underdogParser || providerResult.debug?.underdogParser || debugInfo.sources.Underdog?.underdogParser,
+    rawUnderdogSamples: providerResult.debug?.rawUnderdogSamples || debugInfo.sources.Underdog?.rawUnderdogSamples || [],
     rawPropsLoaded: finiteOr(
       debugInfo.sources.Underdog?.rawPropsLoaded ?? diag.rawPropsLoaded ?? providerResult.debug?.rawPropsLoaded,
       0
     ),
     propsAfterParsing: finiteOr(
-      debugInfo.sources.Underdog?.propsAfterParsing ?? diag.parsedPropsCount ?? providerResult.props?.length,
+      debugInfo.sources.Underdog?.propsAfterParsing ??
+        diag.parsedPropsCount ??
+        providerResult.parsedProps?.length ??
+        providerResult.props?.length,
       0
     ),
   };

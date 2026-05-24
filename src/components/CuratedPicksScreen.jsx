@@ -6,6 +6,7 @@ import GoblinBoard from "./GoblinBoard.jsx";
 import DemonBoard from "./DemonBoard.jsx";
 import MlbPickCard from "./MlbPickCard.jsx";
 import { styles } from "../theme/styles.js";
+import ParsedUnderdogDebugCard from "./ParsedUnderdogDebugCard.jsx";
 import { DISPLAY_LIMITS, MLB_EMPTY_MESSAGE } from "../utils/curatedPicks.js";
 import { MLB_ONLY_MODE } from "../utils/mlbOnlyMode.js";
 import { SAFE_MODE_LOADING_MESSAGE } from "../utils/safeMode.js";
@@ -54,6 +55,7 @@ function CuratedPicksScreen({
   hasMlbProps = false,
   hasUnderdogProps = false,
   underdogEmptyMessage = "",
+  parsedUnderdogPreview = [],
   onSectionError,
 }) {
   if (MLB_ONLY_MODE) {
@@ -77,6 +79,7 @@ function CuratedPicksScreen({
             hasUnderdogProps={hasUnderdogProps}
             emptyMessage={underdogEmptyMessage}
           />
+          <ParsedUnderdogDebugCard picks={parsedUnderdogPreview} />
         </SectionErrorBoundary>
         <SectionErrorBoundary name="MLB 4-Man Builder" onError={onSectionError}>
           <ParlayBuilderSection picks={parlayPicks} loading={loading} onOpen={onOpen} hasMlbProps={hasMlbProps} />

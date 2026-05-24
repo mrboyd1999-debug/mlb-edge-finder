@@ -40,6 +40,11 @@ import {
 } from "./sourceRateLimit.js";
 import { getProxyUrl } from "../config/apiConfig.js";
 import { MLB_ONLY_MODE, emptySourcePipelineAudit } from "../utils/mlbOnlyMode.js";
+import {
+  parseUnderdogPayloadDedicated,
+  extractRawUnderdogRecords,
+  UNDERDOG_PARSER_MISMATCH_MESSAGE,
+} from "../utils/parseUnderdogProp.js";
 
 const UNDERDOG_ENDPOINTS = [
   "/api/underdog",
@@ -142,7 +147,8 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all" } = 
         });
       }
       const rawCount = rawUnderdogRecordCount(payload);
-      const { props: parsedProps, audit } = parseUnderdogPayload(payload, "LIVE");
+      const rawSamples = extractRawUnderdogRecords(payload).slice(0, 3);
+      const { props: parsedProps, audit, diagnostics } = parseUnderdogPayload(payload, "LIVE");
       logPipelineAudit("Underdog", audit);
       const props = parsedProps.filter((prop) => matchesFilter(prop, sport, statType));
       const usableCount = countUsableProps(props);
@@ -159,26 +165,35 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all" } = 
 
       if (!usableCount) {
         const cachedResult = buildCachedUnderdogResult({ sport, statType, attempts, reason: "empty-parse" });
-        if (cachedResult) return cachedResult;
-        console.warn(`${UNDERDOG_AUDIT_PREFIX} no parsed props returned`, {
+        if (cachedResult && !diagnostics?.parserMismatch) return cachedResult;
+        console.warn(`${UNDERDOG_AUDIT_PREFIX} no usable parsed props`, {
           url: apiUrl,
           rawPropsLoaded: rawCount,
           parsedPropsCount: parsedProps.length,
+          diagnostics,
         });
+        const parserMessage =
+          rawCount > 0 && parsedProps.length === 0
+            ? UNDERDOG_PARSER_MISMATCH_MESSAGE
+            : EMPTY_SOURCE_MESSAGE;
         return {
           source: "Underdog",
-          status: "Empty",
-          props: [],
-          warnings: [EMPTY_SOURCE_MESSAGE],
-          health: "EMPTY",
-          lineSourceBadge: "EMPTY",
+          status: rawCount > 0 && parsedProps.length === 0 ? "Connected" : "Empty",
+          props: parsedProps,
+          parsedProps,
+          warnings: [parserMessage],
+          health: rawCount > 0 ? "LIVE" : "EMPTY",
+          lineSourceBadge: rawCount > 0 ? "LIVE" : "EMPTY",
+          pipelineAudit: audit,
           debug: underdogDebug({
             apiUrl,
-            apiStatus: "Empty",
+            apiStatus: rawCount > 0 && parsedProps.length === 0 ? "Connected" : "Empty",
             endpointsTried: attempts.map((item) => item.url),
             rawPropsLoaded: rawCount,
             parsedPropsCount: parsedProps.length,
-            message: EMPTY_SOURCE_MESSAGE,
+            message: parserMessage,
+            underdogParser: diagnostics,
+            rawUnderdogSamples: rawSamples,
           }),
         };
       }
@@ -187,18 +202,25 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all" } = 
         source: "Underdog",
         status: "Connected",
         props,
+        parsedProps,
         pipelineAudit: audit,
         lineSourceBadge: "LIVE",
         health: "LIVE",
         lastSuccessfulFetchAt: new Date().toISOString(),
-        warnings: setupWarning ? [setupWarning] : [],
+        warnings: setupWarning
+          ? [setupWarning]
+          : diagnostics?.parserMismatch
+            ? [UNDERDOG_PARSER_MISMATCH_MESSAGE]
+            : [],
         debug: underdogDebug({
           apiUrl,
           apiStatus: "Connected",
           endpointsTried: attempts.map((item) => item.url),
           rawPropsLoaded: rawCount,
           parsedPropsCount: parsedProps.length,
-          message: "",
+          message: diagnostics?.parserMismatch ? UNDERDOG_PARSER_MISMATCH_MESSAGE : "",
+          underdogParser: diagnostics,
+          rawUnderdogSamples: rawSamples,
         }),
       };
   }
@@ -394,6 +416,7 @@ function parseUnderdogPayload(payload, lineSourceBadge = "LIVE") {
   return safeParse("Underdog.parsePayload", () => parseUnderdogPayloadInternal(payload, lineSourceBadge), {
     props: [],
     audit: coercePipelineAudit(emptySourcePipelineAudit()),
+    diagnostics: { rawCount: 0, acceptedCount: 0, rejectedCount: 0, rejectionReasons: {}, parserMismatch: false },
   });
 }
 
@@ -401,51 +424,38 @@ function parseUnderdogPayloadInternal(payload, lineSourceBadge = "LIVE") {
   let audit = safeCreateEmptyPipelineAudit();
   try {
     audit = createEmptyPipelineAudit();
-    const normalizedPayload = unwrapProxyPayload(payload);
-    let props = [];
-    if (Array.isArray(normalizedPayload)) {
-      const scopedRows = MLB_ONLY_MODE
-        ? normalizedPayload.filter((item) => shouldParseIngestionContext(buildUnderdogFlatIngestionContext(item)))
-        : normalizedPayload;
-      audit.fetched = scopedRows.length;
-      props = scopedRows.map((item) => normalizeFlatUnderdogItem(item, lineSourceBadge, audit)).filter(Boolean);
-    } else {
-      const players = mapById(normalizedPayload.players || normalizedPayload.athletes || []);
-      const games = mapById(normalizedPayload.games || []);
-      const appearances = mapById(normalizedPayload.appearances || []);
-      const teams = mapById(normalizedPayload.teams || []);
-      const lines = normalizedPayload.over_under_lines || normalizedPayload.overUnders || normalizedPayload.data || [];
-      const scopedLines = MLB_ONLY_MODE
-        ? (Array.isArray(lines) ? lines : []).filter((line) => {
-            const overUnder = line.over_under || line.overUnder || line.attributes || line;
-            const appearanceId =
-              overUnder.appearance_id ||
-              line.appearance_id ||
-              line.relationships?.appearance?.data?.id;
-            const appearance = appearances.get(String(appearanceId)) || {};
-            const player = players.get(String(appearance.player_id || overUnder.player_id || line.player_id)) || {};
-            const game = games.get(String(appearance.game_id || overUnder.game_id || line.game_id)) || {};
-            return shouldParseIngestionContext(
-              buildUnderdogLineIngestionContext({ line, overUnder, game, player, appearance })
-            );
-          })
-        : lines;
-      audit.fetched = Array.isArray(scopedLines) ? scopedLines.length : 0;
-      props = scopedLines
-        .map((line) => normalizeUnderdogLine(line, players, games, appearances, teams, lineSourceBadge, audit))
-        .filter(Boolean);
-    }
+    const rawRecords = extractRawUnderdogRecords(payload);
+    audit.fetched = rawRecords.length;
+
+    const { props, diagnostics } = parseUnderdogPayloadDedicated(payload, lineSourceBadge);
     audit.normalized = props.length;
     props.forEach((prop) => recordNormalizedSample(audit, prop));
-    props = filterIngestionProps(props, audit, recordFilterReason);
-    props = filterApprovedMarketsOnly(props);
+
+    if (diagnostics.rejectedCount > 0) {
+      Object.entries(diagnostics.rejectionReasons || {}).forEach(([reason, count]) => {
+        for (let i = 0; i < count; i += 1) {
+          recordFilterReason(audit, `underdog parser: ${reason}`);
+        }
+      });
+    }
+
+    audit.underdogParser = diagnostics;
+    if (diagnostics.parserMismatch) {
+      audit.parserMismatch = true;
+      console.warn(`${UNDERDOG_AUDIT_PREFIX} ${UNDERDOG_PARSER_MISMATCH_MESSAGE}`, diagnostics);
+    }
+
     return {
       props,
-      audit: MLB_ONLY_MODE ? coercePipelineAudit(emptySourcePipelineAudit()) : coercePipelineAudit(audit),
+      audit: coercePipelineAudit({
+        ...audit,
+        underdogParser: diagnostics,
+      }),
+      diagnostics,
     };
   } catch (error) {
-    console.warn("[Underdog] parse payload failed; returning empty audit-safe result", error);
-    return { props: [], audit: coercePipelineAudit(audit) };
+    console.warn("[Underdog] dedicated parse payload failed; returning empty audit-safe result", error);
+    return { props: [], audit: coercePipelineAudit(audit), diagnostics: { rawCount: 0, acceptedCount: 0, rejectedCount: 0, rejectionReasons: {}, parserMismatch: false } };
   }
 }
 
@@ -484,7 +494,7 @@ function rawUnderdogRecordCount(payload) {
   return Array.isArray(lines) ? lines.length : 0;
 }
 
-function underdogDebug({ apiUrl, apiStatus, endpointsTried, rawPropsLoaded, parsedPropsCount, message }) {
+function underdogDebug({ apiUrl, apiStatus, endpointsTried, rawPropsLoaded, parsedPropsCount, message, underdogParser = null, rawUnderdogSamples = [] }) {
   return {
     selectedSource: "Underdog",
     apiUrl,
@@ -493,6 +503,8 @@ function underdogDebug({ apiUrl, apiStatus, endpointsTried, rawPropsLoaded, pars
     rawPropsLoaded,
     propsAfterParsing: parsedPropsCount,
     message,
+    underdogParser,
+    rawUnderdogSamples,
   };
 }
 

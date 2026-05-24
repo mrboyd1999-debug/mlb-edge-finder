@@ -837,9 +837,17 @@ function applySourceResult({
   debugInfo,
 }) {
   const platform = label === "PrizePicks" ? "PrizePicks" : label === "Underdog" ? "Underdog" : label;
-  const props = (result.props || []).map((prop) => normalizePropShape(prop, { platform, source: platform }));
+  const incoming = result.parsedProps?.length ? result.parsedProps : result.props;
+  const props = (incoming || []).map((prop) =>
+    normalizePropShape(
+      { ...prop, playerName: prop.playerName || prop.player || "" },
+      { platform, source: platform }
+    )
+  );
   const rawCount = Number(result.debug?.rawPropsLoaded ?? result.pipelineAudit?.fetched ?? 0);
-  const parsedCount = props.length;
+  const parsedCount = Number(
+    result.debug?.propsAfterParsing ?? result.parsedProps?.length ?? props.length
+  );
   const usableCount = countUsableProps(props);
   const failed = result.status === "Failed";
   const rateLimited = Boolean(result.rateLimited || result.cached);
@@ -927,6 +935,8 @@ function applySourceResult({
     message: health.message || result.debug?.message || "",
     lastSuccessfulFetchAt: result.lastSuccessfulFetchAt || "",
     lineSourceBadge: health.badge,
+    underdogParser: result.debug?.underdogParser || null,
+    rawUnderdogSamples: result.debug?.rawUnderdogSamples || [],
   };
   return usableCount > 0;
 }
@@ -1101,12 +1111,18 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         debugInfo,
       });
       applyUnderdogProviderToDebug(debugInfo, underdogResult);
-      if (underdogResult?.props?.length) {
+      if (underdogResult?.props?.length || underdogResult?.parsedProps?.length) {
+        const udSource = underdogResult.parsedProps || underdogResult.props || [];
         debugInfo.parsedUnderdogProps = normalizePropsWithSource(
-          underdogResult.props.map((prop) =>
-            normalizePropShape(prop, { platform: "Underdog", source: "Underdog" })
+          udSource.map((prop) =>
+            normalizePropShape(
+              { ...prop, playerName: prop.playerName || prop.player || "" },
+              { platform: "Underdog", source: "Underdog" }
+            )
           )
         );
+        debugInfo.underdogParser = underdogResult.debug?.underdogParser || underdogResult.pipelineAudit?.underdogParser || null;
+        debugInfo.rawUnderdogSamples = underdogResult.debug?.rawUnderdogSamples || [];
       }
       if (!underdogOk && !rawProps.length && prizePicksResult?.props?.length) {
         rawProps.push(...prizePicksResult.props);
@@ -2955,6 +2971,7 @@ export default function DFSPropsApp() {
             hasMlbProps={mlbDisplayPropCount > 0}
             hasUnderdogProps={underdogStreakPropCount > 0}
             underdogEmptyMessage={underdogDebugSnapshot ? resolveUnderdogStreakEmptyMessage(underdogDebugSnapshot) : undefined}
+            parsedUnderdogPreview={parsedUnderdogProps.slice(0, 5)}
             onSectionError={handleSectionRenderError}
           />
         </SectionErrorBoundary>
