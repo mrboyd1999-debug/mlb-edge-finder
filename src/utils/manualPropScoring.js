@@ -34,45 +34,45 @@ function propFingerprint(input = {}) {
 /** Sport-specific stat volatility: tier (LOW|MEDIUM|HIGH) and 0–1 score. */
 const MANUAL_VOLATILITY = {
   MLB: {
-    hrr: { tier: "HIGH", score: 0.82 },
-    hits: { tier: "LOW", score: 0.28 },
-    strikeouts: { tier: "MEDIUM", score: 0.52 },
-    batterWalks: { tier: "HIGH", score: 0.78 },
-    walks: { tier: "HIGH", score: 0.74 },
-    singles: { tier: "LOW", score: 0.32 },
-    doubles: { tier: "MEDIUM", score: 0.48 },
-    triples: { tier: "HIGH", score: 0.72 },
-    homeRuns: { tier: "HIGH", score: 0.85 },
-    stolenBases: { tier: "HIGH", score: 0.8 },
-    totalBases: { tier: "MEDIUM", score: 0.55 },
-    rbis: { tier: "MEDIUM", score: 0.5 },
-    runs: { tier: "MEDIUM", score: 0.46 },
-    hitsAllowed: { tier: "MEDIUM", score: 0.58 },
-    earnedRuns: { tier: "MEDIUM", score: 0.6 },
-    outs: { tier: "LOW", score: 0.35 },
-    fantasyScore: { tier: "MEDIUM", score: 0.56 },
-    pitchesThrown: { tier: "MEDIUM", score: 0.5 },
+    hrr: { tier: "HIGH", score: 0.82, label: "High variance" },
+    hits: { tier: "LOW", score: 0.28, label: "Low variance" },
+    strikeouts: { tier: "LOW", score: 0.38, label: "Low variance" },
+    batterWalks: { tier: "HIGH", score: 0.78, label: "High variance" },
+    walks: { tier: "HIGH", score: 0.74, label: "High variance" },
+    singles: { tier: "LOW", score: 0.32, label: "Low variance" },
+    doubles: { tier: "MEDIUM", score: 0.48, label: "Medium variance" },
+    triples: { tier: "HIGH", score: 0.72, label: "High variance" },
+    homeRuns: { tier: "HIGH", score: 0.85, label: "High variance" },
+    stolenBases: { tier: "HIGH", score: 0.8, label: "High variance" },
+    totalBases: { tier: "MEDIUM", score: 0.55, label: "Medium variance" },
+    rbis: { tier: "MEDIUM", score: 0.5, label: "Medium variance" },
+    runs: { tier: "MEDIUM", score: 0.46, label: "Medium variance" },
+    hitsAllowed: { tier: "MEDIUM", score: 0.58, label: "Medium variance" },
+    earnedRuns: { tier: "MEDIUM", score: 0.6, label: "Medium variance" },
+    outs: { tier: "LOW", score: 0.35, label: "Low variance" },
+    fantasyScore: { tier: "MEDIUM", score: 0.56, label: "Medium variance" },
+    pitchesThrown: { tier: "MEDIUM", score: 0.5, label: "Medium variance" },
   },
   NBA: {
-    pra: { tier: "MEDIUM", score: 0.54 },
-    assists: { tier: "HIGH", score: 0.76 },
-    rebounds: { tier: "LOW", score: 0.3 },
-    points: { tier: "MEDIUM", score: 0.48 },
-    pr: { tier: "MEDIUM", score: 0.52 },
-    pa: { tier: "MEDIUM", score: 0.55 },
-    ra: { tier: "MEDIUM", score: 0.5 },
-    threes: { tier: "HIGH", score: 0.8 },
-    steals: { tier: "HIGH", score: 0.74 },
-    blocks: { tier: "HIGH", score: 0.72 },
-    turnovers: { tier: "MEDIUM", score: 0.58 },
-    fantasyScore: { tier: "MEDIUM", score: 0.56 },
-    doubleDouble: { tier: "HIGH", score: 0.7 },
+    pra: { tier: "MEDIUM", score: 0.54, label: "Medium variance" },
+    assists: { tier: "HIGH", score: 0.76, label: "High variance" },
+    rebounds: { tier: "LOW", score: 0.3, label: "Low variance" },
+    points: { tier: "MEDIUM", score: 0.48, label: "Medium variance" },
+    pr: { tier: "MEDIUM", score: 0.52, label: "Medium variance" },
+    pa: { tier: "MEDIUM", score: 0.55, label: "Medium variance" },
+    ra: { tier: "MEDIUM", score: 0.5, label: "Medium variance" },
+    threes: { tier: "HIGH", score: 0.8, label: "High variance" },
+    steals: { tier: "HIGH", score: 0.74, label: "High variance" },
+    blocks: { tier: "HIGH", score: 0.72, label: "High variance" },
+    turnovers: { tier: "MEDIUM", score: 0.58, label: "Medium variance" },
+    fantasyScore: { tier: "MEDIUM", score: 0.56, label: "Medium variance" },
+    doubleDouble: { tier: "HIGH", score: 0.7, label: "High variance" },
   },
   WNBA: {
-    pra: { tier: "MEDIUM", score: 0.54 },
-    assists: { tier: "HIGH", score: 0.76 },
-    rebounds: { tier: "LOW", score: 0.3 },
-    points: { tier: "MEDIUM", score: 0.48 },
+    pra: { tier: "MEDIUM", score: 0.54, label: "Medium variance" },
+    assists: { tier: "HIGH", score: 0.76, label: "High variance" },
+    rebounds: { tier: "LOW", score: 0.3, label: "Low variance" },
+    points: { tier: "MEDIUM", score: 0.48, label: "Medium variance" },
   },
 };
 
@@ -118,7 +118,7 @@ const STAT_BASELINES = {
 };
 
 const DEFAULT_BASELINE = { mean: 2.0, std: 1.0 };
-const DEFAULT_VOLATILITY = { tier: "MEDIUM", score: 0.5 };
+const DEFAULT_VOLATILITY = { tier: "MEDIUM", score: 0.5, label: "Medium variance" };
 
 function normalizeSportKey(sport = "") {
   const key = String(sport || "MLB").trim().toUpperCase();
@@ -134,7 +134,7 @@ function normalizePayout(payoutType = "standard") {
   return "standard";
 }
 
-function normalizePick(side = "") {
+export function normalizeManualPick(side = "") {
   const key = normalize(side);
   if (key === "over" || key === "more" || key === "higher") return "over";
   if (key === "under" || key === "less" || key === "lower") return "under";
@@ -155,6 +155,84 @@ export function getManualStatBaseline(sport = "MLB", statType = "") {
   return table[marketKey] || DEFAULT_BASELINE;
 }
 
+export function volatilityLabelFromTier(tier = "MEDIUM") {
+  const key = String(tier || "MEDIUM").toUpperCase();
+  if (key === "LOW") return "Low variance";
+  if (key === "HIGH") return "High variance";
+  return "Medium variance";
+}
+
+/** OVER: projection - line. UNDER: line - projection. */
+export function computeDirectionalEdge(projection, line, pick) {
+  const proj = Number(projection);
+  const numericLine = Number(line);
+  const side = normalizeManualPick(pick);
+  if (!Number.isFinite(proj) || !Number.isFinite(numericLine)) return 0;
+  return side === "over" ? round(proj - numericLine, 2) : round(numericLine - proj, 2);
+}
+
+export function computeManualEdgePercent(edge, line, projection) {
+  const numericEdge = Number(edge);
+  const numericLine = Number(line);
+  const numericProjection = Number(projection);
+  if (!Number.isFinite(numericEdge)) return null;
+  if (Number.isFinite(numericProjection) && numericProjection > 0) {
+    return Math.round((numericEdge / numericProjection) * 100);
+  }
+  if (Number.isFinite(numericLine) && numericLine > 0) {
+    return Math.round((numericEdge / numericLine) * 100);
+  }
+  return null;
+}
+
+export function computeImpliedHitChance({
+  confidence = 0,
+  edge = 0,
+  volatility = DEFAULT_VOLATILITY,
+  payoutType = "standard",
+}) {
+  const payout = normalizePayout(payoutType);
+  const favorableEdge = Math.max(Number(edge) || 0, 0);
+  let pct = Number(confidence) * 0.82 + favorableEdge * 5;
+
+  if (payout === "goblin") pct += 5;
+  if (payout === "demon") pct -= 7;
+  if (volatility.tier === "LOW") pct += 4;
+  if (volatility.tier === "HIGH") pct -= 6;
+  if (Number(edge) < 0) pct -= 10;
+
+  return Math.round(clamp(pct, 38, 88));
+}
+
+export function manualScoringModeLabel(liveScored = null) {
+  const source = String(liveScored?.projectionSource || "").toLowerCase();
+  if (source && source !== "missing" && source !== "manual-dynamic" && source !== "manual-offline") {
+    return "Base projection mode";
+  }
+  return "Offline scoring mode";
+}
+
+export function leanBadgeStyle(lean = "") {
+  const key = String(lean || "").toLowerCase();
+  if (key === "over") {
+    return { border: "1px solid #0d9488", background: "#042f2e", color: "#5eead4" };
+  }
+  if (key === "under") {
+    return { border: "1px solid #ea580c", background: "#431407", color: "#fdba74" };
+  }
+  return { border: "1px solid #475569", background: "#1e293b", color: "#cbd5e1" };
+}
+
+export function manualRiskBadgeStyle(riskLevel = "") {
+  const key = String(riskLevel || "").toUpperCase();
+  if (key === "LOW") return { border: "1px solid #166534", background: "#052e16", color: "#86efac" };
+  if (key === "MEDIUM" || key.includes("MED")) {
+    return { border: "1px solid #854d0e", background: "#422006", color: "#fde68a" };
+  }
+  if (key === "HIGH") return { border: "1px solid #991b1b", background: "#450a0a", color: "#fca5a5" };
+  return { border: "1px solid #475569", background: "#1e293b", color: "#cbd5e1" };
+}
+
 function linePercentile(line, baseline = {}) {
   const mean = Number(baseline.mean) || 1;
   const std = Math.max(Number(baseline.std) || 1, 0.05);
@@ -168,36 +246,34 @@ export function estimateFairLine(sport, statType, line, payoutType = "standard")
   const numericLine = Number(line);
   if (!Number.isFinite(numericLine)) return baseline.mean;
 
-  // Blend posted line with baseline — manual entries reflect book pricing.
   let fair = baseline.mean * 0.55 + numericLine * 0.45;
   if (payout === "goblin") fair *= 0.96;
   if (payout === "demon") fair *= 1.06;
   return round(fair, 2);
 }
 
-export function calculateManualEdge({ line, fairLine, pick, volatility, payoutType, fingerprint }) {
-  const numericLine = Number(line);
-  const fair = Number(fairLine);
-  const payout = normalizePayout(payoutType);
-  const side = normalizePick(pick);
+function applyMlbMarketConfidenceAdjustments({
+  score,
+  sport,
+  statType,
+  edge,
+  payoutType,
+}) {
+  const sportKey = normalizeSportKey(sport);
+  const marketKey = canonicalMarketKey(statType);
+  let adjusted = score;
 
-  if (!Number.isFinite(numericLine) || !Number.isFinite(fair)) return 0.2;
+  if (sportKey === "MLB" && marketKey === "strikeouts" && edge > 0.7) {
+    adjusted += 5;
+  }
 
-  let raw =
-    side === "over"
-      ? fair - numericLine
-      : numericLine - fair;
+  if (sportKey === "MLB" && marketKey === "hrr") {
+    const payout = normalizePayout(payoutType);
+    const cap = payout === "goblin" ? 82 : payout === "demon" ? 58 : 68;
+    if (edge < 1.4) adjusted = Math.min(adjusted, cap);
+  }
 
-  if (payout === "goblin") raw += 0.28;
-  if (payout === "demon") raw -= 0.32;
-
-  const volFactor = 1 - (volatility.score || 0.5) * 0.12;
-  const mismatch = Math.abs(numericLine - fair) / Math.max(fair, 0.5);
-  let edge = Math.abs(raw) * volFactor + mismatch * 0.35;
-
-  const jitter = ((fingerprint % 17) + 3) / 100;
-  edge = clamp(edge + jitter, 0.1, 2.5);
-  return round(edge, 2);
+  return adjusted;
 }
 
 export function calculateManualConfidence({
@@ -213,7 +289,8 @@ export function calculateManualConfidence({
   linePct,
 }) {
   const payout = normalizePayout(payoutType);
-  const side = normalizePick(pick);
+  const side = normalizeManualPick(pick);
+  const favorableEdge = Math.max(Number(edge) || 0, 0);
   let min;
   let max;
   if (payout === "goblin") {
@@ -230,13 +307,13 @@ export function calculateManualConfidence({
   const spread = ((fingerprint % 97) + 3) / 100;
   let score = min + spread * (max - min);
 
-  if (edge >= 1.8) score += 5;
-  else if (edge >= 1.2) score += 3;
-  else if (edge >= 0.7) score += 1;
-  else if (edge <= 0.25) score -= 4;
+  if (favorableEdge >= 1.8) score += 5;
+  else if (favorableEdge >= 1.2) score += 3;
+  else if (favorableEdge >= 0.7) score += 1;
+  else if (favorableEdge <= 0.25) score -= 4;
+  if (Number(edge) < 0) score -= 6;
 
   if (volatility.tier === "LOW") score += 4;
-  else if (volatility.tier === "MEDIUM") score += 0;
   else if (volatility.tier === "HIGH") score -= 5;
 
   if (linePct > 0.82 && side === "under") score += 3;
@@ -245,7 +322,8 @@ export function calculateManualConfidence({
   if (linePct < 0.18 && side === "under") score -= 4;
 
   if (source === "Underdog") score += 1;
-  if (source === "PrizePicks") score += 0;
+
+  score = applyMlbMarketConfidenceAdjustments({ score, sport, statType, edge: favorableEdge, payoutType });
 
   const floor = payout === "goblin" ? 72 : payout === "demon" ? 45 : 58;
   const ceiling = payout === "goblin" ? 85 : payout === "demon" ? 60 : 72;
@@ -255,13 +333,14 @@ export function calculateManualConfidence({
 export function classifyManualRisk({ payoutType, volatility, edge, linePct }) {
   let riskScore = 0;
   const payout = normalizePayout(payoutType);
+  const favorableEdge = Math.max(Number(edge) || 0, 0);
 
   if (payout === "goblin") riskScore -= 2;
   if (payout === "demon") riskScore += 3;
   if (volatility.tier === "HIGH") riskScore += 2;
   if (volatility.tier === "LOW") riskScore -= 1;
-  if (edge >= 1.2) riskScore -= 1;
-  if (edge <= 0.35) riskScore += 1;
+  if (favorableEdge >= 1.2) riskScore -= 1;
+  if (favorableEdge <= 0.35 || Number(edge) < 0) riskScore += 1;
   if (linePct >= 0.8 || linePct <= 0.2) riskScore += 1;
 
   if (riskScore <= -1) return "Low";
@@ -280,13 +359,19 @@ export function generateManualExplanation(ctx = {}) {
     edge,
     linePct,
     sport,
+    projection,
   } = ctx;
-  const direction = normalizePick(pick) === "over" ? "Over" : "Under";
+  const direction = normalizeManualPick(pick) === "over" ? "Over" : "Under";
   const stat = statLabel || "prop";
   const payout = normalizePayout(payoutType);
   const parts = [];
 
-  if (volatility.tier === "HIGH" && linePct > 0.72 && normalizePick(pick) === "under") {
+  if (Number(edge) < 0) {
+    parts.push(
+      `${direction} faces a negative edge (proj ${projection} vs line ${line}) — downgrade confidence.`
+    );
+  }
+  if (volatility.tier === "HIGH" && linePct > 0.72 && normalizeManualPick(pick) === "under") {
     parts.push(`Line appears inflated for a volatile ${stat} category.`);
   }
   if (payout === "goblin") {
@@ -295,16 +380,16 @@ export function generateManualExplanation(ctx = {}) {
   if (payout === "demon") {
     parts.push(`Demon threshold on ${stat} adds payout upside but shrinks hit rate.`);
   }
-  if (normalizePick(pick) === "under" && linePct > 0.78) {
+  if (normalizeManualPick(pick) === "under" && linePct > 0.78) {
     parts.push("Under selected due to elevated line and high variance stat.");
   }
-  if (normalizePick(pick) === "over" && linePct < 0.28) {
+  if (normalizeManualPick(pick) === "over" && linePct < 0.28) {
     parts.push(`Line sits below typical ${sport} ${stat} output — Over offers cushion.`);
   }
-  if (volatility.tier === "LOW" && edge >= 1.0) {
-    parts.push(`Stable ${stat} profile supports ${direction} with ${edge.toFixed(1)} unit edge.`);
+  if (volatility.tier === "LOW" && Number(edge) >= 1.0) {
+    parts.push(`Stable ${stat} profile supports ${direction} with ${Number(edge).toFixed(1)} unit edge.`);
   }
-  if (volatility.tier === "MEDIUM" && edge >= 0.8 && edge < 1.4) {
+  if (volatility.tier === "MEDIUM" && Number(edge) >= 0.8 && Number(edge) < 1.4) {
     parts.push(`${direction} aligns with moderate ${stat} edge versus posted line ${line}.`);
   }
   if (riskLevel === "High") {
@@ -313,10 +398,10 @@ export function generateManualExplanation(ctx = {}) {
   if (riskLevel === "Low" && payout !== "goblin") {
     parts.push(`${direction} grades as a lower-variance manual entry.`);
   }
-  if (edge >= 1.6) {
-    parts.push(`Strong ${edge.toFixed(1)}-unit edge detected on ${direction.toLowerCase()} side.`);
+  if (Number(edge) >= 1.6) {
+    parts.push(`Strong ${Number(edge).toFixed(1)}-unit edge detected on ${direction.toLowerCase()} side.`);
   }
-  if (edge <= 0.3) {
+  if (Number(edge) > 0 && Number(edge) <= 0.3) {
     parts.push("Thin edge — treat as research-grade until live stats confirm.");
   }
 
@@ -331,7 +416,7 @@ export function scoreManualPropInput(input = {}, liveScored = null) {
   const sport = input.sport || "MLB";
   const statType = input.statType || "";
   const line = Number(input.line);
-  const pick = normalizePick(input.side || input.pick);
+  const pick = normalizeManualPick(input.side || input.pick);
   const payoutType = normalizePayout(input.payoutType || input.oddsType || input.payoutRole);
   const source = input.source === "Underdog" ? "Underdog" : "PrizePicks";
   const fingerprint = propFingerprint(input);
@@ -345,24 +430,11 @@ export function scoreManualPropInput(input = {}, liveScored = null) {
     ? liveProjection
     : estimateFairLine(sport, statType, line, payoutType);
 
-  let edge = calculateManualEdge({
-    line,
-    fairLine,
-    pick,
-    volatility,
-    payoutType,
-    fingerprint,
-  });
-
-  if (Number.isFinite(liveProjection) && Number.isFinite(line)) {
-    const liveEdge =
-      pick === "over"
-        ? liveProjection - line
-        : line - liveProjection;
-    if (liveEdge > 0) {
-      edge = round(clamp(Math.max(edge, Math.abs(liveEdge) * 0.85), 0.1, 2.5), 2);
-    }
-  }
+  let edge = computeDirectionalEdge(fairLine, line, pick);
+  if (normalizePayout(payoutType) === "goblin" && edge > 0) edge = round(edge + 0.12, 2);
+  if (normalizePayout(payoutType) === "demon" && edge > 0) edge = round(Math.max(0, edge - 0.18), 2);
+  if (edge > 0) edge = round(clamp(edge, 0.1, 2.5), 2);
+  else if (edge < 0) edge = round(clamp(edge, -2.5, -0.05), 2);
 
   const confidence = calculateManualConfidence({
     payoutType,
@@ -379,6 +451,9 @@ export function scoreManualPropInput(input = {}, liveScored = null) {
 
   const riskLevel = classifyManualRisk({ payoutType, volatility, edge, linePct });
   const statLabel = marketDisplayLabel(statType) || statType;
+  const edgePercent = computeManualEdgePercent(edge, line, fairLine);
+  const impliedHitChance = computeImpliedHitChance({ confidence, edge, volatility, payoutType });
+  const volatilityLabel = volatility.label || volatilityLabelFromTier(volatility.tier);
   const whyThisPick = generateManualExplanation({
     pick,
     statLabel,
@@ -389,6 +464,7 @@ export function scoreManualPropInput(input = {}, liveScored = null) {
     edge,
     linePct,
     sport: normalizeSportKey(sport),
+    projection: fairLine,
   });
 
   return {
@@ -400,6 +476,8 @@ export function scoreManualPropInput(input = {}, liveScored = null) {
     confidenceScore: confidence,
     calibratedConfidence: confidence,
     edge,
+    edgePercent,
+    impliedHitChance,
     riskLevel,
     whyThisPick,
     qualificationReason: whyThisPick,
@@ -408,15 +486,18 @@ export function scoreManualPropInput(input = {}, liveScored = null) {
     projection: fairLine,
     manualVolatilityTier: volatility.tier,
     manualVolatilityScore: volatility.score,
+    volatilityLabel,
     volatility: round(1.5 + volatility.score * 2.5, 2),
     manualDynamicAnalysis: true,
     projectionSource: liveScored?.projectionSource || "manual-dynamic",
-    dataQualityScore: Math.round(48 + (1 - volatility.score) * 22 + Math.min(edge, 2) * 6),
+    scoringModeLabel: manualScoringModeLabel(liveScored),
+    dataQualityScore: Math.round(48 + (1 - volatility.score) * 22 + Math.max(edge, 0) * 6),
   };
 }
 
 export function mergeManualPropScoring(builtProp = {}, manualScore = {}, liveScored = null) {
   const lean = manualScore.bestPick || builtProp.bestPick || builtProp.side;
+  const scoringModeLabel = manualScore.scoringModeLabel || manualScoringModeLabel(liveScored);
   return {
     ...builtProp,
     ...(liveScored || {}),
@@ -428,25 +509,30 @@ export function mergeManualPropScoring(builtProp = {}, manualScore = {}, liveSco
     team: builtProp.team || liveScored?.team || "",
     opponent: builtProp.opponent || liveScored?.opponent || "",
     isDisplayPlayable: true,
-    bettingLabel: liveScored?.bettingLabel || "Manual Analyze",
-    displayTier: liveScored?.displayTier || "research",
+    bettingLabel: "Manual Analyze",
+    displayTier: "research",
     lineSourceBadge: "MANUAL",
+    scoringModeLabel,
+    dataQualityBadge: { label: scoringModeLabel, tone: "info" },
     analyzedAt: new Date().toISOString(),
   };
 }
 
 export function rankManualPropScore(prop = {}) {
+  const edgePct = Math.max(Number(prop.edgePercent ?? 0), 0);
+  const edge = Math.max(Number(prop.edge ?? 0), 0);
   const conf = Number(prop.confidenceScore ?? prop.confidence ?? 0);
-  const edge = Number(prop.edge ?? 0);
   const vol = Number(prop.manualVolatilityScore ?? 0.5);
-  return conf * 1.5 + edge * 12 - vol * 18;
+  return edgePct * 2.4 + edge * 11 + conf * 1.15 - vol * 24;
 }
 
 export function sortManualPropsByRank(props = []) {
   return [...(props || [])].sort((a, b) => {
     const rankDiff = rankManualPropScore(b) - rankManualPropScore(a);
-    if (rankDiff !== 0) return rankDiff;
-    return Number(b.edge ?? 0) - Number(a.edge ?? 0);
+    if (Math.abs(rankDiff) > 0.01) return rankDiff;
+    const volDiff = Number(a.manualVolatilityScore ?? 0.5) - Number(b.manualVolatilityScore ?? 0.5);
+    if (volDiff !== 0) return volDiff;
+    return Number(b.confidenceScore ?? b.confidence ?? 0) - Number(a.confidenceScore ?? a.confidence ?? 0);
   });
 }
 

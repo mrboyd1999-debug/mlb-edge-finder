@@ -114,6 +114,7 @@ import {
   scoreManualPropInput,
   getManualStatVolatility,
   rankManualPropScore,
+  computeDirectionalEdge,
 } from "../src/utils/manualPropScoring.js";
 
 function parseJsonEnvelope(text, source) {
@@ -1080,7 +1081,7 @@ assert.ok(goblinHit.confidenceScore >= 72 && goblinHit.confidenceScore <= 85);
 assert.ok(demonHrr.confidenceScore >= 45 && demonHrr.confidenceScore <= 60);
 assert.ok(nbaAst.confidenceScore >= 58 && nbaAst.confidenceScore <= 72);
 assert.ok(goblinHit.edge >= 0.1 && goblinHit.edge <= 2.5);
-assert.ok(demonHrr.edge >= 0.1 && demonHrr.edge <= 2.5);
+assert.ok(demonHrr.edge >= -2.5 && demonHrr.edge <= 2.5);
 assert.notEqual(goblinHit.confidenceScore, demonHrr.confidenceScore);
 assert.notEqual(goblinHit.edge, demonHrr.edge);
 assert.equal(goblinHit.bestPick, "over");
@@ -1089,8 +1090,15 @@ assert.ok(goblinHit.whyThisPick.includes("Goblin") || goblinHit.whyThisPick.incl
 assert.ok(demonHrr.whyThisPick.length > 20);
 assert.equal(getManualStatVolatility("MLB", "Hits+Runs+RBIs").tier, "HIGH");
 assert.equal(getManualStatVolatility("MLB", "Hits").tier, "LOW");
+assert.equal(getManualStatVolatility("MLB", "Pitcher Strikeouts").tier, "LOW");
 assert.equal(getManualStatVolatility("NBA", "Assists").tier, "HIGH");
 assert.equal(getManualStatVolatility("NBA", "Rebounds").tier, "LOW");
+
+assert.equal(computeDirectionalEdge(5.8, 6.5, "over"), -0.7);
+assert.equal(computeDirectionalEdge(5.8, 6.5, "under"), 0.7);
+assert.ok(goblinHit.impliedHitChance >= 38 && goblinHit.impliedHitChance <= 88);
+assert.ok(goblinHit.volatilityLabel);
+assert.equal(goblinHit.dataQualityBadge?.label, "Offline scoring mode");
 
 const topTwo = selectManualTopPicks([demonHrr, goblinHit, nbaAst], 2);
 assert.equal(topTwo.length, 2);

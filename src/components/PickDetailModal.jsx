@@ -24,6 +24,12 @@ import {
   warningFlags,
 } from "../utils/pickAnalysis.js";
 import { buildHistoricalPerformance } from "../utils/historicalPropAnalytics.js";
+import { isManualAnalyzerProp } from "../utils/manualPropBuilder.js";
+import {
+  leanBadgeStyle,
+  manualRiskBadgeStyle,
+  normalizeManualPick,
+} from "../utils/manualPropScoring.js";
 import { styles, riskStyle } from "../theme/styles.js";
 
 const NO_EDGE_MESSAGE = "No betting edge detected. More data needed before this becomes a confident pick.";
@@ -65,10 +71,14 @@ function FlagRow({ flags = [], tone = "positive" }) {
 }
 
 export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveManualStats, onSavePick }) {
-  const lean = formatLeanSide(prop.bestPick || prop.side || "Watch");
+  const manualProp = isManualAnalyzerProp(prop);
+  const pickSide = normalizeManualPick(prop.bestPick || prop.side || prop.pick);
+  const lean = pickSide === "over" ? "Over" : pickSide === "under" ? "Under" : formatLeanSide(prop.bestPick || prop.side || "Watch");
   const ready = prop.isDisplayPlayable !== false && (Boolean(prop.isQualificationAccepted) || isReadyToBet(prop));
   const bandLabel = confidenceBandDisplay(resolveBandScore(prop));
-  const badge = prop.dataQualityBadge || dataQualityBadge(prop);
+  const badge = manualProp
+    ? prop.dataQualityBadge || { label: prop.scoringModeLabel || "Offline scoring mode", tone: "info" }
+    : prop.dataQualityBadge || dataQualityBadge(prop);
   const historical = useMemo(
     () => prop.historicalPerformance || buildHistoricalPerformance({
       sport: prop.sport,
@@ -129,18 +139,18 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
     <div style={styles.modalBackdrop} role="presentation" onClick={onClose}>
       <section
         className="pick-detail-modal"
-        style={{ ...styles.modalPanel, maxHeight: "84vh", padding: "8px 10px" }}
+        style={{ ...styles.modalPanel, maxHeight: "80vh", padding: "6px 8px" }}
         role="dialog"
         aria-modal="true"
         aria-label={`${prop.playerName} evaluation`}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="pick-detail-modal-sticky" style={{ ...styles.modalHeader, position: "sticky", top: 0, zIndex: 2, background: "#0f172a", paddingBottom: "8px", marginBottom: "6px", borderBottom: "1px solid #1e293b" }}>
+        <div className="pick-detail-modal-sticky" style={{ ...styles.modalHeader, position: "sticky", top: 0, zIndex: 2, background: "#0f172a", paddingBottom: "4px", marginBottom: "4px", borderBottom: "1px solid #1e293b" }}>
           <div style={styles.modalPlayer}>
             <PlayerImage prop={prop} large />
             <div style={{ minWidth: 0 }}>
               <p style={styles.platform}>{prop.platform}</p>
-              <h2 style={{ ...styles.modalTitle, fontSize: "17px" }}>{prop.playerName}</h2>
+              <h2 style={{ ...styles.modalTitle, fontSize: "15px" }}>{prop.playerName}</h2>
               {(prop.team || prop.opponent) ? (
                 <p style={{ ...styles.gameLine, fontSize: "11px", margin: "2px 0 0" }}>
                   {displaySport(prop)}{prop.team ? ` · ${prop.team}` : ""}{prop.opponent ? ` vs ${prop.opponent}` : ""}
@@ -162,10 +172,17 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
           </div>
         </div>
 
-        <div style={styles.tagRow}>
+        <div style={{ ...styles.tagRow, marginBottom: "6px", gap: "4px" }}>
           <span style={ready ? styles.segmentActive : styles.segment}>{bandLabel}</span>
-          <span style={riskStyle(prop.riskLevel)}>{prop.riskLevel || "Medium"}</span>
-          {Number.isFinite(Number(prop.playabilityScore)) ? (
+          <span style={manualProp ? manualRiskBadgeStyle(prop.riskLevel) : riskStyle(prop.riskLevel)}>
+            {prop.riskLevel || "Medium"}
+          </span>
+          {lean === "Over" || lean === "Under" ? (
+            <span style={{ ...styles.scoreBadge, ...leanBadgeStyle(lean), fontSize: "9px", padding: "2px 6px" }}>
+              {lean.toUpperCase()}
+            </span>
+          ) : null}
+          {Number.isFinite(Number(prop.playabilityScore)) && !manualProp ? (
             <span style={styles.valueTag}>Playability {Math.round(Number(prop.playabilityScore))}</span>
           ) : null}
           <DataQualityBadge badge={badge} />
@@ -174,10 +191,14 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
           )}
         </div>
 
-        <FlagRow flags={prop.positiveFlags || prop.smartFlags?.positive} tone="positive" />
-        <FlagRow flags={prop.negativeFlags || prop.smartFlags?.negative} tone="negative" />
+        {!manualProp ? (
+          <>
+            <FlagRow flags={prop.positiveFlags || prop.smartFlags?.positive} tone="positive" />
+            <FlagRow flags={prop.negativeFlags || prop.smartFlags?.negative} tone="negative" />
+          </>
+        ) : null}
 
-        <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "6px", marginBottom: "8px" }}>
+        <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "4px", marginBottom: "6px" }}>
           <MetricIf label="Line" value={formatNumber(prop.line)} strong />
           <MetricIf
             label="Projection"
@@ -192,17 +213,30 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
           />
           <MetricIf label="Confidence" value={prop.confidenceScore != null ? `${prop.confidenceScore}%` : null} strong />
           <MetricIf label="Edge" value={Number.isFinite(Number(prop.edge)) ? formatSignedNumber(prop.edge) : null} strong />
-          <MetricIf label="Edge %" value={formatSignedPercent(edgePercentForProp(prop) != null ? edgePercentForProp(prop) / 100 : null)} />
+          <MetricIf
+            label="Edge %"
+            value={
+              prop.edgePercent != null && Number.isFinite(Number(prop.edgePercent))
+                ? formatSignedPercent(Number(prop.edgePercent) / 100)
+                : formatSignedPercent(edgePercentForProp(prop) != null ? edgePercentForProp(prop) / 100 : null)
+            }
+          />
+          <MetricIf label="Hit Chance" value={prop.impliedHitChance != null ? `${prop.impliedHitChance}%` : null} strong />
+          <MetricIf label="Volatility" value={prop.volatilityLabel || null} />
           <MetricIf label="Risk" value={prop.riskLevel} />
           <MetricIf label="Prop" value={prop.statType} />
-          <MetricIf label="Lean" value={ready ? lean : null} />
-          <MetricIf label="Playability" value={Number.isFinite(Number(prop.playabilityScore)) ? `${Math.round(Number(prop.playabilityScore))}/100` : null} />
+          <MetricIf label="Lean" value={lean === "Over" || lean === "Under" ? lean.toUpperCase() : lean} strong />
+          {!manualProp ? (
+            <MetricIf label="Playability" value={Number.isFinite(Number(prop.playabilityScore)) ? `${Math.round(Number(prop.playabilityScore))}/100` : null} />
+          ) : null}
         </div>
 
-        <div style={styles.explanationBlock}>
-          <strong>Why this pick</strong>
-          <p style={{ ...styles.compactFlags, margin: "4px 0 0" }}>{whyText}</p>
-          <p style={{ ...styles.compactFlags, margin: "4px 0 0", color: "#94a3b8" }}>{riskExplanation(prop)}</p>
+        <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
+          <strong style={{ fontSize: "11px" }}>Why this pick</strong>
+          <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "11px", lineHeight: 1.35 }}>{whyText}</p>
+          {!manualProp ? (
+            <p style={{ ...styles.compactFlags, margin: "3px 0 0", color: "#94a3b8", fontSize: "10px" }}>{riskExplanation(prop)}</p>
+          ) : null}
         </div>
 
         {(historical.last10.sample > 0 || historical.last20.sample > 0) && (

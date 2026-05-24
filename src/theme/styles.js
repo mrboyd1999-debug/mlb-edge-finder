@@ -588,6 +588,7 @@ export const styles = {
   dataBadgePartial: { color: "#422006", background: "#fde68a", borderColor: "#ca8a04" },
   dataBadgeFallback: { color: "#431407", background: "#fdba74", borderColor: "#ea580c" },
   dataBadgeWeak: { color: "#450a0a", background: "#fca5a5", borderColor: "#ef4444" },
+  dataBadgeInfo: { color: "#042f2e", background: "#99f6e4", borderColor: "#0d9488" },
   playerImageWrap: {
     flex: "0 0 36px",
     width: "36px",
@@ -1078,6 +1079,7 @@ export function dataBadgeStyle(tone) {
     partial: styles.dataBadgePartial,
     fallback: styles.dataBadgeFallback,
     weak: styles.dataBadgeWeak,
+    info: styles.dataBadgeInfo,
   };
   return { ...styles.dataQualityBadge, ...(map[tone] || styles.dataBadgeWeak) };
 }

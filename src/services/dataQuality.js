@@ -1,6 +1,13 @@
 import { computeDataQualityFromEnrichment, hasVerifiedStats } from "./statEnrichment.js";
+import { isManualAnalyzerProp } from "../utils/manualPropBuilder.js";
 
 export function dataQualityBadge(prop = {}) {
+  if (isManualAnalyzerProp(prop)) {
+    return {
+      label: prop.scoringModeLabel || "Offline scoring mode",
+      tone: "info",
+    };
+  }
   const signal = prop.modelSignal || {};
   const projectionSource = prop.projectionSource || signal.projectionSource || "";
   const fallback = Boolean(prop.fallbackProfile || signal.fallbackProfile || prop.isDemoData);

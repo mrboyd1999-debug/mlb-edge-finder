@@ -8,6 +8,7 @@ import { dataBadgeStyle, styles, tierStyle } from "../theme/styles.js";
 import { isReadyToBet } from "../services/pickScoring.js";
 import { dynamicAcceptanceTier, getVolatilityLabel } from "../services/propQualityGates.js";
 import { riskAccentStyle } from "../utils/displayPropScoring.js";
+import { leanBadgeStyle, manualRiskBadgeStyle, normalizeManualPick } from "../utils/manualPropScoring.js";
 
 const DYNAMIC_TIER_STYLE = {
   SAFE: { border: "#22c55e", background: "#052e16", color: "#bbf7d0" },
@@ -67,7 +68,8 @@ function bettingLabelStyle(label) {
 
 function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, cardStyle, savedResult }) {
   const tier = confidenceTier(prop);
-  const lean = formatLeanSide(prop.bestPick || prop.side || "Watch");
+  const pickSide = normalizeManualPick(prop.bestPick || prop.side || prop.pick);
+  const lean = pickSide === "over" ? "Over" : pickSide === "under" ? "Under" : formatLeanSide(prop.bestPick || prop.side || "Watch");
   const researchOnly = Boolean(prop.displayResearchOnly) || /research only/i.test(String(prop.bettingLabel || ""));
   const playable = Boolean(prop.isDisplayPlayable) && !researchOnly;
   const ready = playable && (Boolean(prop.isQualificationAccepted) || isReadyToBet(prop));
@@ -116,6 +118,8 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
       ? prop.calibratedConfidence
       : prop.confidenceScore ?? prop.confidence ?? null;
   const edgeDisplay = Number.isFinite(Number(prop.edge)) ? formatNumber(prop.edge) : null;
+  const hitChanceDisplay = Number.isFinite(Number(prop.impliedHitChance)) ? `${Math.round(Number(prop.impliedHitChance))}%` : null;
+  const volatilityDisplay = prop.volatilityLabel || null;
   const riskShort = (() => {
     const text = String(prop.riskLevel || "").toUpperCase();
     if (text.includes("LOW")) return "LOW";
@@ -217,17 +221,28 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
                 </span>
               ) : null}
               {edgeDisplay != null ? (
-                <span style={{ ...styles.scoreBadge, borderColor: "#1d4ed8", color: "#93c5fd" }}>
-                  EDGE {edgeDisplay}
+                <span
+                  style={{
+                    ...styles.scoreBadge,
+                    borderColor: Number(prop.edge) >= 0 ? "#1d4ed8" : "#991b1b",
+                    color: Number(prop.edge) >= 0 ? "#93c5fd" : "#fca5a5",
+                  }}
+                >
+                  EDGE {Number(prop.edge) > 0 ? "+" : ""}{edgeDisplay}
                 </span>
               ) : null}
-              {lean && lean !== "Watch" ? (
-                <span style={{ ...styles.scoreBadge, borderColor: "#6d28d9", color: "#ddd6fe" }}>
+              {lean === "Over" || lean === "Under" ? (
+                <span style={{ ...styles.scoreBadge, ...leanBadgeStyle(lean) }}>
                   {lean.toUpperCase()}
                 </span>
               ) : null}
+              {hitChanceDisplay ? (
+                <span style={{ ...styles.scoreBadge, borderColor: "#155e75", color: "#a5f3fc" }}>
+                  HIT {hitChanceDisplay}
+                </span>
+              ) : null}
               {riskShort ? (
-                <span style={{ ...styles.scoreBadge, borderColor: riskShort === "LOW" ? "#166534" : riskShort === "HIGH" ? "#991b1b" : "#854d0e", color: riskShort === "LOW" ? "#86efac" : riskShort === "HIGH" ? "#fca5a5" : "#fde68a" }}>
+                <span style={{ ...styles.scoreBadge, ...manualRiskBadgeStyle(prop.riskLevel) }}>
                   RISK {riskShort}
                 </span>
               ) : null}

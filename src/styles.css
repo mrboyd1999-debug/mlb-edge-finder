@@ -453,29 +453,48 @@ body,
   }
 
   .pick-detail-modal {
-    max-height: 84vh !important;
-    padding: 8px 10px !important;
+    max-height: 80vh !important;
+    padding: 6px 8px !important;
   }
 
   .pick-detail-modal-sticky {
     position: sticky;
     top: 0;
     z-index: 2;
-    padding-bottom: 4px !important;
-    margin-bottom: 4px !important;
+    padding-bottom: 3px !important;
+    margin-bottom: 3px !important;
   }
 
   .pick-detail-modal .value-tag,
   .pick-detail-modal [style*="valueTag"] {
-    padding: 2px 5px !important;
-    font-size: 9px !important;
+    padding: 1px 4px !important;
+    font-size: 8px !important;
+  }
+
+  .pick-detail-modal .score-badge,
+  .pick-detail-modal [style*="scoreBadge"] {
+    font-size: 8px !important;
+    padding: 1px 4px !important;
   }
 
   .pick-detail-modal .comparison-box,
   .pick-detail-modal [style*="comparisonBox"] {
-    padding: 4px 6px !important;
-    margin-top: 4px !important;
-    font-size: 10px !important;
+    padding: 3px 5px !important;
+    margin-top: 3px !important;
+    font-size: 9px !important;
+  }
+
+  .pick-detail-modal [style*="explanationBlock"] {
+    padding: 5px 6px !important;
+    margin-bottom: 3px !important;
+  }
+
+  .pick-detail-modal [style*="metricLabel"] {
+    font-size: 8px !important;
+  }
+
+  .pick-detail-modal [style*="metricValue"] {
+    font-size: 11px !important;
   }
 
   .pick-detail-modal .modal-grid,
