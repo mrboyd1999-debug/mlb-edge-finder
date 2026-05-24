@@ -1,11 +1,13 @@
 /** Provider health — merge probe results with actual parsed feed data. */
 
 import { getOddsApiKey } from "../config/apiConfig.js";
-import { ENRICHMENT_TIMEOUT_MESSAGE, isTimeoutPreview } from "../utils/apiTimeout.js";
+import { ENRICHMENT_TIMEOUT_MESSAGE } from "../utils/apiTimeout.js";
+import { SPORTSDATA_CONNECTED_VIA_PROXY } from "./sportsDataService.js";
 import { CONNECTION_STATUS } from "./apiConnectionTest.js";
 
 export const PROVIDER_UI_STATUS = {
   CONNECTED: "Connected",
+  CONNECTED_VIA_PROXY: SPORTSDATA_CONNECTED_VIA_PROXY,
   LIVE: "Live",
   CACHED: "Cached",
   KEY_SAVED: "Key Saved",
@@ -53,7 +55,7 @@ function resolveSportsDataSettingsStatus(probe = {}, feed = {}) {
   }
   if (probe.corsBlocked) {
     return {
-      settingsStatus: "Failed",
+      settingsStatus: PROVIDER_UI_STATUS.PROXY_REQUIRED,
       settingsLine: "Browser blocked direct request — backend proxy recommended.",
       keySaved: true,
       showError: true,
@@ -87,23 +89,27 @@ function resolveSportsDataSettingsStatus(probe = {}, feed = {}) {
       debugLine: "",
     };
   }
-  const apiConnected = probe.ok || probe.settingsLine === "Connected";
-  if (apiConnected && !feed.usedOnBoard) {
+  const connectedViaProxy =
+    probe.ok ||
+    probe.proxied ||
+    probe.settingsLine === SPORTSDATA_CONNECTED_VIA_PROXY ||
+    probe.settingsStatus === SPORTSDATA_CONNECTED_VIA_PROXY;
+  if (connectedViaProxy && !feed.usedOnBoard) {
     return {
-      settingsStatus: PROVIDER_UI_STATUS.CONNECTED,
-      settingsLine: "Connected — not used for current board",
+      settingsStatus: PROVIDER_UI_STATUS.CONNECTED_VIA_PROXY,
+      settingsLine: `${SPORTSDATA_CONNECTED_VIA_PROXY} — not used for current board`,
       keySaved: true,
       showError: false,
-      debugLine: probe.debugLine || "SportsDataIO endpoint tested successfully.",
+      debugLine: probe.debugLine || "SportsDataIO MLB status probe succeeded via backend proxy.",
     };
   }
-  if (apiConnected) {
+  if (connectedViaProxy) {
     return {
-      settingsStatus: PROVIDER_UI_STATUS.CONNECTED,
-      settingsLine: PROVIDER_UI_STATUS.CONNECTED,
+      settingsStatus: PROVIDER_UI_STATUS.CONNECTED_VIA_PROXY,
+      settingsLine: SPORTSDATA_CONNECTED_VIA_PROXY,
       keySaved: true,
       showError: false,
-      debugLine: probe.debugLine || "SportsDataIO endpoint tested successfully.",
+      debugLine: probe.debugLine || "SportsDataIO MLB status probe succeeded via backend proxy.",
     };
   }
   return {
@@ -315,6 +321,18 @@ export function mergeConnectionReportWithFeeds(report = {}, feedContext = {}) {
 export function providerStatusStyle(status = "") {
   const key = String(status || "").toUpperCase();
   if (key.includes("CONNECTED")) {
+    return {
+      display: "inline-flex",
+      alignItems: "center",
+      padding: "2px 8px",
+      borderRadius: 999,
+      fontSize: 11,
+      fontWeight: 700,
+      background: "rgba(34,197,94,0.18)",
+      color: "#86efac",
+    };
+  }
+  if (key.includes("PROXY")) {
     return {
       display: "inline-flex",
       alignItems: "center",

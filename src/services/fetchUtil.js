@@ -312,7 +312,7 @@ export async function cachedFetch(url, init = {}, ttlMsOrOptions = DEFAULT_TTL_M
   return resilientFetch(url, init, { source: options.source || init.source || "API", ttlMs, ...options });
 }
 
-export function buildNetworkErrorResult(sourceName, message, timeoutMs = DEFAULT_TIMEOUT_MS) {
+export function buildNetworkErrorResult(sourceName, message, timeoutMs = getApiTimeoutMs()) {
   const error =
     message?.includes("timed out") || message?.includes("AbortError")
       ? `Request timed out after ${timeoutMs}ms`
@@ -342,7 +342,7 @@ export async function fetchJson(url, init = {}, options = {}) {
 /** Like fetchJson but never throws — returns structured error payload on network/parse failure. */
 export async function fetchJsonSafe(url, init = {}, options = {}) {
   const source = options.source || "API";
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? getApiTimeoutMs({ enrichment: Boolean(options.enrichment) });
   try {
     return await safeJsonFetch(url, source, init, { ...options, timeoutMs, maxRetries: options.maxRetries ?? 1 });
   } catch (error) {
@@ -352,7 +352,7 @@ export async function fetchJsonSafe(url, init = {}, options = {}) {
 
 export async function safeJsonFetch(url, sourceName = "API", init = {}, options = {}) {
   const source = options.source || sourceName || "API";
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? getApiTimeoutMs({ enrichment: Boolean(options.enrichment) });
   let response;
   try {
     response = await cachedFetch(url, init, { ...options, timeoutMs, ttlMs: options.ttlMs ?? DEFAULT_TTL_MS });

@@ -5,6 +5,11 @@ import {
   isAbortOrTimeoutError,
   isTimeoutPreview,
 } from "../utils/apiTimeout.js";
+import {
+  probeSportsDataMlbStatusProxy,
+  SPORTSDATA_CONNECTED_VIA_PROXY,
+  SPORTSDATA_MLB_STATUS_ROUTE,
+} from "./sportsDataService.js";
 import { getSourceState, isSourceInCooldown, SOURCE_IDS } from "./sourceRateLimit.js";
 import { readCachedBoard, readVerifiedCacheBoard } from "./pickStore.js";
 import { buildFeedHealthContext, mergeConnectionReportWithFeeds } from "./providerHealth.js";
@@ -258,8 +263,6 @@ async function testOddsApi() {
   };
 }
 
-const SPORTSDATA_HEALTH_PATH = "/scores/json/AreAnyGamesInProgress";
-const SPORTSDATA_UPSTREAM_BASE = "https://api.sportsdata.io/v3/mlb";
 
 function redactSportsDataUrl(url = "") {
   return String(url).replace(/key=[^&]+/gi, "key=[REDACTED]");
@@ -271,111 +274,30 @@ function isSportsDataHealthPayload(payload) {
   return Boolean(payload && typeof payload === "object");
 }
 
-function isLikelyCorsError(error) {
-  const message = String(error?.message || error || "");
-  return /failed to fetch|cors|networkerror|network error|load failed/i.test(message);
-}
-
-async function probeSportsDataHealth({ apiKey, useDirect = false } = {}) {
+async function probeSportsDataHealth({ apiKey } = {}) {
+  void apiKey;
   const startedAt = Date.now();
-  const probeTimeoutMs = getApiTimeoutMs({ enrichment: true });
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), probeTimeoutMs);
+  const probe = await probeSportsDataMlbStatusProxy();
+  const healthOk = Boolean(probe.ok && isSportsDataHealthPayload(probe.payload ?? probe.data));
 
-  const query = apiKey ? `?key=${encodeURIComponent(apiKey)}` : "";
-  const route = useDirect
-    ? `${SPORTSDATA_UPSTREAM_BASE}${SPORTSDATA_HEALTH_PATH}${query}`
-    : `/api/sportsdata${SPORTSDATA_HEALTH_PATH}${query}`;
-
-  const headers = {
-    accept: "application/json",
-    ...(apiKey ? { "Ocp-Apim-Subscription-Key": apiKey } : {}),
+  return {
+    ok: healthOk,
+    status: probe.responseCode || (healthOk ? 200 : 502),
+    preview: probe.message || probe.preview || "",
+    durationMs: Date.now() - startedAt,
+    payload: probe.payload ?? probe.data,
+    rateLimited: Boolean(probe.rateLimited),
+    unauthorized: Boolean(probe.unauthorized),
+    timedOut: Boolean(probe.timedOut),
+    corsBlocked: false,
+    networkError: !healthOk && !probe.timedOut && !probe.unauthorized,
+    url: SPORTSDATA_MLB_STATUS_ROUTE,
+    usedDirect: false,
+    proxied: true,
   };
-
-  console.log("[SportsDataIO Test] Full request URL:", redactSportsDataUrl(route));
-  console.log("[SportsDataIO Test] Auth: header + query param", apiKey ? "present" : "missing");
-
-  try {
-    const response = await fetch(route, {
-      cache: "no-store",
-      signal: controller.signal,
-      headers,
-    });
-    const text = await response.text();
-    const trimmed = text.trim();
-    console.log("[SportsDataIO Test] Response status:", response.status);
-    console.log("[SportsDataIO Test] Response text:", trimmed.slice(0, 500) || "(empty)");
-
-    let payload = null;
-    try {
-      payload = trimmed ? JSON.parse(trimmed) : null;
-    } catch {
-      payload = null;
-    }
-
-    const unauthorized = response.status === 401 || response.status === 403;
-    const rateLimited = response.status === 429;
-    const ok = response.status === 200 && isSportsDataHealthPayload(payload);
-
-    return {
-      ok,
-      status: response.status,
-      preview: trimmed.slice(0, 160).replace(/\s+/g, " ").trim() || "(empty)",
-      durationMs: Date.now() - startedAt,
-      payload,
-      rateLimited,
-      unauthorized,
-      timedOut: false,
-      corsBlocked: false,
-      networkError: false,
-      url: route,
-      usedDirect: useDirect,
-    };
-  } catch (error) {
-    const message = error?.message || "Failed to fetch";
-    const timedOut = error?.name === "AbortError" || /abort/i.test(message);
-    const corsBlocked = !timedOut && isLikelyCorsError(error);
-
-    if (timedOut) {
-      console.error(`[SportsDataIO Test] Timeout reason: aborted after ${probeTimeoutMs}ms`);
-    } else if (corsBlocked) {
-      console.error("[SportsDataIO Test] CORS blocked direct request:", message);
-    } else {
-      console.error("[SportsDataIO Test] Network error:", message);
-    }
-
-    return {
-      ok: false,
-      status: timedOut ? "timeout" : corsBlocked ? "cors" : "?",
-      preview: timedOut
-        ? ENRICHMENT_TIMEOUT_MESSAGE
-        : corsBlocked
-          ? "Browser blocked direct request — backend proxy recommended."
-          : message,
-      durationMs: Date.now() - startedAt,
-      payload: null,
-      rateLimited: false,
-      unauthorized: false,
-      timedOut,
-      corsBlocked,
-      networkError: !timedOut && !corsBlocked,
-      url: route,
-      usedDirect: useDirect,
-    };
-  } finally {
-    window.clearTimeout(timer);
-  }
 }
 
 function classifySportsDataProbe(probe = {}) {
-  if (probe.corsBlocked) {
-    return {
-      settingsLine: "Browser blocked direct request — backend proxy recommended.",
-      status: CONNECTION_STATUS.FAILED,
-      message: probe.preview,
-      showError: true,
-    };
-  }
   if (probe.timedOut) {
     return {
       settingsLine: ENRICHMENT_TIMEOUT_MESSAGE,
@@ -403,15 +325,17 @@ function classifySportsDataProbe(probe = {}) {
   }
   if (probe.ok) {
     return {
-      settingsLine: "Connected",
+      settingsLine: SPORTSDATA_CONNECTED_VIA_PROXY,
+      settingsStatus: SPORTSDATA_CONNECTED_VIA_PROXY,
       status: CONNECTION_STATUS.LIVE,
-      message: CONNECTION_MESSAGES.CONNECTED,
+      message: SPORTSDATA_CONNECTED_VIA_PROXY,
       showError: false,
-      debugLine: "SportsDataIO endpoint tested successfully.",
+      debugLine: "SportsDataIO MLB status probe succeeded via backend proxy.",
+      proxied: true,
     };
   }
   return {
-    settingsLine: "Failed",
+    settingsLine: probe.preview || "Failed",
     status: CONNECTION_STATUS.FAILED,
     message: probe.preview || CONNECTION_MESSAGES.FAILED,
     showError: true,
@@ -425,7 +349,7 @@ async function testSportsDataProvider() {
     console.log("[SportsDataIO Test] Status: skipped — no key saved");
     return {
       provider: "SportsDataIO",
-      route: `${SPORTSDATA_UPSTREAM_BASE}${SPORTSDATA_HEALTH_PATH}`,
+      route: SPORTSDATA_MLB_STATUS_ROUTE,
       keyConfigured: false,
       status: CONNECTION_STATUS.NOT_CONFIGURED,
       message: CONNECTION_MESSAGES.NOT_CONFIGURED,
@@ -436,29 +360,27 @@ async function testSportsDataProvider() {
     };
   }
 
-  let probe = await probeSportsDataHealth({ apiKey: sportsDataKey, useDirect: false });
-
-  if (!probe.ok && (probe.timedOut || probe.networkError) && !probe.corsBlocked) {
-    const directProbe = await probeSportsDataHealth({ apiKey: sportsDataKey, useDirect: true });
-    if (directProbe.corsBlocked) {
-      probe = { ...probe, corsBlocked: true, preview: directProbe.preview };
-    }
-  }
-
+  const probe = await probeSportsDataHealth({ apiKey: sportsDataKey });
   const classified = classifySportsDataProbe(probe);
   const state = getSourceState(SOURCE_IDS.SPORTSDATA);
 
+  console.log("[SportsDataIO Test] Proxy route:", SPORTSDATA_MLB_STATUS_ROUTE);
+  console.log("[SportsDataIO Test] Response status:", probe.status);
+  console.log("[SportsDataIO Test] Proxied:", probe.proxied);
+  console.log("[SportsDataIO Test] Response text:", redactSportsDataUrl(String(probe.preview || "")));
+
   return {
     provider: "SportsDataIO",
-    route: `${SPORTSDATA_UPSTREAM_BASE}${SPORTSDATA_HEALTH_PATH}`,
+    route: SPORTSDATA_MLB_STATUS_ROUTE,
     keyConfigured: true,
     keySaved: true,
     settingsLine: classified.settingsLine,
-    settingsStatus: classified.settingsLine,
+    settingsStatus: classified.settingsStatus || classified.settingsLine,
     showError: classified.showError,
     debugLine: classified.debugLine || "",
     status: classified.status,
     message: classified.message,
+    proxied: true,
     ...probe,
     lastSuccessfulFetchAt: probe.ok ? new Date().toISOString() : state.lastSuccessfulFetchAt || "",
     requestCount: state.requestCount || 0,

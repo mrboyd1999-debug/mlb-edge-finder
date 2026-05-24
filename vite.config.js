@@ -8,11 +8,12 @@ import {
   savePrizePicksPayload,
   withPrizePicksServerLock,
 } from "./api/lib/prizepicksServerCache.js";
+import {
+  fetchSportsDataUpstream,
+  probeSportsDataMlbStatus,
+  resolveSportsDataApiKeyFromRequest,
+} from "./api/lib/sportsDataServer.js";
 
-const SPORTSDATA_API_KEY =
-  process.env.SPORTSDATA_API_KEY ||
-  process.env.VITE_SPORTSDATA_API_KEY ||
-  "";
 const API_FOOTBALL_KEY = process.env.API_FOOTBALL_KEY || process.env.VITE_API_FOOTBALL_KEY || "";
 const ODDS_API_KEY = process.env.ODDS_API_KEY || process.env.VITE_ODDS_API_KEY || "";
 
@@ -55,6 +56,7 @@ function dfsApiProxy() {
               routes: {
                 prizepicks: "/api/prizepicks",
                 underdog: "/api/underdog",
+                sportsdataio: "/api/sportsdataio/mlb-status",
               },
               timestamp: new Date().toISOString(),
             });
@@ -76,15 +78,18 @@ function dfsApiProxy() {
             return;
           }
 
+          if (pathname === "/api/sportsdataio/mlb-status") {
+            await handleSportsDataMlbStatus(req, res);
+            return;
+          }
+
+          if (pathname.startsWith("/api/sportsdataio/")) {
+            await proxySportsDataIoPath(req, res);
+            return;
+          }
+
           if (pathname.startsWith("/api/sportsdata")) {
-            await proxyUpstream(
-              req,
-              res,
-              "https://api.sportsdata.io/v3/mlb",
-              (p) => p.replace(/^\/api\/sportsdata/, ""),
-              sportsDataHeaders(req.url || ""),
-              "SportsDataIO"
-            );
+            await proxySportsDataIoPath(req, res, pathname.replace(/^\/api\/sportsdata/, "/api/sportsdataio"));
             return;
           }
 
@@ -121,6 +126,7 @@ function isApiRoute(pathname) {
     pathname.startsWith("/api/prizepicks") ||
     pathname.startsWith("/api/underdog") ||
     pathname.startsWith("/api/sportsbookOdds") ||
+    pathname.startsWith("/api/sportsdataio") ||
     pathname.startsWith("/api/sportsdata") ||
     pathname.startsWith("/api/api-football")
   );
@@ -427,26 +433,84 @@ function underdogHeaders() {
   };
 }
 
-function sportsDataHeaders(requestUrl = "") {
-  const headers = {
-    accept: "application/json",
-    ...(SPORTSDATA_API_KEY ? { "Ocp-Apim-Subscription-Key": SPORTSDATA_API_KEY } : {}),
-  };
-  try {
-    const parsed = new URL(requestUrl, "http://localhost");
-    const keyFromQuery = parsed.searchParams.get("key");
-    if (keyFromQuery) {
-      headers["Ocp-Apim-Subscription-Key"] = keyFromQuery;
-    }
-  } catch {
-    // ignore malformed request URLs
-  }
-  return headers;
-}
-
 function apiFootballHeaders() {
   return {
     accept: "application/json",
     ...(API_FOOTBALL_KEY ? { "x-apisports-key": API_FOOTBALL_KEY } : {}),
   };
+}
+
+async function handleSportsDataMlbStatus(req, res) {
+  const startedAt = Date.now();
+  const apiKey = resolveSportsDataApiKeyFromRequest(req);
+  if (!apiKey) {
+    sendJson(res, 200, {
+      ok: false,
+      success: false,
+      status: "not_configured",
+      responseCode: 401,
+      proxied: true,
+      data: null,
+      message: "SportsDataIO key not configured",
+      durationMs: Date.now() - startedAt,
+      route: "/api/sportsdataio/mlb-status",
+    });
+    return;
+  }
+
+  const result = await probeSportsDataMlbStatus(apiKey);
+  sendJson(res, 200, {
+    ...result,
+    durationMs: Date.now() - startedAt,
+    route: "/api/sportsdataio/mlb-status",
+  });
+}
+
+async function proxySportsDataIoPath(req, res, rewrittenPath = "") {
+  const fullUrl = rewrittenPath || req.url || "";
+  const parsed = new URL(fullUrl, "http://localhost");
+  const subPath = parsed.pathname.replace(/^\/api\/sportsdataio/, "") || "/";
+  const apiKey = resolveSportsDataApiKeyFromRequest(req);
+
+  if (!apiKey) {
+    sendJson(res, 200, {
+      ok: false,
+      success: false,
+      status: "not_configured",
+      responseCode: 401,
+      proxied: true,
+      data: null,
+      message: "SportsDataIO key not configured",
+    });
+    return;
+  }
+
+  const result = await fetchSportsDataUpstream(subPath, { apiKey });
+  console.info("[DFS proxy]", {
+    source: "SportsDataIO",
+    requestUrl: req.url,
+    subPath,
+    status: result.responseCode,
+    proxied: true,
+    preview: result.text?.slice(0, 200) || "",
+  });
+
+  if (result.ok) {
+    res.statusCode = 200;
+    res.setHeader("content-type", "application/json; charset=utf-8");
+    res.setHeader("cache-control", "no-store");
+    res.end(result.text || JSON.stringify(result.data));
+    return;
+  }
+
+  sendJson(res, result.responseCode >= 400 && result.responseCode < 600 ? result.responseCode : 502, {
+    ok: false,
+    success: false,
+    status: result.status,
+    responseCode: result.responseCode,
+    proxied: true,
+    data: null,
+    message: result.message,
+    preview: result.text?.slice(0, 200) || "",
+  });
 }

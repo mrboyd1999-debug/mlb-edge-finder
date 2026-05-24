@@ -113,8 +113,10 @@ export default function SettingsPanel({
       const sdRow = (report.results || [])[0];
       setNotice(
         sdRow?.debugLine ||
-          (sdRow?.settingsLine === "Connected"
-            ? "SportsDataIO endpoint tested successfully."
+          (sdRow?.settingsLine === "Connected" || sdRow?.settingsLine === "Connected via Proxy"
+            ? sdRow.settingsLine === "Connected via Proxy"
+              ? "SportsDataIO connected via backend proxy."
+              : "SportsDataIO endpoint tested successfully."
             : `SportsDataIO: ${sdRow?.settingsLine || "test complete"} — see console for details.`)
       );
     } catch (error) {

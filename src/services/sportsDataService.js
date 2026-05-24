@@ -1,23 +1,13 @@
 /**
- * SportsDataIO MLB stats client.
+ * SportsDataIO MLB stats client — proxy-only (no direct browser calls to api.sportsdata.io).
  *
- * Routes through the local `/api/sportsdata` proxy which forwards to
- * `https://api.sportsdata.io/v3/mlb/*` with the
- * `Ocp-Apim-Subscription-Key` header sourced from `VITE_SPORTSDATA_API_KEY`.
+ * All requests go through `/api/sportsdataio/*` with the saved key sent as
+ * `X-SportsData-Api-Key` to the local backend proxy. The server attaches
+ * `Ocp-Apim-Subscription-Key` when calling SportsDataIO upstream.
  *
- * Every endpoint short-circuits to a safe empty response (no throw) when the
- * key is missing or the upstream fails — the accepted-prop pipeline keeps
- * working on PrizePicks + Odds API alone if SportsDataIO is unavailable.
+ * Health probe: `GET /api/sportsdataio/mlb-status`
  *
- * Endpoints implemented:
- *   - Teams                     /scores/json/Teams
- *   - Games by date             /scores/json/GamesByDate/{date}
- *   - Player game projections   /projections/json/PlayerGameProjectionStatsByDate/{date}
- *   - Player game stats         /stats/json/PlayerGameStatsByDate/{date}
- *   - Player season stats       /stats/json/PlayerSeasonStats/{season}
- *   - Pitcher splits            /stats/json/PlayerSeasonSplitStatsByPlayerID/{season}/{playerId}
- *   - Batting averages          derived from PlayerSeasonStats
- *   - Fantasy projections       PlayerGameProjectionStatsByDate (FantasyPointsDraftKings/FanDuel/Yahoo)
+ * Enrichment failures never block PrizePicks / Underdog props.
  */
 
 import { getSportsDataApiKey } from "../config/apiConfig.js";
@@ -35,12 +25,24 @@ import {
   withSourceRetryQueue,
 } from "./sourceRateLimit.js";
 
-const SPORTSDATA_BASE = "/api/sportsdata";
+export const SPORTSDATA_PROXY_HEADER = "X-SportsData-Api-Key";
+export const SPORTSDATA_MLB_STATUS_ROUTE = "/api/sportsdataio/mlb-status";
+const SPORTSDATA_BASE = "/api/sportsdataio";
 const SPORTSDATA_CACHE_PREFIX = "dfs-sportsdata-cache-v1";
 const SPORTSDATA_CACHE_MAX_MS = 60 * 60 * 1000;
 
 export const SPORTSDATA_UNAVAILABLE_MESSAGE =
   "SportsDataIO temporarily unavailable. Falling back to PrizePicks + Odds API.";
+
+export const SPORTSDATA_CONNECTED_VIA_PROXY = "Connected via Proxy";
+
+function sportsDataProxyHeaders() {
+  const apiKey = getSportsDataApiKey();
+  return {
+    accept: "application/json",
+    ...(apiKey ? { [SPORTSDATA_PROXY_HEADER]: apiKey } : {}),
+  };
+}
 
 function isoDate(date = new Date()) {
   return new Date(date).toISOString().slice(0, 10).replace(/-/g, "-");
@@ -50,11 +52,8 @@ function currentSeason(date = new Date()) {
   return new Date(date).getFullYear();
 }
 
-function buildUrl(path, params = {}) {
+function buildUrl(path) {
   const url = new URL(`${SPORTSDATA_BASE}${path.startsWith("/") ? "" : "/"}${path}`, window.location.origin);
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value != null && value !== "") url.searchParams.set(key, value);
-  });
   return url;
 }
 
@@ -124,7 +123,7 @@ async function fetchSportsDataEndpoint(cacheKey, url) {
       async () => {
         const result = await fetchJsonSafe(
           url.toString(),
-          { headers: { accept: "application/json" } },
+          { headers: sportsDataProxyHeaders() },
           {
             source: "SportsDataIO",
             ttlMs: getCacheTtlMs(),
@@ -159,10 +158,11 @@ async function fetchSportsDataEndpoint(cacheKey, url) {
           warnings: [],
           lastSuccessfulFetchAt: new Date().toISOString(),
           rateLimited: false,
+          proxied: true,
         };
       },
       {
-        maxAttempts: 3,
+        maxAttempts: 2,
         isRetryable: (res, err) => {
           if (err) return true;
           if (!res || res.cached) return false;
@@ -173,6 +173,59 @@ async function fetchSportsDataEndpoint(cacheKey, url) {
       }
     );
   });
+}
+
+/** Proxy health probe — never calls SportsDataIO directly from the browser. */
+export async function probeSportsDataMlbStatusProxy() {
+  const apiKey = getSportsDataApiKey();
+  if (!apiKey) {
+    return {
+      ok: false,
+      success: false,
+      proxied: true,
+      responseCode: 401,
+      status: "not_configured",
+      message: "SportsDataIO key not configured",
+      data: null,
+      keyConfigured: false,
+    };
+  }
+
+  const result = await fetchJsonSafe(
+    SPORTSDATA_MLB_STATUS_ROUTE,
+    { headers: sportsDataProxyHeaders(), cache: "no-store" },
+    {
+      source: "SportsDataIO status",
+      ttlMs: 0,
+      timeoutMs: getApiTimeoutMs({ enrichment: true }),
+      maxRetries: ENRICHMENT_MAX_RETRIES,
+      skip429Retry: true,
+      enrichment: true,
+    }
+  );
+
+  const envelope = result.data && typeof result.data === "object" && !Array.isArray(result.data) ? result.data : null;
+  const payload = envelope?.data ?? null;
+  const responseCode = Number(envelope?.responseCode ?? result.status ?? 0);
+  const success = Boolean(envelope?.success ?? envelope?.ok);
+  const healthOk = success && responseCode === 200 && (payload === true || payload === false || payload != null);
+
+  return {
+    ok: healthOk,
+    success: healthOk,
+    proxied: true,
+    responseCode,
+    status: envelope?.status || (healthOk ? "connected" : "failed"),
+    message: envelope?.message || (healthOk ? SPORTSDATA_CONNECTED_VIA_PROXY : result.error || SPORTSDATA_UNAVAILABLE_MESSAGE),
+    data: payload,
+    payload,
+    timedOut: Boolean(envelope?.timedOut),
+    unauthorized: Boolean(envelope?.unauthorized),
+    rateLimited: Boolean(envelope?.rateLimited),
+    durationMs: envelope?.durationMs || 0,
+    keyConfigured: true,
+    preview: envelope?.message || result.error || "",
+  };
 }
 
 // --- Public endpoint helpers ---------------------------------------------
@@ -204,17 +257,11 @@ export async function fetchFantasyProjections(date = new Date()) {
 
 export async function fetchPlayerGameStats(date = new Date()) {
   const day = isoDate(date);
-  return fetchSportsDataEndpoint(
-    `game-stats-${day}`,
-    buildUrl(`/stats/json/PlayerGameStatsByDate/${day}`)
-  );
+  return fetchSportsDataEndpoint(`game-stats-${day}`, buildUrl(`/stats/json/PlayerGameStatsByDate/${day}`));
 }
 
 export async function fetchPlayerSeasonStats(season = currentSeason()) {
-  return fetchSportsDataEndpoint(
-    `season-stats-${season}`,
-    buildUrl(`/stats/json/PlayerSeasonStats/${season}`)
-  );
+  return fetchSportsDataEndpoint(`season-stats-${season}`, buildUrl(`/stats/json/PlayerSeasonStats/${season}`));
 }
 
 export async function fetchBattingAverages(season = currentSeason()) {
@@ -256,5 +303,6 @@ export async function fetchSlateSnapshot({ date = new Date(), season = currentSe
     seasonStats,
     cached: games.cached || projections.cached || seasonStats.cached,
     warnings: [...(games.warnings || []), ...(projections.warnings || []), ...(seasonStats.warnings || [])],
+    proxied: true,
   };
 }

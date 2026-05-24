@@ -9,6 +9,7 @@ import {
 } from "./statEnrichment.js";
 import { MLB_ONLY_MODE, shouldRunNonMlbStatFetch } from "../utils/mlbOnlyMode.js";
 import { canonicalStatType } from "../utils/marketNormalization.js";
+import { enrichMlbProfilesFromSportsData } from "./mlbSportsDataEnrichment.js";
 
 export { statProfileKey, findStatProfile } from "../utils/playerNames.js";
 
@@ -92,8 +93,11 @@ async function fetchMlbStats(props) {
     }
   });
 
+  const sportsDataEnrichment = await enrichMlbProfilesFromSportsData(profiles, supportedProps);
+  const enrichedProfiles = sportsDataEnrichment.profiles || profiles;
+
   supportedProps.forEach((prop) => {
-    const profile = profiles.get(normalizePlayerName(prop.playerName));
+    const profile = enrichedProfiles.get(normalizePlayerName(prop.playerName));
     let nextProfile = profile
       ? profileForMlbProp(profile, prop.statType, prop.line)
       : sparseProfileForProp(prop, "MLB player logs unavailable");
@@ -120,7 +124,10 @@ async function fetchMlbStats(props) {
   const failed = settled.some((result) => result.status === "rejected");
   return {
     stats,
-    warnings: failed ? ["Some MLB player stats failed; missing players left without verified stats."] : [],
+    warnings: unique([
+      ...(failed ? ["Some MLB player stats failed; missing players left without verified stats."] : []),
+      ...(sportsDataEnrichment.warnings || []),
+    ]).filter(Boolean),
   };
 }
 
