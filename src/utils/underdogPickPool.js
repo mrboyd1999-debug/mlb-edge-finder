@@ -15,11 +15,11 @@ import { UNDERDOG_PARSER_MISMATCH_MESSAGE } from "./parseUnderdogProp.js";
 import {
   countUnderdogPropsBySport,
   filterUnderdogPropsBySport,
-  inferMlbUnderdogProp,
+  isNbaUnderdogProp,
   MLB_SPORT_MISMAP_MESSAGE,
   resolvePropSportLabel,
 } from "./underdogSportDetection.js";
-import { isMlbUnderdogStreakRow } from "./underdogRowCard.js";
+import { isMlbUnderdogStreakRow, propMatchesStatTab } from "./underdogRowCard.js";
 
 function finiteOr(value, fallback = 0) {
   const num = Number(value);
@@ -27,9 +27,7 @@ function finiteOr(value, fallback = 0) {
 }
 
 function shapeUnderdogProp(prop = {}) {
-  const sport =
-    resolvePropSportLabel(prop) ||
-    (inferMlbUnderdogProp(prop) ? "MLB" : prop.sport || prop.league || "");
+  const sport = resolvePropSportLabel(prop) || prop.sport || prop.league || "";
   return normalizePropsWithSource([
     normalizePropShape(
       {
@@ -123,12 +121,40 @@ export function mergeUnderdogIntoFinderPool(displayProps = [], parsedUnderdogPro
   return merged;
 }
 
+export function auditUnderdogStreakFilter(props = [], { selectedSport = "MLB", selectedCategory = "all" } = {}) {
+  const ud = (props || []).filter((p) => p.normalizedSource === "underdog");
+  let rejectedWrongSport = 0;
+  let rejectedWrongCategory = 0;
+  let eligible = 0;
+
+  for (const prop of ud) {
+    const label = resolvePropSportLabel(prop);
+    if (selectedSport !== "all" && label !== selectedSport) {
+      rejectedWrongSport += 1;
+      continue;
+    }
+    if (selectedSport === "MLB" && isNbaUnderdogProp(prop)) {
+      rejectedWrongSport += 1;
+      continue;
+    }
+    if (selectedCategory && selectedCategory !== "all" && !propMatchesStatTab(prop, selectedCategory)) {
+      rejectedWrongCategory += 1;
+      continue;
+    }
+    eligible += 1;
+  }
+
+  return { eligible, rejectedWrongSport, rejectedWrongCategory, total: ud.length };
+}
+
 export function buildUnderdogDebugSnapshot({
   debugInfo = {},
   parsedUnderdogProps = [],
   underdogResult = null,
   rawProps = [],
   displayProps = [],
+  selectedSport = "MLB",
+  selectedCategory = "all",
 } = {}) {
   const udSource = debugInfo?.sources?.Underdog || {};
   const parserDiagnostics =
@@ -164,6 +190,7 @@ export function buildUnderdogDebugSnapshot({
   const sportCounts = countUnderdogPropsBySport(parsedPool);
   const mlbUdProps = mlbUnderdogProps(parsedPool);
   const streakEligible = filterMlbUnderdogStreakEligible(parsedPool);
+  const streakFilterAudit = auditUnderdogStreakFilter(parsedPool, { selectedSport, selectedCategory });
   const parserMismatch =
     Boolean(parserDiagnostics?.parserMismatch) || (rawUdCount > 0 && parsedUdCount === 0);
 
@@ -188,6 +215,11 @@ export function buildUnderdogDebugSnapshot({
     rawUdCount,
     parsedUdCount,
     mlbUdCount: mlbUdProps.length,
+    selectedSport,
+    selectedCategory,
+    eligibleUnderdogCount: streakFilterAudit.eligible,
+    rejectedWrongSport: streakFilterAudit.rejectedWrongSport,
+    rejectedWrongCategory: streakFilterAudit.rejectedWrongCategory,
     sportCounts,
     streakEligibleCount: streakEligible.length,
     parserDiagnostics,

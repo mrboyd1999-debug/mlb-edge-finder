@@ -13,7 +13,7 @@ const UNDER_PREFERRED_MARKETS = new Set([
   "fantasy",
 ]);
 
-const UNDER_PREFERENCE_BOOST = 6;
+const UNDER_PREFERENCE_BOOST = 8;
 const STRONG_OVER_EDGE = 1.25;
 
 function finiteOr(value, fallback = 0) {
@@ -92,7 +92,7 @@ export function readPropMultiplier(prop = {}) {
     return false;
   });
   const mult = Number(match?.multiplier ?? prop.multiplier ?? prop.payout ?? prop.payoutMultiplier);
-  return Number.isFinite(mult) && mult > 0 ? mult : null;
+  return Number.isFinite(mult) && mult > 0 && mult !== 1 ? mult : null;
 }
 
 export function readPropProbability(prop = {}) {

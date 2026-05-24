@@ -1686,6 +1686,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 export default function DFSPropsApp() {
   const [platform, setPlatform] = useState("all");
   const [sport, setSport] = useState(MLB_ONLY_MODE ? "MLB" : "all");
+  const [streakCategoryTab, setStreakCategoryTab] = useState("all");
   const [statType, setStatType] = useState("all");
   const [edgeFilter, setEdgeFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("allUpcoming");
@@ -2163,8 +2164,10 @@ export default function DFSPropsApp() {
         parsedUnderdogProps: debugInfo.parsedUnderdogProps || parsedUnderdogProps,
         rawProps: props,
         displayProps: scoredDisplayProps,
+        selectedSport: selectedBoardSport,
+        selectedCategory: streakCategoryTab,
       }),
-    [debugInfo, parsedUnderdogProps, props, scoredDisplayProps]
+    [debugInfo, parsedUnderdogProps, props, scoredDisplayProps, selectedBoardSport, streakCategoryTab]
   );
   const streakFinderProps = useMemo(() => {
     const merged = mergeUnderdogIntoFinderPool(
@@ -2984,6 +2987,8 @@ export default function DFSPropsApp() {
             hasMlbProps={mlbDisplayPropCount > 0}
             hasUnderdogProps={underdogStreakPropCount > 0}
             underdogEmptyMessage={underdogDebugSnapshot ? resolveUnderdogStreakEmptyMessage(underdogDebugSnapshot) : undefined}
+            streakCategoryTab={streakCategoryTab}
+            onStreakCategoryTabChange={setStreakCategoryTab}
             onSectionError={handleSectionRenderError}
           />
         </SectionErrorBoundary>

@@ -23,10 +23,10 @@ function SideButton({ label, multiplier, probability, active, onClick }) {
         {label}
       </span>
       <span className="underdog-side-multiplier" style={styles.underdogSideMultiplier}>
-        {formatUnderdogMultiplier(multiplier)}
+        Payout {formatUnderdogMultiplier(multiplier)}
       </span>
       <span className="underdog-side-prob" style={styles.underdogSideProb}>
-        {probability != null ? `${probability}%` : "—"}
+        Prob {probability != null ? `${probability}%` : "—"}
       </span>
     </button>
   );

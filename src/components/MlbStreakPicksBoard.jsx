@@ -15,8 +15,15 @@ function MlbStreakPicksBoard({
   hasUnderdogProps = false,
   emptyMessage = "",
   loading = false,
+  categoryTab,
+  onCategoryTabChange,
 }) {
-  const [activeTab, setActiveTab] = useState("all");
+  const [internalTab, setInternalTab] = useState("all");
+  const activeTab = categoryTab ?? internalTab;
+  const setActiveTab = (tabId) => {
+    onCategoryTabChange?.(tabId);
+    if (categoryTab == null) setInternalTab(tabId);
+  };
 
   const sourcePool = useMemo(
     () => filterUnderdogRowProps(underdogPool.length ? underdogPool : picks, { tabId: "all", sport: "MLB" }),

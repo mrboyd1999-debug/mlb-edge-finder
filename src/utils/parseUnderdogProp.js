@@ -4,7 +4,7 @@
  */
 
 import { withNormalizedSource } from "./normalizeSource.js";
-import { detectUnderdogSport, inferMlbUnderdogProp, resolvePropSportLabel } from "./underdogSportDetection.js";
+import { detectUnderdogSport, isMlbUnderdogPropStrict, isNbaUnderdogProp, resolvePropSportLabel } from "./underdogSportDetection.js";
 import { resolveUnderdogCategory } from "./underdogRowCard.js";
 import { normalizeGameStartTime } from "./normalizeGameStartTime.js";
 
@@ -173,9 +173,6 @@ function resolveStatTypeFromRaw(raw = {}) {
 function resolveSportFromRaw(raw = {}, lookup = {}, context = {}) {
   const detected = detectUnderdogSport(raw, lookup, context);
   if (detected) return detected;
-  if (inferMlbUnderdogProp({ ...context, statType: context.statType, playerName: context.player, player: context.player })) {
-    return "MLB";
-  }
   return "Unknown";
 }
 
@@ -232,10 +229,28 @@ function inferOddsType(raw = {}) {
   return "standard";
 }
 
-function sideFromRaw(raw = {}) {
-  const pick = String(raw.pick || raw.side || raw.direction || "").toLowerCase();
-  if (pick.includes("under") || pick.includes("less")) return "under";
-  return "over";
+function sideFromRaw(raw = {}, line, projection) {
+  const attrs = attrsOf(raw);
+  const pick = String(raw.pick || raw.side || raw.direction || attrs.pick || attrs.side || "").toLowerCase();
+  if (pick.includes("under") || pick.includes("less") || pick.includes("lower")) return "under";
+  if (pick.includes("over") || pick.includes("more") || pick.includes("higher")) return "over";
+
+  const proj = Number(projection);
+  const ln = Number(line);
+  if (Number.isFinite(proj) && Number.isFinite(ln) && proj !== ln) {
+    return proj > ln ? "over" : "under";
+  }
+
+  return "";
+}
+
+function computeProjectionEdge(line, projection, side) {
+  const ln = Number(line);
+  const proj = Number(projection);
+  if (!Number.isFinite(ln) || !Number.isFinite(proj)) return 0;
+  const diff = proj - ln;
+  if (!side) return diff;
+  return side === "under" ? ln - proj : diff;
 }
 
 function normalizeStreakSide(value = "") {
@@ -289,14 +304,14 @@ function resolveStreakOptionsFromRaw(raw = {}) {
         label: option.selection_subheader || option.choice_display || "",
       };
     })
-    .filter((option) => Number.isFinite(option.multiplier) && option.multiplier > 0);
+    .filter((option) => Number.isFinite(option.multiplier) && option.multiplier > 0 && option.multiplier !== 1);
 }
 
 /**
  * Parse one raw Underdog record into normalized app prop shape.
  * @returns {object|null} prop or null if rejected
  */
-export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LIVE" } = {}) {
+export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LIVE", selectedSport = "MLB" } = {}) {
   if (!raw || typeof raw !== "object") return null;
 
   const player =
@@ -328,7 +343,15 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
     opponent,
     matchup,
     statType,
+    selectedSport,
+    selectedSportTab: selectedSport,
   });
+  const projection = Number(
+    raw.projection ?? raw.projected_value ?? raw.projectedValue ?? attrsOf(raw).projection ?? NaN
+  );
+  const hasProjection = Number.isFinite(projection);
+  const overUnder = sideFromRaw(raw, line, hasProjection ? projection : line);
+  const edge = computeProjectionEdge(line, hasProjection ? projection : line, overUnder);
   const resolvedSport = resolvePropSportLabel({
     sport,
     statType,
@@ -339,11 +362,8 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
     matchup,
     normalizedSource: "underdog",
     raw,
+    _lookup: lookup,
   }) || sport;
-  const projection = Number(
-    raw.projection ?? raw.projected_value ?? raw.projectedValue ?? attrsOf(raw).projection ?? line
-  );
-  const overUnder = sideFromRaw(raw);
   const oddsType = inferOddsType(raw);
   const startTime = resolveStartTimeFromRaw(raw, lookup);
   const streakOptions = resolveStreakOptionsFromRaw(raw);
@@ -362,8 +382,8 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
     market: statType,
     propType: statType,
     line,
-    projection: Number.isFinite(projection) ? projection : line,
-    projectedValue: Number.isFinite(projection) ? projection : line,
+    projection: hasProjection ? projection : null,
+    projectedValue: hasProjection ? projection : null,
     team,
     opponent,
     sport: resolvedSport,
@@ -376,14 +396,14 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
     source: "Underdog",
     platform: "Underdog",
     feedSource: "Underdog",
-    overUnder,
-    side: overUnder,
-    pick: overUnder,
-    bestPick: overUnder,
+    overUnder: overUnder || "",
+    side: overUnder || "",
+    pick: overUnder || "",
+    bestPick: overUnder || "",
     confidence: 50,
     confidenceScore: 50,
-    edge: 0,
-    projectionEdge: 0,
+    edge,
+    projectionEdge: edge,
     playable: false,
     isDisplayPlayable: false,
     matchup,
@@ -461,8 +481,8 @@ export function parseUnderdogRawBatch(rawRecords = [], options = {}) {
 /**
  * Parse full Underdog API payload — extracts raw lines then maps each record.
  */
-export function parseUnderdogPayloadDedicated(payload, lineSourceBadge = "LIVE") {
+export function parseUnderdogPayloadDedicated(payload, lineSourceBadge = "LIVE", selectedSport = "MLB") {
   const rawRecords = extractRawUnderdogRecords(payload);
   const lookup = buildUnderdogLookupMaps(payload);
-  return parseUnderdogRawBatch(rawRecords, { lookup, lineSourceBadge });
+  return parseUnderdogRawBatch(rawRecords, { lookup, lineSourceBadge, selectedSport });
 }

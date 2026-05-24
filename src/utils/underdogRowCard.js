@@ -2,7 +2,7 @@ import { compactMarketKey, canonicalMarketKey } from "./marketNormalization.js";
 import { resolvePickSide } from "./pickRecommendation.js";
 import { estimateModelProbability } from "../services/projectionEngine.js";
 import { isUnderdogProp, isPrizePicksProp } from "./underdogStreakPool.js";
-import { resolvePropSportLabel } from "./underdogSportDetection.js";
+import { isNbaUnderdogProp, resolvePropSportLabel } from "./underdogSportDetection.js";
 
 /** Underdog MLB stat category keys — normalized from any spacing/casing/plus variants. */
 export const UNDERDOG_CATEGORIES = {
@@ -84,7 +84,8 @@ export function isMlbUnderdogStreakRow(prop = {}) {
   return (
     isUnderdogProp(prop) &&
     !isPrizePicksProp(prop) &&
-    resolvePropSportLabel(prop) === "MLB"
+    resolvePropSportLabel(prop) === "MLB" &&
+    !isNbaUnderdogProp(prop)
   );
 }
 
@@ -123,6 +124,11 @@ function collectStreakOptions(prop = {}) {
   }));
 }
 
+function isValidPayoutMultiplier(value) {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 && num !== 1;
+}
+
 function findSideOption(prop = {}, side = "Higher") {
   const want = sideKey(side);
   return collectStreakOptions(prop).find((option) => sideKey(option.side) === want) || null;
@@ -130,7 +136,7 @@ function findSideOption(prop = {}, side = "Higher") {
 
 function readSideMultiplier(prop = {}, side = "Higher") {
   const option = findSideOption(prop, side);
-  if (Number.isFinite(option?.multiplier) && option.multiplier > 0) return option.multiplier;
+  if (isValidPayoutMultiplier(option?.multiplier)) return option.multiplier;
 
   const isHigher = sideKey(side) === "higher";
   const flat = Number(
@@ -138,10 +144,10 @@ function readSideMultiplier(prop = {}, side = "Higher") {
       ? prop.higherMultiplier ?? prop.higher_multiplier ?? prop.higherPayout ?? prop.higher_payout
       : prop.lowerMultiplier ?? prop.lower_multiplier ?? prop.lowerPayout ?? prop.lower_payout
   );
-  if (Number.isFinite(flat) && flat > 0) return flat;
+  if (Number.isFinite(flat) && flat > 0 && flat !== 1) return flat;
 
   const generic = Number(prop.multiplier ?? prop.payout ?? prop.payoutMultiplier ?? prop.odds);
-  if (Number.isFinite(generic) && generic > 0) {
+  if (Number.isFinite(generic) && generic > 0 && generic !== 1) {
     const propSide = sideKey(prop.side || prop.bestPick || prop.overUnder || "");
     if (propSide && propSide === sideKey(side)) return generic;
   }
@@ -150,7 +156,7 @@ function readSideMultiplier(prop = {}, side = "Higher") {
 }
 
 export function formatUnderdogMultiplier(value) {
-  if (value == null || !Number.isFinite(Number(value)) || Number(value) <= 0) return "—";
+  if (!isValidPayoutMultiplier(value)) return "—";
   return `${Number(value).toFixed(2)}x`;
 }
 
