@@ -10,6 +10,8 @@ import { attachHistoricalPerformance } from "./historicalPropAnalytics.js";
 import { resolveGoblinDemonBoards } from "./goblinDemonPairs.js";
 import { withPlayerImageUrl } from "./playerImageFields.js";
 import { fullMarketDisplayLabel } from "./marketNormalization.js";
+import { calibrateRealisticConfidence } from "./mlbConfidenceEngine.js";
+import { buildAnalyticsReason } from "./propReasonEngine.js";
 
 const BASE_CONFIDENCE = 50;
 const MIN_TOP_PICK_CONFIDENCE = 65;
@@ -174,15 +176,15 @@ export function computeDisplayEdgeValue(prop = {}) {
 }
 
 export function confidenceTierLabel(confidence = BASE_CONFIDENCE) {
-  if (confidence >= 80) return "STRONG";
-  if (confidence >= 70) return "SAFE";
-  if (confidence >= 60) return "LEAN";
+  if (confidence >= 76) return "ELITE";
+  if (confidence >= 68) return "STRONG";
+  if (confidence >= 59) return "PLAYABLE";
   return "RESEARCH ONLY";
 }
 
 export function computeDisplayRiskLevel(confidence = BASE_CONFIDENCE) {
-  if (confidence >= 80) return "LOW";
-  if (confidence >= 60) return "MEDIUM";
+  if (confidence >= 76) return "LOW";
+  if (confidence >= 59) return "MEDIUM";
   return "HIGH";
 }
 
@@ -202,8 +204,8 @@ function computeWeightedConfidence(prop = {}, projection, line, edge) {
       confidence -= 5;
       penaltyLabels.push("Line inflated vs market");
     }
-  } else if (Math.abs(edge) >= 0.5) {
-    confidence += 8;
+  } else if (Math.abs(edge) >= 0.75) {
+    confidence += 3;
     boostLabels.push("Line value vs projection");
   }
 
@@ -299,16 +301,16 @@ function computeWeightedConfidence(prop = {}, projection, line, edge) {
   confidence += lineDifficultyOffset(prop, line, projection, side);
 
   if (prop.sportsDataSeason || prop.sportsDataRecentGames?.length) {
-    confidence += 4;
+    confidence += 3;
     boostLabels.push("SportsDataIO enrichment");
   }
 
   const enrichmentQuality = finiteOr(prop.dataQualityScore, NaN);
   if (Number.isFinite(enrichmentQuality)) {
-    confidence += clamp((enrichmentQuality - 50) * 0.12, -4, 5);
+    confidence += clamp((enrichmentQuality - 50) * 0.08, -4, 3);
   }
 
-  confidence = clamp(Math.round(confidence), 52, 82);
+  confidence = clamp(Math.round(confidence), 48, 88);
 
   return { confidence, boostLabels, penaltyLabels };
 }
@@ -343,6 +345,7 @@ export function scoreDisplayProp(prop = {}) {
   const side = String(prop.side || prop.bestPick || "over").toLowerCase();
   const edge = computeDisplayEdgeValue({ ...prop, projection, side });
   const { confidence, boostLabels, penaltyLabels } = computeWeightedConfidence(prop, projection, line, edge);
+  const analyticsReason = buildAnalyticsReason({ ...prop, projection, edge, confidence });
   const whyThisPick = buildWhyThisPick({ ...prop, projection, edge, confidence });
   const edgePct = computeEdgePercent({ ...prop, edge }, edge);
 
@@ -357,29 +360,39 @@ export function scoreDisplayProp(prop = {}) {
     confidenceBoostLabels: boostLabels,
     confidencePenaltyLabels: penaltyLabels,
     whyThisPick,
-    confidenceExplanation: whyThisPick.compact || `Projection ${projection} vs line ${line}`,
+    confidenceExplanation: analyticsReason || whyThisPick.compact || `Projection ${projection} vs line ${line}`,
+    analyticsReason,
   });
 
-  const tier = confidenceTierLabel(calibrated.confidence);
-  const invalidProp = !isValidDisplayProp({ ...calibrated, line, player: prop.player, playerName: prop.playerName });
+  const finalConfidence = calibrateRealisticConfidence(calibrated.confidence, { ...calibrated, ...prop }, edge);
+  const finalized = {
+    ...calibrated,
+    confidence: finalConfidence,
+    confidenceScore: finalConfidence,
+    analyticsReason,
+    confidenceExplanation: analyticsReason || calibrated.confidenceExplanation,
+  };
+
+  const tier = confidenceTierLabel(finalized.confidence);
+  const invalidProp = !isValidDisplayProp({ ...finalized, line, player: prop.player, playerName: prop.playerName });
   const displayResearchOnly = invalidProp
     ? true
-    : finiteOr(calibrated.confidence, 0) < 60 || isDisplayResearchOnly(calibrated);
+    : finiteOr(finalized.confidence, 0) < 59 || isDisplayResearchOnly(finalized);
   const isDisplayPlayable = !displayResearchOnly && !invalidProp;
-  const bettingLabel = displayResearchOnly ? "Research only" : labelForConfidence(calibrated.confidence, false);
+  const bettingLabel = displayResearchOnly ? "Research only" : labelForConfidence(finalized.confidence, false);
 
   return attachHistoricalPerformance(
     attachRankScore(
       withPlayerImageUrl({
-        ...calibrated,
-        fullMarketLabel: fullMarketDisplayLabel(calibrated.statType || prop.statType, calibrated.sport || prop.sport),
+        ...finalized,
+        fullMarketLabel: fullMarketDisplayLabel(finalized.statType || prop.statType, finalized.sport || prop.sport),
         confidenceTier: tier,
-        edgeScore: round1(edge * (calibrated.confidence / 50) + (finiteOr(prop.last10HitRate, 0.5) * 3)),
+        edgeScore: round1(edge * (finalized.confidence / 50) + (finiteOr(prop.last10HitRate, 0.5) * 3)),
         displayRejected: invalidProp,
         displayResearchOnly,
         isDisplayPlayable,
         bettingLabel,
-        premiumRiskSummary: calibrated.premiumRiskSummary || premiumRiskSummary(calibrated),
+        premiumRiskSummary: finalized.premiumRiskSummary || premiumRiskSummary(finalized),
       })
     )
   );
@@ -408,8 +421,8 @@ export function isValidDisplayProp(prop = {}) {
 }
 
 function labelForConfidence(confidence = BASE_CONFIDENCE, displayResearchOnly = false) {
-  if (displayResearchOnly || confidence < 60) return "Research only";
-  if (confidence >= 70) return "Ready to Bet";
+  if (displayResearchOnly || confidence < 59) return "Research only";
+  if (confidence >= 68) return "Ready to Bet";
   return "Lean";
 }
 

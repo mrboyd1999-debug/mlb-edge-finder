@@ -5,11 +5,14 @@
 
 import { buildPropDedupeKey } from "./displayPropScoring.js";
 import { withPlayerImageUrl } from "./playerImageFields.js";
+import { calibrateRealisticConfidence } from "./mlbConfidenceEngine.js";
+import { buildAnalyticsReason } from "./propReasonEngine.js";
 import { isDemonProp, isGoblinProp } from "./propLabels.js";
 import { resolvePickSide } from "./pickRecommendation.js";
 import { filterAllDisplayPropsBySport } from "./allDisplayProps.js";
 import { filterActiveSportProps } from "./mlbOnlyMode.js";
 import { isLooseDisplayProp, dedupeLooseProps } from "./safeModePipeline.js";
+import { filterByDisplayConfidenceFloor } from "./mlbConfidenceEngine.js";
 
 const MIN_LINE_GAP = 0.5;
 const GOBLIN_CONFIDENCE_BOOST = 10;
@@ -88,20 +91,21 @@ function baseConfidence(prop = {}) {
   );
 }
 
-function adjustRoleConfidence(confidence, role) {
-  if (role === "goblin") {
-    return clamp(confidence + GOBLIN_CONFIDENCE_BOOST, DISPLAY_CONF_MIN, DISPLAY_CONF_MAX);
-  }
-  return clamp(confidence - DEMON_CONFIDENCE_PENALTY, DISPLAY_CONF_MIN, DISPLAY_CONF_MAX);
+function adjustRoleConfidence(confidence, role, prop = {}) {
+  const delta = role === "goblin" ? GOBLIN_CONFIDENCE_BOOST : -DEMON_CONFIDENCE_PENALTY;
+  return calibrateRealisticConfidence(confidence + delta, prop);
 }
 
 function annotatePayoutProp(prop = {}, role, { pairedLine = null, pairedWith = null, verified = false } = {}) {
   const isGoblin = role === "goblin";
-  const conf = adjustRoleConfidence(baseConfidence(prop), role);
+  const conf = adjustRoleConfidence(baseConfidence(prop), role, prop);
+  const analyticsReason = buildAnalyticsReason(prop);
   return withPlayerImageUrl({
     ...prop,
     confidence: conf,
     confidenceScore: conf,
+    analyticsReason: analyticsReason || prop.analyticsReason,
+    confidenceExplanation: analyticsReason || prop.confidenceExplanation,
     payoutRole: role,
     payoutLabel: isGoblin ? "Goblin" : "Demon",
     payoutBadge: isGoblin ? "GOBLIN / SAFER LINE" : "DEMON / HIGHER PAYOUT",
@@ -183,7 +187,9 @@ function pickBestPair(group = []) {
 function buildPropPool(displayProps = [], rawProps = []) {
   const mlbDisplay = filterAllDisplayPropsBySport(displayProps, "MLB", "all");
   const mlbRaw = filterActiveSportProps(rawProps || []);
-  return dedupeLooseProps([...mlbDisplay, ...mlbRaw].filter(isLooseDisplayProp));
+  return filterByDisplayConfidenceFloor(
+    dedupeLooseProps([...mlbDisplay, ...mlbRaw].filter(isLooseDisplayProp))
+  );
 }
 
 /**

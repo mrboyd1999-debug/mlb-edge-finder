@@ -150,6 +150,7 @@ import {
 import CuratedPicksScreen from "./components/CuratedPicksScreen.jsx";
 import SectionErrorBoundary from "./components/SectionErrorBoundary.jsx";
 import { DISPLAY_LIMITS, resolveCuratedGoblinDemonBoards, resolveMlbStreakPicks, countMlbDisplayProps, isManuallySavedPick, historyPickToDisplayProp } from "./utils/curatedPicks.js";
+import { resolveFeaturedMlbPicks } from "./utils/mlbFeaturedPicks.js";
 import { isSafeModeEnabled, SAFE_MODE_FALLBACK_MESSAGE, SAFE_MODE_LOADING_MESSAGE } from "./utils/safeMode.js";
 import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks, resolveSafeMlbStreakPicks } from "./utils/safeModePipeline.js";
 import {
@@ -2186,6 +2187,10 @@ export default function DFSPropsApp() {
         .slice(0, 40),
     [visibleHistory]
   );
+  const featuredMlbPicks = useMemo(
+    () => resolveFeaturedMlbPicks(boardDisplayProps, props),
+    [boardDisplayProps, props]
+  );
   const curatedSportPicks = useMemo(
     () => resolveMlbStreakPicks(streakSportBoards, scoredDisplayProps, DISPLAY_LIMITS.streakPerSport, props),
     [streakSportBoards, scoredDisplayProps, props]
@@ -2837,6 +2842,7 @@ export default function DFSPropsApp() {
       <div id="section-top-picks" className="dfs-section dfs-order-top-picks">
         <SectionErrorBoundary name="MLB Picks Screen" onError={handleSectionRenderError}>
           <CuratedPicksScreen
+            featuredPicks={featuredMlbPicks}
             mlbStreakPicks={curatedSportPicks}
             parlayPicks={quickParlayPicks.slice(0, DISPLAY_LIMITS.parlayLegs)}
             goblinPicks={curatedGoblinPicks}

@@ -2,6 +2,8 @@ import { filterAllDisplayPropsBySport } from "./allDisplayProps.js";
 import { buildPropSoftDedupeKey } from "./displayPropScoring.js";
 import { filterActiveSportProps } from "./mlbOnlyMode.js";
 import { resolvePickSide } from "./pickRecommendation.js";
+import { calibrateRealisticConfidence } from "./mlbConfidenceEngine.js";
+import { isDebugModeEnabled } from "./devMode.js";
 import { isSafeModeEnabled } from "./safeMode.js";
 
 function clamp(value, min, max) {
@@ -46,10 +48,9 @@ export function buildSafeMlbPropPool(displayProps = [], rawProps = []) {
 
 function annotateSafePick(prop = {}) {
   const side = resolvePickSide(prop);
-  const conf = clamp(
+  const conf = calibrateRealisticConfidence(
     Math.round(Number(prop.confidenceScore ?? prop.confidence ?? 58)),
-    52,
-    82
+    prop
   );
   return {
     ...prop,
@@ -65,12 +66,14 @@ function annotateSafePick(prop = {}) {
 
 export function resolveSafeMlbStreakPicks(displayProps = [], rawProps = [], limit = 2) {
   return buildSafeMlbPropPool(displayProps, rawProps)
+    .filter((prop) => calibrateRealisticConfidence(prop.confidenceScore ?? prop.confidence ?? 0, prop) >= 55 || isDebugModeEnabled())
     .slice(0, limit)
     .map(annotateSafePick);
 }
 
 export function resolveSafeMlbBoardPicks(displayProps = [], rawProps = [], limit = 6) {
   return buildSafeMlbPropPool(displayProps, rawProps)
+    .filter((prop) => calibrateRealisticConfidence(prop.confidenceScore ?? prop.confidence ?? 0, prop) >= 55 || isDebugModeEnabled())
     .slice(0, limit)
     .map(annotateSafePick);
 }

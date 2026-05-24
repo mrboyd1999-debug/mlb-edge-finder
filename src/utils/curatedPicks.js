@@ -11,6 +11,7 @@ import {
   buildSafeMlbPropPool,
   resolveSafeMlbStreakPicks,
 } from "./safeModePipeline.js";
+import { filterByDisplayConfidenceFloor } from "./mlbConfidenceEngine.js";
 import { resolveCuratedGoblinDemonBoards } from "./goblinDemonPairs.js";
 
 export {
@@ -88,7 +89,7 @@ export function resolveMlbStreakPicks(
   );
 
   const merged = mergeUniquePicks(boardPicks, fallbackPool, limit);
-  if (merged.length) return markDisplayFallbackProps(merged);
+  if (merged.length) return markDisplayFallbackProps(filterByDisplayConfidenceFloor(merged));
 
   if (mlbProps.length) {
     return markDisplayFallbackProps(

@@ -50,20 +50,16 @@ export function booksAlign(prop = {}) {
 }
 
 export function applyConfidenceFloors(confidence, prop = {}, edge = null) {
-  let score = clamp(Math.round(confidence), 52, 82);
+  let score = clamp(Math.round(confidence), 48, 88);
   const edgeVal = finiteOr(edge ?? prop.edge, 0);
   const edgePct = computeEdgePercent(prop, edgeVal) ?? 0;
   const hitRate = finiteOr(prop.last10HitRate ?? prop.recentHitRate ?? prop.last5HitRate, NaN);
   const majorRisk = hasMajorRiskFlags(prop);
 
-  if (edgeVal >= 1.5 && edgePct >= 15 && !majorRisk) score += 4;
-  if (edgeVal >= 2.5 && Number.isFinite(hitRate) && hitRate >= 0.65) score += 5;
-  if (edgeVal >= 3.5 && booksAlign(prop)) score += 6;
+  if (edgeVal >= 2 && edgePct >= 18 && !majorRisk) score += 2;
+  if (edgeVal >= 2.5 && Number.isFinite(hitRate) && hitRate >= 0.65) score += 2;
 
-  if (prop.sportsDataSeason || prop.sportsDataRecentGames?.length) score += 3;
-  if (prop.enrichmentSource === "SportsDataIO" || prop.statsSource === "SportsDataIO") score += 2;
-
-  return clamp(score, 52, 82);
+  return clamp(score, 48, 88);
 }
 
 export function applyConsensusAdjustments(confidence, prop = {}) {
@@ -96,7 +92,7 @@ export function applyConsensusAdjustments(confidence, prop = {}) {
   if (books >= 3 && finiteOr(prop.sportsbookEdge, 0) >= 0.5) delta += 5;
   if (books >= 2 && finiteOr(prop.sportsbookEdge, 0) < -0.5) delta -= 6;
 
-  return clamp(Math.round(confidence + delta), 52, 82);
+  return clamp(Math.round(confidence + delta), 50, 82);
 }
 
 export function applySportSpecificConfidence(confidence, prop = {}) {
@@ -127,7 +123,7 @@ export function applySportSpecificConfidence(confidence, prop = {}) {
     if (/shots|corners|possession/i.test(String(prop.statType || ""))) delta += 1;
   }
 
-  return clamp(Math.round(confidence + delta), 52, 82);
+  return clamp(Math.round(confidence + delta), 50, 82);
 }
 
 export function computeTrueRiskLevel(prop = {}) {

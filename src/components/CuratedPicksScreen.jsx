@@ -1,5 +1,6 @@
 import { memo } from "react";
 import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
+import MlbFeaturedPicksBoard from "./MlbFeaturedPicksBoard.jsx";
 import MlbStreakPicksBoard from "./MlbStreakPicksBoard.jsx";
 import GoblinBoard from "./GoblinBoard.jsx";
 import DemonBoard from "./DemonBoard.jsx";
@@ -43,6 +44,7 @@ function ParlayBuilderSection({ picks = [], loading, onOpen, hasMlbProps = false
 }
 
 function CuratedPicksScreen({
+  featuredPicks = {},
   mlbStreakPicks = [],
   parlayPicks = [],
   goblinPicks = [],
@@ -55,6 +57,16 @@ function CuratedPicksScreen({
   if (MLB_ONLY_MODE) {
     return (
       <div className="curated-picks-screen curated-picks-mlb-only">
+        <SectionErrorBoundary name="Featured MLB Plays" onError={onSectionError}>
+          <MlbFeaturedPicksBoard
+            bestOverall={featuredPicks.bestOverall}
+            sharpestEdge={featuredPicks.sharpestEdge}
+            safestPlay={featuredPicks.safestPlay}
+            loading={loading}
+            onOpen={onOpen}
+            hasMlbProps={hasMlbProps}
+          />
+        </SectionErrorBoundary>
         <SectionErrorBoundary name="MLB Streak Picks" onError={onSectionError}>
           <MlbStreakPicksBoard
             picks={mlbStreakPicks}

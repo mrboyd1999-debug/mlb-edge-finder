@@ -30,6 +30,20 @@ body,
   border-color: #38bdf8;
 }
 
+.mlb-goblin-card {
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.12);
+}
+
+.mlb-demon-card {
+  box-shadow: inset 0 0 0 1px rgba(232, 121, 249, 0.12);
+}
+
+@media (min-width: 641px) {
+  .mlb-featured-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 .mobile-warning-banner {
   display: block;
   margin: 0 0 8px;
