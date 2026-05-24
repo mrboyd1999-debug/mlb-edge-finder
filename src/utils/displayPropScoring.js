@@ -1,5 +1,13 @@
 /** Display scoring — dedupe, weighted confidence, rankings, category picks. */
 
+import {
+  applyPropCalibrationBundle,
+  computeEdgePercent,
+  isDisplayResearchOnly,
+  premiumRiskSummary,
+} from "./propCalibration.js";
+import { attachHistoricalPerformance } from "./historicalPropAnalytics.js";
+
 const BASE_CONFIDENCE = 50;
 const MIN_TOP_PICK_CONFIDENCE = 75;
 const MIN_ACCEPTED_CONFIDENCE = 70;
@@ -269,29 +277,36 @@ export function scoreDisplayProp(prop = {}) {
   const side = String(prop.side || prop.bestPick || "over").toLowerCase();
   const edge = computeDisplayEdgeValue({ ...prop, projection, side });
   const { confidence, boostLabels, penaltyLabels } = computeWeightedConfidence(prop, projection, line, edge);
-  const riskLevel = computeDisplayRiskLevel(confidence);
-  const tier = confidenceTierLabel(confidence);
-  const lineDiff = round1(projection - line);
-  const signedDiff = lineDiff >= 0 ? `+${lineDiff}` : `${lineDiff}`;
   const whyThisPick = buildWhyThisPick({ ...prop, projection, edge, confidence });
+  const edgePct = computeEdgePercent({ ...prop, edge }, edge);
 
-  return {
+  const calibrated = applyPropCalibrationBundle({
     ...prop,
     projection,
     projectedValue: projection,
     edge,
+    edgePercent: edgePct,
     confidence,
     confidenceScore: confidence,
-    riskLevel,
-    confidenceTier: tier,
     confidenceBoostLabels: boostLabels,
     confidencePenaltyLabels: penaltyLabels,
-    confidenceExplanation: whyThisPick.compact || `Projection ${projection} vs line ${line} (${signedDiff} edge)`,
     whyThisPick,
-    edgeScore: round1(edge * (confidence / 50) + (finiteOr(prop.last10HitRate, 0.5) * 3)),
-    scoringEngine: "display-weighted-v2",
-    displayRejected: confidence < 60,
-  };
+    confidenceExplanation: whyThisPick.compact || `Projection ${projection} vs line ${line}`,
+  });
+
+  const tier = confidenceTierLabel(calibrated.confidence);
+  const displayResearchOnly = isDisplayResearchOnly(calibrated);
+
+  return attachHistoricalPerformance({
+    ...calibrated,
+    confidenceTier: tier,
+    edgeScore: round1(edge * (calibrated.confidence / 50) + (finiteOr(prop.last10HitRate, 0.5) * 3)),
+    displayRejected: calibrated.confidence < 60,
+    displayResearchOnly,
+    isDisplayPlayable: !displayResearchOnly,
+    bettingLabel: displayResearchOnly ? "Research only" : calibrated.confidence >= 65 ? "Ready to Bet" : "Watchlist",
+    premiumRiskSummary: calibrated.premiumRiskSummary || premiumRiskSummary(calibrated),
+  });
 }
 
 export function enrichDisplayPropsPipeline(props = []) {

@@ -3079,7 +3079,7 @@ function scoreDFSProp(prop, context) {
   if (Number.isFinite(manualConfidenceAdjustment) && manualConfidenceAdjustment !== 0) {
     confidenceScore = Math.round(clamp(confidenceScore + manualConfidenceAdjustment, 25, 92));
   }
-  if (marketResearchOnly) {
+  if (marketResearchOnly && absoluteEdge < 1.5) {
     confidenceScore = Math.min(confidenceScore, 55);
   }
   const sportCapResult = applySportMarketConfidenceCaps(
@@ -4822,7 +4822,7 @@ function whyNotEliteReasons({ hasModelSignal, recentHitRate, dataQualityScore, s
   if (!hasModelSignal) reasons.push("no independent model/stat signal");
   if (Number.isFinite(recentHitRate) && recentHitRate < 0.62) reasons.push("recent hit rate is not strong enough");
   if (!Number.isFinite(recentHitRate)) reasons.push("missing recent hit-rate sample");
-  if (sampleSize < 5) reasons.push("limited sample size");
+  if (sampleSize < 5) reasons.push("Projection based on a smaller recent sample size.");
   if (Number.isFinite(volatility) && volatility > 2.75) reasons.push("volatile player/stat profile");
   if (!Number.isFinite(dataQualityScore) || dataQualityScore < 65) reasons.push("data confidence below Elite threshold");
   if (!Number.isFinite(sportsbookDiscrepancy) || sportsbookDiscrepancy <= 0) reasons.push("no sportsbook edge support");

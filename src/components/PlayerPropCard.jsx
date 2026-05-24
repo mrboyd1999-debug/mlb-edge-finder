@@ -113,13 +113,13 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
     prop.calibratedConfidence != null && prop.calibratedConfidence !== prop.confidenceScore
       ? prop.calibratedConfidence
       : prop.confidenceScore ?? prop.confidence ?? null;
-  const edgeDisplay = Number.isFinite(Number(prop.edge)) ? formatNumber(prop.edge) : "—";
+  const edgeDisplay = Number.isFinite(Number(prop.edge)) ? formatNumber(prop.edge) : null;
   const riskShort = (() => {
     const text = String(prop.riskLevel || "").toUpperCase();
     if (text.includes("LOW")) return "LOW";
     if (text.includes("HIGH")) return "HIGH";
     if (text.includes("MED") || text.includes("MOD")) return "MED";
-    return text.slice(0, 6) || "—";
+    return text.slice(0, 6) || null;
   })();
   const showDynamicTier = dynamicTier && String(dynamicTier).toUpperCase() !== "RESEARCH";
   const riskAccent = riskAccentStyle(prop.riskLevel);
@@ -202,15 +202,24 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
               </strong>
             </span>
             <div className="prop-card-badge-row" style={styles.badgeRow}>
-              <span style={{ ...styles.scoreBadge, borderColor: "#166534", color: "#86efac" }}>
-                CONF {confDisplay != null ? `${confDisplay}%` : "—"}
-              </span>
-              <span style={{ ...styles.scoreBadge, borderColor: "#1d4ed8", color: "#93c5fd" }}>
-                EDGE {edgeDisplay}
-              </span>
-              <span style={{ ...styles.scoreBadge, borderColor: riskShort === "LOW" ? "#166534" : riskShort === "HIGH" ? "#991b1b" : "#854d0e", color: riskShort === "LOW" ? "#86efac" : riskShort === "HIGH" ? "#fca5a5" : "#fde68a" }}>
-                RISK {riskShort}
-              </span>
+              {confDisplay != null ? (
+                <span style={{ ...styles.scoreBadge, borderColor: "#166534", color: "#86efac" }}>
+                  CONF {confDisplay}%
+                </span>
+              ) : null}
+              {edgeDisplay != null ? (
+                <span style={{ ...styles.scoreBadge, borderColor: "#1d4ed8", color: "#93c5fd" }}>
+                  EDGE {edgeDisplay}
+                </span>
+              ) : null}
+              {riskShort ? (
+                <span style={{ ...styles.scoreBadge, borderColor: riskShort === "LOW" ? "#166534" : riskShort === "HIGH" ? "#991b1b" : "#854d0e", color: riskShort === "LOW" ? "#86efac" : riskShort === "HIGH" ? "#fca5a5" : "#fde68a" }}>
+                  RISK {riskShort}
+                </span>
+              ) : null}
+              {(prop.positiveFlags || prop.smartFlags?.positive || []).slice(0, 1).map((flag) => (
+                <span key={flag} style={{ ...styles.scoreBadge, borderColor: "#166534", color: "#86efac" }}>{flag}</span>
+              ))}
             </div>
           </>
         ) : (
@@ -238,9 +247,9 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
             </span>
           </>
         )}
-        {topPick && !compact ? (
+        {topPick && !compact && confDisplay != null ? (
           <p className="prop-meta-top-pick-inline">
-            CONF {confDisplay != null ? `${confDisplay}%` : "—"} • EDGE {edgeDisplay} • RISK {riskShort}
+            CONF {confDisplay}% {edgeDisplay != null ? `• EDGE ${edgeDisplay}` : ""} {riskShort ? `• RISK ${riskShort}` : ""}
           </p>
         ) : null}
         {!compact ? (

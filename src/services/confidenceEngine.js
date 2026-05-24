@@ -136,7 +136,7 @@ function scoreRecentForm(prop = {}) {
 
   if (sampleSize >= 10) score += 3;
   else if (sampleSize >= 5) score += 1.5;
-  else if (sampleSize > 0) parts.push("limited sample");
+  else if (sampleSize > 0) parts.push("Projection based on a smaller recent sample size.");
 
   const detail = parts.length ? parts.join(" · ") : "No recent form logs available.";
   return componentScore(score, 15, "Recent Form", detail);

@@ -302,7 +302,17 @@ export function isReadyToBet(prop, thresholds = {}) {
 export function getReadyToBetRejectReason(prop, thresholds = {}) {
   if (!isVerifiedSportsbookProp(prop)) return "not a verified sportsbook prop";
   if (prop.unsupportedSport || prop.marketUnsupported || prop.esports) return "unsupported sport or market";
-  if (prop.marketResearchOnly || prop.marketSupportTier === 2 || prop.noveltyMarket) return "research-only market tier";
+  if (prop.marketResearchOnly || prop.marketSupportTier === 2 || prop.noveltyMarket) {
+    const confidence = Number(prop.confidenceScore || prop.confidence || 0);
+    const edge = Number(prop.edge || 0);
+    if (confidence >= 70 && edge >= 1.5) {
+      // Strong edge overrides tier-2 research routing.
+    } else if (prop.marketSupportTier === 2 || prop.noveltyMarket) {
+      return "research-only market tier";
+    } else if (prop.marketResearchOnly && confidence < 65) {
+      return "research-only market tier";
+    }
+  }
   if (
     shouldRouteMlbHitterToResearch(prop, {
       sampleSize: prop.sampleSize || prop.modelSignal?.sampleSize,

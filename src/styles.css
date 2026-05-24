@@ -275,8 +275,19 @@ body,
     padding: 5px 6px !important;
   }
 
-  .why-this-pick-block p {
-    font-size: 10px !important;
+  .pick-detail-modal {
+    max-height: 88vh !important;
+  }
+
+  .pick-detail-modal-sticky {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+
+  .pick-detail-modal .modal-grid,
+  .pick-detail-modal [style*="modalGrid"] {
+    gap: 6px !important;
   }
 
   .player-image-wrap .player-initials-text {

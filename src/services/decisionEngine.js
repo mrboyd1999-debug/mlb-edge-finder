@@ -12,6 +12,7 @@ import { isVerifiedSportsbookProp } from "../utils/propValidation.js";
 import { isDemonProp, isGoblinProp } from "../utils/propLabels.js";
 import { getPropVolatilityTier, meetsVolatilityTierRequirements, PROP_VOLATILITY_TIERS } from "./marketConfidenceModels.js";
 import { getMlbMinEdgeForTier, isMlbQualityTierS, MLB_ONLY_MODE } from "../utils/mlbOnlyMode.js";
+import { applyPropCalibrationBundle } from "../utils/propCalibration.js";
 
 export { CONFIDENCE_THRESHOLDS };
 
@@ -427,10 +428,18 @@ export function isDemonEligible(prop = {}) {
 }
 
 export function shouldRouteResearchOnly(prop = {}) {
-  if (prop.marketResearchOnly || prop.noveltyMarket || prop.marketSupportTier === 2) return true;
-  if (Number(prop.dataQualityScore || 0) < 35) return true;
+  if (prop.displayResearchOnly === false || prop.isDisplayPlayable) return false;
+  if (prop.marketResearchOnly && prop.marketSupportTier === 2 && prop.noveltyMarket) return true;
+  const confidence = Number(prop.confidenceScore ?? prop.confidence ?? 0);
+  if (confidence >= 65 && Number(prop.edge || 0) >= 1 && prop.hasVerifiedStats) return false;
+  if (prop.marketResearchOnly || prop.noveltyMarket) {
+    if (confidence >= 70 && Number(prop.edge || 0) >= 1.5) return false;
+    if (prop.marketSupportTier !== 2) return false;
+  }
+  if (Number(prop.dataQualityScore || 0) < 28) return true;
   if (!Number.isFinite(prop.projectedValue ?? prop.projection) && prop.projectionSource === "missing") return true;
-  if (Number(prop.volatility) >= DECISION_THRESHOLDS.HIGH_VOLATILITY && Number(prop.edge || 0) < 1.5) return true;
+  if (Number(prop.volatility) >= 4 && Number(prop.edge || 0) < 1.5) return true;
+  if (confidence < 65) return true;
   return false;
 }
 
@@ -466,7 +475,7 @@ export function enrichPropDecision(prop = {}, context = {}) {
 
   const sportsbookEdge = computeSportsbookEdge(prop, bookDisagreement);
 
-  return {
+  return applyPropCalibrationBundle({
     ...prop,
     bookDisagreement,
     lineValueScore,
@@ -487,7 +496,7 @@ export function enrichPropDecision(prop = {}, context = {}) {
     marketModelLabel: prop.marketModelLabel || null,
     projectionAgreement: prop.projectionAgreement ?? prop.marketConfidenceAgreement ?? null,
     meetsVolatilityRequirements: prop.meetsVolatilityRequirements ?? meetsVolatilityTierRequirements(prop, prop.confidenceScore ?? prop.confidence ?? 0),
-  };
+  });
 }
 
 export function sortDecisionBoard(props = []) {

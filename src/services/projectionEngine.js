@@ -351,7 +351,7 @@ export function buildPickExplanation(prop = {}) {
   if (prop.riskLevel === "Risky" || prop.riskLevel === "Low Data Confidence") risks.push(prop.riskLevel);
   sections.push({
     title: "Risk factors",
-    lines: risks.length ? risks : ["No major risk flags flagged by the model."],
+    lines: risks.length ? risks : ["Stable role and matchup support this projection."],
   });
 
   sections.push({

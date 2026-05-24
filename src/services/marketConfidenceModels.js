@@ -193,7 +193,7 @@ function scoreConsistencyPillar(ctx = {}, { lowVolatilityBonus = false } = {}) {
 
   if (sampleSize >= 10) score += 10;
   else if (sampleSize >= 5) score += 5;
-  else if (sampleSize > 0) parts.push("limited sample");
+  else if (sampleSize > 0) parts.push("Projection based on a smaller recent sample size.");
 
   if (lowVolatilityBonus) score += 4;
 

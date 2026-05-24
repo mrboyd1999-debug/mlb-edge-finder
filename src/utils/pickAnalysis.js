@@ -91,11 +91,13 @@ export function warningFlags(prop) {
 }
 
 export function riskExplanation(prop) {
+  if (prop.premiumRiskSummary) return prop.premiumRiskSummary;
   const flags = warningFlags(prop);
   if (flags.length) return flags.join(", ");
-  if (prop.riskLevel === "Elite") return "Low-volatility profile with strong confidence and model support.";
-  if (prop.riskLevel === "Medium") return "Playable edge, but keep normal streak caution.";
-  return prop.riskLevel || "No major risk flags";
+  if (prop.riskLevel === "LOW") return "Stable role and matchup support this projection.";
+  if (prop.riskLevel === "MEDIUM") return "Playable edge with normal variance — monitor late news.";
+  if (prop.riskLevel === "HIGH") return "Higher variance profile — size accordingly.";
+  return "Standard variance for this market.";
 }
 
 export { displaySport, formatLeanSide, formatNumber, formatMaybeLine, formatSignedNumber, formatSignedPercent, formatPercent, formatDateTime };
