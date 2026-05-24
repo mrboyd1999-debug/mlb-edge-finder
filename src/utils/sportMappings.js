@@ -60,15 +60,16 @@ export function normalizeSportLabel(value = "", league = "") {
 }
 
 const SPORT_EQUIVALENTS = {
-  MLB: new Set(["mlb", "baseball", "majorleaguebaseball"]),
-  NBA: new Set(["nba", "basketball"]),
-  WNBA: new Set(["wnba", "women's basketball", "womens basketball"]),
+  MLB: new Set(["mlb", "baseball", "majorleaguebaseball", "baseballmlb", "baseball_mlb"]),
+  NBA: new Set(["nba", "basketball", "basketballnba", "basketball_nba"]),
+  WNBA: new Set(["wnba", "basketballwnba", "basketball_wnba", "womensbasketball"]),
   NFL: new Set(["nfl", "football"]),
-  NCAAF: new Set(["ncaaf", "college football"]),
+  NCAAF: new Set(["ncaaf", "college football", "collegefootball"]),
   NHL: new Set(["nhl", "hockey"]),
   Soccer: new Set(["soccer", "football", "epl", "mls", "laliga", "premier"]),
-  "ATP Tennis": new Set(["atp", "tennis", "mens tennis", "men's tennis"]),
-  "WTA Tennis": new Set(["wta", "women's tennis", "womens tennis"]),
+  Tennis: new Set(["tennis", "tennisatp", "tenniswta", "tennisatpwta", "atp", "wta"]),
+  "ATP Tennis": new Set(["atp", "tennis", "tennisatp", "mens tennis", "men's tennis"]),
+  "WTA Tennis": new Set(["wta", "tennis", "tenniswta", "women's tennis", "womens tennis"]),
 };
 
 function sportToken(value = "") {
@@ -103,9 +104,9 @@ export function inferSportFromText(text = "", context = {}) {
   if (key.includes("wta") || (key.includes("women") && key.includes("tennis"))) return "WTA Tennis";
   if (key.includes("atp") || key.includes("tennis")) return "ATP Tennis";
 
-  if (compact.includes("wnba") || key.includes("women's basketball") || key.includes("womens basketball")) return "WNBA";
-  if ((compact === "nba" || key.includes("nba")) && !key.includes("wnba")) return "NBA";
-  if (compact.includes("mlb") || key.includes("baseball")) return "MLB";
+  if (compact.includes("wnba") || compact.includes("basketballwnba") || key.includes("women's basketball") || key.includes("womens basketball")) return "WNBA";
+  if ((compact === "nba" || compact.includes("basketballnba") || key.includes("nba")) && !key.includes("wnba")) return "NBA";
+  if (compact.includes("mlb") || key.includes("baseball") || compact.includes("baseballmlb")) return "MLB";
   if (key.includes("nhl") || key.includes("hockey")) return "NHL";
   if (key.includes("ncaaf") || key.includes("college football")) return "NCAAF";
   if (key.includes("nfl") && !key.includes("soccer")) return "NFL";

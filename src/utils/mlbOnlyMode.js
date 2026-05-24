@@ -299,7 +299,9 @@ export function sanitizeBoardForMlbOnly(board = {}) {
   if (!MLB_ONLY_MODE) return board;
   return {
     ...board,
-    props: filterActiveSportProps(board.props || []),
+    props: filterActiveSportProps(board.allDisplayProps?.length ? board.allDisplayProps : board.props || []),
+    allDisplayProps: filterActiveSportProps(board.allDisplayProps || board.usableProps || board.props || []),
+    usableProps: filterActiveSportProps(board.usableProps || board.allDisplayProps || board.props || []),
     watchlist: filterActiveSportProps(board.watchlist || []),
     nearQualification: filterActiveSportProps(board.nearQualification || []),
     qualifiedReadyProps: filterActiveSportProps(board.qualifiedReadyProps || board.readyProps || []),

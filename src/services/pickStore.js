@@ -103,6 +103,8 @@ function readRawCachedBoard(defaultSourceStatus = {}) {
     if (isFailedEmptyBoard(parsed)) return null;
     return sanitizeBoardForMlbOnly({
       props: Array.isArray(parsed.props) ? parsed.props : [],
+      allDisplayProps: Array.isArray(parsed.allDisplayProps) ? parsed.allDisplayProps : Array.isArray(parsed.usableProps) ? parsed.usableProps : [],
+      usableProps: Array.isArray(parsed.usableProps) ? parsed.usableProps : Array.isArray(parsed.allDisplayProps) ? parsed.allDisplayProps : [],
       watchlist: Array.isArray(parsed.watchlist) ? parsed.watchlist : [],
       nearQualification: Array.isArray(parsed.nearQualification) ? parsed.nearQualification : [],
       qualifiedReadyProps: Array.isArray(parsed.qualifiedReadyProps)
@@ -163,7 +165,7 @@ export function compactPropForStorage(prop) {
 
 export function writeCachedBoard(board) {
   try {
-    const parsedCount = (board?.props || []).length;
+    const parsedCount = (board?.allDisplayProps || board?.props || []).length;
     const qualifiedCount = (board?.qualifiedReadyProps || board?.readyProps || []).length;
     if (parsedCount === 0 && qualifiedCount === 0) return;
     if (isFailedEmptyBoard(board)) return;
@@ -183,7 +185,9 @@ export function writeCachedBoard(board) {
       verifiedAt,
       cacheMetadata: cacheMeta,
       cacheAnalytics: cacheMeta.cacheAnalytics,
-      props: enrichList(scopedBoard.props || []),
+      props: enrichList(scopedBoard.allDisplayProps?.length ? scopedBoard.allDisplayProps : scopedBoard.props || []),
+      allDisplayProps: enrichList(scopedBoard.allDisplayProps || scopedBoard.usableProps || scopedBoard.props || []),
+      usableProps: enrichList(scopedBoard.usableProps || scopedBoard.allDisplayProps || scopedBoard.props || []),
       qualifiedReadyProps: enrichList(scopedBoard.qualifiedReadyProps || scopedBoard.readyProps || []),
       acceptedPropsForRender: enrichList(
         scopedBoard.acceptedPropsForRender || scopedBoard.qualifiedReadyProps || scopedBoard.readyProps || []
