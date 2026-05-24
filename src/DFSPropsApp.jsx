@@ -159,7 +159,7 @@ import {
   mergeUnderdogIntoFinderPool,
   resolveUnderdogStreakEmptyMessage,
 } from "./utils/underdogPickPool.js";
-import { resolveFeaturedMlbPicks } from "./utils/mlbFeaturedPicks.js";
+import { resolveTopMlbPlays } from "./utils/topMlbPlays.js";
 import { isSafeModeEnabled, SAFE_MODE_FALLBACK_MESSAGE, SAFE_MODE_LOADING_MESSAGE } from "./utils/safeMode.js";
 import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks, resolveSafeMlbStreakPicks } from "./utils/safeModePipeline.js";
 import {
@@ -2308,8 +2308,8 @@ export default function DFSPropsApp() {
         .slice(0, 40),
     [visibleHistory]
   );
-  const featuredMlbPicks = useMemo(
-    () => resolveFeaturedMlbPicks(boardDisplayProps, props, parsedUnderdogProps),
+  const topMlbPlays = useMemo(
+    () => resolveTopMlbPlays(boardDisplayProps, props, parsedUnderdogProps),
     [boardDisplayProps, props, parsedUnderdogProps]
   );
   const curatedSportPicks = useMemo(() => {
@@ -2872,14 +2872,6 @@ export default function DFSPropsApp() {
             />
             Compact Mode
           </label>
-          <label style={{ ...styles.selectLabel, alignItems: "center", flexDirection: "row", gap: "6px" }}>
-            <input
-              type="checkbox"
-              checked={quickPicksMode}
-              onChange={(event) => setQuickPicksMode(event.target.checked)}
-            />
-            Quick Picks
-          </label>
         </div>
       </section>
       </div>
@@ -2980,7 +2972,7 @@ export default function DFSPropsApp() {
         </section>
       ) : null}
 
-      {displayStatusMessage ? (
+      {debugPanelsVisible && displayStatusMessage ? (
         <section className="mobile-warning-banner" role="status">
           <p>{displayStatusMessage}</p>
         </section>
@@ -2989,6 +2981,7 @@ export default function DFSPropsApp() {
       {visibleError && !allDisplayProps.length ? <section style={styles.errorPanel}>{visibleError}</section> : null}
       </div>
 
+      {debugPanelsVisible ? (
       <div className="dfs-section dfs-order-api-health">
       <SectionErrorBoundary
         name="Source Status"
@@ -3013,34 +3006,21 @@ export default function DFSPropsApp() {
       />
       </SectionErrorBoundary>
       </div>
+      ) : null}
 
       <div id="section-top-picks" className="dfs-section dfs-order-top-picks">
         <SectionErrorBoundary name="MLB Picks Screen" onError={handleSectionRenderError}>
           <CuratedPicksScreen
-            featuredPicks={featuredMlbPicks}
-            mlbStreakPicks={curatedSportPicks}
-            underdogPool={parsedUnderdogProps}
-            parlayPicks={quickParlayPicks.slice(0, DISPLAY_LIMITS.parlayLegs)}
-            goblinPicks={curatedGoblinPicks}
-            demonPicks={curatedDemonPicks}
+            topPlays={topMlbPlays}
             loading={loading}
             onOpen={setSelectedEvaluation}
             hasMlbProps={mlbDisplayPropCount > 0}
-            hasUnderdogProps={underdogStreakPropCount > 0}
-            underdogEmptyMessage={
-              underdogDebugSnapshot
-                ? resolveUnderdogStreakEmptyMessage(underdogDebugSnapshot, { debugMode: debugModeEnabled })
-                : undefined
-            }
-            streakCategoryTab={streakCategoryTab}
-            onStreakCategoryTabChange={setStreakCategoryTab}
             onSectionError={handleSectionRenderError}
-            quickMode={quickPicksMode}
           />
         </SectionErrorBoundary>
       </div>
 
-      {!quickPicksMode ? (
+      {debugPanelsVisible ? (
       <>
       <div id="section-accepted" className="dfs-section dfs-order-accepted">
       <AcceptedPropsPanel props={finalAcceptedProps} onOpen={setSelectedEvaluation} compactMode={compactMode} />

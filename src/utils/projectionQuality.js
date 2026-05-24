@@ -253,6 +253,23 @@ export function isStreakRankEligible(prop = {}) {
   return !validateStreakRejectReason(prop);
 }
 
+export function isTopMlbPlayCandidate(prop = {}) {
+  const base = baseSportStatRejectReason(prop);
+  if (base) return false;
+
+  const sport = resolvePropSportLabel(prop) || prop.inferredSport || prop.sport || "";
+  const statType = prop.statType || prop.market || prop.propType || "";
+  const statLock = lockSportFromStatType(statType);
+
+  if (statLock === "NBA" || statLock === "WNBA" || statLock === "NHL") return false;
+  if (sport && !["MLB", ""].includes(sport) && sport !== "Unknown") {
+    if (sport !== "MLB") return false;
+  }
+  if (statLock && statLock !== "MLB") return false;
+
+  return true;
+}
+
 export function annotateProjectionFields(prop = {}) {
   const quality = resolveProjectionQuality(prop);
   const projection = resolveProjectionValue(prop);

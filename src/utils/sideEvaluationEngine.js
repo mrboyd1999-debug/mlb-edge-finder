@@ -31,6 +31,7 @@ const UNDER_PREFERRED_MARKETS = new Set([
   "totalbases",
   "fantasyscore",
   "fantasy",
+  "strikeouts",
 ]);
 
 function finiteOr(value, fallback = 0) {
@@ -236,17 +237,18 @@ function round2(n) {
 
 export function evaluateBothSides(prop = {}) {
   if (!hasRenderableProjection(prop)) {
+    const underLean = isUnderPreferredMarket(prop) || /strikeout/.test(statBlob(prop));
     return {
-      recommendedSide: "PASS",
-      pass: true,
+      recommendedSide: underLean ? "UNDER" : "PASS",
+      pass: !underLean,
       over: null,
       under: null,
       edge: 0,
-      confidence: null,
-      tier: "No projection data available",
+      confidence: underLean ? 50 : null,
+      tier: "Research Only",
       varianceLevel: varianceLevel(prop),
       reason: "No projection data available",
-      rankScore: -Infinity,
+      rankScore: underLean ? 38 : -Infinity,
       estimatedProjection: false,
     };
   }
@@ -376,8 +378,11 @@ export function enrichPropWithSideEvaluation(prop = {}) {
         ? "under"
         : "";
 
-  const tier = evaluation.pass ? "Pass" : confidenceTierFromScore(evaluation.confidence);
-  const displayResearchOnly = evaluation.pass || isResearchTier(evaluation.confidence);
+  const tier = evaluation.pass ? "Research Only" : confidenceTierFromScore(evaluation.confidence ?? 50);
+  const displayResearchOnly =
+    evaluation.pass ||
+    isResearchTier(evaluation.confidence ?? 50) ||
+    resolveProjectionQuality(prop) === PROJECTION_QUALITY.MISSING;
 
   return {
     ...prop,
@@ -397,7 +402,7 @@ export function enrichPropWithSideEvaluation(prop = {}) {
     confidence: evaluation.confidence ?? prop.confidence ?? null,
     confidenceScore: evaluation.confidence ?? prop.confidenceScore ?? null,
     confidenceTier: tier,
-    bettingLabel: evaluation.pass ? "Pass" : tier,
+    bettingLabel: displayResearchOnly ? "Research Only" : tier,
     displayResearchOnly,
     isDisplayPlayable: !displayResearchOnly && !evaluation.pass,
     varianceLevel: evaluation.varianceLevel,
