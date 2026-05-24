@@ -1098,7 +1098,8 @@ assert.equal(computeDirectionalEdge(5.8, 6.5, "over"), -0.7);
 assert.equal(computeDirectionalEdge(5.8, 6.5, "under"), 0.7);
 assert.ok(goblinHit.impliedHitChance >= 38 && goblinHit.impliedHitChance <= 88);
 assert.ok(goblinHit.volatilityLabel);
-assert.equal(goblinHit.dataQualityBadge?.label, "Offline scoring mode");
+assert.equal(goblinHit.scoringModeLabel, "Estimated grade");
+assert.ok(goblinHit.confidenceScore <= 85);
 
 const topTwo = selectManualTopPicks([demonHrr, goblinHit, nbaAst], 2);
 assert.equal(topTwo.length, 2);
@@ -1114,6 +1115,6 @@ const analyzedNoScoreFn = analyzeManualProp({
   payoutType: "standard",
 });
 assert.ok(analyzedNoScoreFn.riskLevel === "Low" || analyzedNoScoreFn.riskLevel === "Medium" || analyzedNoScoreFn.riskLevel === "High");
-assert.ok(analyzedNoScoreFn.whyThisPick !== "Manual prop analyzed offline using base scoring. API enrichment unavailable.");
+assert.ok(analyzedNoScoreFn.whyThisPick.length > 12);
 
 console.log("Parser smoke tests passed.");

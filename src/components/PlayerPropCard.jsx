@@ -8,7 +8,19 @@ import { dataBadgeStyle, styles, tierStyle } from "../theme/styles.js";
 import { isReadyToBet } from "../services/pickScoring.js";
 import { dynamicAcceptanceTier, getVolatilityLabel } from "../services/propQualityGates.js";
 import { riskAccentStyle } from "../utils/displayPropScoring.js";
-import { leanBadgeStyle, manualRiskBadgeStyle, normalizeManualPick } from "../utils/manualPropScoring.js";
+import { isManualAnalyzerProp } from "../utils/manualPropBuilder.js";
+import {
+  leanBadgeStyle,
+  manualMetricFadeStyle,
+  manualRiskBadgeStyle,
+  manualWeakPickStyle,
+  normalizeManualPick,
+  payoutBadgeStyle,
+  payoutDisplayLabel,
+  projectionVsLineLabel,
+  riskShortLabel,
+  strongPlayBadgeStyle,
+} from "../utils/manualPropScoring.js";
 
 const DYNAMIC_TIER_STYLE = {
   SAFE: { border: "#22c55e", background: "#052e16", color: "#bbf7d0" },
@@ -67,9 +79,14 @@ function bettingLabelStyle(label) {
 }
 
 function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, cardStyle, savedResult }) {
+  const isManual = isManualAnalyzerProp(prop);
   const tier = confidenceTier(prop);
   const pickSide = normalizeManualPick(prop.bestPick || prop.side || prop.pick);
   const lean = pickSide === "over" ? "Over" : pickSide === "under" ? "Under" : formatLeanSide(prop.bestPick || prop.side || "Watch");
+  const weakPick = isManual && Number(prop.edge) < 0;
+  const metricFade = manualMetricFadeStyle(prop.edge);
+  const payoutLabel = payoutDisplayLabel(prop);
+  const projVsLine = projectionVsLineLabel(prop);
   const researchOnly = Boolean(prop.displayResearchOnly) || /research only/i.test(String(prop.bettingLabel || ""));
   const playable = Boolean(prop.isDisplayPlayable) && !researchOnly;
   const ready = playable && (Boolean(prop.isQualificationAccepted) || isReadyToBet(prop));
@@ -84,7 +101,12 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
   const resultBadge = savedResult ? resultStatusBadge(savedResult) : null;
   const sourceBadge = prop.lineSourceBadge || prop.modelSignal?.lineSourceBadge || "";
   const verifiedBadge = prop.verifiedBadge || (prop.sportsbookVerified ? "VERIFIED" : "");
-  const statusLabel = researchOnly ? "Research" : ready ? "Ready" : playable ? "Lean" : "Research";
+  const statusLabel = researchOnly
+    ? "Research only"
+    : prop.playTag === "Strong Play"
+      ? "Strong Play"
+      : prop.bettingLabel ||
+        (ready ? "Ready to Bet" : prop.displayTier === "near" || prop.recommendationStatus === "near" ? "Near Miss" : "Watchlist");
   const statSourceBadges = (prop.statEnrichmentSources || prop.dataSources || prop.modelSignal?.statEnrichmentSources || [])
     .filter(Boolean)
     .slice(0, 3);
@@ -120,13 +142,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
   const edgeDisplay = Number.isFinite(Number(prop.edge)) ? formatNumber(prop.edge) : null;
   const hitChanceDisplay = Number.isFinite(Number(prop.impliedHitChance)) ? `${Math.round(Number(prop.impliedHitChance))}%` : null;
   const volatilityDisplay = prop.volatilityLabel || null;
-  const riskShort = (() => {
-    const text = String(prop.riskLevel || "").toUpperCase();
-    if (text.includes("LOW")) return "LOW";
-    if (text.includes("HIGH")) return "HIGH";
-    if (text.includes("MED") || text.includes("MOD")) return "MED";
-    return text.slice(0, 6) || null;
-  })();
+  const riskShort = riskShortLabel(prop.riskLevel);
   const showDynamicTier = dynamicTier && String(dynamicTier).toUpperCase() !== "RESEARCH";
   const riskAccent = riskAccentStyle(prop.riskLevel);
   const fallbackBadge = prop.displayFallback || prop.fallbackLabel;
@@ -138,8 +154,19 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
 
   return (
     <article
-      className={topPick ? "prop-card-top-pick" : "prop-card-compact"}
-      style={{ ...styles.card, ...(compact ? styles.cardMobileTight : null), ...riskAccent, ...cardStyle }}
+      className={
+        topPick
+          ? "prop-card-top-pick"
+          : isManual
+            ? `prop-card-compact prop-card-manual${weakPick ? " prop-card-manual-weak" : ""}`
+            : "prop-card-compact"
+      }
+      style={{
+        ...styles.card,
+        ...(compact ? styles.cardMobileTight : null),
+        ...(isManual ? manualWeakPickStyle(prop.edge) : riskAccent),
+        ...cardStyle,
+      }}
       role="button"
       tabIndex={0}
       onClick={openDetails}
@@ -184,9 +211,12 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
               )}
             </div>
             <div style={styles.cardBadgeColumn}>
-              {verifiedBadge ? <span style={lineSourceBadgeStyle("VERIFIED")}>VERIFIED</span> : null}
+              {verifiedBadge && !isManual ? <span style={lineSourceBadgeStyle("VERIFIED")}>VERIFIED</span> : null}
               {fallbackBadge ? <span style={bettingLabelStyle("Near Miss")}>Fallback</span> : null}
-              <span style={bettingLabelStyle(statusLabel)}>{compact ? statusLabel : bettingLabel}</span>
+              {!isManual ? <span style={bettingLabelStyle(statusLabel)}>{compact ? statusLabel : bettingLabel}</span> : null}
+              {isManual && prop.playTag === "Strong Play" ? (
+                <span style={{ ...styles.scoreBadge, ...strongPlayBadgeStyle(), fontSize: "9px" }}>Strong Play</span>
+              ) : null}
               {prop.needsReview ? <span style={bettingLabelStyle("Near Miss")}>Needs review</span> : null}
               {showDynamicTier ? <span style={dynamicTierBadgeStyle(dynamicTier)}>{dynamicTier}</span> : null}
               {!compact && sourceBadge ? <span style={lineSourceBadgeStyle(sourceBadge)}>{String(sourceBadge).toUpperCase()}</span> : null}
@@ -207,6 +237,66 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
       </div>
       <div className="prop-card-meta-row prop-card-meta-primary" style={styles.compactMetaRow}>
         {compact ? (
+          isManual ? (
+            <>
+              <span className="prop-card-stat-highlight prop-card-prop-line-row" style={{ ...styles.compactMetaItem, flex: "1 1 100%" }}>
+                <strong>
+                  {displayMarketLabel(prop)} · Line {formatNumber(prop.line)}
+                </strong>
+              </span>
+              <div className="prop-card-primary-metrics" style={styles.manualPrimaryMetricsRow}>
+                {confDisplay != null ? (
+                  <span style={{ ...styles.scoreBadge, ...metricFade, borderColor: "#166534", color: "#86efac", background: "#052e16" }}>
+                    CONF {confDisplay}%
+                  </span>
+                ) : null}
+                {hitChanceDisplay ? (
+                  <span style={{ ...styles.scoreBadge, ...metricFade, borderColor: "#155e75", color: "#a5f3fc", background: "#083344" }}>
+                    HIT {hitChanceDisplay}
+                  </span>
+                ) : null}
+                {edgeDisplay != null ? (
+                  <span
+                    style={{
+                      ...styles.scoreBadge,
+                      ...metricFade,
+                      borderColor: Number(prop.edge) >= 0 ? "#1d4ed8" : "#991b1b",
+                      color: Number(prop.edge) >= 0 ? "#93c5fd" : "#fca5a5",
+                      background: Number(prop.edge) >= 0 ? "#1e3a8a" : "#450a0a",
+                    }}
+                  >
+                    EDGE {Number(prop.edge) > 0 ? "+" : ""}{edgeDisplay}
+                  </span>
+                ) : null}
+                {projVsLine ? (
+                  <span style={{ ...styles.scoreBadge, ...metricFade, borderColor: "#475569", color: "#cbd5e1", background: "#111827" }}>
+                    {projVsLine}
+                  </span>
+                ) : null}
+              </div>
+              <div className="prop-card-badge-row" style={styles.badgeRow}>
+                {lean === "Over" || lean === "Under" ? (
+                  <span style={{ ...styles.scoreBadge, ...leanBadgeStyle(lean) }}>{lean.toUpperCase()}</span>
+                ) : null}
+                {riskShort ? (
+                  <span style={{ ...styles.scoreBadge, ...manualRiskBadgeStyle(prop.riskLevel) }}>
+                    {riskShort} RISK
+                  </span>
+                ) : null}
+                {confDisplay != null ? (
+                  <span style={{ ...styles.scoreBadge, ...metricFade, borderColor: "#166534", color: "#86efac", background: "#052e16" }}>
+                    {confDisplay}%
+                  </span>
+                ) : null}
+                <span style={{ ...styles.scoreBadge, ...payoutBadgeStyle(prop) }}>{payoutLabel}</span>
+              </div>
+              {volatilityDisplay ? (
+                <p className="prop-card-volatility-secondary" style={styles.manualVolatilityLine}>
+                  {volatilityDisplay}
+                </p>
+              ) : null}
+            </>
+          ) : (
           <>
             <span className="prop-card-stat-highlight prop-card-prop-line-row" style={{ ...styles.compactMetaItem, flex: "1 1 100%" }}>
               <strong>
@@ -251,6 +341,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
               ))}
             </div>
           </>
+          )
         ) : (
           <>
             <span className="prop-card-stat-highlight" style={styles.compactMetaItem}>
@@ -271,7 +362,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
               </strong>
             </span>
             <span style={styles.compactMetaItem}>
-              <span style={styles.metaLabel}>Lean</span>
+              <span style={styles.metaLabel}>Side</span>
               <strong style={styles.metaValueStrong}>{lean}</strong>
             </span>
           </>

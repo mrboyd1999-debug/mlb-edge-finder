@@ -4,7 +4,7 @@ import { isManualAnalyzerProp } from "../utils/manualPropBuilder.js";
 export function dataQualityBadge(prop = {}) {
   if (isManualAnalyzerProp(prop)) {
     return {
-      label: prop.scoringModeLabel || "Offline scoring mode",
+      label: prop.scoringModeLabel || "Estimated grade",
       tone: "info",
     };
   }

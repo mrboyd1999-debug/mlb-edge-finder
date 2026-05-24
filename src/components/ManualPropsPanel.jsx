@@ -143,7 +143,7 @@ function ManualPropsPanel({
           <div>
             <h2 style={styles.sectionTitleSmall}>Manual Prop Analyzer</h2>
             <p className="section-subcopy" style={styles.streakCopy}>
-              Paste lines from PrizePicks or Underdog. Scoring runs locally — no live API required.
+              Enter PrizePicks or Underdog lines for instant mobile-friendly grades.
             </p>
           </div>
           <p style={styles.countPill}>{rankedProps.length} analyzed</p>
@@ -289,7 +289,7 @@ function ManualPropsPanel({
           <div style={styles.sectionHeading}>
             <div>
               <h2 style={styles.sectionTitleSmall}>Top 2 Manual Picks</h2>
-              <p className="section-subcopy" style={styles.streakCopy}>Highest confidence from your manual entries.</p>
+              <p className="section-subcopy" style={styles.streakCopy}>Best edge and lowest volatility from your board.</p>
             </div>
             <p style={styles.countPill}>{topPicks.length} picks</p>
           </div>
@@ -301,12 +301,12 @@ function ManualPropsPanel({
         <div style={styles.sectionHeading}>
           <div>
             <h2 style={styles.sectionTitleSmall}>Analyzed Props</h2>
-            <p className="section-subcopy" style={styles.streakCopy}>Sorted by confidence — risk and reason on each card.</p>
+            <p className="section-subcopy" style={styles.streakCopy}>Ranked by edge, volatility, and confidence.</p>
           </div>
           <p style={styles.countPill}>{rankedProps.length} ranked</p>
         </div>
         {!rankedProps.length ? (
-          <div style={styles.emptyStateCompact}>Add a prop above to run the scoring engine offline.</div>
+          <div style={styles.emptyStateCompact}>Add a prop above to generate your first grade.</div>
         ) : (
           <div style={styles.manualTopPickGrid}>{rankedProps.map((prop, index) => renderCard(prop, index))}</div>
         )}

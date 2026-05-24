@@ -976,6 +976,8 @@ export const styles = {
   },
   manualPropReason: { flex: "1 1 180px", color: "#94a3b8", fontSize: "11px", lineHeight: 1.35 },
   manualPropActions: { display: "flex", gap: "6px", flexWrap: "wrap" },
+  manualPrimaryMetricsRow: { display: "flex", flexWrap: "wrap", gap: "3px", marginTop: "2px" },
+  manualVolatilityLine: { margin: "2px 0 0", color: "#64748b", fontSize: "9px", lineHeight: 1.2 },
   manualTopPickGrid: { display: "grid", gap: "8px" },
   controlHint: { color: "#64748b", fontSize: "10px", fontWeight: 600, textTransform: "none" },
   secondaryButtonSmall: {

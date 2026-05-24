@@ -452,6 +452,41 @@ body,
     padding: 5px 6px !important;
   }
 
+  .pick-detail-modal-manual {
+    max-height: 72vh !important;
+    max-width: calc(100vw - 6px) !important;
+    padding: 4px 6px !important;
+    border-radius: 10px 10px 0 0 !important;
+  }
+
+  .pick-detail-modal-manual .player-image-wrap {
+    width: 32px !important;
+    height: 32px !important;
+    min-width: 32px !important;
+  }
+
+  .pick-detail-modal-manual [style*="modalTitle"] {
+    font-size: 14px !important;
+  }
+
+  .prop-card-manual {
+    padding: 2px 3px !important;
+  }
+
+  .prop-card-manual-weak {
+    opacity: 0.76 !important;
+    border-color: #334155 !important;
+  }
+
+  .prop-card-manual .prop-card-primary-metrics {
+    gap: 2px !important;
+  }
+
+  .prop-card-manual .prop-card-volatility-secondary {
+    font-size: 8px !important;
+    margin-top: 1px !important;
+  }
+
   .pick-detail-modal {
     max-height: 80vh !important;
     padding: 6px 8px !important;
