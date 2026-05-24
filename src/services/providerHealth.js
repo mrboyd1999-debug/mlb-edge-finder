@@ -1,12 +1,14 @@
 /** Provider health — merge probe results with actual parsed feed data. */
 
-import { getProxyUrl } from "../config/apiConfig.js";
+import { getOddsApiKey, getProxyUrl } from "../config/apiConfig.js";
 import { CONNECTION_STATUS } from "./apiConnectionTest.js";
 
 export const PROVIDER_UI_STATUS = {
   CONNECTED: "Connected",
-  LIVE_FEED: "Live Feed Available",
-  CACHED_FEED: "Cached Feed",
+  LIVE: "Live",
+  CACHED: "Cached",
+  KEY_SAVED: "Key Saved",
+  NOT_USED: "Not Used",
   PROXY_REQUIRED: "Proxy Required",
   INVALID_KEY: "Invalid API Key",
   RATE_LIMITED: "Rate Limited",
@@ -35,7 +37,7 @@ function countPropsForProvider(props = [], provider = "") {
     const platform = normalizePlatform(prop.platform || prop.source);
     if (needle.includes("prize") && platform.includes("prize")) return true;
     if (needle.includes("underdog") && platform.includes("underdog")) return true;
-    if (needle.includes("odds") && (platform.includes("odds") || prop.sportsbookVerified)) return true;
+    if (needle.includes("odds") && platform.includes("odds")) return true;
     return platform.includes(needle);
   }).length;
 }
@@ -52,20 +54,19 @@ export function buildFeedHealthContext({
   const odds = sources["The Odds API"] || {};
 
   const buildRow = (provider, sourceRow = {}, statusKey = provider) => {
-    const fromProps = countPropsForProvider(allDisplayProps, provider);
-    const parsedCount = finiteOr(sourceRow.propsAfterParsing, fromProps);
-    const usableCount = finiteOr(sourceRow.usablePropsCount ?? sourceRow.propsAfterParsing, fromProps);
+    const boardCount = countPropsForProvider(allDisplayProps, provider);
     const cached =
       /cached/i.test(String(sourceRow.status || sourceStatus[statusKey] || "")) ||
       /cached/i.test(String(sourceRow.lineSourceBadge || ""));
     return {
       provider,
-      parsedCount,
-      usableCount,
-      rawCount: finiteOr(sourceRow.rawPropsLoaded, parsedCount),
-      hasUsableProps: usableCount > 0 || fromProps > 0,
+      boardCount,
+      parsedCount: finiteOr(sourceRow.propsAfterParsing, 0),
+      usableCount: boardCount,
+      rawCount: finiteOr(sourceRow.rawPropsLoaded, 0),
+      hasUsableProps: boardCount > 0,
       cached,
-      live: usableCount > 0 && !cached,
+      live: boardCount > 0 && !cached,
       lastSuccessfulFetchAt: sourceRow.lastSuccessfulFetchAt || lastUpdated || "",
       lastError: sourceRow.message || sourceRow.lastError || "",
     };
@@ -87,103 +88,140 @@ function isProxyBlockedProbe(probe = {}) {
   return /failed to fetch|cors|network|blocked|timeout|abort/i.test(String(probe.preview || ""));
 }
 
-function mapUiStatusToConnectionStatus(uiStatus = "") {
-  const key = String(uiStatus || "").toUpperCase();
-  if (key === PROVIDER_UI_STATUS.CONNECTED.toUpperCase()) return CONNECTION_STATUS.LIVE;
-  if (key === PROVIDER_UI_STATUS.LIVE_FEED.toUpperCase()) return "LIVE FEED AVAILABLE";
-  if (key === PROVIDER_UI_STATUS.CACHED_FEED.toUpperCase()) return CONNECTION_STATUS.CACHED;
-  if (key === PROVIDER_UI_STATUS.PROXY_REQUIRED.toUpperCase()) return "PROXY REQUIRED";
-  if (key === PROVIDER_UI_STATUS.INVALID_KEY.toUpperCase()) return CONNECTION_STATUS.FAILED;
-  if (key === PROVIDER_UI_STATUS.RATE_LIMITED.toUpperCase()) return CONNECTION_STATUS.CACHED;
-  if (key === PROVIDER_UI_STATUS.NOT_CONFIGURED.toUpperCase()) return CONNECTION_STATUS.NOT_CONFIGURED;
-  return uiStatus;
+function mapUiStatusToConnectionStatus(settingsStatus = "") {
+  const key = String(settingsStatus || "").toUpperCase();
+  if (key === "LIVE" || key === "CONNECTED") return CONNECTION_STATUS.LIVE;
+  if (key === "CACHED") return CONNECTION_STATUS.CACHED;
+  if (key === "PROXY REQUIRED") return "PROXY REQUIRED";
+  if (key === "INVALID API KEY") return CONNECTION_STATUS.FAILED;
+  if (key === "RATE LIMITED") return CONNECTION_STATUS.CACHED;
+  if (key === "NOT CONFIGURED" || key === "NOT USED" || key === "KEY SAVED") {
+    return CONNECTION_STATUS.NOT_CONFIGURED;
+  }
+  return settingsStatus;
 }
 
-export function resolveEffectiveProviderStatus(provider = "", { probe = {}, feed = {} } = {}) {
+function resolveLineProviderStatus(provider = "", { probe = {}, feed = {} } = {}) {
   const name = PROVIDER_KEYS[provider] || provider;
-  const parsedCount = finiteOr(feed.parsedCount ?? feed.usableCount, 0);
-  const usableCount = finiteOr(feed.usableCount, parsedCount);
-  const hasFeed = Boolean(feed.hasUsableProps || usableCount > 0 || parsedCount > 0);
-
-  if (name === "Odds API" && probe?.sportsListOk) {
-    return {
-      uiStatus: PROVIDER_UI_STATUS.CONNECTED,
-      message: `Odds API /v4/sports OK (${probe.sportsCount || "multiple"} sports)`,
-      status: CONNECTION_STATUS.LIVE,
-      showError: false,
-    };
-  }
+  const boardCount = finiteOr(feed.boardCount ?? feed.usableCount, 0);
+  const hasBoardProps = boardCount > 0;
 
   if (probe?.unauthorized) {
     return {
-      uiStatus: PROVIDER_UI_STATUS.INVALID_KEY,
-      message: PROVIDER_UI_STATUS.INVALID_KEY,
-      status: CONNECTION_STATUS.FAILED,
+      settingsStatus: PROVIDER_UI_STATUS.INVALID_KEY,
+      settingsLine: PROVIDER_UI_STATUS.INVALID_KEY,
       showError: true,
     };
   }
 
-  if (hasFeed) {
-    if (probe?.rateLimited || feed.cached) {
+  if (name === "Odds API") {
+    const keyConfigured = Boolean(probe?.keyConfigured ?? getOddsApiKey());
+    if (!keyConfigured) {
       return {
-        uiStatus: PROVIDER_UI_STATUS.CACHED_FEED,
-        message: `${usableCount || parsedCount} props from cache/live parse`,
-        status: CONNECTION_STATUS.CACHED,
+        settingsStatus: PROVIDER_UI_STATUS.NOT_USED,
+        settingsLine: PROVIDER_UI_STATUS.NOT_USED,
         showError: false,
       };
     }
-    return {
-      uiStatus: PROVIDER_UI_STATUS.LIVE_FEED,
-      message: `${usableCount || parsedCount} props parsed successfully`,
-      status: "LIVE FEED AVAILABLE",
-      showError: false,
-    };
+    if (probe?.sportsListOk) {
+      if (hasBoardProps) {
+        return {
+          settingsStatus: PROVIDER_UI_STATUS.CONNECTED,
+          settingsLine: PROVIDER_UI_STATUS.CONNECTED,
+          showError: false,
+        };
+      }
+      return {
+        settingsStatus: PROVIDER_UI_STATUS.CONNECTED,
+        settingsLine: "Connected — not used for current board",
+        showError: false,
+      };
+    }
+    if (keyConfigured && !probe?.sportsListOk && !hasBoardProps) {
+      return {
+        settingsStatus: PROVIDER_UI_STATUS.KEY_SAVED,
+        settingsLine: PROVIDER_UI_STATUS.KEY_SAVED,
+        showError: false,
+      };
+    }
+  }
+
+  if (name === "PrizePicks" || name === "Underdog") {
+    if (hasBoardProps) {
+      return {
+        settingsStatus: feed.cached ? PROVIDER_UI_STATUS.CACHED : PROVIDER_UI_STATUS.LIVE,
+        settingsLine: feed.cached ? PROVIDER_UI_STATUS.CACHED : PROVIDER_UI_STATUS.LIVE,
+        showError: false,
+      };
+    }
+    if (probe?.rateLimited || feed.cached) {
+      return {
+        settingsStatus: PROVIDER_UI_STATUS.RATE_LIMITED,
+        settingsLine: PROVIDER_UI_STATUS.RATE_LIMITED,
+        showError: false,
+      };
+    }
+    if (isProxyBlockedProbe(probe)) {
+      const proxyConfigured = Boolean(getProxyUrl(name === "PrizePicks" ? "prizepicks" : "underdog"));
+      if (!proxyConfigured) {
+        return {
+          settingsStatus: PROVIDER_UI_STATUS.PROXY_REQUIRED,
+          settingsLine: PROVIDER_UI_STATUS.PROXY_REQUIRED,
+          showError: false,
+        };
+      }
+    }
+    if (probe?.ok || probe?.lastSuccessfulFetchAt) {
+      return {
+        settingsStatus: PROVIDER_UI_STATUS.LIVE,
+        settingsLine: PROVIDER_UI_STATUS.LIVE,
+        showError: false,
+      };
+    }
   }
 
   if (probe?.rateLimited) {
     return {
-      uiStatus: PROVIDER_UI_STATUS.RATE_LIMITED,
-      message: PROVIDER_UI_STATUS.RATE_LIMITED,
-      status: CONNECTION_STATUS.CACHED,
+      settingsStatus: PROVIDER_UI_STATUS.RATE_LIMITED,
+      settingsLine: PROVIDER_UI_STATUS.RATE_LIMITED,
       showError: false,
     };
-  }
-
-  if ((name === "PrizePicks" || name === "Underdog") && isProxyBlockedProbe(probe)) {
-    const proxyConfigured = Boolean(getProxyUrl(name === "PrizePicks" ? "prizepicks" : "underdog"));
-    if (!proxyConfigured) {
-      return {
-        uiStatus: PROVIDER_UI_STATUS.PROXY_REQUIRED,
-        message: "Browser blocked direct request — configure proxy in Settings",
-        status: "PROXY REQUIRED",
-        showError: false,
-      };
-    }
   }
 
   if (probe?.ok) {
     return {
-      uiStatus: PROVIDER_UI_STATUS.CONNECTED,
-      message: PROVIDER_UI_STATUS.CONNECTED,
-      status: CONNECTION_STATUS.LIVE,
+      settingsStatus: PROVIDER_UI_STATUS.CONNECTED,
+      settingsLine: PROVIDER_UI_STATUS.CONNECTED,
       showError: false,
     };
   }
 
-  if (name === "Odds API" && !probe?.keyConfigured && probe?.status === CONNECTION_STATUS.NOT_CONFIGURED) {
+  if (probe?.status === CONNECTION_STATUS.NOT_CONFIGURED) {
     return {
-      uiStatus: PROVIDER_UI_STATUS.NOT_CONFIGURED,
-      message: PROVIDER_UI_STATUS.NOT_CONFIGURED,
-      status: CONNECTION_STATUS.NOT_CONFIGURED,
+      settingsStatus: PROVIDER_UI_STATUS.NOT_CONFIGURED,
+      settingsLine: PROVIDER_UI_STATUS.NOT_CONFIGURED,
       showError: false,
     };
   }
 
   return {
-    uiStatus: probe?.message || "Unavailable",
-    message: probe?.preview || probe?.lastError || "No usable props parsed yet",
-    status: CONNECTION_STATUS.DEGRADED,
-    showError: Boolean(probe?.preview && !hasFeed),
+    settingsStatus: "Unavailable",
+    settingsLine: "Unavailable",
+    showError: Boolean(probe?.preview && !hasBoardProps),
+  };
+}
+
+export function resolveEffectiveProviderStatus(provider = "", context = {}) {
+  const resolved = resolveLineProviderStatus(provider, context);
+  return {
+    uiStatus: resolved.settingsStatus,
+    message: "",
+    status: mapUiStatusToConnectionStatus(resolved.settingsStatus),
+    displayStatus: resolved.settingsLine,
+    displayMessage: "",
+    settingsStatus: resolved.settingsStatus,
+    settingsLine: resolved.settingsLine,
+    showError: resolved.showError,
   };
 }
 
@@ -195,14 +233,10 @@ export function mergeConnectionReportWithFeeds(report = {}, feedContext = {}) {
     const effective = resolveEffectiveProviderStatus(provider, { probe: row, feed });
     return {
       ...row,
-      uiStatus: effective.uiStatus,
-      message: effective.message,
-      status: mapUiStatusToConnectionStatus(effective.uiStatus) || effective.status,
-      displayStatus: effective.uiStatus,
-      displayMessage: effective.message,
-      showError: effective.showError,
+      ...effective,
       feedParsedCount: feed.parsedCount ?? 0,
-      feedUsableCount: feed.usableCount ?? 0,
+      feedUsableCount: feed.boardCount ?? feed.usableCount ?? 0,
+      feedBoardCount: feed.boardCount ?? 0,
     };
   });
   return { ...report, results };
@@ -210,18 +244,32 @@ export function mergeConnectionReportWithFeeds(report = {}, feedContext = {}) {
 
 export function providerStatusStyle(status = "") {
   const key = String(status || "").toUpperCase();
+  if (key.includes("CONNECTED")) {
+    return {
+      display: "inline-flex",
+      alignItems: "center",
+      padding: "2px 8px",
+      borderRadius: 999,
+      fontSize: 11,
+      fontWeight: 700,
+      background: "rgba(34,197,94,0.18)",
+      color: "#86efac",
+    };
+  }
   const colors = {
-    CONNECTED: { bg: "rgba(34,197,94,0.18)", text: "#86efac" },
-    "LIVE FEED AVAILABLE": { bg: "rgba(34,197,94,0.18)", text: "#86efac" },
     LIVE: { bg: "rgba(34,197,94,0.18)", text: "#86efac" },
-    "CACHED FEED": { bg: "rgba(59,130,246,0.18)", text: "#93c5fd" },
+    CONNECTED: { bg: "rgba(34,197,94,0.18)", text: "#86efac" },
+    "CONNECTED — NOT USED FOR CURRENT BOARD": { bg: "rgba(34,197,94,0.18)", text: "#86efac" },
     CACHED: { bg: "rgba(59,130,246,0.18)", text: "#93c5fd" },
+    "KEY SAVED": { bg: "rgba(148,163,184,0.15)", text: "#cbd5e1" },
+    "NOT USED": { bg: "rgba(148,163,184,0.15)", text: "#cbd5e1" },
     "PROXY REQUIRED": { bg: "rgba(234,179,8,0.18)", text: "#fde047" },
     "INVALID API KEY": { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
     "RATE LIMITED": { bg: "rgba(59,130,246,0.18)", text: "#93c5fd" },
     "NOT CONFIGURED": { bg: "rgba(148,163,184,0.15)", text: "#cbd5e1" },
     DEGRADED: { bg: "rgba(249,115,22,0.18)", text: "#fdba74" },
     FAILED: { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
+    UNAVAILABLE: { bg: "rgba(249,115,22,0.18)", text: "#fdba74" },
   };
   const palette = colors[key] || colors.DEGRADED;
   return {

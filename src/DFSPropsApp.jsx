@@ -148,13 +148,7 @@ import {
   BOARD_SORT_MODES,
 } from "./services/propPriority.js";
 import CuratedPicksScreen from "./components/CuratedPicksScreen.jsx";
-import {
-  CURATED_SPORT_ORDER,
-  resolveCuratedSportPicks,
-  resolveCuratedBoardPicks,
-  isManuallySavedPick,
-  historyPickToDisplayProp,
-} from "./utils/curatedPicks.js";
+import { DISPLAY_LIMITS, resolveCuratedBoardPicks, resolveCuratedSportPicks, CURATED_SPORT_ORDER, isManuallySavedPick, historyPickToDisplayProp } from "./utils/curatedPicks.js";
 import NearMissBoard from "./components/NearMissBoard.jsx";
 import RejectionAnalyticsPanel from "./components/RejectionAnalyticsPanel.jsx";
 import QualificationAnalyticsPanel from "./components/QualificationAnalyticsPanel.jsx";
@@ -712,7 +706,7 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
     const usableCount = Number(row.usablePropsCount ?? counts.usableCount ?? 0);
     if (usableCount > 0) {
       if (/cached/i.test(String(status || row.status || row.lineSourceBadge || ""))) return HEALTH_STATES.CACHED;
-      return "LIVE FEED AVAILABLE";
+      return HEALTH_STATES.LIVE;
     }
     return resolveSourceHealthState({
       status: status || row.status,
@@ -2038,11 +2032,11 @@ export default function DFSPropsApp() {
     return Object.fromEntries(entries);
   }, [streakSportBoards, scoredDisplayProps]);
   const curatedGoblinPicks = useMemo(
-    () => resolveCuratedBoardPicks(streakSportBoards.goblins?.picks, selectGoblinProps, boardDisplayProps, 6),
+    () => resolveCuratedBoardPicks(streakSportBoards.goblins?.picks, selectGoblinProps, boardDisplayProps, DISPLAY_LIMITS.goblins),
     [streakSportBoards, boardDisplayProps]
   );
   const curatedDemonPicks = useMemo(
-    () => resolveCuratedBoardPicks(streakSportBoards.demons?.picks, selectDemonProps, boardDisplayProps, 6),
+    () => resolveCuratedBoardPicks(streakSportBoards.demons?.picks, selectDemonProps, boardDisplayProps, DISPLAY_LIMITS.demons),
     [streakSportBoards, boardDisplayProps]
   );
   const feedHealthContext = useMemo(
@@ -2635,7 +2629,7 @@ export default function DFSPropsApp() {
       <div id="section-top-picks" className="dfs-section dfs-order-top-picks">
         <CuratedPicksScreen
           sportPicks={curatedSportPicks}
-          parlayPicks={quickParlayPicks}
+          parlayPicks={quickParlayPicks.slice(0, 4)}
           goblinPicks={curatedGoblinPicks}
           demonPicks={curatedDemonPicks}
           loading={loading}
@@ -2678,29 +2672,6 @@ export default function DFSPropsApp() {
               onClick={() => showMoreSection("ready")}
             />
           </>
-        )}
-      </section>
-      </div>
-
-      <div className="dfs-section dfs-order-research-only">
-      <section style={styles.section} aria-label="Research only board">
-        <div style={styles.sectionHeading}>
-          <div>
-            <h2 style={styles.sectionTitleSmall}>Research Only</h2>
-            <p className="section-subcopy" style={styles.streakCopy}>Lower-confidence or incomplete-data props — review before playing.</p>
-          </div>
-          <p style={styles.countPill}>{researchOnlyProps.length} research</p>
-        </div>
-        {loading ? (
-          <EmptyState text="Loading research props…" />
-        ) : researchOnlyProps.length === 0 ? (
-          <EmptyState text="No research-only props this cycle." />
-        ) : (
-          <VirtualCardList
-            items={researchOnlyProps}
-            renderCard={readyRenderCard}
-            initialVisible={INITIAL_VISIBLE_SECTION_LIMIT}
-          />
         )}
       </section>
       </div>
@@ -2769,6 +2740,8 @@ export default function DFSPropsApp() {
           pipelineAudit={pipelineAudit}
           apiHealth={apiHealth}
           lastUpdated={lastUpdated}
+          researchOnlyCount={researchOnlyProps.length}
+          feedHealthContext={feedHealthContext}
         />
       ) : null}
 

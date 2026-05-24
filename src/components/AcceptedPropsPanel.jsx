@@ -12,9 +12,7 @@ function SavedPicksPanel({ props = [], onOpen, compactMode = true }) {
         <p style={styles.countPill}>{rows.length} saved</p>
       </div>
       {rows.length === 0 ? (
-        <div style={styles.emptyStateCompact}>
-          No saved picks yet. Open a pick and tap Save to keep it here.
-        </div>
+        <div style={styles.emptyStateCompact}>No saved picks yet.</div>
       ) : (
         <div className="saved-picks-grid" style={styles.cardGridCompact}>
           {rows.map((prop, idx) => (

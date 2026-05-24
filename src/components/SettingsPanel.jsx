@@ -154,7 +154,7 @@ export default function SettingsPanel({
             ))}
           </ul>
         ) : null}
-        <ApiHealthPanel connectionReport={connectionReport} lastUpdated={lastUpdated} />
+        <ApiHealthPanel connectionReport={connectionReport} />
         <details className="settings-keys-expand" style={{ ...styles.compactDetails, marginTop: "8px" }}>
           <summary style={styles.detailsSummary}>
             <span>

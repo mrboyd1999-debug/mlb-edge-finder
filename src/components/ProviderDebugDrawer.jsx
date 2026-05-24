@@ -1,7 +1,15 @@
 import { styles } from "../theme/styles.js";
 import { formatDateTime } from "../utils/formatters.js";
 
-export default function ProviderDebugDrawer({ debugInfo = {}, pipelineAudit = {}, apiHealth = {}, lastUpdated = "" }) {
+export default function ProviderDebugDrawer({
+  debugInfo = {},
+  pipelineAudit = {},
+  apiHealth = {},
+  lastUpdated = "",
+  researchOnlyCount = 0,
+  feedHealthContext = {},
+  connectionReport = null,
+}) {
   const sources = debugInfo?.sources || {};
   const counters = debugInfo?.pipelineCounters || pipelineAudit?.pipelineCounters || {};
   const rejected = Number(counters.rejected ?? pipelineAudit?.rejected ?? 0);
@@ -14,9 +22,14 @@ export default function ProviderDebugDrawer({ debugInfo = {}, pipelineAudit = {}
     raw: row?.rawPropsLoaded ?? 0,
     parsed: row?.propsAfterParsing ?? 0,
     usable: row?.usablePropsCount ?? row?.propsAfterParsing ?? 0,
+    board: feedHealthContext[name]?.boardCount ?? feedHealthContext[name === "The Odds API" ? "Odds API" : name]?.boardCount ?? 0,
     error: row?.message || row?.lastError || "",
     lastFetch: row?.lastSuccessfulFetchAt || "",
   }));
+
+  const probeRows = (connectionReport?.results || []).filter((row) =>
+    ["PrizePicks", "Underdog", "Odds API"].includes(row.provider)
+  );
 
   const lastSuccess = sourceRows
     .filter((row) => row.usable > 0 || row.lastFetch)
@@ -33,7 +46,7 @@ export default function ProviderDebugDrawer({ debugInfo = {}, pipelineAudit = {}
       </summary>
       <div className="provider-debug-panel" style={styles.compactPanel}>
         <p style={styles.compactFlags}>
-          parsed {parsed} · accepted {accepted} · rejected {rejected}
+          parsed {parsed} · accepted {accepted} · rejected {rejected} · research-only {researchOnlyCount}
           {lastUpdated ? ` · updated ${formatDateTime(lastUpdated)}` : ""}
         </p>
         {lastSuccess ? (
@@ -45,12 +58,23 @@ export default function ProviderDebugDrawer({ debugInfo = {}, pipelineAudit = {}
           <div key={row.name} style={{ marginTop: "8px" }}>
             <strong style={{ fontSize: 12 }}>{row.name}</strong>
             <p style={styles.compactFlags}>
-              {row.status} · raw {row.raw} · parsed {row.parsed} · usable {row.usable}
+              {row.status} · raw {row.raw} · parsed {row.parsed} · usable {row.usable} · on board {row.board}
               {row.lastFetch ? ` · ${formatDateTime(row.lastFetch)}` : ""}
             </p>
             {row.error ? <p style={{ ...styles.compactFlags, color: "#fca5a5" }}>{row.error}</p> : null}
           </div>
         ))}
+        {probeRows.length ? (
+          <div style={{ marginTop: "8px" }}>
+            <strong style={{ fontSize: 12 }}>Probe results</strong>
+            {probeRows.map((row) => (
+              <p key={row.provider} style={styles.compactFlags}>
+                {row.provider}: {row.settingsLine || row.displayStatus} · board {row.feedBoardCount ?? 0}
+                {row.url ? ` · ${String(row.url).replace(/apiKey=[^&]+/i, "apiKey=[REDACTED]")}` : ""}
+              </p>
+            ))}
+          </div>
+        ) : null}
         {apiHealth?.PrizePicks?.lastError || apiHealth?.Underdog?.lastError || apiHealth?.OddsAPI?.lastError ? (
           <div style={{ marginTop: "8px" }}>
             <strong style={{ fontSize: 12 }}>Fetch errors</strong>
