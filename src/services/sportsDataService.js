@@ -21,6 +21,7 @@
  */
 
 import { getSportsDataApiKey } from "../config/apiConfig.js";
+import { ENRICHMENT_MAX_RETRIES, getApiTimeoutMs } from "../utils/apiTimeout.js";
 import { fetchJsonSafe, getCacheTtlMs } from "./fetchUtil.js";
 import {
   SOURCE_IDS,
@@ -127,9 +128,10 @@ async function fetchSportsDataEndpoint(cacheKey, url) {
           {
             source: "SportsDataIO",
             ttlMs: getCacheTtlMs(),
-            timeoutMs: 15_000,
-            maxRetries: 0,
+            timeoutMs: getApiTimeoutMs({ enrichment: true }),
+            maxRetries: ENRICHMENT_MAX_RETRIES,
             skip429Retry: true,
+            enrichment: true,
           }
         );
         if (result.rateLimited) {

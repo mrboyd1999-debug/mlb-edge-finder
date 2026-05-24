@@ -1,4 +1,5 @@
 import { fetchJsonSafe, getCacheTtlMs } from "./fetchUtil.js";
+import { ENRICHMENT_MAX_RETRIES, getApiTimeoutMs } from "../utils/apiTimeout.js";
 import { canonicalStatType } from "../utils/marketNormalization.js";
 import {
   SOURCE_IDS,
@@ -168,8 +169,10 @@ async function fetchSportMarkets(apiKey, sport, propsForSport) {
   const result = await fetchJsonSafe(eventsUrl.toString(), {}, {
     source: "Sportsbook odds events",
     ttlMs: getCacheTtlMs(),
-    maxRetries: 0,
+    maxRetries: ENRICHMENT_MAX_RETRIES,
     skip429Retry: true,
+    enrichment: true,
+    timeoutMs: getApiTimeoutMs({ enrichment: true }),
   });
   if (!result.ok) {
     if (result.rateLimited) throw new Error(oddsApiErrorMessage(429));
@@ -203,8 +206,10 @@ async function fetchEventPlayerProps(apiKey, sportKey, sport, eventId, markets) 
   const result = await fetchJsonSafe(url.toString(), {}, {
     source: "Sportsbook odds props",
     ttlMs: getCacheTtlMs(),
-    maxRetries: 0,
+    maxRetries: ENRICHMENT_MAX_RETRIES,
     skip429Retry: true,
+    enrichment: true,
+    timeoutMs: getApiTimeoutMs({ enrichment: true }),
   });
   if (!result.ok) {
     if (result.rateLimited) throw new Error(oddsApiErrorMessage(429));

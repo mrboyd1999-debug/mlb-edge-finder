@@ -1,8 +1,9 @@
+import { ENRICHMENT_MAX_RETRIES, getApiTimeoutMs } from "../utils/apiTimeout.js";
+
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const SHORT_CACHE_MIN_MS = 60 * 1000;
 const SHORT_CACHE_MAX_MS = 120 * 1000;
-const DEFAULT_TIMEOUT_MS = 15_000;
-const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_MAX_RETRIES = 1;
 const RETRY_STATUSES = new Set([429, 502, 503, 504]);
 const DEV_MIN_INTERVAL_MS = 4000;
 
@@ -182,8 +183,8 @@ export async function resilientFetch(url, init = {}, options = {}) {
   const key = cacheKey(url, init);
   const bypassCache = init.cache === "no-store" || options.ttlMs === 0;
   const ttlMs = bypassCache ? 0 : options.ttlMs ?? shortCacheTtlMs();
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const timeoutMs = options.timeoutMs ?? getApiTimeoutMs({ enrichment: Boolean(options.enrichment) });
+  const maxRetries = options.maxRetries ?? (options.enrichment ? ENRICHMENT_MAX_RETRIES : DEFAULT_MAX_RETRIES);
   const retryStatuses = options.retryStatuses || RETRY_STATUSES;
   const now = Date.now();
 

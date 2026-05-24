@@ -1,4 +1,5 @@
 import { resilientFetch } from "./fetchUtil.js";
+import { getApiTimeoutMs } from "../utils/apiTimeout.js";
 import { normalizeGameStartTime, startTimeUncertainty } from "../utils/normalizeGameStartTime.js";
 import { inferSportFromText, sportFromPrizePicksLeague } from "../utils/sportMappings.js";
 import { filterApprovedMarketsOnly } from "../utils/approvedMarkets.js";
@@ -271,8 +272,8 @@ async function fetchPrizePicksEndpoint(endpoint, init) {
     const response = await resilientFetch(endpoint, init, {
       source: "PrizePicks",
       ttlMs: PRIZEPICKS_CLIENT_STALE_MS,
-      timeoutMs: 15_000,
-      maxRetries: 0,
+      timeoutMs: getApiTimeoutMs(),
+      maxRetries: 1,
       skip429Retry: true,
     });
     attempt.status = response.status;

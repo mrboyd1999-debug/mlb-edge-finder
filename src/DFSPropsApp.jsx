@@ -151,7 +151,13 @@ import CuratedPicksScreen from "./components/CuratedPicksScreen.jsx";
 import SectionErrorBoundary from "./components/SectionErrorBoundary.jsx";
 import { DISPLAY_LIMITS, resolveCuratedBoardPicks, resolveMlbStreakPicks, countMlbDisplayProps, isManuallySavedPick, historyPickToDisplayProp } from "./utils/curatedPicks.js";
 import { isSafeModeEnabled, SAFE_MODE_FALLBACK_MESSAGE, SAFE_MODE_LOADING_MESSAGE } from "./utils/safeMode.js";
-import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks } from "./utils/safeModePipeline.js";
+import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks, resolveSafeMlbStreakPicks } from "./utils/safeModePipeline.js";
+import {
+  ENRICHMENT_TIMEOUT_MESSAGE,
+  getApiTimeoutMs,
+  isAbortOrTimeoutError,
+  withFetchTimeout,
+} from "./utils/apiTimeout.js";
 import NearMissBoard from "./components/NearMissBoard.jsx";
 import RejectionAnalyticsPanel from "./components/RejectionAnalyticsPanel.jsx";
 import QualificationAnalyticsPanel from "./components/QualificationAnalyticsPanel.jsx";
@@ -911,7 +917,79 @@ function applySourceResult({
   return usableCount > 0;
 }
 
-async function fetchDFSProps({ platform = "both", sport = "all", statType = "all" } = {}) {
+function emptyOddsApiResult({ timedOut = false, warnings = [] } = {}) {
+  return {
+    props: [],
+    warnings: timedOut ? [ENRICHMENT_TIMEOUT_MESSAGE, ...warnings].filter(Boolean) : warnings,
+    parsedCount: 0,
+    timedOut,
+  };
+}
+
+function applyOddsApiSourceState(oddsApiPlayerResult, sourceStatus, debugInfo) {
+  const timedOut = Boolean(oddsApiPlayerResult?.timedOut);
+  const hasProps = Number(oddsApiPlayerResult?.props?.length || 0) > 0;
+  if (timedOut) {
+    sourceStatus["The Odds API"] = ENRICHMENT_TIMEOUT_MESSAGE;
+  } else if (hasProps) {
+    sourceStatus["The Odds API"] = oddsApiPlayerResult.cached ? "Cached" : "Partial";
+  }
+  debugInfo.sources["The Odds API"] = {
+    ...debugInfo.sources["The Odds API"],
+    status: timedOut
+      ? ENRICHMENT_TIMEOUT_MESSAGE
+      : hasProps
+        ? oddsApiPlayerResult.cached
+          ? "Cached"
+          : "Partial"
+        : debugInfo.sources["The Odds API"]?.status || "Pending",
+    apiStatus: timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : hasProps ? "Connected" : "Pending",
+    rawPropsLoaded: Number(oddsApiPlayerResult?.parsedCount || oddsApiPlayerResult?.props?.length || 0),
+    propsAfterParsing: Number(oddsApiPlayerResult?.parsedCount || oddsApiPlayerResult?.props?.length || 0),
+    usablePropsCount: Number(oddsApiPlayerResult?.props?.length || 0),
+    message: timedOut
+      ? ENRICHMENT_TIMEOUT_MESSAGE
+      : (oddsApiPlayerResult?.warnings || []).join(" ") || (hasProps ? "Player props parsed" : EMPTY_SOURCE_MESSAGE),
+    lastSuccessfulFetchAt: oddsApiPlayerResult?.lastSuccessfulFetchAt || "",
+    lineSourceBadge: hasProps
+      ? oddsApiPlayerResult.cached || oddsApiPlayerResult.rateLimited
+        ? "CACHED"
+        : "LIVE"
+      : timedOut
+        ? "TIMED OUT"
+        : "EMPTY",
+  };
+}
+
+function buildCoreBoardPreview({ rawProps = [], allDisplayProps = [], sourceStatus, debugInfo }) {
+  const boardProps = allDisplayProps.length ? allDisplayProps : rawProps;
+  const streakProps = resolveSafeMlbStreakPicks(boardProps, rawProps, 2);
+  const status = finalizeSourceStatus({ ...sourceStatus });
+  return {
+    props: boardProps,
+    allDisplayProps: boardProps,
+    usableProps: boardProps,
+    streakProps,
+    sourceStatus: status,
+    sourceHealth: buildSourceHealth([], [], status),
+    debugInfo: sanitizeDebugInfoForMlbOnly(debugInfo),
+    pipelineFallback: true,
+    partial: true,
+  };
+}
+
+function enrichmentBackgroundFallback(label) {
+  const warnings = [ENRICHMENT_TIMEOUT_MESSAGE];
+  if (label === "sportsbook") {
+    return { comparisons: [], warnings, timedOut: true };
+  }
+  if (label === "stats") {
+    return { stats: new Map(), warnings, timedOut: true };
+  }
+  return { news: new Map(), warnings, timedOut: true };
+}
+
+async function fetchDFSProps({ platform = "both", sport = "all", statType = "all", onCoreReady } = {}) {
   const fetchSport = getActiveFetchSport(sport);
   console.info("[DFS Source Audit] fetchDFSProps requested", {
     platform,
@@ -927,18 +1005,40 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   const debugInfo = createDebugInfo(platform);
   const wantsPrizePicks = platform === "both" || platform === "all" || platform === "prizepicks";
   const wantsUnderdog = platform === "both" || platform === "all" || platform === "underdog";
+  const enrichmentTimeoutMs = getApiTimeoutMs({ enrichment: true });
 
   let prizePicksResult = null;
   let underdogResult = null;
-  let oddsApiPlayerResult = null;
-  const oddsApiPromise = fetchOddsApiDisplayProps({ sport: fetchSport }).catch((error) => ({
-    props: [],
-    warnings: [error?.message || "Odds API player props failed"],
-    parsedCount: 0,
-  }));
+  let oddsApiPlayerResult = emptyOddsApiResult();
+
+  const oddsApiPromise = withFetchTimeout(
+    () =>
+      fetchOddsApiDisplayProps({ sport: fetchSport }).catch((error) =>
+        emptyOddsApiResult({
+          timedOut: isAbortOrTimeoutError(error),
+          warnings: [
+            isAbortOrTimeoutError(error) ? ENRICHMENT_TIMEOUT_MESSAGE : error?.message || "Odds API player props failed",
+          ],
+        })
+      ),
+    enrichmentTimeoutMs,
+    {
+      label: "Odds API",
+      fallback: () => emptyOddsApiResult({ timedOut: true }),
+    }
+  );
+
+  const needsUnderdogBackup = wantsUnderdog;
+  const fetchUnderdog = needsUnderdogBackup || (wantsUnderdog && !wantsPrizePicks);
+
+  const [ppSettled, udSettled] = await Promise.allSettled([
+    wantsPrizePicks ? fetchPrizePicksProps({ sport: fetchSport, statType: "all" }) : Promise.resolve(null),
+    fetchUnderdog ? fetchUnderdogProviderProps({ sport: fetchSport, statType: "all" }) : Promise.resolve(null),
+  ]);
+
   if (wantsPrizePicks) {
-    try {
-      prizePicksResult = await fetchPrizePicksProps({ sport: fetchSport, statType: "all" });
+    if (ppSettled.status === "fulfilled" && ppSettled.value) {
+      prizePicksResult = ppSettled.value;
       console.info("[DFS Source Audit] PrizePicks result", {
         status: prizePicksResult.status,
         props: prizePicksResult.props?.length || 0,
@@ -953,7 +1053,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         sourceStatus,
         debugInfo,
       });
-    } catch (error) {
+    } else {
+      const error = ppSettled.status === "rejected" ? ppSettled.reason : new Error("PrizePicks returned no data");
       sourceStatus.PrizePicks = "Failed";
       console.warn("[DFS Source Audit] PrizePicks load failed", error);
       sourceFailures.push(sourceFailureMessage("Could not load PrizePicks lines.", error));
@@ -967,11 +1068,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     }
   }
 
-  const needsUnderdogBackup = wantsUnderdog;
-
-  if (needsUnderdogBackup) {
-    try {
-      underdogResult = await fetchUnderdogProviderProps({ sport: fetchSport, statType: "all" });
+  if (fetchUnderdog) {
+    if (udSettled.status === "fulfilled" && udSettled.value) {
+      underdogResult = udSettled.value;
       console.info("[DFS Source Audit] Underdog backup result", {
         status: underdogResult.status,
         props: underdogResult.props?.length || 0,
@@ -992,7 +1091,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         rawProps.push(...prizePicksResult.props);
         sourceStatus.PrizePicks = prizePicksResult.status;
       }
-    } catch (error) {
+    } else {
+      const error = udSettled.status === "rejected" ? udSettled.reason : new Error("Underdog returned no data");
       sourceStatus.Underdog = "Unavailable";
       console.warn("[DFS Source Audit] Underdog backup failed", error);
       sourceWarnings.push(UNDERDOG_UNAVAILABLE_MESSAGE);
@@ -1008,47 +1108,49 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         rawProps.push(...prizePicksResult.props);
       }
     }
-  } else if (wantsUnderdog && !wantsPrizePicks) {
-    try {
-      underdogResult = await fetchUnderdogProviderProps({ sport: fetchSport, statType: "all" });
-      applySourceResult({
-        label: "Underdog",
-        result: underdogResult,
-        sourceWarnings,
-        sourceFailures,
-        rawProps,
-        sourceStatus,
-        debugInfo,
-      });
-    } catch (error) {
-      sourceStatus.Underdog = "Unavailable";
-      sourceWarnings.push(UNDERDOG_UNAVAILABLE_MESSAGE);
-    }
   }
 
   if (!rawProps.length && prizePicksResult?.warnings?.includes(PRIZEPICKS_RATE_LIMIT_MESSAGE)) {
     sourceWarnings.unshift(PRIZEPICKS_RATE_LIMIT_MESSAGE);
   }
 
-  oddsApiPlayerResult = await oddsApiPromise;
-  if (oddsApiPlayerResult?.props?.length) {
-    sourceStatus["The Odds API"] = oddsApiPlayerResult.cached ? "Cached" : "Partial";
+  const scopedCoreRawProps = filterActiveSportProps([...rawProps]);
+  let coreDisplayProps = buildAllDisplayProps({
+    prizePicksResult,
+    underdogResult,
+    sport: fetchSport,
+    selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
+    oddsApi: [],
+  });
+  if (!coreDisplayProps.length && scopedCoreRawProps.length) {
+    coreDisplayProps = enrichDisplayPropsPipeline(
+      scopedCoreRawProps.map((prop) =>
+        normalizeDisplayProp(prop, {
+          selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
+          source: prop.platform || prop.source || "PrizePicks",
+          status: String(prop.lineSourceBadge || "").toUpperCase() === "CACHED" ? "cached" : "live",
+        })
+      )
+    );
   }
-  debugInfo.sources["The Odds API"] = {
-    ...debugInfo.sources["The Odds API"],
-    status: oddsApiPlayerResult?.props?.length ? (oddsApiPlayerResult.cached ? "Cached" : "Partial") : debugInfo.sources["The Odds API"]?.status || "Pending",
-    apiStatus: oddsApiPlayerResult?.props?.length ? "Connected" : "Pending",
-    rawPropsLoaded: Number(oddsApiPlayerResult?.parsedCount || oddsApiPlayerResult?.props?.length || 0),
-    propsAfterParsing: Number(oddsApiPlayerResult?.parsedCount || oddsApiPlayerResult?.props?.length || 0),
-    usablePropsCount: Number(oddsApiPlayerResult?.props?.length || 0),
-    message: (oddsApiPlayerResult?.warnings || []).join(" ") || (oddsApiPlayerResult?.props?.length ? "Player props parsed" : EMPTY_SOURCE_MESSAGE),
-    lastSuccessfulFetchAt: oddsApiPlayerResult?.lastSuccessfulFetchAt || "",
-    lineSourceBadge: oddsApiPlayerResult?.props?.length
-      ? oddsApiPlayerResult.cached || oddsApiPlayerResult.rateLimited
-        ? "CACHED"
-        : "LIVE"
-      : "EMPTY",
-  };
+
+  if (typeof onCoreReady === "function" && (coreDisplayProps.length || scopedCoreRawProps.length)) {
+    try {
+      onCoreReady(
+        buildCoreBoardPreview({
+          rawProps: scopedCoreRawProps,
+          allDisplayProps: coreDisplayProps,
+          sourceStatus,
+          debugInfo,
+        })
+      );
+    } catch (error) {
+      console.warn("[DFS Pipeline] onCoreReady failed", error);
+    }
+  }
+
+  oddsApiPlayerResult = await oddsApiPromise;
+  applyOddsApiSourceState(oddsApiPlayerResult, sourceStatus, debugInfo);
 
   const scopedRawProps = filterActiveSportProps(rawProps);
   if (MLB_ONLY_MODE && scopedRawProps.length !== rawProps.length) {
@@ -1241,7 +1343,14 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     { label: "stats", run: () => fetchPlayerStats({ props: workingNormalProps }) },
     { label: "news", run: () => fetchInjuryNews({ props: workingNormalProps }) },
   ];
-  const settledBackground = await Promise.allSettled(backgroundJobs.map((job) => job.run()));
+  const settledBackground = await Promise.allSettled(
+    backgroundJobs.map((job) =>
+      withFetchTimeout(job.run, enrichmentTimeoutMs, {
+        label: job.label,
+        fallback: () => enrichmentBackgroundFallback(job.label),
+      })
+    )
+  );
   const background = {
     comparisons: [],
     stats: new Map(),
@@ -1294,13 +1403,16 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     }
 
     if (label === "sportsbook") {
-      sourceStatus["The Odds API"] = "Failed";
-      backgroundWarnings.push("Sportsbook comparison unavailable.");
+      const timedOut = Boolean(result.value?.timedOut);
+      sourceStatus["The Odds API"] = timedOut
+        ? ENRICHMENT_TIMEOUT_MESSAGE
+        : "Failed";
+      backgroundWarnings.push(timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "Sportsbook comparison unavailable.");
       debugInfo.sources["The Odds API"] = {
         ...debugInfo.sources["The Odds API"],
-        status: "Failed",
-        apiStatus: "Failed",
-        message: "Sportsbook comparison unavailable.",
+        status: timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "Failed",
+        apiStatus: timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "Failed",
+        message: timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "Sportsbook comparison unavailable.",
       };
     }
     if (label === "stats") backgroundWarnings.push("Could not load player stats.");
@@ -1415,9 +1527,16 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   }
   const acceptedPropsForRender = qualifiedReadyProps;
   const modelSignalMap = buildModelSignalMap(filterVerifiedSportsbookProps(qualBoards.allDisplayable));
-  const streakProps = filterVerifiedSportsbookProps(
+  let streakProps = filterVerifiedSportsbookProps(
     buildStreakFinderProps(workingActiveProps, modelSignalMap, lineMovementMap).sort(sortStreakProps)
   ).slice(0, MAX_STREAK_PROPS);
+  if (streakProps.length < 2 && (allDisplayProps.length || rawProps.length)) {
+    streakProps = resolveSafeMlbStreakPicks(
+      allDisplayProps.length ? allDisplayProps : usablePropsPool,
+      rawProps,
+      2
+    );
+  }
   attachScoredSourceCounts(debugInfo, {
     recommendedProps: displayProps,
     watchlistProps,
@@ -1731,7 +1850,18 @@ export default function DFSPropsApp() {
           }
         }
 
-        const result = await fetchDFSProps({ platform: "both", sport: MLB_ONLY_MODE ? "MLB" : "all", statType: "all" });
+        const result = await fetchDFSProps({
+          platform: "both",
+          sport: MLB_ONLY_MODE ? "MLB" : "all",
+          statType: "all",
+          onCoreReady: (coreBoard) => {
+            const hasProps =
+              coreBoard.allDisplayProps?.length || coreBoard.props?.length || coreBoard.usableProps?.length;
+            if (!hasProps) return;
+            applyBoardState({ ...coreBoard, updatedAt: new Date().toISOString() }, "live");
+            if (!autoRefresh) setLoading(false);
+          },
+        });
         scoringContextRef.current = result.scoringContext || null;
         const boardSourceStatus = finalizeSourceStatus(result.sourceStatus || DEFAULT_SOURCE_STATUS);
         const boardProps = result.allDisplayProps?.length

@@ -1,4 +1,10 @@
 import { getOddsApiKey, getProxyUrl, getSportsDataApiKey, getStatmuseApiKey } from "../config/apiConfig.js";
+import {
+  ENRICHMENT_TIMEOUT_MESSAGE,
+  getApiTimeoutMs,
+  isAbortOrTimeoutError,
+  isTimeoutPreview,
+} from "../utils/apiTimeout.js";
 import { getSourceState, isSourceInCooldown, SOURCE_IDS } from "./sourceRateLimit.js";
 import { readCachedBoard, readVerifiedCacheBoard } from "./pickStore.js";
 import { buildFeedHealthContext, mergeConnectionReportWithFeeds } from "./providerHealth.js";
@@ -20,12 +26,11 @@ export const CONNECTION_MESSAGES = {
   FAILED: "Connection failed",
 };
 
-const PROBE_TIMEOUT_MS = 15_000;
-
 async function probeFetch(url, { method = "GET", headers = {} } = {}) {
   const startedAt = Date.now();
+  const probeTimeoutMs = getApiTimeoutMs({ enrichment: true });
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  const timer = window.setTimeout(() => controller.abort(), probeTimeoutMs);
   try {
     const response = await fetch(url, { cache: "no-store", signal: controller.signal, headers });
     const contentType = response.headers.get("content-type") || "";
@@ -62,17 +67,19 @@ async function probeFetch(url, { method = "GET", headers = {} } = {}) {
     return result;
   } catch (error) {
     const message = error?.message || "Failed to fetch";
+    const timedOut = isAbortOrTimeoutError(error);
     console.error(`[API Health] Probe failed — url=${url} status=? error=${message}`);
     return {
       ok: false,
-      status: "?",
+      status: timedOut ? "timeout" : "?",
       contentType: "",
-      preview: /abort/i.test(message) ? "Request timed out after 15s" : message,
+      preview: timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : message,
       durationMs: Date.now() - startedAt,
       payload: null,
       rateLimited: false,
       unauthorized: false,
-      networkError: true,
+      timedOut,
+      networkError: !timedOut,
       url,
     };
   } finally {
@@ -133,6 +140,14 @@ function classifyLineSourceProbe(result, { requiresKey = false, keyConfigured = 
     return {
       status: CONNECTION_STATUS.CACHED,
       message: CONNECTION_MESSAGES.RATE_LIMITED,
+    };
+  }
+  if (result.timedOut || isTimeoutPreview(result.preview)) {
+    return {
+      status: CONNECTION_STATUS.FAILED,
+      message: ENRICHMENT_TIMEOUT_MESSAGE,
+      timedOut: true,
+      settingsLine: ENRICHMENT_TIMEOUT_MESSAGE,
     };
   }
   return {
@@ -243,7 +258,6 @@ async function testOddsApi() {
   };
 }
 
-const SPORTSDATA_PROBE_TIMEOUT_MS = 5_000;
 const SPORTSDATA_HEALTH_PATH = "/scores/json/AreAnyGamesInProgress";
 const SPORTSDATA_UPSTREAM_BASE = "https://api.sportsdata.io/v3/mlb";
 
@@ -264,8 +278,9 @@ function isLikelyCorsError(error) {
 
 async function probeSportsDataHealth({ apiKey, useDirect = false } = {}) {
   const startedAt = Date.now();
+  const probeTimeoutMs = getApiTimeoutMs({ enrichment: true });
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), SPORTSDATA_PROBE_TIMEOUT_MS);
+  const timer = window.setTimeout(() => controller.abort(), probeTimeoutMs);
 
   const query = apiKey ? `?key=${encodeURIComponent(apiKey)}` : "";
   const route = useDirect
@@ -322,7 +337,7 @@ async function probeSportsDataHealth({ apiKey, useDirect = false } = {}) {
     const corsBlocked = !timedOut && isLikelyCorsError(error);
 
     if (timedOut) {
-      console.error("[SportsDataIO Test] Timeout reason: aborted after 5 seconds");
+      console.error(`[SportsDataIO Test] Timeout reason: aborted after ${probeTimeoutMs}ms`);
     } else if (corsBlocked) {
       console.error("[SportsDataIO Test] CORS blocked direct request:", message);
     } else {
@@ -333,7 +348,7 @@ async function probeSportsDataHealth({ apiKey, useDirect = false } = {}) {
       ok: false,
       status: timedOut ? "timeout" : corsBlocked ? "cors" : "?",
       preview: timedOut
-        ? "Request timed out after 5s"
+        ? ENRICHMENT_TIMEOUT_MESSAGE
         : corsBlocked
           ? "Browser blocked direct request — backend proxy recommended."
           : message,
@@ -363,10 +378,11 @@ function classifySportsDataProbe(probe = {}) {
   }
   if (probe.timedOut) {
     return {
-      settingsLine: "Timed out",
+      settingsLine: ENRICHMENT_TIMEOUT_MESSAGE,
       status: CONNECTION_STATUS.FAILED,
-      message: "Request timed out after 5s",
-      showError: true,
+      message: ENRICHMENT_TIMEOUT_MESSAGE,
+      showError: false,
+      timedOut: true,
     };
   }
   if (probe.unauthorized) {

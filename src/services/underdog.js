@@ -1,4 +1,5 @@
 import { getShortCacheTtlMs, resilientFetch } from "./fetchUtil.js";
+import { getApiTimeoutMs } from "../utils/apiTimeout.js";
 import { normalizeGameStartTime, startTimeUncertainty } from "../utils/normalizeGameStartTime.js";
 import { inferSportFromText, sportFromUnderdogGame } from "../utils/sportMappings.js";
 import { applySportClassification } from "../utils/marketClassification.js";
@@ -286,7 +287,7 @@ async function attemptUnderdogEndpoint(endpoint) {
     const response = await resilientFetch(
       endpoint,
       { headers: { accept: "application/json" }, cache: "no-store" },
-      { source: "Underdog", ttlMs: 0, timeoutMs: 15_000, maxRetries: 2, skip429Retry: true }
+      { source: "Underdog", ttlMs: 0, timeoutMs: getApiTimeoutMs(), maxRetries: 1, skip429Retry: true }
     );
     attempt.status = response.status;
     attempt.contentType = response.headers.get("content-type") || "";

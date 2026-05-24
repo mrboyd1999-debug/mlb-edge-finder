@@ -3,6 +3,7 @@
  * Used to populate allDisplayProps without requiring DFS props first.
  */
 import { fetchJsonSafe, getCacheTtlMs } from "./fetchUtil.js";
+import { ENRICHMENT_MAX_RETRIES, getApiTimeoutMs } from "../utils/apiTimeout.js";
 import { getOddsApiKey as getRuntimeOddsApiKey } from "../config/apiConfig.js";
 import {
   SOURCE_IDS,
@@ -147,8 +148,10 @@ async function fetchSportPlayerProps(apiKey, sport) {
   const result = await fetchJsonSafe(eventsUrl.toString(), {}, {
     source: "Odds API events",
     ttlMs: getCacheTtlMs(),
-    maxRetries: 0,
+    maxRetries: ENRICHMENT_MAX_RETRIES,
     skip429Retry: true,
+    enrichment: true,
+    timeoutMs: getApiTimeoutMs({ enrichment: true }),
   });
   if (!result.ok) {
     if (result.rateLimited) throw new Error("Odds API rate limit (429)");
@@ -177,8 +180,10 @@ async function fetchEventOddsRows(apiKey, sportKey, sport, eventId, markets, gam
   const result = await fetchJsonSafe(url.toString(), {}, {
     source: "Odds API player props",
     ttlMs: getCacheTtlMs(),
-    maxRetries: 0,
+    maxRetries: ENRICHMENT_MAX_RETRIES,
     skip429Retry: true,
+    enrichment: true,
+    timeoutMs: getApiTimeoutMs({ enrichment: true }),
   });
   if (!result.ok) {
     if (result.rateLimited) throw new Error("Odds API rate limit (429)");

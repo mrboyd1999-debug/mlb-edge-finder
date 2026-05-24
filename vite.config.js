@@ -18,7 +18,7 @@ const ODDS_API_KEY = process.env.ODDS_API_KEY || process.env.VITE_ODDS_API_KEY |
 
 const PRIZEPICKS_TARGETS = ["https://partner-api.prizepicks.com", "https://api.prizepicks.com"];
 const UNDERDOG_TARGET = "https://api.underdogfantasy.com";
-const UPSTREAM_TIMEOUT_MS = 15_000;
+const UPSTREAM_TIMEOUT_MS = 8_000;
 
 export default defineConfig({
   plugins: [dfsApiProxy(), react()],

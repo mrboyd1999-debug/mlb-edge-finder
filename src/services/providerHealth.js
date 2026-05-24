@@ -1,6 +1,7 @@
 /** Provider health — merge probe results with actual parsed feed data. */
 
 import { getOddsApiKey } from "../config/apiConfig.js";
+import { ENRICHMENT_TIMEOUT_MESSAGE, isTimeoutPreview } from "../utils/apiTimeout.js";
 import { CONNECTION_STATUS } from "./apiConnectionTest.js";
 
 export const PROVIDER_UI_STATUS = {
@@ -61,10 +62,10 @@ function resolveSportsDataSettingsStatus(probe = {}, feed = {}) {
   }
   if (probe.timedOut) {
     return {
-      settingsStatus: "Failed",
-      settingsLine: "Timed out",
+      settingsStatus: "Timed out",
+      settingsLine: ENRICHMENT_TIMEOUT_MESSAGE,
       keySaved: true,
-      showError: true,
+      showError: false,
       debugLine: "",
     };
   }
@@ -219,6 +220,13 @@ function resolveLineProviderStatus(provider = "", { probe = {}, feed = {} } = {}
         showError: false,
       };
     }
+    if (probe?.timedOut || isTimeoutPreview(probe?.preview)) {
+      return {
+        settingsStatus: "Timed out",
+        settingsLine: ENRICHMENT_TIMEOUT_MESSAGE,
+        showError: false,
+      };
+    }
     return {
       settingsStatus: "Failed",
       settingsLine: "Failed",
@@ -330,6 +338,7 @@ export function providerStatusStyle(status = "") {
     "INVALID KEY": { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
     "NOT TESTED": { bg: "rgba(148,163,184,0.15)", text: "#cbd5e1" },
     "TIMED OUT": { bg: "rgba(234,179,8,0.18)", text: "#fde047" },
+    "TIMED OUT — USING BASE FEED.": { bg: "rgba(234,179,8,0.18)", text: "#fde047" },
     "RATE LIMITED": { bg: "rgba(59,130,246,0.18)", text: "#93c5fd" },
     "INVALID KEY OR SUBSCRIPTION": { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
     "BROWSER BLOCKED DIRECT REQUEST — BACKEND PROXY RECOMMENDED.": {
