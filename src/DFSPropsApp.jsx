@@ -98,6 +98,8 @@ import {
   writeParlayHistory,
   readManualStatsMap,
   writeManualStatsForProp,
+  readManualAnalyzerProps,
+  writeManualAnalyzerProps,
 } from "./services/pickStore";
 import {
   assessResearchGaps,
@@ -265,6 +267,12 @@ import {
 } from "./utils/mlbOnlyMode.js";
 import { runFilterPipeline, runUiPipeline } from "./utils/pipelineStages.js";
 import MobileQuickActionBar from "./components/MobileQuickActionBar.jsx";
+import ManualPropsPanel from "./components/ManualPropsPanel.jsx";
+import {
+  buildManualPropFromInput,
+  isManualAnalyzerProp,
+  selectManualTopPicks,
+} from "./utils/manualPropBuilder.js";
 import MobileScrollFab from "./components/MobileScrollFab.jsx";
 import LazyBelowFold from "./components/LazyBelowFold.jsx";
 import { isHeavyDebugEnabled, isDebugModeEnabled, readShowDebugPanelsPreference, shouldLogVerbose, shouldTrackRejectedProps, writeShowDebugPanelsPreference } from "./utils/devMode.js";
@@ -287,6 +295,7 @@ const MAX_WATCHLIST_PROPS = 40;
 const MAX_STREAK_PROPS = RENDER_LIMITS.goblins + RENDER_LIMITS.demons + 32;
 const MAX_PRE_SCORE_PROPS = MAX_ANALYSIS_PROPS;
 const INITIAL_VISIBLE_SECTION_LIMIT = 10;
+const APP_VIEW_STORAGE_KEY = "dfs-app-view-mode";
 const VISIBLE_SECTION_LIMIT = RENDER_LIMITS.readyToBet;
 const HISTORY_LIMIT = 100;
 const BACKUP_STREAK_LIMIT = 12;
@@ -2122,6 +2131,15 @@ export default function DFSPropsApp() {
   const [quickPicksMode, setQuickPicksMode] = useState(() => readQuickPicksModePreference());
   const [showDebugPanels, setShowDebugPanels] = useState(() => readShowDebugPanelsPreference());
   const [rawApiDebugOpen, setRawApiDebugOpen] = useState(false);
+  const [appView, setAppView] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem(APP_VIEW_STORAGE_KEY);
+      return stored === "manual" ? "manual" : "live";
+    } catch {
+      return "live";
+    }
+  });
+  const [manualAnalyzerProps, setManualAnalyzerProps] = useState(() => readManualAnalyzerProps());
   const [marketQuickFilter, setMarketQuickFilter] = useState("all");
   const [searchText, setSearchText] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -2532,7 +2550,48 @@ export default function DFSPropsApp() {
     writeShowDebugPanelsPreference(showDebugPanels);
   }, [showDebugPanels]);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(APP_VIEW_STORAGE_KEY, appView);
+    } catch {
+      // ignore storage errors
+    }
+  }, [appView]);
+
+  const scoreManualAnalyzerProp = useCallback((prop) => {
+    const base = scoringContextRef.current || {};
+    const context = {
+      stats: base.stats || new Map(),
+      news: base.news || new Map(),
+      lineComparisonMap: base.lineComparisonMap || new Map(),
+      sportsbookComparisonMap: base.sportsbookComparisonMap || new Map(),
+      lineMovementMap: base.lineMovementMap || new Map(),
+      manualStatsMap: { ...(base.manualStatsMap || readManualStatsMap()) },
+      historyRows: base.historyRows || readHistory(),
+      historyWeights: base.historyWeights || buildHistoryAccuracyWeights(readHistory()),
+    };
+    const scored = scoreDFSProp(prop, context);
+    if (!scored) return prop;
+    const evaluation = evaluateAdaptiveQualification(scored);
+    return applyQualificationLabels(scored, evaluation);
+  }, []);
+
+  const persistManualAnalyzerProps = useCallback((next) => {
+    setManualAnalyzerProps(next);
+    writeManualAnalyzerProps(next);
+  }, []);
+
+  const manualTopPicks = useMemo(() => selectManualTopPicks(manualAnalyzerProps, 2), [manualAnalyzerProps]);
+
   const scrollToSection = useCallback((sectionId) => {
+    if (sectionId === "section-manual-props") {
+      setAppView("manual");
+      window.requestAnimationFrame(() => {
+        document.getElementById("section-manual-props")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      return;
+    }
+    if (sectionId === "section-top-picks") setAppView("live");
     const target = document.getElementById(sectionId);
     if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
@@ -3195,13 +3254,50 @@ export default function DFSPropsApp() {
   }
 
   function saveThisPick(prop) {
-    if (!prop || !isVerifiedSportsbookProp(prop)) {
+    if (!prop) return;
+    if (isManualAnalyzerProp(prop)) {
+      const updated = saveLearningPicks([prop], "Manual Analyzer Pick", {
+        allowResearch: true,
+        allowManualAnalyzer: true,
+      });
+      setHistory(updated);
+      setLearningSaveNotice("Manual pick saved for accuracy review.");
+      return;
+    }
+    if (!isVerifiedSportsbookProp(prop)) {
       setLearningSaveNotice("Only verified sportsbook picks can be saved.");
       return;
     }
     const updated = saveLearningPicks([prop], "Manually Saved Pick", { allowResearch: true });
     setHistory(updated);
     setLearningSaveNotice("Pick saved for accuracy review.");
+  }
+
+  function handleAddManualProp(form) {
+    const built = buildManualPropFromInput(form);
+    const scored = scoreManualAnalyzerProp(built);
+    persistManualAnalyzerProps(
+      [scored, ...manualAnalyzerProps.filter((row) => row.id !== scored.id)].slice(0, 100)
+    );
+    setLearningSaveNotice(
+      `Analyzed ${scored.playerName} — confidence ${Math.round(Number(scored.confidenceScore ?? scored.confidence ?? 0))}.`
+    );
+  }
+
+  function handleRemoveManualProp(propId) {
+    persistManualAnalyzerProps(manualAnalyzerProps.filter((row) => row.id !== propId));
+  }
+
+  function handleClearManualProps() {
+    persistManualAnalyzerProps([]);
+    setLearningSaveNotice("Manual prop list cleared.");
+  }
+
+  function handleReanalyzeManualProps() {
+    if (!manualAnalyzerProps.length) return;
+    const rescored = manualAnalyzerProps.map((prop) => scoreManualAnalyzerProp(prop));
+    persistManualAnalyzerProps(rescored);
+    setLearningSaveNotice(`Re-analyzed ${rescored.length} manual props.`);
   }
 
   function clearOldResearchPicks() {
@@ -3255,6 +3351,17 @@ export default function DFSPropsApp() {
       const scored = scoreDFSProp({ ...current, manualStats }, context);
       const evaluation = evaluateAdaptiveQualification(scored);
       return applyQualificationLabels(scored, evaluation);
+    });
+    setManualAnalyzerProps((current) => {
+      const index = current.findIndex((row) => row.id === propId);
+      if (index < 0) return current;
+      const scored = scoreDFSProp({ ...current[index], manualStats }, context);
+      if (!scored) return current;
+      const evaluation = evaluateAdaptiveQualification(scored);
+      const next = [...current];
+      next[index] = applyQualificationLabels(scored, evaluation);
+      writeManualAnalyzerProps(next);
+      return next;
     });
     setLearningSaveNotice("Manual stats saved — confidence recalculated.");
   }
@@ -3315,6 +3422,32 @@ export default function DFSPropsApp() {
       </section>
       </div>
 
+      <div className="dfs-section dfs-order-view-tabs">
+        <div style={styles.segmentGroup}>
+          <span style={styles.controlLabel}>Mode</span>
+          <div style={styles.segmentRow}>
+            <button
+              type="button"
+              style={appView === "live" ? styles.segmentActive : styles.segment}
+              onClick={() => setAppView("live")}
+            >
+              Live Board
+            </button>
+            <button
+              type="button"
+              style={appView === "manual" ? styles.segmentActive : styles.segment}
+              onClick={() => setAppView("manual")}
+            >
+              Manual Props
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {learningSaveNotice ? <p className="mobile-hide-verbose dfs-section" style={styles.streakNotice}>{learningSaveNotice}</p> : null}
+
+      {appView === "live" ? (
+      <>
       <div className="dfs-section dfs-order-filters">
       <details style={styles.compactDetails}>
         <summary style={styles.detailsSummary}>
@@ -3357,7 +3490,6 @@ export default function DFSPropsApp() {
       </div>
 
       <div className="dfs-section dfs-order-notices">
-      {learningSaveNotice ? <p className="mobile-hide-verbose" style={styles.streakNotice}>{learningSaveNotice}</p> : null}
       {debugPanelsVisible && MLB_ONLY_MODE ? (
         <section className="mobile-hide-verbose" style={styles.compactPanel}>
           <p style={styles.compactFlags}>
@@ -3538,6 +3670,24 @@ export default function DFSPropsApp() {
       ) : null}
       </>
       ) : null}
+      </>
+      ) : (
+      <div id="section-manual-props" className="dfs-section dfs-order-manual-props">
+        <SectionErrorBoundary name="Manual Props" onError={handleSectionRenderError}>
+          <ManualPropsPanel
+            props={manualAnalyzerProps}
+            topPicks={manualTopPicks}
+            compactMode={compactMode}
+            onAddProp={handleAddManualProp}
+            onRemoveProp={handleRemoveManualProp}
+            onClearAll={handleClearManualProps}
+            onReanalyzeAll={handleReanalyzeManualProps}
+            onOpenProp={setSelectedEvaluation}
+            onSavePick={saveThisPick}
+          />
+        </SectionErrorBoundary>
+      </div>
+      )}
 
       <div className="dfs-section dfs-order-settings">
       <SectionErrorBoundary name="Settings" onError={handleSectionRenderError}>
@@ -6254,8 +6404,18 @@ function saveLearningPicks(props, recommendationType = "Model Recommendation", o
   const existing = readHistory();
   const today = dateKey(new Date());
   const additions = props
-    .filter((prop) => options.allowResearch || isAutoSavablePick(prop))
-    .map((prop) => toHistoryPick({ ...prop, categorySource: categorySourceFromRecommendation(recommendationType) }, today, recommendationType));
+    .filter((prop) => options.allowResearch || options.allowManualAnalyzer || isAutoSavablePick(prop))
+    .map((prop) =>
+      toHistoryPick(
+        {
+          ...prop,
+          categorySource: categorySourceFromRecommendation(recommendationType),
+          manualAnalyzer: isManualAnalyzerProp(prop) || prop.manualAnalyzer,
+        },
+        today,
+        recommendationType
+      )
+    );
   if (!additions.length) {
     const trimmed = trimHistoryToLimit(existing);
     if (trimmed.length !== existing.length) writeHistory(trimmed);

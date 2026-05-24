@@ -14,6 +14,7 @@ const PARLAY_HISTORY_KEY = "dfs-pickem-parlay-history";
 const DFS_CACHE_KEY = "dfs-pickem-active-board-cache-v18";
 const LINE_MOVEMENT_KEY = "dfs-pickem-line-movement";
 const MANUAL_STATS_KEY = "dfs-pick-manual-stats";
+const MANUAL_ANALYZER_KEY = "dfs-manual-analyzer-props";
 const PROP_HISTORY_KEY = "dfs-prop-history-v1";
 export const DFS_CACHE_TTL_MS = 8 * 60 * 1000;
 export const DFS_CACHE_VERIFIED_MAX_MS = MLB_CACHE_EXPIRED_MS;
@@ -337,4 +338,21 @@ export function recordPropHistoryEntry(prop = {}, outcome = {}) {
   return history;
 }
 
-export { HISTORY_KEY, PARLAY_HISTORY_KEY, DFS_CACHE_KEY, LINE_MOVEMENT_KEY, MANUAL_STATS_KEY };
+export { HISTORY_KEY, PARLAY_HISTORY_KEY, DFS_CACHE_KEY, LINE_MOVEMENT_KEY, MANUAL_STATS_KEY, MANUAL_ANALYZER_KEY };
+
+export function readManualAnalyzerProps() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(MANUAL_ANALYZER_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeManualAnalyzerProps(props = []) {
+  try {
+    window.localStorage.setItem(MANUAL_ANALYZER_KEY, JSON.stringify((props || []).slice(0, 120)));
+  } catch {
+    // ignore quota errors
+  }
+}

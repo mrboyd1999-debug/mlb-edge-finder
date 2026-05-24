@@ -3,6 +3,7 @@ import { memo } from "react";
 const NAV_ITEMS = [
   { id: "refresh", label: "Refresh", icon: "↻", action: "refresh" },
   { id: "top-picks", label: "Picks", icon: "★", action: "section-top-picks" },
+  { id: "manual-props", label: "Manual", icon: "✎", action: "section-manual-props" },
   { id: "accepted", label: "Accepted", icon: "✓", action: "section-accepted" },
   { id: "settings", label: "Settings", icon: "⚙", action: "section-settings" },
 ];

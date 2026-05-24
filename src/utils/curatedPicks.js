@@ -305,7 +305,7 @@ export function resolveCuratedBoardPicks(boardPicks = [], selector, displayProps
 }
 
 export function isManuallySavedPick(pick = {}) {
-  return /manually saved/i.test(String(pick.recommendationType || ""));
+  return /manually saved|manual analyzer/i.test(String(pick.recommendationType || ""));
 }
 
 export function historyPickToDisplayProp(pick = {}) {
