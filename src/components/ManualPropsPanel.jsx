@@ -1,15 +1,17 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import PlayerPropCard from "./PlayerPropCard.jsx";
-import VirtualCardList from "./VirtualCardList.jsx";
 import { styles } from "../theme/styles.js";
 import {
   DEFAULT_MANUAL_FORM,
+  MANUAL_OFFLINE_REASON,
   MANUAL_PAYOUT_TYPES,
   MANUAL_SIDE_OPTIONS,
   MANUAL_SOURCES,
   MLB_STAT_SUGGESTIONS,
+  normalizeManualFormInput,
+  selectManualTopPicks,
   sortManualPropsByConfidence,
-  validateManualForm,
+  validateManualPropFields,
 } from "../utils/manualPropBuilder.js";
 import { shortReason } from "../utils/formatters.js";
 
@@ -25,10 +27,9 @@ function Field({ label, children, hint = "" }) {
 
 function ManualPropsPanel({
   props = [],
-  topPicks = [],
   loading = false,
   notice = "",
-  onAddProp,
+  onAnalyzeProp,
   onRemoveProp,
   onClearAll,
   onReanalyzeAll,
@@ -38,8 +39,17 @@ function ManualPropsPanel({
 }) {
   const [form, setForm] = useState(DEFAULT_MANUAL_FORM);
   const [formError, setFormError] = useState("");
+  const [analyzedProps, setAnalyzedProps] = useState(() => props || []);
+  const [analyzing, setAnalyzing] = useState(false);
 
-  const rankedProps = useMemo(() => sortManualPropsByConfidence(props), [props]);
+  useEffect(() => {
+    if (Array.isArray(props) && props.length) {
+      setAnalyzedProps(props);
+    }
+  }, [props]);
+
+  const rankedProps = useMemo(() => sortManualPropsByConfidence(analyzedProps), [analyzedProps]);
+  const topPicks = useMemo(() => selectManualTopPicks(analyzedProps, 2), [analyzedProps]);
   const sportOptions = useMemo(() => {
     const sports = new Set(["MLB", ...rankedProps.map((prop) => prop.sport).filter(Boolean)]);
     return Array.from(sports);
@@ -50,33 +60,75 @@ function ManualPropsPanel({
     if (formError) setFormError("");
   }
 
-  function handleSubmit(event) {
-    event.preventDefault();
-    const error = validateManualForm(form);
-    if (error) {
-      setFormError(error);
-      return;
-    }
-    onAddProp?.(form);
-    setForm((current) => ({
-      ...DEFAULT_MANUAL_FORM,
-      sport: current.sport || "MLB",
-      source: current.source || "PrizePicks",
-      payoutType: current.payoutType || "standard",
-    }));
+  const handleAnalyzeManualProp = useCallback(async () => {
+    const manualProp = normalizeManualFormInput(form);
+    console.log("Analyze clicked", manualProp);
+
     setFormError("");
+    setAnalyzing(true);
+    try {
+      const validation = validateManualPropFields(form);
+      if (!validation.ok) {
+        setFormError(validation.error);
+        return;
+      }
+
+      const numericLine = Number(manualProp.line);
+      if (!Number.isFinite(numericLine) || numericLine <= 0) {
+        setFormError("Enter a valid line greater than 0.");
+        return;
+      }
+
+      let analyzed = null;
+      if (typeof onAnalyzeProp === "function") {
+        analyzed = await onAnalyzeProp(form);
+      }
+
+      if (!analyzed || !analyzed.playerName) {
+        throw new Error("Manual analysis did not return a valid prop.");
+      }
+
+      console.log("[Manual Analyzer] analyzed prop", analyzed);
+      setAnalyzedProps((current) => [analyzed, ...current.filter((row) => row.id !== analyzed.id)]);
+      setForm((current) => ({
+        ...DEFAULT_MANUAL_FORM,
+        sport: current.sport || "MLB",
+        source: current.source || "PrizePicks",
+        payoutType: current.payoutType || "standard",
+      }));
+    } catch (error) {
+      const message = error?.message || "Manual analysis failed.";
+      console.error("[Manual Analyzer]", error);
+      setFormError(message);
+    } finally {
+      setAnalyzing(false);
+    }
+  }, [form, formError, onAnalyzeProp]);
+
+  function handleFormSubmit(event) {
+    event.preventDefault();
+    handleAnalyzeManualProp();
   }
 
   const renderCard = (prop, index) => (
     <div key={prop.id || index} style={{ display: "grid", gap: "4px" }}>
       <PlayerPropCard prop={prop} onOpen={onOpenProp} rank={index + 1} compact={compactMode} />
       <div style={styles.manualPropMetaRow}>
-        <span style={styles.manualPropReason}>{shortReason(prop) || prop.qualificationReason || prop.whyThisPick || "Manual line analysis"}</span>
+        <span style={styles.manualPropReason}>
+          {shortReason(prop) || prop.qualificationReason || prop.whyThisPick || MANUAL_OFFLINE_REASON}
+        </span>
         <div style={styles.manualPropActions}>
           <button type="button" style={styles.secondaryButtonSmall} onClick={() => onSavePick?.(prop)}>
             Save
           </button>
-          <button type="button" style={styles.dangerButtonSmall} onClick={() => onRemoveProp?.(prop.id)}>
+          <button
+            type="button"
+            style={styles.dangerButtonSmall}
+            onClick={() => {
+              setAnalyzedProps((current) => current.filter((row) => row.id !== prop.id));
+              onRemoveProp?.(prop.id);
+            }}
+          >
             Remove
           </button>
         </div>
@@ -97,14 +149,14 @@ function ManualPropsPanel({
           <p style={styles.countPill}>{rankedProps.length} analyzed</p>
         </div>
 
-        <form style={styles.manualPropForm} onSubmit={handleSubmit}>
+        <form style={styles.manualPropForm} onSubmit={handleFormSubmit}>
           <div style={styles.manualPropFormGrid}>
             <Field label="Player name">
               <input
                 style={styles.textInput}
                 value={form.playerName}
                 onChange={(event) => updateField("playerName", event.target.value)}
-                placeholder="e.g. Aaron Judge"
+                placeholder="e.g. Michael Busch"
                 autoComplete="off"
               />
             </Field>
@@ -117,21 +169,21 @@ function ManualPropsPanel({
                 ))}
               </select>
             </Field>
-            <Field label="Team (optional)">
+            <Field label="Team (optional)" hint="Leave blank if unknown">
               <input
                 style={styles.textInput}
                 value={form.team}
                 onChange={(event) => updateField("team", event.target.value)}
-                placeholder="NYY"
+                placeholder="CHC"
                 autoComplete="off"
               />
             </Field>
-            <Field label="Opponent (optional)">
+            <Field label="Opponent (optional)" hint="Leave blank if unknown">
               <input
                 style={styles.textInput}
                 value={form.opponent}
                 onChange={(event) => updateField("opponent", event.target.value)}
-                placeholder="BOS"
+                placeholder="Optional"
                 autoComplete="off"
               />
             </Field>
@@ -201,15 +253,27 @@ function ManualPropsPanel({
           ) : null}
 
           <div style={styles.manualPropFormActions}>
-            <button type="submit" style={styles.refreshButton} disabled={loading}>
-              {loading ? "Analyzing…" : "Analyze prop"}
+            <button
+              type="button"
+              style={styles.refreshButton}
+              disabled={loading || analyzing}
+              onClick={handleAnalyzeManualProp}
+            >
+              {loading || analyzing ? "Analyzing…" : "Analyze prop"}
             </button>
             {rankedProps.length ? (
               <>
                 <button type="button" style={styles.secondaryButton} onClick={() => onReanalyzeAll?.()}>
                   Re-analyze all
                 </button>
-                <button type="button" style={styles.dangerButton} onClick={() => onClearAll?.()}>
+                <button
+                  type="button"
+                  style={styles.dangerButton}
+                  onClick={() => {
+                    setAnalyzedProps([]);
+                    onClearAll?.();
+                  }}
+                >
                   Clear all
                 </button>
               </>
@@ -244,7 +308,7 @@ function ManualPropsPanel({
         {!rankedProps.length ? (
           <div style={styles.emptyStateCompact}>Add a prop above to run the scoring engine offline.</div>
         ) : (
-          <VirtualCardList items={rankedProps} renderCard={renderCard} initialVisible={12} />
+          <div style={styles.manualTopPickGrid}>{rankedProps.map((prop, index) => renderCard(prop, index))}</div>
         )}
       </section>
     </div>

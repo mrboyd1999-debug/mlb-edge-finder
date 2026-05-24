@@ -269,9 +269,9 @@ import { runFilterPipeline, runUiPipeline } from "./utils/pipelineStages.js";
 import MobileQuickActionBar from "./components/MobileQuickActionBar.jsx";
 import ManualPropsPanel from "./components/ManualPropsPanel.jsx";
 import {
-  buildManualPropFromInput,
+  analyzeManualProp,
   isManualAnalyzerProp,
-  selectManualTopPicks,
+  normalizeManualFormInput,
 } from "./utils/manualPropBuilder.js";
 import MobileScrollFab from "./components/MobileScrollFab.jsx";
 import LazyBelowFold from "./components/LazyBelowFold.jsx";
@@ -2560,28 +2560,36 @@ export default function DFSPropsApp() {
 
   const scoreManualAnalyzerProp = useCallback((prop) => {
     const base = scoringContextRef.current || {};
+    const asMap = (value) => (value instanceof Map ? value : new Map());
     const context = {
-      stats: base.stats || new Map(),
-      news: base.news || new Map(),
-      lineComparisonMap: base.lineComparisonMap || new Map(),
-      sportsbookComparisonMap: base.sportsbookComparisonMap || new Map(),
-      lineMovementMap: base.lineMovementMap || new Map(),
+      stats: asMap(base.stats),
+      news: asMap(base.news),
+      lineComparisonMap: asMap(base.lineComparisonMap),
+      sportsbookComparisonMap: asMap(base.sportsbookComparisonMap),
+      lineMovementMap: asMap(base.lineMovementMap),
       manualStatsMap: { ...(base.manualStatsMap || readManualStatsMap()) },
       historyRows: base.historyRows || readHistory(),
       historyWeights: base.historyWeights || buildHistoryAccuracyWeights(readHistory()),
     };
-    const scored = scoreDFSProp(prop, context);
-    if (!scored) return prop;
-    const evaluation = evaluateAdaptiveQualification(scored);
-    return applyQualificationLabels(scored, evaluation);
+    try {
+      const scored = scoreDFSProp(prop, context);
+      if (!scored) return null;
+      const evaluation = evaluateAdaptiveQualification(scored);
+      return applyQualificationLabels(scored, evaluation);
+    } catch (error) {
+      console.warn("[Manual Analyzer] scoreDFSProp failed", error);
+      return null;
+    }
   }, []);
 
   const persistManualAnalyzerProps = useCallback((next) => {
-    setManualAnalyzerProps(next);
-    writeManualAnalyzerProps(next);
+    setManualAnalyzerProps((current) => {
+      const resolved = typeof next === "function" ? next(current) : next;
+      writeManualAnalyzerProps(resolved);
+      return resolved;
+    });
   }, []);
 
-  const manualTopPicks = useMemo(() => selectManualTopPicks(manualAnalyzerProps, 2), [manualAnalyzerProps]);
 
   const scrollToSection = useCallback((sectionId) => {
     if (sectionId === "section-manual-props") {
@@ -3273,19 +3281,26 @@ export default function DFSPropsApp() {
     setLearningSaveNotice("Pick saved for accuracy review.");
   }
 
-  function handleAddManualProp(form) {
-    const built = buildManualPropFromInput(form);
-    const scored = scoreManualAnalyzerProp(built);
-    persistManualAnalyzerProps(
-      [scored, ...manualAnalyzerProps.filter((row) => row.id !== scored.id)].slice(0, 100)
-    );
-    setLearningSaveNotice(
-      `Analyzed ${scored.playerName} — confidence ${Math.round(Number(scored.confidenceScore ?? scored.confidence ?? 0))}.`
-    );
+  function handleAnalyzeManualProp(form) {
+    const manualProp = normalizeManualFormInput(form);
+    console.log("Analyze clicked", manualProp);
+    try {
+      const analyzed = analyzeManualProp(form, scoreManualAnalyzerProp);
+      persistManualAnalyzerProps((current) =>
+        [analyzed, ...current.filter((row) => row.id !== analyzed.id)].slice(0, 100)
+      );
+      setLearningSaveNotice(
+        `Analyzed ${analyzed.playerName} — confidence ${Math.round(Number(analyzed.confidenceScore ?? analyzed.confidence ?? 0))}.`
+      );
+      return analyzed;
+    } catch (error) {
+      console.error("[Manual Analyzer] handleAnalyzeManualProp failed", error);
+      throw error;
+    }
   }
 
   function handleRemoveManualProp(propId) {
-    persistManualAnalyzerProps(manualAnalyzerProps.filter((row) => row.id !== propId));
+    persistManualAnalyzerProps((current) => current.filter((row) => row.id !== propId));
   }
 
   function handleClearManualProps() {
@@ -3295,9 +3310,28 @@ export default function DFSPropsApp() {
 
   function handleReanalyzeManualProps() {
     if (!manualAnalyzerProps.length) return;
-    const rescored = manualAnalyzerProps.map((prop) => scoreManualAnalyzerProp(prop));
-    persistManualAnalyzerProps(rescored);
-    setLearningSaveNotice(`Re-analyzed ${rescored.length} manual props.`);
+    try {
+      const rescored = manualAnalyzerProps.map((prop) =>
+        analyzeManualProp(
+          {
+            playerName: prop.playerName,
+            sport: prop.sport,
+            team: prop.team,
+            opponent: prop.opponent,
+            statType: prop.statType,
+            line: prop.line,
+            side: prop.side || prop.bestPick || prop.pick,
+            source: prop.source || prop.platform,
+            payoutType: prop.oddsType || prop.payoutRole || "standard",
+          },
+          scoreManualAnalyzerProp
+        )
+      );
+      persistManualAnalyzerProps(rescored);
+      setLearningSaveNotice(`Re-analyzed ${rescored.length} manual props.`);
+    } catch (error) {
+      setLearningSaveNotice(error?.message || "Re-analyze failed.");
+    }
   }
 
   function clearOldResearchPicks() {
@@ -3676,9 +3710,9 @@ export default function DFSPropsApp() {
         <SectionErrorBoundary name="Manual Props" onError={handleSectionRenderError}>
           <ManualPropsPanel
             props={manualAnalyzerProps}
-            topPicks={manualTopPicks}
             compactMode={compactMode}
-            onAddProp={handleAddManualProp}
+            notice={learningSaveNotice}
+            onAnalyzeProp={handleAnalyzeManualProp}
             onRemoveProp={handleRemoveManualProp}
             onClearAll={handleClearManualProps}
             onReanalyzeAll={handleReanalyzeManualProps}
