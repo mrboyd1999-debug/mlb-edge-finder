@@ -2274,8 +2274,8 @@ export default function DFSPropsApp() {
     [visibleHistory]
   );
   const featuredMlbPicks = useMemo(
-    () => resolveFeaturedMlbPicks(boardDisplayProps, props),
-    [boardDisplayProps, props]
+    () => resolveFeaturedMlbPicks(boardDisplayProps, props, parsedUnderdogProps),
+    [boardDisplayProps, props, parsedUnderdogProps]
   );
   const curatedSportPicks = useMemo(() => {
     const primary = resolveMlbStreakPicks(

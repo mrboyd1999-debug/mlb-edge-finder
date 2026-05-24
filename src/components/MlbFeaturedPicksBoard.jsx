@@ -1,20 +1,15 @@
 import { memo } from "react";
-import MlbPickCard from "./MlbPickCard.jsx";
+import BestPlayRowCard from "./BestPlayRowCard.jsx";
 import { styles } from "../theme/styles.js";
 import { MLB_EMPTY_MESSAGE } from "../utils/curatedPicks.js";
 import { SAFE_MODE_LOADING_MESSAGE } from "../utils/safeMode.js";
-
-const FEATURED_CARD_STYLES = {
-  bestOverall: styles.featuredBestCard,
-  sharpestEdge: styles.featuredEdgeCard,
-  safestPlay: styles.featuredSafeCard,
-};
 
 function EmptyState({ text }) {
   return <div style={styles.emptyStateCompact}>{text}</div>;
 }
 
 function MlbFeaturedPicksBoard({
+  bestPlays = [],
   bestOverall = null,
   sharpestEdge = null,
   safestPlay = null,
@@ -22,34 +17,32 @@ function MlbFeaturedPicksBoard({
   onOpen,
   hasMlbProps = false,
 }) {
-  const picks = [
-    { prop: bestOverall, key: "bestOverall" },
-    { prop: sharpestEdge, key: "sharpestEdge" },
-    { prop: safestPlay, key: "safestPlay" },
-  ].filter((entry) => entry.prop);
+  const picks = (bestPlays?.length
+    ? bestPlays
+    : [bestOverall, sharpestEdge, safestPlay].filter(Boolean)
+  ).slice(0, 6);
 
   return (
-    <section className="mlb-featured-picks-section" style={styles.section} aria-label="Featured MLB Plays">
+    <section className="mlb-featured-picks-section" style={styles.section} aria-label="Best Plays">
       <div style={styles.sectionHeading}>
         <div>
-          <p style={styles.eyebrow}>Slate leaders · model-ranked</p>
-          <h2 style={styles.sectionTitle}>Featured MLB Plays</h2>
+          <p style={styles.eyebrow}>PrizePicks + Underdog · model-ranked</p>
+          <h2 style={styles.sectionTitle}>Best Plays</h2>
         </div>
-        <p style={styles.countPill}>{picks.length}/3</p>
+        <p style={styles.countPill}>{picks.length}</p>
       </div>
       {loading ? (
         <EmptyState text={SAFE_MODE_LOADING_MESSAGE} />
       ) : picks.length === 0 ? (
-        <EmptyState text={hasMlbProps ? "No featured plays above confidence floor." : MLB_EMPTY_MESSAGE} />
+        <EmptyState text={hasMlbProps ? "No best plays above confidence floor." : MLB_EMPTY_MESSAGE} />
       ) : (
-        <div className="mlb-featured-grid mlb-outlook-grid" style={styles.mlbOutlookGrid}>
-          {picks.map(({ prop, key }, idx) => (
-            <MlbPickCard
-              key={prop.id || `featured-${key}`}
+        <div className="best-play-row-list" style={styles.bestPlayRowList}>
+          {picks.map((prop, idx) => (
+            <BestPlayRowCard
+              key={prop.id || `best-play-${idx}`}
               prop={prop}
               rank={idx + 1}
               onOpen={onOpen}
-              cardStyle={FEATURED_CARD_STYLES[key]}
             />
           ))}
         </div>

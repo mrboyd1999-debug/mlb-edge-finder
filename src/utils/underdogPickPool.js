@@ -16,6 +16,7 @@ import {
   countUnderdogPropsBySport,
   filterUnderdogPropsBySport,
   inferMlbUnderdogProp,
+  MLB_SPORT_MISMAP_MESSAGE,
   resolvePropSportLabel,
 } from "./underdogSportDetection.js";
 import { isMlbUnderdogStreakRow } from "./underdogRowCard.js";
@@ -232,10 +233,10 @@ export function resolveUnderdogStreakEmptyMessage(snapshot = {}) {
   if (snapshot.parserMismatch) return UNDERDOG_PARSER_MISMATCH_MESSAGE;
   if (snapshot.parserEmpty) return UNDERDOG_PARSER_EMPTY_MESSAGE;
   if (snapshot.hasParsedUnderdog && !snapshot.hasMlbUnderdog) {
-    return MLB_UNDERDOG_STREAK_EMPTY_MESSAGE;
+    return MLB_SPORT_MISMAP_MESSAGE;
   }
   if (snapshot.hasParsedUnderdog && snapshot.streakEligibleCount === 0) {
-    return MLB_UNDERDOG_STREAK_EMPTY_MESSAGE;
+    return MLB_SPORT_MISMAP_MESSAGE;
   }
   if (snapshot.hasRawUnderdog && !snapshot.hasParsedUnderdog) {
     return UNDERDOG_PARSER_EMPTY_MESSAGE;
@@ -243,4 +244,4 @@ export function resolveUnderdogStreakEmptyMessage(snapshot = {}) {
   return MLB_UNDERDOG_STREAK_EMPTY_MESSAGE;
 }
 
-export { MLB_UNDERDOG_STREAK_EMPTY_MESSAGE, UNDERDOG_STREAK_EMPTY_MESSAGE };
+export { MLB_SPORT_MISMAP_MESSAGE, MLB_UNDERDOG_STREAK_EMPTY_MESSAGE, UNDERDOG_STREAK_EMPTY_MESSAGE };

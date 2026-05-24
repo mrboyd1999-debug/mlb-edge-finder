@@ -152,6 +152,36 @@ body,
     font-size: 10px;
     padding: 5px 8px;
   }
+
+  .best-play-row-card {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .best-play-row-metrics {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+  }
+}
+
+.best-play-row-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.best-play-row-card:hover {
+  border-color: #2563eb;
+  background: #0f172a;
+}
+
+.best-play-row-card .player-image-wrap {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  flex-basis: 40px;
 }
 
 .mobile-warning-banner {

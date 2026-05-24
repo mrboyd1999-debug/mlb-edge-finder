@@ -4,7 +4,7 @@
  */
 
 import { withNormalizedSource } from "./normalizeSource.js";
-import { detectUnderdogSport, inferMlbUnderdogProp } from "./underdogSportDetection.js";
+import { detectUnderdogSport, inferMlbUnderdogProp, resolvePropSportLabel } from "./underdogSportDetection.js";
 import { resolveUnderdogCategory } from "./underdogRowCard.js";
 import { normalizeGameStartTime } from "./normalizeGameStartTime.js";
 
@@ -329,6 +329,17 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
     matchup,
     statType,
   });
+  const resolvedSport = resolvePropSportLabel({
+    sport,
+    statType,
+    player,
+    playerName: player,
+    team,
+    opponent,
+    matchup,
+    normalizedSource: "underdog",
+    raw,
+  }) || sport;
   const projection = Number(
     raw.projection ?? raw.projected_value ?? raw.projectedValue ?? attrsOf(raw).projection ?? line
   );
@@ -355,8 +366,8 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
     projectedValue: Number.isFinite(projection) ? projection : line,
     team,
     opponent,
-    sport,
-    league: sport === "MLB" ? "MLB" : sport,
+    sport: resolvedSport,
+    league: resolvedSport === "MLB" ? "MLB" : resolvedSport,
     underdogCategory,
     startTime,
     gameTime: startTime,

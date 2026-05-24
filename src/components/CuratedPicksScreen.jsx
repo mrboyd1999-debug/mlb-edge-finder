@@ -62,6 +62,7 @@ function CuratedPicksScreen({
       <div className="curated-picks-screen curated-picks-mlb-only">
         <SectionErrorBoundary name="Featured MLB Plays" onError={onSectionError}>
           <MlbFeaturedPicksBoard
+            bestPlays={featuredPicks.bestPlays}
             bestOverall={featuredPicks.bestOverall}
             sharpestEdge={featuredPicks.sharpestEdge}
             safestPlay={featuredPicks.safestPlay}

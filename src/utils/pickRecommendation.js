@@ -55,10 +55,17 @@ export function formatRecommendationLabel(side = "", { streak = false } = {}) {
   return "WATCH";
 }
 
-export function formatDfsSide(side = "") {
-  if (side === "OVER") return "More";
-  if (side === "UNDER") return "Less";
+export function formatDfsSide(side = "", prop = null) {
+  const platform = String(prop?.platform || prop?.source || prop?.normalizedSource || "").toLowerCase();
+  const isUnderdog = /underdog/.test(platform) || prop?.normalizedSource === "underdog";
+  if (side === "OVER") return isUnderdog ? "Higher" : "More";
+  if (side === "UNDER") return isUnderdog ? "Lower" : "Less";
   return "Watch";
+}
+
+export function formatPlatformSideLabel(prop = {}) {
+  const side = resolvePickSide(prop);
+  return formatDfsSide(side, prop);
 }
 
 export function formatRiskShort(prop = {}) {

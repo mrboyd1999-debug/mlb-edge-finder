@@ -5,19 +5,16 @@ import { buildPropSoftDedupeKey } from "./displayPropScoring.js";
 import { filterByDisplayConfidenceFloor } from "./mlbConfidenceEngine.js";
 import { formatRiskLevel } from "./pickRecommendation.js";
 import { withPlayerImageUrl } from "./playerImageFields.js";
+import { filterUnderdogStreakPool } from "./underdogStreakPool.js";
+import { filterUnderdogPropsBySport } from "./underdogSportDetection.js";
+import { sortBestPlayProps } from "./bestPlayRanking.js";
+import { buildAnalyticsReason } from "./propReasonEngine.js";
 
-function buildMlbPool(displayProps = [], rawProps = []) {
+function buildBestPlayPool(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
   const mlbDisplay = filterAllDisplayPropsBySport(displayProps, "MLB", "all");
   const mlbRaw = filterActiveSportProps(rawProps || []);
-  return dedupeLooseProps([...mlbDisplay, ...mlbRaw].filter(isLooseDisplayProp));
-}
-
-function overallScore(prop = {}) {
-  const conf = Number(prop.confidenceScore ?? prop.confidence ?? 0);
-  const edge = Math.max(0, Number(prop.edge ?? 0));
-  const projection = Math.max(0.1, Number(prop.projection ?? prop.projectedValue) || Number(prop.line) || 1);
-  const edgePct = projection > 0 ? (edge / projection) * 100 : 0;
-  return conf * 0.45 + edgePct * 0.55 + (prop.isDisplayPlayable ? 4 : 0);
+  const udMlb = filterUnderdogPropsBySport(parsedUnderdogProps || [], "MLB");
+  return dedupeLooseProps([...mlbDisplay, ...mlbRaw, ...filterUnderdogStreakPool(udMlb)].filter(isLooseDisplayProp));
 }
 
 function annotateFeatured(prop, featuredLabel, featuredKey) {
@@ -27,6 +24,12 @@ function annotateFeatured(prop, featuredLabel, featuredKey) {
     featuredLabel,
     featuredKey,
     isFeaturedMlbPick: true,
+    reason:
+      prop.analyticsReason ||
+      prop.premiumWhySummary ||
+      prop.whyThisPick?.compact ||
+      buildAnalyticsReason(prop) ||
+      "",
   });
 }
 
@@ -41,15 +44,15 @@ function pickUnique(candidates = [], usedKeys = new Set()) {
   return null;
 }
 
-export function resolveFeaturedMlbPicks(displayProps = [], rawProps = []) {
-  const pool = filterByDisplayConfidenceFloor(buildMlbPool(displayProps, rawProps));
+export function resolveFeaturedMlbPicks(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
+  const pool = filterByDisplayConfidenceFloor(buildBestPlayPool(displayProps, rawProps, parsedUnderdogProps));
   const usedKeys = new Set();
 
   if (!pool.length) {
-    return { bestOverall: null, sharpestEdge: null, safestPlay: null };
+    return { bestOverall: null, sharpestEdge: null, safestPlay: null, bestPlays: [] };
   }
 
-  const byOverall = [...pool].sort((a, b) => overallScore(b) - overallScore(a));
+  const ranked = sortBestPlayProps(pool);
   const byEdge = [...pool]
     .filter((prop) => Number(prop.edge) > 0)
     .sort((a, b) => Number(b.edge) - Number(a.edge) || Number(b.confidenceScore) - Number(a.confidenceScore));
@@ -61,13 +64,18 @@ export function resolveFeaturedMlbPicks(displayProps = [], rawProps = []) {
         Number(b.edge) - Number(a.edge)
     );
 
-  const bestOverall = pickUnique(byOverall, usedKeys);
+  const bestOverall = pickUnique(ranked, usedKeys);
   const sharpestEdge = pickUnique(byEdge, usedKeys);
   const safestPlay = pickUnique(bySafety, usedKeys);
+
+  const bestPlays = ranked.slice(0, 6).map((prop, idx) =>
+    annotateFeatured(prop, idx === 0 ? "Best Overall Play" : `Best Play #${idx + 1}`, `best-${idx}`)
+  );
 
   return {
     bestOverall: annotateFeatured(bestOverall, "Best Overall Play", "bestOverall"),
     sharpestEdge: annotateFeatured(sharpestEdge, "Sharpest Edge", "sharpestEdge"),
     safestPlay: annotateFeatured(safestPlay, "Safest Play", "safestPlay"),
+    bestPlays,
   };
 }
