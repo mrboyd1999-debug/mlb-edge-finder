@@ -2,6 +2,7 @@ import { memo, useMemo } from "react";
 import PlayerPropCard from "./PlayerPropCard.jsx";
 import MlbPickCard from "./MlbPickCard.jsx";
 import { styles } from "../theme/styles.js";
+import { GOBLIN_EMPTY_MESSAGE } from "../utils/goblinDemonPairs.js";
 
 function EmptyState({ text }) {
   return <div style={styles.emptyState}>{text}</div>;
@@ -22,7 +23,7 @@ function GoblinBoard({ picks = [], loading, onOpen, compactMode = true, limit = 
       {loading ? (
         <EmptyState text="Loading Goblin lines…" />
       ) : goblins.length === 0 ? (
-        <EmptyState text="No Goblin picks (80+ confidence, low variance) available right now." />
+        <EmptyState text={GOBLIN_EMPTY_MESSAGE} />
       ) : (
         <>
           <div style={styles.topPicksList}>

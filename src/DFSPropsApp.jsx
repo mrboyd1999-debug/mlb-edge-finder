@@ -149,7 +149,7 @@ import {
 } from "./services/propPriority.js";
 import CuratedPicksScreen from "./components/CuratedPicksScreen.jsx";
 import SectionErrorBoundary from "./components/SectionErrorBoundary.jsx";
-import { DISPLAY_LIMITS, resolveCuratedBoardPicks, resolveMlbStreakPicks, countMlbDisplayProps, isManuallySavedPick, historyPickToDisplayProp } from "./utils/curatedPicks.js";
+import { DISPLAY_LIMITS, resolveCuratedGoblinDemonBoards, resolveMlbStreakPicks, countMlbDisplayProps, isManuallySavedPick, historyPickToDisplayProp } from "./utils/curatedPicks.js";
 import { isSafeModeEnabled, SAFE_MODE_FALLBACK_MESSAGE, SAFE_MODE_LOADING_MESSAGE } from "./utils/safeMode.js";
 import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks, resolveSafeMlbStreakPicks } from "./utils/safeModePipeline.js";
 import {
@@ -2194,28 +2194,18 @@ export default function DFSPropsApp() {
     () => countMlbDisplayProps(scoredDisplayProps, props),
     [scoredDisplayProps, props]
   );
-  const curatedGoblinPicks = useMemo(
+  const curatedGoblinDemonBoards = useMemo(
     () =>
-      resolveCuratedBoardPicks(
-        streakSportBoards.goblins?.picks,
-        selectGoblinProps,
-        boardDisplayProps,
-        DISPLAY_LIMITS.goblins,
-        props
-      ),
+      resolveCuratedGoblinDemonBoards(boardDisplayProps, props, {
+        goblinBoardPicks: streakSportBoards.goblins?.picks,
+        demonBoardPicks: streakSportBoards.demons?.picks,
+        goblinLimit: DISPLAY_LIMITS.goblins,
+        demonLimit: DISPLAY_LIMITS.demons,
+      }),
     [streakSportBoards, boardDisplayProps, props]
   );
-  const curatedDemonPicks = useMemo(
-    () =>
-      resolveCuratedBoardPicks(
-        streakSportBoards.demons?.picks,
-        selectDemonProps,
-        boardDisplayProps,
-        DISPLAY_LIMITS.demons,
-        props
-      ),
-    [streakSportBoards, boardDisplayProps, props]
-  );
+  const curatedGoblinPicks = curatedGoblinDemonBoards.goblins;
+  const curatedDemonPicks = curatedGoblinDemonBoards.demons;
   const safeModeFallbackActive = useMemo(() => {
     if (!isSafeModeEnabled()) return pipelineFallback || boardDisplayProps.some((prop) => prop.displayFallback);
     return (

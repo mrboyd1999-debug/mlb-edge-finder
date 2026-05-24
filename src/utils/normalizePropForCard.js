@@ -12,9 +12,9 @@ export function normalizePropForCard(prop = {}, index = 0) {
     market: prop.market || prop.statType || prop.propType || prop.category || "Unknown Market",
     line: prop.line ?? prop.value ?? prop.threshold ?? "—",
     pick: prop.pick || prop.recommendation || prop.lean || prop.side || prop.bestPick || prop.pickDirection || "Lean",
-    confidence: Number(prop.confidence ?? prop.calibratedConfidence ?? prop.confidenceScore ?? prop.score ?? 65),
+    confidence: Number(prop.confidence ?? prop.calibratedConfidence ?? prop.confidenceScore ?? prop.score ?? NaN) || null,
     edge: Number(prop.edge ?? prop.projectedEdge ?? 0),
-    weightedScore: Number(prop.weightedScore ?? prop.confidenceScore ?? prop.confidence ?? prop.score ?? 65),
+    weightedScore: Number(prop.weightedScore ?? prop.confidenceScore ?? prop.confidence ?? prop.score ?? NaN) || null,
     source: prop.source || prop.sportsbook || prop.platform || "PrizePicks",
     _raw: prop,
   };

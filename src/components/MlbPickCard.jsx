@@ -74,6 +74,9 @@ function MlbPickCard({
   const source = normalizeSourceLabel(prop);
   const conf = prop.confidenceScore ?? prop.confidence;
   const risk = formatRiskShort(prop);
+  const payoutBadge =
+    prop.payoutBadge ||
+    (prop.isGoblinPick ? "GOBLIN / SAFER LINE" : prop.isDemonPick ? "DEMON / HIGHER PAYOUT" : "");
   const teamLine = [prop.team, prop.opponent ? `vs ${prop.opponent}` : ""].filter(Boolean).join(" ");
   const reason = shortReason(prop);
   const fallback = prop.isFallbackMlbPick || prop.fallbackLabel;
@@ -113,6 +116,25 @@ function MlbPickCard({
       </div>
 
       <RecommendationBanner side={side} streakAction={streakAction} />
+
+      {payoutBadge ? (
+        <div
+          style={{
+            marginTop: "8px",
+            padding: "6px 10px",
+            borderRadius: "6px",
+            fontWeight: 800,
+            fontSize: "11px",
+            letterSpacing: "0.06em",
+            textAlign: "center",
+            background: prop.isDemonPick ? "#431407" : "#14532d",
+            color: prop.isDemonPick ? "#fdba74" : "#86efac",
+            border: `2px solid ${prop.isDemonPick ? "#f97316" : "#22c55e"}`,
+          }}
+        >
+          {payoutBadge}
+        </div>
+      ) : null}
 
       <div style={{ marginTop: "10px", display: "grid", gap: "2px" }}>
         <MetaLine label="Prop" value={market} strong />

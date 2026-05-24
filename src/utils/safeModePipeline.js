@@ -4,6 +4,10 @@ import { filterActiveSportProps } from "./mlbOnlyMode.js";
 import { resolvePickSide } from "./pickRecommendation.js";
 import { isSafeModeEnabled } from "./safeMode.js";
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
 export function isLooseDisplayProp(prop = {}) {
   const name = String(prop.player || prop.playerName || "").trim();
   if (name.length < 2 || /^unknown player$/i.test(name)) return false;
@@ -42,10 +46,15 @@ export function buildSafeMlbPropPool(displayProps = [], rawProps = []) {
 
 function annotateSafePick(prop = {}) {
   const side = resolvePickSide(prop);
+  const conf = clamp(
+    Math.round(Number(prop.confidenceScore ?? prop.confidence ?? 58)),
+    52,
+    82
+  );
   return {
     ...prop,
-    confidenceScore: prop.confidenceScore ?? prop.confidence ?? 50,
-    confidence: prop.confidence ?? prop.confidenceScore ?? 50,
+    confidenceScore: conf,
+    confidence: conf,
     bestPick: prop.bestPick || prop.side || (side === "UNDER" ? "under" : side === "OVER" ? "over" : ""),
     side: prop.side || prop.bestPick || (side === "UNDER" ? "under" : side === "OVER" ? "over" : ""),
     isFallbackMlbPick: true,

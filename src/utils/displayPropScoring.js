@@ -7,6 +7,7 @@ import {
   premiumRiskSummary,
 } from "./propCalibration.js";
 import { attachHistoricalPerformance } from "./historicalPropAnalytics.js";
+import { resolveGoblinDemonBoards } from "./goblinDemonPairs.js";
 
 const BASE_CONFIDENCE = 50;
 const MIN_TOP_PICK_CONFIDENCE = 65;
@@ -39,7 +40,35 @@ function hashString(text = "") {
 }
 
 function propVariance(prop = {}) {
-  return (hashString(buildPropDedupeKey(prop)) % 7) - 3;
+  const key = buildPropDedupeKey(prop);
+  const stat = String(prop.statType || prop.market || "").toLowerCase();
+  const source = String(prop.source || prop.platform || "").toLowerCase();
+  const mixed = hashString(`${key}|${stat}|${source}`);
+  return (mixed % 17) - 8;
+}
+
+function statTypeConfidenceOffset(prop = {}) {
+  const stat = String(prop.statType || prop.market || prop.propType || "").toLowerCase();
+  if (/strikeout|pitching|earned run|hits allowed|walks/.test(stat)) return (hashString(stat) % 5) - 2;
+  if (/hit|total base|rbi|run|home run|steal/.test(stat)) return (hashString(stat) % 7) - 3;
+  return (hashString(stat || "prop") % 5) - 2;
+}
+
+function sourceConfidenceOffset(prop = {}) {
+  const source = String(prop.source || prop.platform || "").toLowerCase();
+  if (/prizepicks/.test(source)) return 2;
+  if (/underdog/.test(source)) return 1;
+  if (/odds|sportsbook/.test(source)) return 3;
+  return 0;
+}
+
+function lineDifficultyOffset(prop = {}, line, projection, side) {
+  if (!Number.isFinite(line) || line <= 0 || !Number.isFinite(projection)) return 0;
+  const gapPct = Math.abs(projection - line) / line;
+  const favorable =
+    side.includes("under") ? projection < line : projection > line;
+  const magnitude = clamp(gapPct * 100, 0, 12);
+  return favorable ? magnitude * 0.35 : -magnitude * 0.25;
 }
 
 export function buildPropDedupeKey(prop = {}) {
@@ -128,7 +157,8 @@ export function ensureDisplayProjection(prop = {}) {
   const side = String(prop.side || prop.bestPick || "over").toLowerCase();
   const existing = finiteOr(prop.projection ?? prop.projectedValue, NaN);
   if (Number.isFinite(existing) && Math.abs(existing - line) >= 0.1) return existing;
-  const variance = seededVariance(prop.id || buildPropDedupeKey(prop));
+  const seed = prop.id || buildPropDedupeKey(prop);
+  const variance = seededVariance(seed, 0.15, 1.1);
   if (side.includes("under")) return round1(line - variance);
   return round1(line + variance);
 }
@@ -262,7 +292,21 @@ function computeWeightedConfidence(prop = {}, projection, line, edge) {
   }
 
   confidence += propVariance(prop);
-  confidence = clamp(Math.round(confidence), 1, 99);
+  confidence += statTypeConfidenceOffset(prop);
+  confidence += sourceConfidenceOffset(prop);
+  confidence += lineDifficultyOffset(prop, line, projection, side);
+
+  if (prop.sportsDataSeason || prop.sportsDataRecentGames?.length) {
+    confidence += 4;
+    boostLabels.push("SportsDataIO enrichment");
+  }
+
+  const enrichmentQuality = finiteOr(prop.dataQualityScore, NaN);
+  if (Number.isFinite(enrichmentQuality)) {
+    confidence += clamp((enrichmentQuality - 50) * 0.12, -4, 5);
+  }
+
+  confidence = clamp(Math.round(confidence), 52, 82);
 
   return { confidence, boostLabels, penaltyLabels };
 }
@@ -540,29 +584,15 @@ export function markDisplayFallbackProps(props = []) {
 }
 
 export function selectDemonProps(props = [], limit = CURATED_DEMON_LIMIT) {
-  return markDisplayFallbackProps(
-    sortPropsForDisplay(
-      (props || []).filter((prop) => {
-        const conf = finiteOr(prop.confidence, BASE_CONFIDENCE);
-        const edge = finiteOr(prop.edge, 0);
-        const upside = Math.abs(finiteOr(prop.projection, prop.line) - finiteOr(prop.line, 0));
-        return conf >= 65 && conf <= 79 && (edge >= 2 || upside >= 1.5 || Number(prop.multiplier) > 1);
-      })
-    ).slice(0, limit)
-  );
+  const { demons } = resolveGoblinDemonBoards(props, { goblinLimit: 0, demonLimit: limit });
+  if (demons.length) return demons;
+  return [];
 }
 
 export function selectGoblinProps(props = [], limit = CURATED_GOBLIN_LIMIT) {
-  return markDisplayFallbackProps(
-    sortPropsForDisplay(
-      (props || []).filter((prop) => {
-        const conf = finiteOr(prop.confidence, BASE_CONFIDENCE);
-        const hit = finiteOr(prop.last10HitRate ?? prop.recentHitRate, 0.55);
-        const vol = finiteOr(prop.volatility, 2.5);
-        return conf >= 80 && hit >= 0.55 && vol <= 2.75 && String(prop.riskLevel || "").toUpperCase() === "LOW";
-      })
-    ).slice(0, limit)
-  );
+  const { goblins } = resolveGoblinDemonBoards(props, { goblinLimit: limit, demonLimit: 0 });
+  if (goblins.length) return goblins;
+  return [];
 }
 
 export function selectAcceptedDisplayProps(props = []) {

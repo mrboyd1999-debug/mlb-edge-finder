@@ -13,7 +13,8 @@ function SimplePropCard({ prop, className = "accepted-prop-card", onOpen, index 
   const side = resolvePickSide(prop._raw || prop);
   const palette = recommendationPalette(side);
   const market = displayMarketLabel(prop._raw || prop) || card.market;
-  const conf = Math.round(Number(prop.confidenceScore ?? prop.confidence ?? card.confidence ?? 50));
+  const conf = Math.round(Number(prop.confidenceScore ?? prop.confidence ?? card.confidence ?? 58));
+  const payoutBadge = prop.payoutBadge || (prop.isGoblinPick ? "GOBLIN / SAFER LINE" : prop.isDemonPick ? "DEMON / HIGHER PAYOUT" : "");
 
   return (
     <div
@@ -57,6 +58,25 @@ function SimplePropCard({ prop, className = "accepted-prop-card", onOpen, index 
       <div className="prop-card-market">Prop: {market}</div>
       <div className="prop-card-line">Line: {line}</div>
       <div className="prop-card-confidence">Confidence: {conf}%</div>
+      {payoutBadge ? (
+        <div
+          className="prop-card-payout-badge"
+          style={{
+            marginTop: "6px",
+            padding: "4px 8px",
+            borderRadius: "6px",
+            fontWeight: 800,
+            fontSize: "11px",
+            letterSpacing: "0.05em",
+            textAlign: "center",
+            background: prop.isDemonPick ? "#431407" : "#14532d",
+            color: prop.isDemonPick ? "#fdba74" : "#86efac",
+            border: `1px solid ${prop.isDemonPick ? "#f97316" : "#22c55e"}`,
+          }}
+        >
+          {payoutBadge}
+        </div>
+      ) : null}
       {card.source ? <div className="prop-card-source">Source: {card.source}</div> : null}
     </div>
   );

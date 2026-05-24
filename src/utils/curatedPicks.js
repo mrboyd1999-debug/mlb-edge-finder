@@ -9,9 +9,15 @@ import { MLB_ONLY_MODE } from "./mlbOnlyMode.js";
 import { isSafeModeEnabled } from "./safeMode.js";
 import {
   buildSafeMlbPropPool,
-  resolveSafeMlbBoardPicks,
   resolveSafeMlbStreakPicks,
 } from "./safeModePipeline.js";
+import { resolveCuratedGoblinDemonBoards } from "./goblinDemonPairs.js";
+
+export {
+  GOBLIN_EMPTY_MESSAGE,
+  DEMON_EMPTY_MESSAGE,
+  resolveCuratedGoblinDemonBoards,
+} from "./goblinDemonPairs.js";
 
 export const CURATED_SPORT_ORDER = MLB_ONLY_MODE ? ["MLB"] : ["MLB", "WNBA", "NBA", "Tennis"];
 
@@ -108,20 +114,29 @@ export function resolveCuratedSportPicks(sport, streakBoards = {}, displayProps 
   return markDisplayFallbackProps(mergeUniquePicks(boardPicks, fallback, limit));
 }
 
-export function resolveCuratedBoardPicks(boardPicks = [], selector, displayProps = [], limit = DISPLAY_LIMITS.goblins, rawProps = []) {
-  if (isSafeModeEnabled()) {
-    const safe = resolveSafeMlbBoardPicks(displayProps, rawProps, limit);
-    if (safe.length) return safe;
-  }
+export function resolveCuratedGoblinBoardPicks(boardPicks = [], displayProps = [], limit = DISPLAY_LIMITS.goblins, rawProps = []) {
+  return resolveCuratedGoblinDemonBoards(displayProps, rawProps, {
+    goblinBoardPicks: boardPicks,
+    goblinLimit: limit,
+    demonLimit: 0,
+  }).goblins;
+}
 
-  const mlbProps = filterAllDisplayPropsBySport(displayProps, "MLB", "all");
-  const pool = mlbProps.length ? mlbProps : displayProps;
-  const primary = (boardPicks || []).slice(0, limit);
-  let fallback = selector(pool, limit);
-  if (!fallback.length && pool.length) {
-    fallback = sortPropsForDisplay(pool.filter(isValidDisplayProp)).slice(0, limit);
+export function resolveCuratedDemonBoardPicks(boardPicks = [], displayProps = [], limit = DISPLAY_LIMITS.demons, rawProps = []) {
+  return resolveCuratedGoblinDemonBoards(displayProps, rawProps, {
+    demonBoardPicks: boardPicks,
+    goblinLimit: 0,
+    demonLimit: limit,
+  }).demons;
+}
+
+/** @deprecated Use resolveCuratedGoblinBoardPicks / resolveCuratedDemonBoardPicks */
+export function resolveCuratedBoardPicks(boardPicks = [], selector, displayProps = [], limit = DISPLAY_LIMITS.goblins, rawProps = []) {
+  const isGoblinSelector = selector?.name === "selectGoblinProps";
+  if (isGoblinSelector) {
+    return resolveCuratedGoblinBoardPicks(boardPicks, displayProps, limit, rawProps);
   }
-  return markDisplayFallbackProps(mergeUniquePicks(primary, fallback, limit));
+  return resolveCuratedDemonBoardPicks(boardPicks, displayProps, limit, rawProps);
 }
 
 export function isManuallySavedPick(pick = {}) {

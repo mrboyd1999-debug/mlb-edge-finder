@@ -2,6 +2,7 @@ import { memo, useMemo } from "react";
 import PlayerPropCard from "./PlayerPropCard.jsx";
 import MlbPickCard from "./MlbPickCard.jsx";
 import { styles } from "../theme/styles.js";
+import { DEMON_EMPTY_MESSAGE } from "../utils/goblinDemonPairs.js";
 
 function EmptyState({ text }) {
   return <div style={styles.emptyState}>{text}</div>;
@@ -22,7 +23,7 @@ function DemonBoard({ picks = [], loading, onOpen, compactMode = true, limit = 6
       {loading ? (
         <EmptyState text="Loading Demon lines…" />
       ) : demons.length === 0 ? (
-        <EmptyState text="No Demon picks (65–79 confidence with upside) available right now." />
+        <EmptyState text={DEMON_EMPTY_MESSAGE} />
       ) : (
         <>
           <div style={styles.topPicksList}>
