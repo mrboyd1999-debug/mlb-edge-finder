@@ -1,22 +1,345 @@
-/**
- * Phase 2 — MLB-only projection engine facade.
- * NBA/NFL engines will register here in Phase 3; not implemented yet.
- */
-export {
-  buildRealProjection,
-  formatProjectionBreakdownSummary,
-  hasRealStatInputs,
-  projectMlbHitterProp,
-  projectMlbPitcherStrikeouts,
-} from "../services/realProjectionEngine.js";
+import { canonicalMarketKey } from "../utils/marketNormalization.js";
+import { formatNumber } from "../utils/formatters.js";
+import {
+  buildMlbPitcherDataPackage,
+  hasVerifiedPitcherGameLogs,
+  isMlbPitcherMarket,
+  MLB_PITCHER_MARKET_KEYS,
+} from "./mlbPitcherData.js";
+import {
+  appendDataStatusRow,
+  appendFinalProjectionRow,
+  buildBreakdownRow,
+  buildFallbackBreakdown,
+  DATA_STATUS,
+  dataStatusLabel,
+  isFallbackDataStatus,
+  projectionConfidenceFromDataStatus,
+  projectionLabelFromDataStatus,
+  resolveDataStatus,
+} from "./projectionBreakdown.js";
 
-/** Phase 3 hook: sport-specific engines register here. MLB only for now. */
-export const PROJECTION_ENGINES = {
-  MLB: {
-    pitcherMarkets: ["strikeouts", "outs", "pitchesThrown"],
-    projectPitcher: (prop, profile, context) =>
-      import("../services/realProjectionEngine.js").then((m) => m.projectMlbPitcherStrikeouts(prop, profile, context)),
-    projectHitter: (prop, profile, context) =>
-      import("../services/realProjectionEngine.js").then((m) => m.projectMlbHitterProp(prop, profile, context)),
-  },
+function round(value, digits = 1) {
+  const factor = 10 ** digits;
+  return Math.round(Number(value) * factor) / factor;
+}
+
+function finiteNumber(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function baselineRate(last5, season) {
+  if (last5 != null && season != null) return last5 * 0.54 + season * 0.46;
+  return last5 ?? season ?? null;
+}
+
+function opponentStrikeoutRate(data = {}) {
+  const core = baselineRate(data.last5Average, data.seasonAverage);
+  const oppK = finiteNumber(data.opponentContext?.strikeoutsPerGame);
+  if (core == null || oppK == null) return core;
+  const leagueK = 8.4;
+  return round(core * (1 + ((oppK - leagueK) / leagueK) * 0.35), 2);
+}
+
+function pitchCountRate(data = {}, core = null) {
+  const base = core ?? baselineRate(data.last5Average, data.seasonAverage);
+  const pitches = finiteNumber(data.projectedPitchCount);
+  if (base == null || pitches == null) return base;
+  return round(base * (pitches / 92), 2);
+}
+
+function inningsRate(data = {}, core = null) {
+  const base = core ?? baselineRate(data.last5Average, data.seasonAverage);
+  const ip = finiteNumber(data.projectedInnings);
+  if (base == null || ip == null) return base;
+  return round(base * (ip / 5.5), 2);
+}
+
+function opponentAllowedRate(data = {}, kind = "hits") {
+  const core = baselineRate(data.last5Average, data.seasonAverage);
+  const opponent = data.opponentContext || {};
+  const league = kind === "hits" ? 8.6 : 4.5;
+  const oppVal =
+    kind === "hits"
+      ? finiteNumber(opponent.hitsAllowedPerGame) ?? finiteNumber(opponent.hitsPerGame)
+      : finiteNumber(opponent.runsScoredPerGame);
+  if (core == null || oppVal == null) return core;
+  return round(core * (1 + ((oppVal - league) / league) * 0.25), 2);
+}
+
+function weightedPitcherProjection(components = []) {
+  const clean = components.filter((part) => finiteNumber(part.value) != null && part.weight > 0);
+  if (!clean.length) return null;
+  const weightSum = clean.reduce((sum, part) => sum + part.weight, 0);
+  return round(
+    clean.reduce((sum, part) => sum + finiteNumber(part.value) * (part.weight / weightSum), 0),
+    1
+  );
+}
+
+function finalizePitcherProjection({ projection, breakdown, dataStatus, data, marketKey }) {
+  if (!Number.isFinite(projection) || projection <= 0) {
+    return {
+      projectedValue: null,
+      projectionBreakdown: breakdown,
+      projectionSource: "missing",
+      projectionLabel: DATA_STATUS.FALLBACK,
+      dataStatus: DATA_STATUS.FALLBACK,
+      isFallbackProjection: true,
+      projectionConfidence: 48,
+      reasoning: ["Insufficient verified MLB pitcher data for this market."],
+      pitcherInputs: data,
+    };
+  }
+
+  appendFinalProjectionRow(breakdown, projection);
+  appendDataStatusRow(breakdown, dataStatus);
+
+  const isFallback = isFallbackDataStatus(dataStatus);
+  return {
+    projectedValue: round(projection, 1),
+    projectionBreakdown: breakdown,
+    projectionSource: isFallback ? "manual-fallback" : "player-stats-model",
+    projectionLabel: projectionLabelFromDataStatus(dataStatus),
+    dataStatus,
+    isFallbackProjection: isFallback,
+    projectionConfidence: projectionConfidenceFromDataStatus(dataStatus, data.sampleSize || 0),
+    reasoning: breakdown
+      .filter((row) => row.label !== "Data status")
+      .map((row) => `${row.label}: ${row.display ?? row.value}`),
+    pitcherInputs: {
+      playerName: data.playerName,
+      team: data.team,
+      opponent: data.opponent,
+      statType: data.statType,
+      line: data.line,
+      pickDirection: data.pickDirection,
+      source: data.source,
+      last5Average: data.last5Average,
+      seasonAverage: data.seasonAverage,
+      projectedInnings: data.projectedInnings,
+      projectedPitchCount: data.projectedPitchCount,
+    },
+  };
+}
+
+export function projectPitcherStrikeouts(prop = {}, profile = {}, context = {}) {
+  const data = buildMlbPitcherDataPackage(prop, profile, context);
+  const breakdown = [];
+  const { last5Average: last5, seasonAverage: season } = data;
+
+  if (last5 == null && season == null) {
+    return finalizePitcherProjection({
+      projection: null,
+      breakdown: buildFallbackBreakdown(null),
+      dataStatus: DATA_STATUS.FALLBACK,
+      data,
+      marketKey: "strikeouts",
+    });
+  }
+
+  const oppRate = opponentStrikeoutRate(data) ?? baselineRate(last5, season);
+  const pitchRate = pitchCountRate(data) ?? baselineRate(last5, season);
+  const ipRate = inningsRate(data) ?? baselineRate(last5, season);
+
+  const components = [
+    { label: "Last 5 avg", value: last5, weight: 0.35 },
+    { label: "Season avg", value: season, weight: 0.3 },
+    { label: "Opponent adjustment", value: oppRate, weight: 0.15 },
+    { label: "Pitch count factor", value: pitchRate, weight: 0.1 },
+    { label: "Innings factor", value: ipRate, weight: 0.1 },
+  ];
+
+  components.forEach((part) => {
+    if (part.value == null) return;
+    breakdown.push(
+      buildBreakdownRow(part.label, part.value, {
+        weight: part.weight,
+        contribution: round(part.value * part.weight, 2),
+        display:
+          part.label === "Pitch count factor" && data.projectedPitchCount != null
+            ? `${formatNumber(data.projectedPitchCount)} pitches`
+            : part.label === "Innings factor" && data.projectedInnings != null
+              ? `${formatNumber(data.projectedInnings)} IP`
+              : undefined,
+      })
+    );
+  });
+
+  const projection = weightedPitcherProjection(components);
+  const dataStatus = resolveDataStatus({
+    hasGameLogs: hasVerifiedPitcherGameLogs(data),
+    hasCoreRates: last5 != null || season != null,
+    hasOpponent: finiteNumber(data.opponentContext?.strikeoutsPerGame) != null,
+    hasWorkload: data.projectedInnings != null && data.projectedPitchCount != null,
+  });
+
+  return finalizePitcherProjection({ projection, breakdown, dataStatus, data, marketKey: "strikeouts" });
+}
+
+export function projectPitchingOuts(prop = {}, profile = {}, context = {}) {
+  const data = buildMlbPitcherDataPackage(prop, profile, context);
+  const breakdown = [];
+  const { last5Average: last5, seasonAverage: season, projectedInnings: ip } = data;
+
+  if (ip == null && last5 == null && season == null) {
+    return finalizePitcherProjection({
+      projection: null,
+      breakdown: buildFallbackBreakdown(null),
+      dataStatus: DATA_STATUS.FALLBACK,
+      data,
+      marketKey: "outs",
+    });
+  }
+
+  const outsPerInning =
+    last5 != null && ip != null
+      ? last5 / Math.max(ip, 3.5)
+      : season != null && ip != null
+        ? season / Math.max(ip, 3.5)
+        : 2.9;
+
+  const ipDriven = ip != null ? round(ip * outsPerInning, 1) : null;
+  const components = [
+    { label: "Last 5 avg", value: last5, weight: 0.25 },
+    { label: "Season avg", value: season, weight: 0.2 },
+    { label: "Innings factor", value: ipDriven, weight: 0.4 },
+    { label: "Opponent adjustment", value: opponentAllowedRate(data, "hits"), weight: 0.15 },
+  ];
+
+  components.forEach((part) => {
+    if (part.value == null) return;
+    breakdown.push(
+      buildBreakdownRow(part.label, part.value, {
+        weight: part.weight,
+        contribution: round(part.value * part.weight, 2),
+        display: part.label === "Innings factor" && ip != null ? `${formatNumber(ip)} IP` : undefined,
+      })
+    );
+  });
+
+  const projection = weightedPitcherProjection(components);
+  const dataStatus = resolveDataStatus({
+    hasGameLogs: hasVerifiedPitcherGameLogs(data),
+    hasCoreRates: last5 != null || season != null,
+    hasOpponent: Boolean(data.hasOpponent),
+    hasWorkload: ip != null,
+  });
+
+  return finalizePitcherProjection({ projection, breakdown, dataStatus, data, marketKey: "outs" });
+}
+
+export function projectHitsAllowed(prop = {}, profile = {}, context = {}) {
+  const data = buildMlbPitcherDataPackage(prop, profile, context);
+  const breakdown = [];
+  const { last5Average: last5, seasonAverage: season } = data;
+
+  if (last5 == null && season == null) {
+    return finalizePitcherProjection({
+      projection: null,
+      breakdown: buildFallbackBreakdown(null),
+      dataStatus: DATA_STATUS.FALLBACK,
+      data,
+      marketKey: "hitsAllowed",
+    });
+  }
+
+  const components = [
+    { label: "Last 5 avg", value: last5, weight: 0.35 },
+    { label: "Season avg", value: season, weight: 0.3 },
+    { label: "Opponent adjustment", value: opponentAllowedRate(data, "hits"), weight: 0.2 },
+    { label: "Innings factor", value: inningsRate(data), weight: 0.15 },
+  ];
+
+  components.forEach((part) => {
+    if (part.value == null) return;
+    breakdown.push(
+      buildBreakdownRow(part.label, part.value, {
+        weight: part.weight,
+        contribution: round(part.value * part.weight, 2),
+        display: part.label === "Innings factor" && data.projectedInnings != null ? `${formatNumber(data.projectedInnings)} IP` : undefined,
+      })
+    );
+  });
+
+  const projection = weightedPitcherProjection(components);
+  const dataStatus = resolveDataStatus({
+    hasGameLogs: hasVerifiedPitcherGameLogs(data),
+    hasCoreRates: true,
+    hasOpponent: Boolean(data.hasOpponent),
+    hasWorkload: data.projectedInnings != null,
+  });
+
+  return finalizePitcherProjection({ projection, breakdown, dataStatus, data, marketKey: "hitsAllowed" });
+}
+
+export function projectEarnedRunsAllowed(prop = {}, profile = {}, context = {}) {
+  const data = buildMlbPitcherDataPackage(prop, profile, context);
+  const breakdown = [];
+  const { last5Average: last5, seasonAverage: season } = data;
+
+  if (last5 == null && season == null) {
+    return finalizePitcherProjection({
+      projection: null,
+      breakdown: buildFallbackBreakdown(null),
+      dataStatus: DATA_STATUS.FALLBACK,
+      data,
+      marketKey: "earnedRuns",
+    });
+  }
+
+  const components = [
+    { label: "Last 5 avg", value: last5, weight: 0.35 },
+    { label: "Season avg", value: season, weight: 0.3 },
+    { label: "Opponent adjustment", value: opponentAllowedRate(data, "runs"), weight: 0.2 },
+    { label: "Innings factor", value: inningsRate(data), weight: 0.15 },
+  ];
+
+  components.forEach((part) => {
+    if (part.value == null) return;
+    breakdown.push(
+      buildBreakdownRow(part.label, part.value, {
+        weight: part.weight,
+        contribution: round(part.value * part.weight, 2),
+        display: part.label === "Innings factor" && data.projectedInnings != null ? `${formatNumber(data.projectedInnings)} IP` : undefined,
+      })
+    );
+  });
+
+  const projection = weightedPitcherProjection(components);
+  const dataStatus = resolveDataStatus({
+    hasGameLogs: hasVerifiedPitcherGameLogs(data),
+    hasCoreRates: true,
+    hasOpponent: Boolean(data.hasOpponent),
+    hasWorkload: data.projectedInnings != null,
+  });
+
+  return finalizePitcherProjection({ projection, breakdown, dataStatus, data, marketKey: "earnedRuns" });
+}
+
+export function projectMlbPitcherProp(prop = {}, profile = {}, context = {}) {
+  const key = canonicalMarketKey(prop.statType);
+  if (key === "strikeouts") return projectPitcherStrikeouts(prop, profile, context);
+  if (key === "outs") return projectPitchingOuts(prop, profile, context);
+  if (key === "hitsAllowed") return projectHitsAllowed(prop, profile, context);
+  if (key === "earnedRuns") return projectEarnedRunsAllowed(prop, profile, context);
+  return null;
+}
+
+export function hasMlbPitcherStatInputs(profile = {}) {
+  return Boolean(
+    finiteNumber(profile.last5Average) ||
+      finiteNumber(profile.seasonAverage) ||
+      finiteNumber(profile.last10Average) ||
+      (profile.gradingRows || profile.splits || []).length >= 3
+  );
+}
+
+export { isMlbPitcherMarket, MLB_PITCHER_MARKET_KEYS, buildMlbPitcherDataPackage, hasVerifiedPitcherGameLogs };
+export { DATA_STATUS, dataStatusLabel } from "./projectionBreakdown.js";
+
+export const MLB_PITCHER_ENGINE = {
+  markets: MLB_PITCHER_MARKET_KEYS,
+  project: projectMlbPitcherProp,
 };

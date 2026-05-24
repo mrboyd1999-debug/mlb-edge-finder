@@ -1,5 +1,10 @@
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
 import { formatNumber } from "../utils/formatters.js";
+import {
+  isMlbPitcherMarket,
+  projectMlbPitcherProp,
+  hasMlbPitcherStatInputs,
+} from "../modules/mlbProjectionEngine.js";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -354,6 +359,11 @@ function parseMinutes(value) {
 export function buildRealProjection(prop = {}, profile = {}, context = {}) {
   const sport = String(prop.sport || profile.sport || "MLB").toUpperCase();
   const key = canonicalMarketKey(prop.statType);
+
+  if (sport === "MLB" && isMlbPitcherMarket(prop.statType) && hasMlbPitcherStatInputs(profile)) {
+    const pitcher = projectMlbPitcherProp(prop, profile, context);
+    if (pitcher) return pitcher;
+  }
 
   if (sport === "MLB" && (key === "strikeouts" || key === "outs" || key === "pitchesThrown")) {
     return projectMlbPitcherStrikeouts(prop, profile, context);

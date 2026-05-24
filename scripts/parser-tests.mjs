@@ -116,7 +116,8 @@ import {
   rankManualPropScore,
   computeDirectionalEdge,
 } from "../src/utils/manualPropScoring.js";
-import { projectMlbPitcherStrikeouts, hasRealStatInputs } from "../src/services/realProjectionEngine.js";
+import { projectPitcherStrikeouts, DATA_STATUS } from "../src/modules/mlbProjectionEngine.js";
+import { computePitcherEdge, computePitcherHitChance } from "../src/modules/scoringEngine.js";
 
 function parseJsonEnvelope(text, source) {
   const trimmed = String(text || "").trim();
@@ -1102,22 +1103,27 @@ assert.ok(goblinHit.volatilityLabel);
 assert.equal(goblinHit.scoringModeLabel, "Estimated grade");
 assert.ok(goblinHit.confidenceScore <= 85);
 
-const kProjection = projectMlbPitcherStrikeouts(
-  { statType: "Pitcher Strikeouts", line: 6.5, sport: "MLB" },
+const kProjection = projectPitcherStrikeouts(
+  { statType: "Pitcher Strikeouts", line: 6.5, sport: "MLB", side: "over" },
   {
     last5Average: 6.3,
     seasonAverage: 5.9,
+    hasGameLogs: true,
     gradingRows: [
-      { stat: { strikeOuts: 7, inningsPitched: "6.0", numberOfPitches: 95 } },
-      { stat: { strikeOuts: 6, inningsPitched: "5.2", numberOfPitches: 88 } },
+      { stat: { strikeOuts: 7, inningsPitched: "6.0", numberOfPitches: 95, gamesStarted: 1 } },
+      { stat: { strikeOuts: 6, inningsPitched: "5.2", numberOfPitches: 88, gamesStarted: 1 } },
     ],
   },
   { opponentContext: { strikeoutsPerGame: 9.1 } }
 );
 assert.ok(kProjection.projectedValue > 0);
-assert.ok(Array.isArray(kProjection.projectionBreakdown) && kProjection.projectionBreakdown.length >= 3);
-assert.equal(kProjection.projectionLabel, "Stat-based projection");
-assert.ok(hasRealStatInputs({ last5Average: 6.3, seasonAverage: 5.9 }));
+assert.ok(Array.isArray(kProjection.projectionBreakdown) && kProjection.projectionBreakdown.length >= 5);
+assert.ok(kProjection.dataStatus === DATA_STATUS.VERIFIED || kProjection.dataStatus === DATA_STATUS.PARTIAL);
+assert.ok(kProjection.projectionBreakdown.some((row) => row.label === "Last 5 avg"));
+assert.equal(computePitcherEdge(6.2, 6.5, "over"), -0.3);
+assert.equal(computePitcherEdge(6.8, 6.5, "over"), 0.3);
+const fallbackHit = computePitcherHitChance({ edge: 0.2, volatility: { tier: "LOW" }, confidence: 52, isFallback: true });
+assert.ok(fallbackHit >= 35 && fallbackHit <= 65);
 
 const topTwo = selectManualTopPicks([demonHrr, goblinHit, nbaAst], 2);
 assert.equal(topTwo.length, 2);

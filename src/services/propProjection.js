@@ -2,6 +2,7 @@ import { MLB_ONLY_MODE, guardMlbOnlyProp } from "../utils/mlbOnlyMode.js";
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
 import { isTennisSportLabel } from "../utils/marketClassification.js";
 import { buildRealProjection, hasRealStatInputs } from "./realProjectionEngine.js";
+import { hasMlbPitcherStatInputs } from "../modules/mlbProjectionEngine.js";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -110,7 +111,7 @@ function projectMlbProp(prop = {}, profile = {}, injury = null, context = {}) {
     opponentContext: context.opponentContext || profile.opponentContext,
   });
 
-  if (real.projectedValue != null && hasRealStatInputs(profile)) {
+  if (real.projectedValue != null && (hasRealStatInputs(profile) || hasMlbPitcherStatInputs(profile))) {
     return {
       projectedValue: real.projectedValue,
       reasoning: real.reasoning,
@@ -119,6 +120,8 @@ function projectMlbProp(prop = {}, profile = {}, injury = null, context = {}) {
       projectionLabel: real.projectionLabel,
       isFallbackProjection: real.isFallbackProjection,
       projectionSource: real.projectionSource,
+      dataStatus: real.dataStatus,
+      projectionConfidence: real.projectionConfidence,
     };
   }
 

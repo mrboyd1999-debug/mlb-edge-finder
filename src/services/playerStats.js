@@ -889,6 +889,8 @@ async function fetchMlbOpponentContext(opponentName) {
     catcherPopTimeProxy,
     strikeoutsPerGame: strikeouts,
     runsScoredPerGame: runsScored,
+    hitsAllowedPerGame: hitsAllowed,
+    runsAllowedPerGame: runsAllowed,
     note: `${team.abbreviation || team.name}: ${round(runsScored || 0)} R/G, ${round(strikeouts || 0)} K/G${whip != null ? `, WHIP ${whip}` : ""}`,
   };
 }

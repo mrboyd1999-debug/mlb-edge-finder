@@ -2,6 +2,14 @@ import { playerNamesMatch } from "./playerNames.js";
 import { normalize, formatNumber } from "./formatters.js";
 import { canonicalMarketKey, marketDisplayLabel } from "./marketNormalization.js";
 import { buildRealProjection, hasRealStatInputs } from "../services/realProjectionEngine.js";
+import {
+  hasMlbPitcherStatInputs,
+  isMlbPitcherMarket,
+  projectMlbPitcherProp,
+  DATA_STATUS,
+} from "../modules/mlbProjectionEngine.js";
+import { scorePitcherManualProp } from "../modules/scoringEngine.js";
+import { buildFallbackBreakdown } from "../modules/projectionBreakdown.js";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -48,9 +56,9 @@ const MANUAL_VOLATILITY = {
     totalBases: { tier: "MEDIUM", score: 0.55, label: "Medium variance" },
     rbis: { tier: "MEDIUM", score: 0.5, label: "Medium variance" },
     runs: { tier: "MEDIUM", score: 0.46, label: "Medium variance" },
-    hitsAllowed: { tier: "MEDIUM", score: 0.58, label: "Medium variance" },
-    earnedRuns: { tier: "MEDIUM", score: 0.6, label: "Medium variance" },
-    outs: { tier: "LOW", score: 0.35, label: "Low variance" },
+    hitsAllowed: { tier: "MEDIUM", score: 0.65, label: "Medium/high variance" },
+    earnedRuns: { tier: "HIGH", score: 0.72, label: "High variance" },
+    outs: { tier: "MEDIUM", score: 0.52, label: "Medium variance" },
     fantasyScore: { tier: "MEDIUM", score: 0.56, label: "Medium variance" },
     pitchesThrown: { tier: "MEDIUM", score: 0.5, label: "Medium variance" },
   },
@@ -492,11 +500,40 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
   let projectionLabel = liveScored?.projectionLabel || null;
   let projectionSource = liveScored?.projectionSource || null;
   let isFallbackProjection = liveScored?.isFallbackProjection;
+  let dataStatus = liveScored?.dataStatus || null;
+  let projectionConfidence = liveScored?.projectionConfidence ?? null;
 
   let fairLine = Number(liveScored?.projectedValue ?? liveScored?.projection);
   const mergedProfile = profile && !profile.sparse ? profile : null;
+  const sportKey = normalizeSportKey(sport);
+  const marketKey = canonicalMarketKey(statType);
+  const isPitcherProp = sportKey === "MLB" && isMlbPitcherMarket(statType);
 
-  if (mergedProfile && hasRealStatInputs(mergedProfile)) {
+  if (isPitcherProp && mergedProfile && hasMlbPitcherStatInputs(mergedProfile)) {
+    const pitcher = projectMlbPitcherProp(
+      {
+        sport,
+        statType,
+        line,
+        playerName: input.playerName,
+        opponent: input.opponent,
+        team: input.team,
+        side: pick,
+        source,
+      },
+      mergedProfile,
+      { opponentContext: mergedProfile.opponentContext }
+    );
+    if (pitcher && Number.isFinite(pitcher.projectedValue)) {
+      fairLine = pitcher.projectedValue;
+      projectionBreakdown = pitcher.projectionBreakdown || [];
+      projectionLabel = pitcher.projectionLabel;
+      projectionSource = pitcher.projectionSource;
+      isFallbackProjection = pitcher.isFallbackProjection;
+      dataStatus = pitcher.dataStatus;
+      projectionConfidence = pitcher.projectionConfidence;
+    }
+  } else if (mergedProfile && hasRealStatInputs(mergedProfile)) {
     const real = buildRealProjection(
       {
         sport,
@@ -520,13 +557,12 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
 
   if (!Number.isFinite(fairLine)) {
     fairLine = estimateFairLine(sport, statType, line, payoutType);
-    projectionLabel = "Estimated fallback projection";
+    projectionLabel = DATA_STATUS.FALLBACK;
     projectionSource = "manual-fallback";
     isFallbackProjection = true;
-    projectionBreakdown = [
-      { label: "Baseline Estimate", value: fairLine, display: formatNumber(fairLine), contribution: fairLine },
-      { label: "Note", value: "No verified game logs", display: "No verified game logs", contribution: 0 },
-    ];
+    dataStatus = DATA_STATUS.FALLBACK;
+    projectionConfidence = 48;
+    projectionBreakdown = buildFallbackBreakdown(fairLine);
   }
 
   let edge = computeDirectionalEdge(fairLine, line, pick);
@@ -535,23 +571,45 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
   if (edge > 0) edge = round(clamp(edge, 0.1, 2.5), 2);
   else if (edge < 0) edge = round(clamp(edge, -2.5, -0.05), 2);
 
-  const confidence = calculateManualConfidence({
-    payoutType,
-    volatility,
-    edge,
-    line,
-    pick,
-    source,
-    sport,
-    statType,
-    fingerprint,
-    linePct,
-  });
+  let confidence;
+  let impliedHitChance;
+
+  if (isPitcherProp) {
+    const pitcherScore = scorePitcherManualProp({
+      projection: fairLine,
+      line,
+      pick,
+      statType,
+      payoutType,
+      volatility,
+      projectionConfidence: projectionConfidence ?? 60,
+      dataStatus: dataStatus || DATA_STATUS.FALLBACK,
+    });
+    confidence = pitcherScore.confidence;
+    impliedHitChance = pitcherScore.impliedHitChance;
+  } else {
+    confidence = calculateManualConfidence({
+      payoutType,
+      volatility,
+      edge,
+      line,
+      pick,
+      source,
+      sport,
+      statType,
+      fingerprint,
+      linePct,
+    });
+    impliedHitChance = computeImpliedHitChance({ confidence, edge, volatility, payoutType, isFallback: isFallbackProjection });
+  }
 
   const riskLevel = classifyManualRisk({ payoutType, volatility, edge, linePct });
   const statLabel = marketDisplayLabel(statType) || statType;
   const edgePercent = computeManualEdgePercent(edge, line, fairLine);
-  const impliedHitChance = computeImpliedHitChance({ confidence, edge, volatility, payoutType });
+  if (!isPitcherProp) {
+    impliedHitChance = computeImpliedHitChance({ confidence, edge, volatility, payoutType });
+    if (isFallbackProjection) impliedHitChance = Math.round(clamp(impliedHitChance, 35, 65));
+  }
   const volatilityLabel = volatility.label || volatilityLabelFromTier(volatility.tier);
   const whyThisPick = generateManualExplanation({
     pick,
@@ -591,6 +649,8 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
     projectionLabel,
     projectionSource: projectionSource || "manual-dynamic",
     isFallbackProjection: Boolean(isFallbackProjection),
+    dataStatus: dataStatus || (isFallbackProjection ? DATA_STATUS.FALLBACK : null),
+    projectionConfidence,
     manualVolatilityTier: volatility.tier,
     manualVolatilityScore: volatility.score,
     volatilityLabel,
@@ -623,6 +683,8 @@ export function mergeManualPropScoring(builtProp = {}, manualScore = {}, liveSco
     projectionBreakdown: manualScore.projectionBreakdown || liveScored?.projectionBreakdown || [],
     projectionLabel: manualScore.projectionLabel || liveScored?.projectionLabel || "Estimated fallback projection",
     isFallbackProjection: manualScore.isFallbackProjection ?? liveScored?.isFallbackProjection,
+    dataStatus: manualScore.dataStatus || liveScored?.dataStatus || null,
+    projectionConfidence: manualScore.projectionConfidence ?? liveScored?.projectionConfidence ?? null,
     analyzedAt: new Date().toISOString(),
   };
 }
