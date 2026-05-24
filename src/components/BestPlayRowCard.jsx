@@ -12,10 +12,10 @@ import {
 } from "../utils/pickRecommendation.js";
 import { displayFullMarketLabel, displaySport } from "../utils/propLabels.js";
 import { readPropMultiplier, readPropProbability } from "../utils/bestPlayRanking.js";
-import { computeCuratedPropEdge } from "../utils/propValidation.js";
+import { enrichPropWithSideEvaluation } from "../utils/sideEvaluationEngine.js";
 
 function BestPlayRowCard({ prop, onOpen, rank }) {
-  const enriched = withPlayerImageUrl(prop || {});
+  const enriched = withPlayerImageUrl(enrichPropWithSideEvaluation(prop || {}));
   const side = resolvePickSide(enriched);
   const sidePalette = recommendationPalette(side);
   const platform = normalizeSourceLabel(enriched);
@@ -28,9 +28,14 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
   const sideLabel = formatPlatformSideLabel(enriched);
   const multiplier = readPropMultiplier(enriched);
   const probability = readPropProbability(enriched);
-  const edge = computeCuratedPropEdge(enriched);
+  const evaluation = enriched.sideEvaluation || {};
+  const edge = evaluation.edge ?? null;
   const edgeLabel = edge != null ? formatSignedNumber(edge) : "—";
+  const confidence = evaluation.confidence ?? enriched.confidenceScore ?? enriched.confidence;
+  const confidenceLabel = enriched.confidenceTier || enriched.bettingLabel || "—";
+  const variance = enriched.varianceLevel || evaluation.varianceLevel || "—";
   const reason =
+    evaluation.reason ||
     enriched.reason ||
     enriched.analyticsReason ||
     enriched.premiumWhySummary ||
@@ -92,9 +97,13 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
         >
           {sideLabel}
         </div>
+        <span style={styles.bestPlayMetric}>
+          Conf {confidence != null ? `${Math.round(confidence)}%` : "—"} · {confidenceLabel}
+        </span>
+        <span style={styles.bestPlayMetric}>Edge {edgeLabel}</span>
+        <span style={styles.bestPlayMetric}>Var {variance}</span>
         <span style={styles.bestPlayMetric}>Payout {multiplier != null ? `${multiplier.toFixed(2)}x` : "—"}</span>
         <span style={styles.bestPlayMetric}>Prob {probability != null ? `${probability}%` : "—"}</span>
-        <span style={styles.bestPlayMetric}>Edge {edgeLabel}</span>
       </div>
     </article>
   );

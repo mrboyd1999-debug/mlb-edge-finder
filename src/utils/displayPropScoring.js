@@ -175,9 +175,9 @@ export function computeDisplayEdgeValue(prop = {}) {
 }
 
 export function confidenceTierLabel(confidence = BASE_CONFIDENCE) {
-  if (confidence >= 80) return "STRONG";
-  if (confidence >= 70) return "PLAYABLE";
-  if (confidence >= 60) return "LEAN";
+  if (confidence >= 85) return "STRONG";
+  if (confidence >= 75) return "PLAYABLE";
+  if (confidence >= 65) return "LEAN";
   return "RESEARCH ONLY";
 }
 
@@ -376,7 +376,7 @@ export function scoreDisplayProp(prop = {}) {
   const invalidProp = !isValidDisplayProp({ ...finalized, line, player: prop.player, playerName: prop.playerName });
   const displayResearchOnly = invalidProp
     ? true
-    : finiteOr(finalized.confidence, 0) < 60 || isDisplayResearchOnly(finalized);
+    : finiteOr(finalized.confidence, 0) < 65 || isDisplayResearchOnly(finalized);
   const isDisplayPlayable = !displayResearchOnly && !invalidProp;
   const bandScore = resolveBandScore(finalized);
   const bettingLabel = displayResearchOnly ? "Research only" : confidenceBandDisplay(bandScore);
@@ -421,17 +421,18 @@ export function isValidDisplayProp(prop = {}) {
 }
 
 function labelForConfidence(confidence = BASE_CONFIDENCE, displayResearchOnly = false) {
-  if (displayResearchOnly || confidence < 60) return "Research only";
-  if (confidence >= 80) return "Strong Play";
-  if (confidence >= 70) return "Playable";
+  if (displayResearchOnly || confidence < 65) return "Research only";
+  if (confidence >= 85) return "Strong Play";
+  if (confidence >= 75) return "Playable";
   return "Lean";
 }
 
 export function isResearchProp(prop = {}) {
   if (prop.displayResearchOnly) return true;
+  if (prop.recommendedSide === "PASS") return true;
   const confidence = finiteOr(prop.confidence ?? prop.confidenceScore, 0);
-  if (confidence < 60) return true;
-  if (/research only/i.test(String(prop.bettingLabel || ""))) return true;
+  if (confidence < 65) return true;
+  if (/research only|^pass$/i.test(String(prop.bettingLabel || ""))) return true;
   return false;
 }
 

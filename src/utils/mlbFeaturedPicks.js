@@ -7,9 +7,10 @@ import { formatRiskLevel } from "./pickRecommendation.js";
 import { withPlayerImageUrl } from "./playerImageFields.js";
 import { filterUnderdogStreakPool } from "./underdogStreakPool.js";
 import { filterUnderdogPropsBySport } from "./underdogSportDetection.js";
-import { sortBestPlayProps } from "./bestPlayRanking.js";
+import { sortBestPlayProps, prepareBestPlayProps, isRankableBestPlay } from "./bestPlayRanking.js";
 import { buildAnalyticsReason } from "./propReasonEngine.js";
 import { isCuratedDisplayProp, computeCuratedPropEdge } from "./propValidation.js";
+import { enrichPropWithSideEvaluation } from "./sideEvaluationEngine.js";
 
 function buildBestPlayPool(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
   const mlbDisplay = filterAllDisplayPropsBySport(displayProps, "MLB", "all");
@@ -50,7 +51,8 @@ function pickUnique(candidates = [], usedKeys = new Set()) {
 }
 
 export function resolveFeaturedMlbPicks(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
-  const pool = filterByDisplayConfidenceFloor(buildBestPlayPool(displayProps, rawProps, parsedUnderdogProps));
+  const rawPool = filterByDisplayConfidenceFloor(buildBestPlayPool(displayProps, rawProps, parsedUnderdogProps));
+  const pool = prepareBestPlayProps(rawPool).filter(isRankableBestPlay);
   const usedKeys = new Set();
 
   if (!pool.length) {
@@ -77,7 +79,11 @@ export function resolveFeaturedMlbPicks(displayProps = [], rawProps = [], parsed
   const safestPlay = pickUnique(bySafety, usedKeys);
 
   const bestPlays = ranked.slice(0, 6).map((prop, idx) =>
-    annotateFeatured(prop, idx === 0 ? "Best Overall Play" : `Best Play #${idx + 1}`, `best-${idx}`)
+    annotateFeatured(
+      enrichPropWithSideEvaluation(prop),
+      idx === 0 ? "Best Overall Play" : `Best Play #${idx + 1}`,
+      `best-${idx}`
+    )
   );
 
   return {

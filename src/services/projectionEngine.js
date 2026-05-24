@@ -165,10 +165,10 @@ export function computeStreakConfidence(inputs) {
 
 export function confidenceTierLabel(score, riskLevel = "", opts = {}) {
   if (riskLevel === "Low Data Confidence" || riskLevel === "Invalid Data") return "Research Only";
-  const strongOk = opts.strongData && opts.verifiedHistory && score >= 80;
-  if (strongOk || score >= 80) return "Strong Play";
-  if (score >= 70) return "Playable";
-  if (score >= 60) return "Lean";
+  const strongOk = opts.strongData && opts.verifiedHistory && score >= 85;
+  if (strongOk || score >= 85) return "Strong Play";
+  if (score >= 75) return "Playable";
+  if (score >= 65) return "Lean";
   return "Research Only";
 }
 

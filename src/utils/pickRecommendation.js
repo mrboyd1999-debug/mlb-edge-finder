@@ -1,7 +1,12 @@
 import { normalize } from "./formatters.js";
 
-/** Resolve OVER / UNDER / WATCH from prop fields or projection vs line. */
+/** Resolve OVER / UNDER / WATCH / PASS from evaluated side or projection. */
 export function resolvePickSide(prop = {}) {
+  if (prop.recommendedSide === "PASS") return "WATCH";
+  if (prop.recommendedSide === "OVER" || prop.recommendedSide === "UNDER") {
+    return prop.recommendedSide;
+  }
+
   const raw = prop.bestPick || prop.side || prop.pickDirection || prop.pick || "";
   const key = normalize(raw);
   if (key === "more" || key === "over" || key === "higher") return "OVER";
@@ -58,6 +63,7 @@ export function formatRecommendationLabel(side = "", { streak = false } = {}) {
 export function formatDfsSide(side = "", prop = null) {
   const platform = String(prop?.platform || prop?.source || prop?.normalizedSource || "").toLowerCase();
   const isUnderdog = /underdog/.test(platform) || prop?.normalizedSource === "underdog";
+  if (side === "WATCH" && prop?.recommendedSide === "PASS") return "Pass";
   if (side === "OVER") return isUnderdog ? "Higher" : "More";
   if (side === "UNDER") return isUnderdog ? "Lower" : "Less";
   return "Watch";

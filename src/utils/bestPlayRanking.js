@@ -1,125 +1,71 @@
-import { resolvePickSide } from "./pickRecommendation.js";
 import { canonicalMarketKey } from "./marketNormalization.js";
 import { normalizeSource } from "./normalizeSource.js";
 import {
   computeCuratedPropEdge,
-  hasValidProjection,
   isCuratedDisplayProp,
 } from "./propValidation.js";
+import {
+  enrichPropWithSideEvaluation,
+  evaluateBothSides,
+  isUnderPreferredMarket,
+  variancePenalty,
+} from "./sideEvaluationEngine.js";
 
-const UNDER_PREFERRED_MARKETS = new Set([
-  "hrr",
-  "hits",
-  "runs",
-  "rbis",
-  "rbi",
-  "totalbases",
-  "fantasyscore",
-  "fantasy",
-]);
-
-const UNDER_PREFERENCE_BOOST = 8;
-const UNDER_MARKET_BONUS = 8;
-const STRONG_OVER_EDGE = 1.25;
+export { readPropMultiplier, readPropProbability } from "./bestPlayRankingDisplay.js";
 
 function finiteOr(value, fallback = 0) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
 }
 
-function marketKey(prop = {}) {
-  return canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
-}
-
-function isUnderPreferredMarket(prop = {}) {
-  const key = marketKey(prop);
-  if (UNDER_PREFERRED_MARKETS.has(key)) return true;
-  const compact = key.replace(/[^a-z0-9]/g, "");
-  return (
-    compact.includes("hitsrunsrbis") ||
-    compact.includes("totalbases") ||
-    compact.includes("fantasy") ||
-    compact === "hits" ||
-    compact === "runs" ||
-    compact === "rbis"
-  );
-}
-
-function isUnderSide(prop = {}) {
-  const side = resolvePickSide(prop);
-  return side === "UNDER";
-}
-
-function isOverSide(prop = {}) {
-  const side = resolvePickSide(prop);
-  return side === "OVER";
-}
-
 export function isRankableBestPlay(prop = {}) {
-  return isCuratedDisplayProp(prop);
+  if (!isCuratedDisplayProp(prop)) return false;
+  const evaluation = prop.sideEvaluation || evaluateBothSides(prop);
+  if (evaluation.pass) return false;
+  if (evaluation.recommendedSide === "PASS") return false;
+  return finiteOr(evaluation.confidence ?? prop.confidenceScore ?? prop.confidence, 0) >= 65;
 }
 
-/** Rank score for Best Plays — requires valid projection; edge = projection - line. */
+/** Rank score — uses dual-side evaluation output when present. */
 export function computeBestPlayRankScore(prop = {}) {
   if (!isRankableBestPlay(prop)) return -Infinity;
 
-  const confidence = finiteOr(prop.confidenceScore ?? prop.confidence, 50);
+  const evaluation = prop.sideEvaluation || evaluateBothSides(prop);
+  if (evaluation.rankScore != null && Number.isFinite(evaluation.rankScore)) {
+    return evaluation.rankScore;
+  }
+
+  const confidence = finiteOr(evaluation.confidence ?? prop.confidenceScore ?? prop.confidence, 50);
   const line = finiteOr(prop.line, 1);
-  const edge = computeCuratedPropEdge(prop) ?? 0;
-  const edgePct = line > 0 ? (Math.abs(edge) / line) * 100 : 0;
+  const edge = Math.abs(evaluation.edge ?? computeCuratedPropEdge(prop) ?? 0);
+  const edgePct = line > 0 ? (edge / line) * 100 : 0;
 
-  let score = confidence * 0.4 + edgePct * 0.45 + (prop.isDisplayPlayable ? 5 : 0);
-
+  let score = confidence * 0.42 + edgePct * 0.38;
+  score -= variancePenalty(prop);
   if (normalizeSource(prop) === "underdog") score += 1.5;
   if (normalizeSource(prop) === "prizepicks") score += 1;
-
-  if (isUnderSide(prop)) {
-    score += UNDER_PREFERENCE_BOOST;
-    if (isUnderPreferredMarket(prop)) score += UNDER_MARKET_BONUS;
-  } else if (isOverSide(prop)) {
-    if (edge < STRONG_OVER_EDGE) score -= 5;
-    else if (edge >= STRONG_OVER_EDGE * 2) score += 2;
+  if (evaluation.recommendedSide === "UNDER") {
+    score += 8;
+    if (isUnderPreferredMarket(prop)) score += 5;
   }
 
   return score;
 }
 
+export function prepareBestPlayProps(props = []) {
+  return (props || []).map((prop) =>
+    prop.sideEvaluation ? prop : enrichPropWithSideEvaluation(prop)
+  );
+}
+
 export function sortBestPlayProps(props = []) {
-  return [...(props || [])]
+  return prepareBestPlayProps(props)
     .filter(isRankableBestPlay)
     .sort(
       (a, b) =>
         computeBestPlayRankScore(b) - computeBestPlayRankScore(a) ||
         finiteOr(b.confidenceScore ?? b.confidence) - finiteOr(a.confidenceScore ?? a.confidence) ||
-        Math.abs(computeCuratedPropEdge(b) ?? 0) - Math.abs(computeCuratedPropEdge(a) ?? 0)
+        Math.abs(b.sideEvaluation?.edge ?? computeCuratedPropEdge(b) ?? 0) -
+          Math.abs(a.sideEvaluation?.edge ?? computeCuratedPropEdge(a) ?? 0)
     );
-}
-
-export function readPropMultiplier(prop = {}) {
-  const side = resolvePickSide(prop);
-  const options = prop.streakOptions || [];
-  const match = options.find((opt) => {
-    const label = String(opt.side || opt.label || "").toLowerCase();
-    if (side === "OVER") return label.includes("higher") || label.includes("over") || label.includes("more");
-    if (side === "UNDER") return label.includes("lower") || label.includes("under") || label.includes("less");
-    return false;
-  });
-  const mult = Number(match?.multiplier ?? prop.multiplier ?? prop.payout ?? prop.payoutMultiplier);
-  return Number.isFinite(mult) && mult > 0 && mult !== 1 ? mult : null;
-}
-
-export function readPropProbability(prop = {}) {
-  if (!hasValidProjection(prop)) return null;
-  const conf = finiteOr(prop.confidenceScore ?? prop.confidence, null);
-  if (Number.isFinite(conf) && conf !== 50) return Math.round(conf);
-  const options = prop.streakOptions || [];
-  const side = resolvePickSide(prop);
-  const match = options.find((opt) => {
-    const label = String(opt.side || opt.label || "").toLowerCase();
-    if (side === "OVER") return label.includes("higher") || label.includes("over") || label.includes("more");
-    return label.includes("lower") || label.includes("under") || label.includes("less");
-  });
-  const rawProb = Number(match?.rawProbability);
-  if (Number.isFinite(rawProb) && rawProb > 0 && rawProb <= 1) return Math.round(rawProb * 100);
-  return null;
 }
