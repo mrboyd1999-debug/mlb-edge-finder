@@ -1,6 +1,7 @@
 import { canonicalMarketKey } from "./marketNormalization.js";
 import { normalize, formatNumber } from "./formatters.js";
 import { marketDisplayLabel } from "./marketNormalization.js";
+import { buildRealProjection, hasRealStatInputs } from "../services/realProjectionEngine.js";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -204,9 +205,10 @@ export function computeImpliedHitChance({
   return Math.round(clamp(pct, 38, 88));
 }
 
-export function manualScoringModeLabel(liveScored = null) {
+export function manualScoringModeLabel(liveScored = null, isFallback = false) {
+  if (isFallback) return "Estimated grade";
   const source = String(liveScored?.projectionSource || "").toLowerCase();
-  if (source && source !== "missing" && source !== "manual-dynamic" && source !== "manual-offline") {
+  if (source && source !== "missing" && source !== "manual-dynamic" && source !== "manual-fallback" && source !== "manual-offline") {
     return "Live projection";
   }
   return "Estimated grade";
@@ -473,7 +475,7 @@ export function generateManualExplanation(ctx = {}) {
   return parts.slice(0, 2).join(" ");
 }
 
-export function scoreManualPropInput(input = {}, liveScored = null) {
+export function scoreManualPropInput(input = {}, liveScored = null, profile = null) {
   const sport = input.sport || "MLB";
   const statType = input.statType || "";
   const line = Number(input.line);
@@ -486,10 +488,46 @@ export function scoreManualPropInput(input = {}, liveScored = null) {
   const baseline = getManualStatBaseline(sport, statType);
   const linePct = linePercentile(line, baseline);
 
-  const liveProjection = Number(liveScored?.projectedValue ?? liveScored?.projection);
-  const fairLine = Number.isFinite(liveProjection)
-    ? liveProjection
-    : estimateFairLine(sport, statType, line, payoutType);
+  let projectionBreakdown = liveScored?.projectionBreakdown || [];
+  let projectionLabel = liveScored?.projectionLabel || null;
+  let projectionSource = liveScored?.projectionSource || null;
+  let isFallbackProjection = liveScored?.isFallbackProjection;
+
+  let fairLine = Number(liveScored?.projectedValue ?? liveScored?.projection);
+  const mergedProfile = profile && !profile.sparse ? profile : null;
+
+  if (mergedProfile && hasRealStatInputs(mergedProfile)) {
+    const real = buildRealProjection(
+      {
+        sport,
+        statType,
+        line,
+        playerName: input.playerName,
+        opponent: input.opponent,
+        team: input.team,
+      },
+      mergedProfile,
+      { opponentContext: mergedProfile.opponentContext }
+    );
+    if (Number.isFinite(real.projectedValue)) {
+      fairLine = real.projectedValue;
+      projectionBreakdown = real.projectionBreakdown || [];
+      projectionLabel = real.projectionLabel;
+      projectionSource = real.projectionSource;
+      isFallbackProjection = real.isFallbackProjection;
+    }
+  }
+
+  if (!Number.isFinite(fairLine)) {
+    fairLine = estimateFairLine(sport, statType, line, payoutType);
+    projectionLabel = "Estimated fallback projection";
+    projectionSource = "manual-fallback";
+    isFallbackProjection = true;
+    projectionBreakdown = [
+      { label: "Baseline Estimate", value: fairLine, display: formatNumber(fairLine), contribution: fairLine },
+      { label: "Note", value: "No verified game logs", display: "No verified game logs", contribution: 0 },
+    ];
+  }
 
   let edge = computeDirectionalEdge(fairLine, line, pick);
   if (normalizePayout(payoutType) === "goblin" && edge > 0) edge = round(edge + 0.12, 2);
@@ -549,13 +587,16 @@ export function scoreManualPropInput(input = {}, liveScored = null) {
     premiumWhySummary: whyThisPick,
     projectedValue: fairLine,
     projection: fairLine,
+    projectionBreakdown,
+    projectionLabel,
+    projectionSource: projectionSource || "manual-dynamic",
+    isFallbackProjection: Boolean(isFallbackProjection),
     manualVolatilityTier: volatility.tier,
     manualVolatilityScore: volatility.score,
     volatilityLabel,
     volatility: round(1.5 + volatility.score * 2.5, 2),
     manualDynamicAnalysis: true,
-    projectionSource: liveScored?.projectionSource || "manual-dynamic",
-    scoringModeLabel: manualScoringModeLabel(liveScored),
+    scoringModeLabel: isFallbackProjection ? "Estimated grade" : manualScoringModeLabel(liveScored, isFallbackProjection),
     dataQualityScore: Math.round(48 + (1 - volatility.score) * 22 + Math.max(edge, 0) * 6),
     bettingLabel: playTag || "Graded",
   };
@@ -563,7 +604,7 @@ export function scoreManualPropInput(input = {}, liveScored = null) {
 
 export function mergeManualPropScoring(builtProp = {}, manualScore = {}, liveScored = null) {
   const lean = manualScore.bestPick || builtProp.bestPick || builtProp.side;
-  const scoringModeLabel = manualScore.scoringModeLabel || manualScoringModeLabel(liveScored);
+  const scoringModeLabel = manualScore.scoringModeLabel || manualScoringModeLabel(liveScored, manualScore.isFallbackProjection);
   return {
     ...builtProp,
     ...(liveScored || {}),
@@ -579,6 +620,9 @@ export function mergeManualPropScoring(builtProp = {}, manualScore = {}, liveSco
     displayTier: manualScore.playTag === "Strong Play" ? "playable" : "research",
     lineSourceBadge: "MANUAL",
     scoringModeLabel,
+    projectionBreakdown: manualScore.projectionBreakdown || liveScored?.projectionBreakdown || [],
+    projectionLabel: manualScore.projectionLabel || liveScored?.projectionLabel || "Estimated fallback projection",
+    isFallbackProjection: manualScore.isFallbackProjection ?? liveScored?.isFallbackProjection,
     analyzedAt: new Date().toISOString(),
   };
 }

@@ -116,6 +116,7 @@ import {
   rankManualPropScore,
   computeDirectionalEdge,
 } from "../src/utils/manualPropScoring.js";
+import { projectMlbPitcherStrikeouts, hasRealStatInputs } from "../src/services/realProjectionEngine.js";
 
 function parseJsonEnvelope(text, source) {
   const trimmed = String(text || "").trim();
@@ -1101,11 +1102,28 @@ assert.ok(goblinHit.volatilityLabel);
 assert.equal(goblinHit.scoringModeLabel, "Estimated grade");
 assert.ok(goblinHit.confidenceScore <= 85);
 
+const kProjection = projectMlbPitcherStrikeouts(
+  { statType: "Pitcher Strikeouts", line: 6.5, sport: "MLB" },
+  {
+    last5Average: 6.3,
+    seasonAverage: 5.9,
+    gradingRows: [
+      { stat: { strikeOuts: 7, inningsPitched: "6.0", numberOfPitches: 95 } },
+      { stat: { strikeOuts: 6, inningsPitched: "5.2", numberOfPitches: 88 } },
+    ],
+  },
+  { opponentContext: { strikeoutsPerGame: 9.1 } }
+);
+assert.ok(kProjection.projectedValue > 0);
+assert.ok(Array.isArray(kProjection.projectionBreakdown) && kProjection.projectionBreakdown.length >= 3);
+assert.equal(kProjection.projectionLabel, "Stat-based projection");
+assert.ok(hasRealStatInputs({ last5Average: 6.3, seasonAverage: 5.9 }));
+
 const topTwo = selectManualTopPicks([demonHrr, goblinHit, nbaAst], 2);
 assert.equal(topTwo.length, 2);
 assert.ok(rankManualPropScore(topTwo[0]) >= rankManualPropScore(topTwo[1]));
 
-const analyzedNoScoreFn = analyzeManualProp({
+const analyzedNoScoreFn = await analyzeManualProp({
   playerName: "Shohei Ohtani",
   sport: "MLB",
   statType: "Pitcher Strikeouts",

@@ -3281,11 +3281,11 @@ export default function DFSPropsApp() {
     setLearningSaveNotice("Pick saved for accuracy review.");
   }
 
-  function handleAnalyzeManualProp(form) {
+  async function handleAnalyzeManualProp(form) {
     const manualProp = normalizeManualFormInput(form);
     console.log("Analyze clicked", manualProp);
     try {
-      const analyzed = analyzeManualProp(form, scoreManualAnalyzerProp);
+      const analyzed = await analyzeManualProp(form, scoreManualAnalyzerProp);
       persistManualAnalyzerProps((current) =>
         [analyzed, ...current.filter((row) => row.id !== analyzed.id)].slice(0, 100)
       );
@@ -3308,23 +3308,25 @@ export default function DFSPropsApp() {
     setLearningSaveNotice("Manual prop list cleared.");
   }
 
-  function handleReanalyzeManualProps() {
+  async function handleReanalyzeManualProps() {
     if (!manualAnalyzerProps.length) return;
     try {
-      const rescored = manualAnalyzerProps.map((prop) =>
-        analyzeManualProp(
-          {
-            playerName: prop.playerName,
-            sport: prop.sport,
-            team: prop.team,
-            opponent: prop.opponent,
-            statType: prop.statType,
-            line: prop.line,
-            side: prop.side || prop.bestPick || prop.pick,
-            source: prop.source || prop.platform,
-            payoutType: prop.oddsType || prop.payoutRole || "standard",
-          },
-          scoreManualAnalyzerProp
+      const rescored = await Promise.all(
+        manualAnalyzerProps.map((prop) =>
+          analyzeManualProp(
+            {
+              playerName: prop.playerName,
+              sport: prop.sport,
+              team: prop.team,
+              opponent: prop.opponent,
+              statType: prop.statType,
+              line: prop.line,
+              side: prop.side || prop.bestPick || prop.pick,
+              source: prop.source || prop.platform,
+              payoutType: prop.oddsType || prop.payoutRole || "standard",
+            },
+            scoreManualAnalyzerProp
+          )
         )
       );
       persistManualAnalyzerProps(rescored);
@@ -3927,6 +3929,9 @@ function scoreDFSProp(prop, context) {
     ? statModel.projectionSource
     : projectionResult.source;
   const projectionReasoning = statModel.projectionReasoning || [];
+  const projectionBreakdown = statModel.projectionBreakdown || [];
+  const projectionLabel = statModel.projectionLabel || (statModel.isFallbackProjection ? "Estimated fallback projection" : "Stat-based projection");
+  const isFallbackProjection = Boolean(statModel.isFallbackProjection);
   if (!Number.isFinite(projection) && verifiedStats) {
     if (Number.isFinite(enriched?.last5Average)) {
       projection = enriched.last5Average;
@@ -4325,6 +4330,9 @@ function scoreDFSProp(prop, context) {
     projectedValue: Number.isFinite(projection) ? round(projection) : null,
     projectionSource,
     projectionReasoning,
+    projectionBreakdown,
+    projectionLabel,
+    isFallbackProjection,
     statProfileSource: enriched?.source || "",
     statEnrichmentSources: enriched?.statSources || [],
     fallbackProfile: profileIsFallback,

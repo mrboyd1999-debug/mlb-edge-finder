@@ -7,6 +7,7 @@ import {
   selectManualTopPicksByRank,
   sortManualPropsByRank,
 } from "./manualPropScoring.js";
+import { fetchPlayerStats, findStatProfile } from "../services/playerStats.js";
 
 export const MANUAL_SOURCES = ["PrizePicks", "Underdog"];
 
@@ -99,7 +100,7 @@ export function validateManualPropFields(form = {}) {
 export const MANUAL_OFFLINE_REASON =
   "Manual prop analyzed offline using base scoring. API enrichment unavailable.";
 
-export function buildOfflineManualAnalyzedProp(form = {}, liveScored = null) {
+export function buildOfflineManualAnalyzedProp(form = {}, liveScored = null, profile = null) {
   const validated = validateManualPropFields(form);
   if (!validated.ok) throw new Error(validated.error);
   const { manualProp } = validated;
@@ -110,40 +111,63 @@ export function buildOfflineManualAnalyzedProp(form = {}, liveScored = null) {
     opponent: manualProp.opponent || "",
     side: manualProp.pick,
   });
-  const manualScore = scoreManualPropInput(manualProp, liveScored);
+  const manualScore = scoreManualPropInput(manualProp, liveScored, profile);
   return mergeManualPropScoring(
     {
       ...built,
       player: built.playerName,
       team: manualProp.team || "",
       opponent: manualProp.opponent || "",
-      projectionLabel: liveScored?.projectionLabel || "Manual Dynamic Projection",
-      manualOfflineAnalysis: !liveScored?.projectionSource || liveScored?.projectionSource === "missing",
+      projectionLabel: manualScore.projectionLabel || liveScored?.projectionLabel || "Estimated fallback projection",
+      manualOfflineAnalysis: manualScore.isFallbackProjection ?? (!liveScored?.projectionSource || liveScored?.projectionSource === "missing"),
     },
     manualScore,
     liveScored
   );
 }
 
-export function analyzeManualProp(form = {}, scoreFn = null) {
+export async function fetchManualPropProfile(form = {}) {
   const validated = validateManualPropFields(form);
   if (!validated.ok) throw new Error(validated.error);
+  const built = buildManualPropFromInput({
+    ...form,
+    ...validated.manualProp,
+    side: validated.manualProp.pick,
+  });
+  const { stats, warnings } = await fetchPlayerStats({ props: [built] });
+  const profile = findStatProfile(stats, built) || null;
+  return { profile, built, warnings: warnings || [] };
+}
+
+export async function analyzeManualProp(form = {}, scoreFn = null) {
+  const validated = validateManualPropFields(form);
+  if (!validated.ok) throw new Error(validated.error);
+
+  let profile = null;
+  let built = null;
+  try {
+    const fetched = await fetchManualPropProfile(form);
+    profile = fetched.profile;
+    built = fetched.built;
+  } catch (error) {
+    console.warn("[Manual Analyzer] stat fetch failed", error);
+  }
 
   let liveScored = null;
   if (typeof scoreFn === "function") {
     try {
-      const built = buildManualPropFromInput({
+      const prop = built || buildManualPropFromInput({
         ...form,
         ...validated.manualProp,
         side: validated.manualProp.pick,
       });
-      liveScored = scoreFn(built);
+      liveScored = scoreFn(prop);
     } catch (error) {
       console.warn("[Manual Analyzer] live scoring failed, using dynamic manual scoring", error);
     }
   }
 
-  return buildOfflineManualAnalyzedProp(form, liveScored?.playerName ? liveScored : null);
+  return buildOfflineManualAnalyzedProp(form, liveScored?.playerName ? liveScored : null, profile);
 }
 
 export function normalizeSide(value = "") {

@@ -10,15 +10,16 @@ import {
 import { MLB_ONLY_MODE, shouldRunNonMlbStatFetch } from "../utils/mlbOnlyMode.js";
 import { canonicalStatType } from "../utils/marketNormalization.js";
 import { enrichMlbProfilesFromSportsData } from "./mlbSportsDataEnrichment.js";
+import { statProfileKey, findStatProfile } from "../utils/playerNames.js";
 
-export { statProfileKey, findStatProfile } from "../utils/playerNames.js";
+export { statProfileKey, findStatProfile };
 
 const MLB_SEARCH_URL = "https://statsapi.mlb.com/api/v1/people/search";
 const mlbProfileInflight = new Map();
 const MLB_PLAYER_FETCH_LIMIT = 60;
 const WNBA_PLAYER_FETCH_LIMIT = 50;
 const SOCCER_PLAYER_FETCH_LIMIT = 40;
-const API_FOOTBALL_KEY = import.meta.env.VITE_API_FOOTBALL_KEY || "";
+const API_FOOTBALL_KEY = import.meta.env?.VITE_API_FOOTBALL_KEY || "";
 const API_FOOTBALL_BASE = "/api/api-football";
 const API_FOOTBALL_LEAGUE_IDS = [253, 39, 2, 140, 78, 61, 135];
 
@@ -112,6 +113,7 @@ async function fetchMlbStats(props) {
         opponentPitcherSbAllowed: opponentCtx.stolenBasesAllowed,
         catcherPopTimeProxy: opponentCtx.catcherPopTimeProxy,
         matchupNote: opponentCtx.note,
+        opponentContext: opponentCtx,
         statSources: uniqueSources([...(nextProfile.statSources || []), SOURCE_LABELS.mlb]),
         hasMatchup: true,
       };
@@ -885,6 +887,8 @@ async function fetchMlbOpponentContext(opponentName) {
     homeRunsAllowed,
     stolenBasesAllowed: sbAgainstRate,
     catcherPopTimeProxy,
+    strikeoutsPerGame: strikeouts,
+    runsScoredPerGame: runsScored,
     note: `${team.abbreviation || team.name}: ${round(runsScored || 0)} R/G, ${round(strikeouts || 0)} K/G${whip != null ? `, WHIP ${whip}` : ""}`,
   };
 }

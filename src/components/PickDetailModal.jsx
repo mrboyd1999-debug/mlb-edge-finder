@@ -268,11 +268,42 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
 
         <div style={{ ...styles.explanationBlock, padding: manualProp ? "5px 6px" : "6px 8px", marginBottom: "3px" }}>
           <strong style={{ fontSize: "11px" }}>{manualProp ? "Grade summary" : "Why this pick"}</strong>
+          {manualProp && prop.projectionLabel ? (
+            <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "10px", color: prop.isFallbackProjection ? "#fcd34d" : "#86efac" }}>
+              {prop.projectionLabel}
+            </p>
+          ) : null}
           <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "11px", lineHeight: 1.35 }}>{whyText}</p>
           {!manualProp ? (
             <p style={{ ...styles.compactFlags, margin: "3px 0 0", color: "#94a3b8", fontSize: "10px" }}>{riskExplanation(prop)}</p>
           ) : null}
         </div>
+
+        {(manualProp || Array.isArray(prop.projectionBreakdown)) && Array.isArray(prop.projectionBreakdown) && prop.projectionBreakdown.length > 0 ? (
+          <div style={{ ...styles.explanationBlock, padding: "5px 6px", marginBottom: "4px" }}>
+            <strong style={{ fontSize: "11px" }}>Projection breakdown</strong>
+            {prop.projectionLabel ? (
+              <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "10px", color: prop.isFallbackProjection ? "#fcd34d" : "#86efac" }}>
+                {prop.projectionLabel}
+              </p>
+            ) : null}
+            <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "3px", marginTop: "4px" }}>
+              {prop.projectionBreakdown
+                .filter((row) => row.label !== "Projected Output" && row.label !== "Projected Ks")
+                .slice(0, 8)
+                .map((row) => (
+                  <MetricIf key={row.label} label={row.label} value={row.display ?? row.value} strong={/projected/i.test(row.label)} />
+                ))}
+              {prop.projectionBreakdown.find((row) => /projected/i.test(row.label)) ? (
+                <MetricIf
+                  label="Projected"
+                  value={prop.projectionBreakdown.find((row) => /projected/i.test(row.label))?.display}
+                  strong
+                />
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
         {!manualProp && (historical.last10.sample > 0 || historical.last20.sample > 0) && (
           <div style={{ ...styles.explanationBlock, marginTop: "8px" }}>

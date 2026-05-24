@@ -1,6 +1,7 @@
 import { MLB_ONLY_MODE, guardMlbOnlyProp } from "../utils/mlbOnlyMode.js";
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
 import { isTennisSportLabel } from "../utils/marketClassification.js";
+import { buildRealProjection, hasRealStatInputs } from "./realProjectionEngine.js";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -102,9 +103,27 @@ function consistencyMultiplier(profile = {}) {
 }
 
 function projectMlbProp(prop = {}, profile = {}, injury = null, context = {}) {
+  const key = canonicalMarketKey(prop.statType);
+  const real = buildRealProjection(prop, profile, {
+    ...context,
+    injury,
+    opponentContext: context.opponentContext || profile.opponentContext,
+  });
+
+  if (real.projectedValue != null && hasRealStatInputs(profile)) {
+    return {
+      projectedValue: real.projectedValue,
+      reasoning: real.reasoning,
+      volatility: profile.volatility ?? null,
+      projectionBreakdown: real.projectionBreakdown,
+      projectionLabel: real.projectionLabel,
+      isFallbackProjection: real.isFallbackProjection,
+      projectionSource: real.projectionSource,
+    };
+  }
+
   const reasoning = [];
   const line = finiteNumber(prop.line);
-  const key = canonicalMarketKey(prop.statType);
   let base = baseWeightedForm(profile);
   if (!Number.isFinite(base) && Number.isFinite(profile.projection)) base = profile.projection;
 
@@ -239,7 +258,20 @@ function parseMinutes(value) {
   return finiteNumber(value);
 }
 
-function projectBasketballProp(prop = {}, profile = {}, injury = null) {
+function projectBasketballProp(prop = {}, profile = {}, injury = null, context = {}) {
+  const real = buildRealProjection(prop, profile, { ...context, injury });
+  if (real.projectedValue != null && hasRealStatInputs(profile)) {
+    return {
+      projectedValue: real.projectedValue,
+      reasoning: real.reasoning,
+      volatility: profile.volatility ?? null,
+      projectionBreakdown: real.projectionBreakdown,
+      projectionLabel: real.projectionLabel,
+      isFallbackProjection: real.isFallbackProjection,
+      projectionSource: real.projectionSource,
+    };
+  }
+
   const reasoning = [];
   const line = finiteNumber(prop.line);
   const sport = prop.sport || profile.sport || "NBA";
@@ -392,7 +424,7 @@ export function projectPlayerProp(prop = {}, context = {}) {
   if (sport === "MLB") {
     result = projectMlbProp(prop, profile, injury, context);
   } else if (sport === "NBA" || sport === "WNBA") {
-    result = projectBasketballProp(prop, profile, injury);
+    result = projectBasketballProp(prop, profile, injury, context);
   } else if (isTennisSportLabel(sport) || sport === "Tennis") {
     result = projectTennisProp(prop, profile);
   } else {
@@ -414,13 +446,16 @@ export function projectPlayerProp(prop = {}, context = {}) {
   return {
     projectedValue,
     projection: projectedValue,
-    projectionSource,
+    projectionSource: result.projectionSource || (projectedValue == null ? "missing" : hasStats ? "player-stats-model" : "player-stats-estimate"),
     bestPick: edgeInfo.bestPick,
     edge: edgeInfo.edge,
     edgePct: edgeInfo.edgePct,
     volatility: result.volatility ?? profile.volatility ?? null,
     volatilityAdjustment: 0,
     projectionReasoning: result.reasoning,
+    projectionBreakdown: result.projectionBreakdown || [],
+    projectionLabel: result.projectionLabel || (hasStats ? "Stat-based projection" : "Estimated fallback projection"),
+    isFallbackProjection: Boolean(result.isFallbackProjection),
     modelInputs: {
       last5Average: profile.last5Average,
       last10Average: profile.last10Average,
