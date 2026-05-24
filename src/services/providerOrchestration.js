@@ -35,21 +35,25 @@ export function hasAnyProviderProps({ rawProps = [], allDisplayProps = [], usabl
 
 export function buildUnderdogParserFailureMessage(debug = {}) {
   const parser = debug.underdogParser || debug.parser || {};
+  const parsedCount = Number(debug.parsedPropsCount ?? parser.acceptedCount ?? 0);
+  const rawCount = Number(debug.rawPropsLoaded ?? parser.rawCount ?? 0);
   const reasons = Object.entries(parser.rejectionReasons || {})
     .map(([reason, count]) => `${reason} (${count})`)
     .join(", ");
   const sample = debug.rawUnderdogSamples?.[0] || parser.sampleKeys || null;
   const sampleKeys = sample && typeof sample === "object" ? Object.keys(sample).join(", ") : "";
   const parts = [];
-  if (parser.rawCount > 0 && parser.acceptedCount === 0) {
-    parts.push(`Underdog parser returned 0 props from ${parser.rawCount} raw lines`);
+  if (parsedCount > 0 && rawCount > 0) {
+    parts.push(`Underdog parsed ${parsedCount} lines but 0 matched MLB filters (${rawCount} raw)`);
+  } else if (rawCount > 0 && parsedCount === 0) {
+    parts.push(`Underdog parser returned 0 props from ${rawCount} raw lines`);
   }
   if (reasons) parts.push(`rejections: ${reasons}`);
   if (sampleKeys) parts.push(`sample keys: ${sampleKeys}`);
   if (debug.responseShape?.keys?.length) {
     parts.push(`response keys: ${debug.responseShape.keys.join(", ")}`);
   }
-  return parts.join(" · ") || "Underdog connected but parser returned 0 MLB props";
+  return parts.join(" · ") || "Underdog connected but no MLB props in current feed";
 }
 
 export function resolveProviderBoardProps({

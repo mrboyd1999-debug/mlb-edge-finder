@@ -195,6 +195,10 @@ function resolvePlayerFromRaw(raw = {}, lookup = {}) {
   );
   if (fromTitle.length >= 2) return fromTitle;
 
+  const ouTitle = String(raw.over_under?.title || attrs.over_under?.title || "");
+  const playerOu = ouTitle.match(/^(.+?)\s+(Player Points|Strikeouts|Hits|Total Bases|RBIs?|Runs?)\s+O\/U/i);
+  if (playerOu?.[1]?.trim().length >= 2) return playerOu[1].trim();
+
   return "";
 }
 
@@ -596,14 +600,6 @@ export function parseUnderdogRawBatch(rawRecords = [], options = {}) {
     parserErrors,
   };
 
-  recordParserPreview("underdog", {
-    rawObjectCount: records.length,
-    normalizedObjectCount: props.length,
-    parserErrors,
-    firstNormalizedProp: props[0] || null,
-    schemaKeys: diagnostics.sampleKeys,
-  });
-
   if (diagnostics.parserMismatch) {
     console.warn("[Underdog Parser] mismatch — raw records present but zero parsed props", diagnostics);
   }
@@ -622,8 +618,21 @@ export function parseUnderdogPayloadDedicated(payload, lineSourceBadge = "LIVE",
   const lookup = buildDynamicUnderdogLookupMaps(payload);
   const rawRecords = filterMlbPickemRecords(discovered.records, lookup);
   const batch = parseUnderdogRawBatch(rawRecords, { lookup, lineSourceBadge, selectedSport });
+  recordParserPreview("underdog", {
+    rawObjectCount: discovered.records.length,
+    normalizedObjectCount: batch.props.length,
+    parserErrors: batch.diagnostics?.parserErrors || [],
+    firstNormalizedProp: batch.props[0] || null,
+    schemaKeys: discovered.schema?.[0]?.sampleKeys || batch.diagnostics?.sampleKeys || [],
+    mlbFilteredCount: Math.max(0, discovered.records.length - rawRecords.length),
+  });
   return {
     ...batch,
+    diagnostics: {
+      ...(batch.diagnostics || {}),
+      discoveredRawCount: discovered.records.length,
+      mlbFilteredCount: Math.max(0, discovered.records.length - rawRecords.length),
+    },
     responseShape: {
       ...responseShape,
       discoveredPath: discovered.path,

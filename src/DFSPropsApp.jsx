@@ -170,7 +170,8 @@ import {
 import { enrichPropsWithSportsData, generateMlbPropsFromSportsData } from "./services/propSportsDataEnrichment.js";
 import { resolveIngestionFallback } from "./services/ingestionFallback.js";
 import { writeLastGoodBoard, readLastGoodBoard, boardFromLastGood } from "./services/lastGoodBoardCache.js";
-import { initRawResponseDebug } from "./utils/rawResponseDebug.js";
+import { initRawResponseDebug, dumpDebugGlobals, recordProviderStatus, recordNormalizedProps } from "./utils/rawResponseDebug.js";
+import RawApiDebugPanel from "./components/RawApiDebugPanel.jsx";
 import { logLiveFetchResult, buildLiveFetchFailureSummary } from "./utils/liveFetchAudit.js";
 import { isSafeModeEnabled, SAFE_MODE_FALLBACK_MESSAGE, SAFE_MODE_LOADING_MESSAGE } from "./utils/safeMode.js";
 import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks, resolveSafeMlbStreakPicks } from "./utils/safeModePipeline.js";
@@ -1125,6 +1126,48 @@ function buildCoreBoardPreview({ rawProps = [], allDisplayProps = [], sourceStat
   };
 }
 
+async function injectSportsDataIfProvidersEmpty({
+  mergedCount = 0,
+  fetchSport = "MLB",
+  sourceStatus = {},
+  debugInfo = {},
+} = {}) {
+  if (mergedCount > 0) return null;
+  const generated = await generateMlbPropsFromSportsData({ limit: 48 });
+  if (!generated.props?.length) return null;
+
+  const display = normalizePropsWithSource(
+    enrichDisplayPropsPipeline(
+      generated.props.map((prop) =>
+        normalizeDisplayProp(prop, {
+          selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
+          source: "SportsDataIO",
+          status: "live",
+        })
+      )
+    )
+  );
+
+  sourceStatus.SportsDataIO = "Connected";
+  debugInfo.sources.SportsDataIO = {
+    ...(debugInfo.sources.SportsDataIO || {}),
+    status: "Connected",
+    apiStatus: "Connected",
+    message: `Generated ${generated.generatedCount} MLB projection props`,
+    propsAfterParsing: generated.generatedCount,
+    usablePropsCount: display.length,
+    lineSourceBadge: "LIVE",
+  };
+  debugInfo.ingestionFallback = "sportsdata-immediate";
+  recordNormalizedProps(display, {
+    provider: "sportsdataio",
+    total: display.length,
+    ingestionSource: "sportsdata-immediate",
+  });
+
+  return { rawProps: generated.props, allDisplayProps: display, generated };
+}
+
 function enrichmentBackgroundFallback(label) {
   const warnings = [ENRICHMENT_TIMEOUT_MESSAGE];
   if (label === "sportsbook") {
@@ -1216,7 +1259,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         debugInfo.underdogParser = underdogResult.debug?.underdogParser || underdogResult.pipelineAudit?.underdogParser || null;
         debugInfo.rawUnderdogSamples = underdogResult.debug?.rawUnderdogSamples || [];
         debugInfo.underdogResponseShape = underdogResult.debug?.responseShape || null;
-      } else if (underdogResult.debug?.underdogParser?.parserMismatch) {
+      } else if (underdogResult.debug?.underdogParser?.parserMismatch && !(underdogResult.parsedProps?.length || underdogResult.props?.length)) {
         sourceWarnings.push(buildUnderdogParserFailureMessage(underdogResult.debug));
       }
     } else {
@@ -1277,6 +1320,18 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   if (mergedProviderProps.length) {
     rawProps.length = 0;
     rawProps.push(...mergedProviderProps);
+  } else {
+    const sdioImmediate = await injectSportsDataIfProvidersEmpty({
+      mergedCount: 0,
+      fetchSport,
+      sourceStatus,
+      debugInfo,
+    });
+    if (sdioImmediate) {
+      rawProps.length = 0;
+      rawProps.push(...normalizePropsWithSource(sdioImmediate.rawProps));
+      pipelineFallback = true;
+    }
   }
 
   if (!rawProps.length && prizePicksResult?.rateLimited) {
@@ -1882,6 +1937,38 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     });
   }
 
+  recordProviderStatus({
+    underdog: {
+      status: finalStatus.Underdog,
+      url: debugInfo.sources.Underdog?.apiUrl || "/api/underdog",
+      message: debugInfo.sources.Underdog?.message || "",
+      normalizedCount: Number(debugInfo.sources.Underdog?.propsAfterParsing || 0),
+    },
+    prizepicks: {
+      status: finalStatus.PrizePicks,
+      url: debugInfo.sources.PrizePicks?.apiUrl || "/api/prizepicks",
+      message: debugInfo.sources.PrizePicks?.message || "",
+      normalizedCount: Number(debugInfo.sources.PrizePicks?.propsAfterParsing || 0),
+    },
+    oddsapi: {
+      status: finalStatus["The Odds API"],
+      url: "/api/sportsbookOdds",
+      message: debugInfo.sources["The Odds API"]?.message || "",
+      normalizedCount: Number(debugInfo.sources["The Odds API"]?.propsAfterParsing || 0),
+    },
+    sportsdataio: {
+      status: finalStatus.SportsDataIO,
+      url: "/api/sportsdataio/slate-snapshot",
+      message: debugInfo.sources.SportsDataIO?.message || "",
+      normalizedCount: Number(debugInfo.sources.SportsDataIO?.usablePropsCount || allDisplayProps.filter((p) => p.isSportsDataFallback).length || 0),
+    },
+  });
+  recordNormalizedProps(allDisplayProps.length ? allDisplayProps : uiPayload.props, {
+    total: allDisplayProps.length || uiPayload.props.length,
+    ingestionSource: debugInfo.ingestionFallback || "live",
+  });
+  dumpDebugGlobals("fetchDFSProps");
+
   return {
     props: uiPayload.props,
     allDisplayProps,
@@ -1917,6 +2004,7 @@ export default function DFSPropsApp() {
   const [compactMode, setCompactMode] = useState(() => readCompactModePreference());
   const [quickPicksMode, setQuickPicksMode] = useState(() => readQuickPicksModePreference());
   const [showDebugPanels, setShowDebugPanels] = useState(() => readShowDebugPanelsPreference());
+  const [rawApiDebugOpen, setRawApiDebugOpen] = useState(false);
   const [marketQuickFilter, setMarketQuickFilter] = useState("all");
   const [searchText, setSearchText] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -3461,6 +3549,7 @@ export default function DFSPropsApp() {
       refreshLabel={mobileRefreshLabel}
     />
     <MobileScrollFab onScrollTop={scrollToTop} onScrollTo={scrollToSection} />
+    <RawApiDebugPanel open={rawApiDebugOpen} onToggle={() => setRawApiDebugOpen((open) => !open)} />
     </>
   );
 }

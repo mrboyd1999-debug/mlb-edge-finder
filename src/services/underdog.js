@@ -173,6 +173,7 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all" } = 
         url: apiUrl,
         status: parsed.attempt?.status ?? attempts.at(-1)?.status ?? null,
         payload,
+        rawCount,
         parsedCount: parsedProps.length,
         normalizedCount: props.length,
         errors: diagnostics?.parserErrors || [],
@@ -187,9 +188,11 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all" } = 
             ? `${UNDERDOG_PARSER_MISMATCH_MESSAGE} ${Object.entries(diagnostics?.rejectionReasons || {})
                 .map(([k, v]) => `${k}(${v})`)
                 .join(", ")}`
-            : parsedProps.length > 0
-              ? "Underdog props parsed but none matched MLB filters."
-              : EMPTY_SOURCE_MESSAGE;
+            : parsedProps.length > 0 && props.length === 0
+              ? `Underdog parsed ${parsedProps.length} lines but none matched MLB filters (${rawCount} raw).`
+              : parsedProps.length > 0
+                ? "Underdog props parsed but none matched MLB filters."
+                : EMPTY_SOURCE_MESSAGE;
         console.warn(`${UNDERDOG_AUDIT_PREFIX} no usable parsed props`, {
           url: apiUrl,
           rawPropsLoaded: rawCount,

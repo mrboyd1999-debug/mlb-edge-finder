@@ -42,6 +42,10 @@ function isPrizePicksOrUnderdog(prop = {}) {
   return src === "prizepicks" || src === "underdog";
 }
 
+function isSportsDataProjectionProp(prop = {}) {
+  return Boolean(prop?.isSportsDataFallback) || normalizeSource(prop) === "sportsdataio";
+}
+
 function mergeInputProps(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
   const mlbDisplay = filterResolvedSportProps(displayProps, "MLB", { selectedSportTab: "MLB" });
   const ppRaw = filterResolvedSportProps(rawProps || [], "MLB", { selectedSportTab: "MLB" });
@@ -69,8 +73,8 @@ function buildTopMlbPlayPool(displayProps = [], rawProps = [], parsedUnderdogPro
     if (!relaxed && unsupportedMarketRejectReason(prop)) return;
     if (!relaxed && validatePropSanityRejectReason(prop)) return;
     if (!isTopMlbPlayCandidate(prop)) return;
-    if (!relaxed && !isPrizePicksOrUnderdog(prop)) return;
-    if (!relaxed && !isVerifiedSportsbookProp(prop)) return;
+    if (!relaxed && !isPrizePicksOrUnderdog(prop) && !isSportsDataProjectionProp(prop)) return;
+    if (!relaxed && !isVerifiedSportsbookProp(prop) && !isSportsDataProjectionProp(prop)) return;
     pool.push(prop);
   });
 
@@ -125,6 +129,7 @@ function annotateTopPlay(prop, rank, { allowRelaxed = false, allowLiveLine = fal
   const enriched = enrichForBoard(prop);
   const rankable =
     enriched.isDemoData ||
+    enriched.isSportsDataFallback ||
     (allowLiveLine && isLiveLineRankable(enriched)) ||
     (allowRelaxed ? isRelaxedRankableOrLiveLine(enriched) : isTopMlbPlayRankable(enriched));
   if (!rankable && !enriched.isDemoData) return null;
@@ -272,7 +277,15 @@ export function resolveTopMlbPlaySections(
     logPipelineStage("rank.liveLine", { pool: liveLinePool.length, ranked: ranked.length });
   }
 
-  if (!ranked.length && shouldUseDemoFallback(liveVerifiedCount, options)) {
+  const sportsDataProps = mergedInput.filter(isSportsDataProjectionProp);
+  if (!ranked.length && sportsDataProps.length) {
+    ranked = rankPool(sportsDataProps, { relaxed: true });
+    usedFallback = true;
+    fallbackLabel = "SportsDataIO projection lines";
+    logPipelineStage("rank.sportsdata", { pool: sportsDataProps.length, ranked: ranked.length });
+  }
+
+  if (!ranked.length && shouldUseDemoFallback(liveVerifiedCount, options) && !sportsDataProps.length) {
     ranked = buildDemoMlbProps(12);
     usedFallback = true;
     isDemoBoard = true;

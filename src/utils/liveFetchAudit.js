@@ -25,9 +25,10 @@ export function resolveLiveFetchFailureReason(sourceMeta = {}) {
   const msg = String(sourceMeta.message || sourceMeta.lastError || "").toLowerCase();
   if (/invalid.*key|401|403|unauthorized/.test(msg)) return "API key invalid";
   if (/cors|blocked|cross-origin/.test(msg)) return "CORS blocked";
-  if (/parser|parse|malformed/.test(msg)) return "Parser failed";
+  if (/parser mismatch|parser failed|parse error|malformed json|invalid json/.test(msg)) return "Parser failed";
   if (/rate limit|429|cooldown/.test(msg)) return "Rate limited";
   if (/timed?\s*out|timeout|abort/.test(msg)) return "Request timeout";
+  if (/none matched mlb|0 mlb props|no mlb props/.test(msg)) return "No MLB props in feed";
   if (/empty|no props|0 props/.test(msg)) return "Empty response";
   if (sourceMeta.status === "Failed" || sourceMeta.apiStatus === "Failed") return "API failed";
   return "";
