@@ -48,7 +48,7 @@ function TopPicksBoard({ label = "Sport", picks = [], onOpen, compactMode = true
           })}
         </div>
       ) : (
-        <div style={styles.emptyStateCompact}>No valid props available for Top Picks yet.</div>
+        <div style={styles.emptyStateCompact}>No top picks strong enough yet.</div>
       )}
     </section>
   );

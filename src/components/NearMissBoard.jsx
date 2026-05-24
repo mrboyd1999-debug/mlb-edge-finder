@@ -1,6 +1,6 @@
 import { memo } from "react";
 import PlayerPropCard from "./PlayerPropCard.jsx";
-import { sortDecisionBoard } from "../services/decisionEngine.js";
+import { sortPropsForDisplay } from "../utils/displayPropScoring.js";
 import { styles } from "../theme/styles.js";
 
 function EmptyState({ text }) {
@@ -8,16 +8,16 @@ function EmptyState({ text }) {
 }
 
 function NearMissBoard({ picks = [], loading, onOpen, compactMode = true }) {
-  const sorted = sortDecisionBoard(picks).slice(0, 12);
+  const sorted = sortPropsForDisplay(picks).slice(0, 12);
 
   return (
     <section style={styles.section} aria-label="Near miss board">
       <div style={styles.sectionHeading}>
         <div>
-          <p style={styles.eyebrow}>Within 3–5 pts</p>
+          <p style={styles.eyebrow}>Almost there</p>
           <h2 style={styles.sectionTitleSmall}>Near Miss</h2>
           <p style={styles.streakCopy}>
-            Within adaptive tier boundary — strong edge and matchup with one secondary metric slightly below threshold.
+            Playable props that narrowly missed Top Pick thresholds — not low-confidence research lines.
           </p>
         </div>
         <p style={styles.countPill}>{sorted.length} near</p>
@@ -25,7 +25,7 @@ function NearMissBoard({ picks = [], loading, onOpen, compactMode = true }) {
       {loading ? (
         <EmptyState text="Loading near-miss props…" />
       ) : sorted.length === 0 ? (
-        <EmptyState text="No near-miss props this cycle." />
+        <EmptyState text="No near-miss playable props this cycle." />
       ) : (
         <div style={styles.topPicksList}>
           {sorted.map((prop) => (

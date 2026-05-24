@@ -70,17 +70,21 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
   const [expanded, setExpanded] = useState(false);
   const tier = confidenceTier(prop);
   const lean = formatLeanSide(prop.bestPick || prop.side || "Watch");
-  const ready = Boolean(prop.isQualificationAccepted) || isReadyToBet(prop);
+  const researchOnly = Boolean(prop.displayResearchOnly) || /research only/i.test(String(prop.bettingLabel || ""));
+  const playable = Boolean(prop.isDisplayPlayable) && !researchOnly;
+  const ready = playable && (Boolean(prop.isQualificationAccepted) || isReadyToBet(prop));
   const bettingLabel =
-    prop.bettingLabel ||
-    (ready ? "Ready to Bet" : prop.displayTier === "near" || prop.recommendationStatus === "near" ? "Near Miss" : "Watchlist");
-  const isWatch = !ready && (prop.recommendationStatus === "watchlist" || prop.recommendationStatus === "research" || prop.recommendationStatus === "near");
+    researchOnly
+      ? "Research only"
+      : prop.bettingLabel ||
+        (ready ? "Ready to Bet" : prop.displayTier === "near" || prop.recommendationStatus === "near" ? "Near Miss" : "Watchlist");
+  const isWatch = !ready && !researchOnly && (prop.recommendationStatus === "watchlist" || prop.recommendationStatus === "research" || prop.recommendationStatus === "near");
   const movementLabel = lineMovementArrow(prop);
   const bookTag = sportsbookCardTag(prop);
   const resultBadge = savedResult ? resultStatusBadge(savedResult) : null;
   const sourceBadge = prop.lineSourceBadge || prop.modelSignal?.lineSourceBadge || "";
   const verifiedBadge = prop.verifiedBadge || (prop.sportsbookVerified ? "VERIFIED" : "");
-  const statusLabel = ready ? "Ready" : "Research";
+  const statusLabel = researchOnly ? "Research" : ready ? "Ready" : playable ? "Lean" : "Research";
   const statSourceBadges = (prop.statEnrichmentSources || prop.dataSources || prop.modelSignal?.statEnrichmentSources || [])
     .filter(Boolean)
     .slice(0, 3);

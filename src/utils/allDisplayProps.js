@@ -6,6 +6,7 @@ import {
   selectBestValueProps,
   selectNearMissProps,
   selectReadyToBetProps,
+  selectResearchOnlyProps,
   selectTop2Picks,
 } from "./displayPropScoring.js";
 
@@ -229,6 +230,10 @@ export function selectBestValueFromDisplayProps(props = []) {
 
 export function selectNearMissFromDisplayProps(props = []) {
   return selectNearMissProps(props);
+}
+
+export function selectResearchOnlyFromDisplayProps(props = []) {
+  return selectResearchOnlyProps(props);
 }
 
 export { dedupeDisplayProps, enrichDisplayPropsPipeline } from "./displayPropScoring.js";

@@ -298,18 +298,24 @@ export function scoreDisplayProp(prop = {}) {
 
   const tier = confidenceTierLabel(calibrated.confidence);
   const invalidProp = !isValidDisplayProp({ ...calibrated, line, player: prop.player, playerName: prop.playerName });
-  const displayResearchOnly = invalidProp ? true : finiteOr(calibrated.confidence, 0) < 60 || isDisplayResearchOnly(calibrated);
+  const displayResearchOnly = invalidProp
+    ? true
+    : finiteOr(calibrated.confidence, 0) < 60 || isDisplayResearchOnly(calibrated);
+  const isDisplayPlayable = !displayResearchOnly && !invalidProp;
+  const bettingLabel = displayResearchOnly ? "Research only" : labelForConfidence(calibrated.confidence, false);
 
-  return attachHistoricalPerformance({
-    ...calibrated,
-    confidenceTier: tier,
-    edgeScore: round1(edge * (calibrated.confidence / 50) + (finiteOr(prop.last10HitRate, 0.5) * 3)),
-    displayRejected: invalidProp,
-    displayResearchOnly,
-    isDisplayPlayable: !displayResearchOnly && !invalidProp,
-    bettingLabel: labelForConfidence(calibrated.confidence, displayResearchOnly),
-    premiumRiskSummary: calibrated.premiumRiskSummary || premiumRiskSummary(calibrated),
-  });
+  return attachHistoricalPerformance(
+    attachRankScore({
+      ...calibrated,
+      confidenceTier: tier,
+      edgeScore: round1(edge * (calibrated.confidence / 50) + (finiteOr(prop.last10HitRate, 0.5) * 3)),
+      displayRejected: invalidProp,
+      displayResearchOnly,
+      isDisplayPlayable,
+      bettingLabel,
+      premiumRiskSummary: calibrated.premiumRiskSummary || premiumRiskSummary(calibrated),
+    })
+  );
 }
 
 export function enrichDisplayPropsPipeline(props = []) {
@@ -317,14 +323,7 @@ export function enrichDisplayPropsPipeline(props = []) {
 }
 
 export function sortPropsForDisplay(props = []) {
-  return [...(props || [])].sort(
-    (a, b) =>
-      finiteOr(b.confidence, BASE_CONFIDENCE) - finiteOr(a.confidence, BASE_CONFIDENCE) ||
-      finiteOr(b.edge, 0) - finiteOr(a.edge, 0) ||
-      finiteOr(b.projection ?? b.projectedValue, 0) - finiteOr(a.projection ?? a.projectedValue, 0) ||
-      finiteOr(b.last10HitRate ?? b.recentHitRate, 0) - finiteOr(a.last10HitRate ?? a.recentHitRate, 0) ||
-      finiteOr(b.edgeScore, 0) - finiteOr(a.edgeScore, 0)
-  );
+  return [...(props || [])].map((prop) => attachRankScore(prop)).sort(compareRankProps);
 }
 
 function hasValidPlayerName(prop = {}) {
@@ -347,6 +346,80 @@ function labelForConfidence(confidence = BASE_CONFIDENCE, displayResearchOnly = 
   return "Lean";
 }
 
+export function isResearchProp(prop = {}) {
+  if (prop.displayResearchOnly) return true;
+  const confidence = finiteOr(prop.confidence ?? prop.confidenceScore, 0);
+  if (confidence < 60) return true;
+  if (/research only/i.test(String(prop.bettingLabel || ""))) return true;
+  return false;
+}
+
+function isPlayablePickProp(prop = {}) {
+  if (!isValidDisplayProp(prop) || isResearchProp(prop)) return false;
+  return (
+    finiteOr(prop.confidence ?? prop.confidenceScore, 0) >= MIN_TOP_PICK_CONFIDENCE &&
+    finiteOr(prop.playabilityScore, 0) >= 55
+  );
+}
+
+export function computeRankScore(prop = {}) {
+  const confidence = finiteOr(prop.confidence ?? prop.confidenceScore, BASE_CONFIDENCE);
+  const playabilityScore = finiteOr(prop.playabilityScore, confidence * 0.8);
+  const edgeScore = finiteOr(prop.edgeScore, 0);
+  const edge = finiteOr(prop.edge, 0);
+
+  let verifiedBonus = 0;
+  if (prop.sportsbookVerified || String(prop.verifiedBadge || "").toUpperCase() === "VERIFIED") {
+    verifiedBonus = 8;
+  }
+
+  let researchPenalty = 0;
+  if (prop.displayResearchOnly) researchPenalty += 20;
+  if (/research only/i.test(String(prop.bettingLabel || ""))) researchPenalty += 25;
+
+  let riskPenalty = 0;
+  const risk = String(prop.riskLevel || "").toUpperCase();
+  if (risk.includes("HIGH")) riskPenalty = 15;
+  else if (risk.includes("MED")) riskPenalty = 6;
+
+  return round1(
+    confidence * 0.35 +
+      playabilityScore * 0.3 +
+      edgeScore * 8 +
+      edge * 5 +
+      verifiedBonus -
+      researchPenalty -
+      riskPenalty
+  );
+}
+
+function attachRankScore(prop = {}) {
+  return { ...prop, rankScore: computeRankScore(prop) };
+}
+
+function compareRankProps(a = {}, b = {}) {
+  const aResearch = isResearchProp(a);
+  const bResearch = isResearchProp(b);
+  if (aResearch !== bResearch) return aResearch ? 1 : -1;
+
+  const aConf = finiteOr(a.confidence ?? a.confidenceScore, 0);
+  const bConf = finiteOr(b.confidence ?? b.confidenceScore, 0);
+  if (aConf < 60 && bConf >= 65) return 1;
+  if (bConf < 60 && aConf >= 65) return -1;
+
+  const aPlay = finiteOr(a.playabilityScore, 0);
+  const bPlay = finiteOr(b.playabilityScore, 0);
+  if (aPlay < 50 && bPlay >= 60) return 1;
+  if (bPlay < 50 && aPlay >= 60) return -1;
+
+  return (
+    finiteOr(b.rankScore, computeRankScore(b)) - finiteOr(a.rankScore, computeRankScore(a)) ||
+    finiteOr(b.confidence ?? b.confidenceScore, 0) - finiteOr(a.confidence ?? a.confidenceScore, 0) ||
+    finiteOr(b.playabilityScore, 0) - finiteOr(a.playabilityScore, 0) ||
+    finiteOr(b.edge, 0) - finiteOr(a.edge, 0)
+  );
+}
+
 function isCorrelated(a = {}, b = {}) {
   return playerKey(a) && playerKey(a) === playerKey(b);
 }
@@ -366,42 +439,64 @@ export function selectTop2Picks(props = []) {
   if (!valid.length) return [];
 
   const elitePool = valid.filter(
-    (prop) => finiteOr(prop.confidence, 0) >= PREFERRED_TOP_PICK_CONFIDENCE && finiteOr(prop.edge, 0) > 0
+    (prop) =>
+      !isResearchProp(prop) &&
+      finiteOr(prop.confidence, 0) >= PREFERRED_TOP_PICK_CONFIDENCE &&
+      finiteOr(prop.edge, 0) > 0
   );
   const elitePicks = pickTop2FromPool(elitePool);
   if (elitePicks.length) return elitePicks;
 
-  const preferredPool = valid.filter((prop) => finiteOr(prop.confidence, 0) >= MIN_TOP_PICK_CONFIDENCE);
-  const preferredPicks = pickTop2FromPool(preferredPool);
-  if (preferredPicks.length) return preferredPicks;
-
-  return pickTop2FromPool(valid);
+  const playablePool = valid.filter(isPlayablePickProp);
+  return pickTop2FromPool(playablePool);
 }
 
 export function selectNearMissProps(props = []) {
   return sortPropsForDisplay(
     (props || []).filter((prop) => {
+      if (!isValidDisplayProp(prop) || isResearchProp(prop)) return false;
       const conf = finiteOr(prop.confidence, BASE_CONFIDENCE);
-      return conf >= 45 && conf <= 59;
+      const play = finiteOr(prop.playabilityScore, 0);
+      const edge = finiteOr(prop.edge, 0);
+      const nearConfidence = conf >= 60 && conf < 70;
+      const nearPlayability = play >= 55 && play < 70;
+      const missedTopPick =
+        conf >= 60 &&
+        conf < PREFERRED_TOP_PICK_CONFIDENCE &&
+        edge > 0 &&
+        play >= 55;
+      return nearConfidence || nearPlayability || missedTopPick;
     })
   );
 }
 
 export function selectBestValueProps(props = []) {
-  return sortPropsForDisplay((props || []).filter(isValidDisplayProp));
+  return sortPropsForDisplay(
+    (props || []).filter((prop) => {
+      if (!isValidDisplayProp(prop) || isResearchProp(prop) || prop.displayResearchOnly) return false;
+      return (
+        finiteOr(prop.confidence, 0) >= 65 &&
+        finiteOr(prop.edge, 0) >= 1 &&
+        finiteOr(prop.playabilityScore, 0) >= 55
+      );
+    })
+  );
+}
+
+export function selectResearchOnlyProps(props = []) {
+  return sortPropsForDisplay((props || []).filter((prop) => isValidDisplayProp(prop) && isResearchProp(prop)));
 }
 
 export function selectReadyToBetProps(props = []) {
-  return sortPropsForDisplay((props || []).filter(isValidDisplayProp)).map((prop) => {
-    const confidence = finiteOr(prop.confidence, BASE_CONFIDENCE);
-    const displayResearchOnly = confidence < 60 || Boolean(prop.displayResearchOnly);
-    return {
-      ...prop,
-      displayResearchOnly,
-      bettingLabel: labelForConfidence(confidence, displayResearchOnly),
-      needsReview: displayResearchOnly,
-    };
-  });
+  return sortPropsForDisplay(
+    (props || []).filter((prop) => isValidDisplayProp(prop) && !isResearchProp(prop))
+  ).map((prop) => ({
+    ...prop,
+    displayResearchOnly: false,
+    isDisplayPlayable: true,
+    bettingLabel: labelForConfidence(finiteOr(prop.confidence, BASE_CONFIDENCE), false),
+    needsReview: false,
+  }));
 }
 
 export function selectDemonProps(props = []) {

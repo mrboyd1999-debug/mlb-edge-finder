@@ -181,6 +181,7 @@ import {
   selectBestValueFromDisplayProps,
   selectNearMissFromDisplayProps,
   selectReadyFromDisplayProps,
+  selectResearchOnlyFromDisplayProps,
   selectTop2FromDisplayProps,
 } from "./utils/allDisplayProps.js";
 import { enrichDisplayPropsPipeline, selectAcceptedDisplayProps, selectDemonProps, selectGoblinProps, matchesMarketQuickFilter } from "./utils/displayPropScoring.js";
@@ -1948,6 +1949,10 @@ export default function DFSPropsApp() {
     () => selectNearMissFromDisplayProps(boardDisplayProps).slice(0, VISIBLE_SECTION_LIMIT),
     [boardDisplayProps]
   );
+  const researchOnlyProps = useMemo(
+    () => selectResearchOnlyFromDisplayProps(boardDisplayProps).slice(0, VISIBLE_SECTION_LIMIT),
+    [boardDisplayProps]
+  );
   const rejectionAnalytics = useMemo(
     () => debugInfo.rejectionAnalytics || pipelineAudit.rejectionAnalytics || null,
     [debugInfo.rejectionAnalytics, pipelineAudit.rejectionAnalytics]
@@ -2655,6 +2660,29 @@ export default function DFSPropsApp() {
       </section>
       </div>
 
+      <div className="dfs-section dfs-order-research-only">
+      <section style={styles.section} aria-label="Research only board">
+        <div style={styles.sectionHeading}>
+          <div>
+            <h2 style={styles.sectionTitleSmall}>Research Only</h2>
+            <p className="section-subcopy" style={styles.streakCopy}>Lower-confidence or incomplete-data props — review before playing.</p>
+          </div>
+          <p style={styles.countPill}>{researchOnlyProps.length} research</p>
+        </div>
+        {loading ? (
+          <EmptyState text="Loading research props…" />
+        ) : researchOnlyProps.length === 0 ? (
+          <EmptyState text="No research-only props this cycle." />
+        ) : (
+          <VirtualCardList
+            items={researchOnlyProps}
+            renderCard={readyRenderCard}
+            initialVisible={INITIAL_VISIBLE_SECTION_LIMIT}
+          />
+        )}
+      </section>
+      </div>
+
       <LazyBelowFold>
       <div className="dfs-section dfs-order-near-miss">
       <NearMissBoard picks={nearMissProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
@@ -2672,7 +2700,7 @@ export default function DFSPropsApp() {
         {loading || boardEmptyState?.kind === "loading" ? (
           <EmptyState text="Loading value board…" />
         ) : bestValueProps.length === 0 ? (
-          <EmptyState text={allDisplayProps.length ? "No props matched this sport tab." : boardEmptyState?.text || NO_VERIFIED_PROPS_MESSAGE} />
+          <EmptyState text="No strong value props yet." />
         ) : (
           <>
             <VirtualCardList
