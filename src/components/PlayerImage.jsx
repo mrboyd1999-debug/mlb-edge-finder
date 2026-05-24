@@ -27,6 +27,7 @@ function buildHeadshotCandidates(prop = {}) {
     candidates.push(
       `https://midfield.mlbstatic.com/v1/people/${mlbId}/spots/120`
     );
+    candidates.push(`https://a.espncdn.com/i/headshots/mlb/players/full/${mlbId}.png`);
   }
   return candidates.filter(Boolean);
 }

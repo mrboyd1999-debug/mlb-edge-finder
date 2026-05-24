@@ -196,7 +196,7 @@ export default function SourceStatusBar({
                     <div style={styles.apiHealthMeta}>
                       {hint ? <span>{hint}</span> : null}
                       {row.badge ? <span style={styles.lineSourceBadge(row.badge)}>{row.badge}</span> : null}
-                      {row.label !== "Upcoming slate" ? <span className="api-health-count-line">{countLine}</span> : null}
+                      {row.label !== "Upcoming slate" && devMode ? <span className="api-health-count-line">{countLine}</span> : null}
                       <span>Last OK: {formatHealthTime(row.lastFetchAt)}</span>
                       {row.cacheAge ? <span>Cache age: {row.cacheAge}</span> : null}
                       {Number(row.cooldownRemainingMs) > 0 ? (

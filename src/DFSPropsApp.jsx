@@ -178,9 +178,11 @@ import {
   logAllDisplayPropsSample,
   normalizeDisplayProp,
   selectBestValueFromDisplayProps,
+  selectNearMissFromDisplayProps,
   selectReadyFromDisplayProps,
   selectTop2FromDisplayProps,
 } from "./utils/allDisplayProps.js";
+import { enrichDisplayPropsPipeline, selectDemonProps, selectGoblinProps } from "./utils/displayPropScoring.js";
 import {
   buildPipelineStageReport,
   buildUsablePropsPool,
@@ -1035,12 +1037,14 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     oddsApi: [],
   });
   if (!allDisplayProps.length && rawProps.length) {
-    allDisplayProps = rawProps.map((prop) =>
-      normalizeDisplayProp(prop, {
-        selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
-        source: prop.platform || prop.source || "PrizePicks",
-        status: String(prop.lineSourceBadge || "").toUpperCase() === "CACHED" ? "cached" : "live",
-      })
+    allDisplayProps = enrichDisplayPropsPipeline(
+      rawProps.map((prop) =>
+        normalizeDisplayProp(prop, {
+          selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
+          source: prop.platform || prop.source || "PrizePicks",
+          status: String(prop.lineSourceBadge || "").toUpperCase() === "CACHED" ? "cached" : "live",
+        })
+      )
     );
   }
   logAllDisplayPropsSample(allDisplayProps);
@@ -1541,12 +1545,13 @@ export default function DFSPropsApp() {
 
   const applyBoardState = useCallback((board, cacheLayer = "fresh") => {
     const scopedBoard = sanitizeBoardForMlbOnly(board || {});
-    const masterProps =
+    const masterProps = enrichDisplayPropsPipeline(
       scopedBoard.allDisplayProps?.length
         ? scopedBoard.allDisplayProps
         : scopedBoard.usableProps?.length
           ? scopedBoard.usableProps
-          : scopedBoard.props || [];
+          : scopedBoard.props || []
+    );
     const boardProps = masterProps.length ? masterProps : scopedBoard.props || [];
     const boardSourceStatus = finalizeSourceStatus(scopedBoard.sourceStatus || DEFAULT_SOURCE_STATUS);
     setAllDisplayProps(masterProps);
@@ -1868,9 +1873,11 @@ export default function DFSPropsApp() {
     }
   }, [platform, sourceStatus, debugInfo]);
 
+  const scoredDisplayProps = useMemo(() => allDisplayProps, [allDisplayProps]);
+
   const selectedSportProps = useMemo(
-    () => filterAllDisplayPropsBySport(allDisplayProps, sport, platform),
-    [allDisplayProps, sport, platform]
+    () => filterAllDisplayPropsBySport(scoredDisplayProps, sport, platform),
+    [scoredDisplayProps, sport, platform]
   );
   const boardDisplayProps = useMemo(() => {
     if (selectedSportProps.length) return selectedSportProps;
@@ -1899,8 +1906,8 @@ export default function DFSPropsApp() {
     [boardDisplayProps]
   );
   const nearMissProps = useMemo(
-    () => sortDecisionBoard(filterAllDisplayPropsBySport(nearQualification, sport, platform)),
-    [nearQualification, sport, platform]
+    () => selectNearMissFromDisplayProps(boardDisplayProps).slice(0, VISIBLE_SECTION_LIMIT),
+    [boardDisplayProps]
   );
   const rejectionAnalytics = useMemo(
     () => debugInfo.rejectionAnalytics || pipelineAudit.rejectionAnalytics || null,
@@ -1933,6 +1940,8 @@ export default function DFSPropsApp() {
   const currentCategoryLabel = currentStreakBoard.label || STREAK_TAB_OPTIONS.find((option) => option.value === streakSport)?.label || "MLB";
   const isGoblinTab = streakSport === "goblins";
   const isDemonTab = streakSport === "demons";
+  const goblinDisplayProps = useMemo(() => selectGoblinProps(boardDisplayProps), [boardDisplayProps]);
+  const demonDisplayProps = useMemo(() => selectDemonProps(boardDisplayProps), [boardDisplayProps]);
   const pipelineCounters = useMemo(
     () => pipelineAudit.pipelineCounters || debugInfo.pipelineCounters || {},
     [pipelineAudit.pipelineCounters, debugInfo.pipelineCounters]
@@ -2540,9 +2549,9 @@ export default function DFSPropsApp() {
 
       <div id="section-top-picks" className="dfs-section dfs-order-top-picks">
       {isGoblinTab ? (
-        <GoblinBoard picks={streakFinderProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
+        <GoblinBoard picks={goblinDisplayProps.length ? goblinDisplayProps : streakFinderProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
       ) : isDemonTab ? (
-        <DemonBoard picks={streakFinderProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
+        <DemonBoard picks={demonDisplayProps.length ? demonDisplayProps : streakFinderProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
       ) : (
         <TopPicksBoard
           label={currentCategoryLabel}

@@ -1,4 +1,12 @@
 import { normalizeSportLabel, sportLabelsMatch } from "./sportMappings.js";
+import {
+  dedupeDisplayProps,
+  enrichDisplayPropsPipeline,
+  selectBestValueProps,
+  selectNearMissProps,
+  selectReadyToBetProps,
+  selectTop2Picks,
+} from "./displayPropScoring.js";
 
 const SOURCE_CACHE_PREFIX = "dfs_props_cache_";
 const MAX_CACHE_PROPS = 500;
@@ -177,7 +185,7 @@ export function buildAllDisplayProps(
   if (ud.live.length) writePropSourceCache(sport, "Underdog", ud.live.map((p) => normalizeDisplayProp(p, { selectedSport, source: "Underdog", status: "live" })));
   if (ud.cached.length) writePropSourceCache(sport, "Underdog", ud.cached.map((p) => normalizeDisplayProp(p, { selectedSport, source: "Underdog", status: "cached" })));
 
-  return allDisplayProps;
+  return enrichDisplayPropsPipeline(allDisplayProps);
 }
 
 export function filterAllDisplayPropsBySport(props = [], selectedSport = "all", platform = "all") {
@@ -207,29 +215,22 @@ export function applyEmergencyDisplayFallback(allDisplayProps = [], limit = 10) 
 }
 
 export function selectTop2FromDisplayProps(props = []) {
-  return [...(props || [])]
-    .sort(
-      (a, b) =>
-        finiteOr(b.confidence, 50) - finiteOr(a.confidence, 50) ||
-        finiteOr(b.edge, 0) - finiteOr(a.edge, 0)
-    )
-    .slice(0, 2);
+  return selectTop2Picks(props);
 }
 
 export function selectReadyFromDisplayProps(props = []) {
-  const sorted = [...props].sort(
-    (a, b) => finiteOr(b.confidence, 50) - finiteOr(a.confidence, 50) || finiteOr(b.edge, 0) - finiteOr(a.edge, 0)
-  );
-  const qualified = sorted.filter((prop) => finiteOr(prop.confidence, 50) >= 50);
-  if (qualified.length) return qualified;
-  return sorted.map((prop) => ({ ...prop, needsReview: true }));
+  return selectReadyToBetProps(props);
 }
 
 export function selectBestValueFromDisplayProps(props = []) {
-  return [...props]
-    .map((prop) => ({ ...prop, edge: computeDisplayEdge(prop) }))
-    .sort((a, b) => finiteOr(b.edge, 0) - finiteOr(a.edge, 0));
+  return selectBestValueProps(props);
 }
+
+export function selectNearMissFromDisplayProps(props = []) {
+  return selectNearMissProps(props);
+}
+
+export { dedupeDisplayProps, enrichDisplayPropsPipeline } from "./displayPropScoring.js";
 
 export function buildDisplayDebugCounts({
   raw = 0,

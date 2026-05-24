@@ -8,6 +8,7 @@ import { dataBadgeStyle, styles, tierStyle } from "../theme/styles.js";
 import { isReadyToBet } from "../services/pickScoring.js";
 import { dynamicAcceptanceTier, getVolatilityLabel } from "../services/propQualityGates.js";
 import { formatDateTime } from "../utils/formatters.js";
+import { riskAccentStyle } from "../utils/displayPropScoring.js";
 
 const DYNAMIC_TIER_STYLE = {
   SAFE: { border: "#22c55e", background: "#052e16", color: "#bbf7d0" },
@@ -112,20 +113,21 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
     prop.calibratedConfidence != null && prop.calibratedConfidence !== prop.confidenceScore
       ? prop.calibratedConfidence
       : prop.confidenceScore ?? prop.confidence ?? null;
-  const edgeDisplay =
-    Number.isFinite(Number(prop.edge)) && Number(prop.edge) > 0 ? formatNumber(prop.edge) : "—";
+  const edgeDisplay = Number.isFinite(Number(prop.edge)) ? formatNumber(prop.edge) : "—";
   const riskShort = (() => {
     const text = String(prop.riskLevel || "").toUpperCase();
     if (text.includes("LOW")) return "LOW";
     if (text.includes("HIGH")) return "HIGH";
     if (text.includes("MED") || text.includes("MOD")) return "MED";
-    return text.slice(0, 3) || "—";
+    return text.slice(0, 6) || "—";
   })();
+  const showDynamicTier = dynamicTier && String(dynamicTier).toUpperCase() !== "RESEARCH";
+  const riskAccent = riskAccentStyle(prop.riskLevel);
 
   return (
     <article
       className={topPick ? "prop-card-top-pick" : undefined}
-      style={{ ...styles.card, ...(compact ? styles.cardMobileTight : null), ...cardStyle }}
+      style={{ ...styles.card, ...(compact ? styles.cardMobileTight : null), ...riskAccent, ...cardStyle }}
       role="button"
       tabIndex={0}
       onClick={() => onOpen?.(prop)}
@@ -172,7 +174,8 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
             <div style={styles.cardBadgeColumn}>
               {verifiedBadge ? <span style={lineSourceBadgeStyle("VERIFIED")}>VERIFIED</span> : null}
               <span style={bettingLabelStyle(statusLabel)}>{compact ? statusLabel : bettingLabel}</span>
-              {dynamicTier ? <span style={dynamicTierBadgeStyle(dynamicTier)}>{dynamicTier}</span> : null}
+              {prop.needsReview ? <span style={bettingLabelStyle("Near Miss")}>Needs review</span> : null}
+              {showDynamicTier ? <span style={dynamicTierBadgeStyle(dynamicTier)}>{dynamicTier}</span> : null}
               {!compact && sourceBadge ? <span style={lineSourceBadgeStyle(sourceBadge)}>{String(sourceBadge).toUpperCase()}</span> : null}
               {!compact && prop.timeBadge?.label ? (
                 <span style={dataBadgeStyle(prop.timeBadge.tone || "partial")}>{prop.timeBadge.label}</span>
@@ -189,8 +192,8 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
           </div>
         </div>
       </div>
-      <div className="prop-card-meta-row" style={styles.compactMetaRow}>
-        <span style={styles.compactMetaItem}>
+      <div className="prop-card-meta-row prop-card-meta-primary" style={styles.compactMetaRow}>
+        <span className="prop-card-stat-highlight" style={styles.compactMetaItem}>
           <span style={styles.metaLabel}>Prop</span>
           <strong>{displayMarketLabel(prop)}</strong>
         </span>
@@ -199,6 +202,12 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
           <strong>
             {formatNumber(prop.line)}
             {movementLabel ? <span style={{ marginLeft: "4px", color: "#7dd3fc", fontSize: "11px" }}>{movementLabel}</span> : null}
+          </strong>
+        </span>
+        <span className="prop-card-conf-highlight" style={styles.compactMetaItem}>
+          <span style={styles.metaLabel}>Conf</span>
+          <strong style={styles.metaValueStrong}>
+            {confDisplay != null ? `${confDisplay}%` : "—"}
           </strong>
         </span>
         <span style={styles.compactMetaItem}>
@@ -225,17 +234,8 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
           <strong style={styles.metaValueStrong}>{edgeDisplay}</strong>
         </span>
         <span className={`prop-meta-conf-edge-risk${topPick ? " prop-meta-top-pick-hide" : ""}`} style={styles.compactMetaItem}>
-          <span style={styles.metaLabel}>Conf</span>
-          <strong style={styles.metaValueStrong}>
-            {confDisplay != null ? `${confDisplay}%` : "—"}
-          </strong>
-          {prop.calibratedConfidence != null && prop.calibratedConfidence !== prop.confidenceScore ? (
-            <span style={{ ...styles.compactFlags, marginLeft: 4 }}> raw {prop.confidenceScore}%</span>
-          ) : null}
-        </span>
-        <span className={`prop-meta-conf-edge-risk${topPick ? " prop-meta-top-pick-hide" : ""}`} style={styles.compactMetaItem}>
           <span style={styles.metaLabel}>Risk</span>
-          <strong>{prop.riskLevel || "—"}</strong>
+          <strong>{riskShort}</strong>
         </span>
         <span className="prop-meta-secondary" style={styles.compactMetaItem}>
           <span style={styles.metaLabel}>EV</span>
@@ -296,12 +296,12 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
           </summary>
           <div style={styles.cardInlineBody}>
             <p style={styles.compactFlags}>
-              Book {bookLine != null ? formatNumber(bookLine) : "—"} · Line {formatNumber(prop.line)} · Proj{" "}
-              {prop.projectedValue != null ? formatNumber(prop.projectedValue) : prop.projection != null ? formatNumber(prop.projection) : "—"} · Edge{" "}
-              {Number(prop.edge) > 0 ? formatNumber(prop.edge) : "—"} · Conf {prop.confidenceScore ?? "—"}% · Vol {volatilityLabel}
-              {movementTag ? ` · Move ${movementTag}` : ""} · Source {prop.platform || prop.source || "—"}
+              {prop.confidenceExplanation ||
+                `Projection ${prop.projectedValue != null ? formatNumber(prop.projectedValue) : prop.projection != null ? formatNumber(prop.projection) : "—"} vs line ${formatNumber(prop.line)} (${edgeDisplay} edge)`}
+            </p>
+            <p style={styles.compactFlags}>
+              Source {prop.platform || prop.source || "—"} · {prop.status === "cached" || prop.lineSourceBadge === "CACHED" ? "Cached" : "Live"}
               {lastUpdated ? ` · Updated ${formatDateTime(lastUpdated)}` : ""}
-              {cacheLabel ? ` · ${cacheLabel}` : ""}
             </p>
             {sportsbookEdgeLabel ? (
               <p style={{ ...styles.compactFlags, margin: "2px 0 0", color: sportsbookEdgeNum > 0 ? "#86efac" : "#fca5a5" }}>

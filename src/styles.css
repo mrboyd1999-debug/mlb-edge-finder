@@ -192,11 +192,29 @@ body,
   }
 
   .prop-card-top-pick {
-    padding: 6px 8px !important;
+    padding: 5px 6px !important;
   }
 
   .prop-card-top-pick .prop-card-player-name {
+    font-size: 13px !important;
+  }
+
+  .prop-card-stat-highlight strong,
+  .prop-card-conf-highlight strong {
     font-size: 12px !important;
+  }
+
+  .prop-card-meta-primary {
+    gap: 3px 6px !important;
+    padding-top: 2px !important;
+  }
+
+  .prop-card-inline-details {
+    margin-top: 2px !important;
+  }
+
+  .prop-card-why-link {
+    display: none !important;
   }
 
   .prop-card-top-pick .prop-card-platform {

@@ -117,8 +117,8 @@ export const styles = {
     transition: "border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease",
   },
   cardMobileTight: {
-    padding: "6px 7px",
-    borderRadius: "7px",
+    padding: "5px 6px",
+    borderRadius: "6px",
   },
   cardInlineDetails: {
     marginTop: "4px",
@@ -140,12 +140,12 @@ export const styles = {
   goblinCard: { borderColor: "#15803d", background: "#071a12" },
   demonCard: { borderColor: "#b45309", background: "#1f1308" },
   parlayCard: { borderColor: "#4f46e5", background: "#11152a" },
-  compactCardTop: { display: "flex", gap: "6px", alignItems: "flex-start", marginBottom: "4px" },
+  compactCardTop: { display: "flex", gap: "5px", alignItems: "flex-start", marginBottom: "2px" },
   cardInfo: { minWidth: 0, flex: 1 },
   cardTitleRow: { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "flex-start" },
   cardBadgeColumn: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" },
   platform: { margin: "0 0 2px", color: "#22c55e", fontWeight: 900, fontSize: "9px", textTransform: "uppercase" },
-  playerName: { margin: 0, fontSize: "14px", lineHeight: 1.15 },
+  playerName: { margin: 0, fontSize: "15px", fontWeight: 900, lineHeight: 1.15, color: "#f8fafc" },
   gameLine: { margin: "2px 0 0", color: "#94a3b8", fontSize: "11px" },
   compactMetaRow: {
     display: "flex",
