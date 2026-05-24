@@ -9,9 +9,12 @@ import {
 import { attachHistoricalPerformance } from "./historicalPropAnalytics.js";
 
 const BASE_CONFIDENCE = 50;
-const MIN_TOP_PICK_CONFIDENCE = 75;
-const MIN_ACCEPTED_CONFIDENCE = 70;
-const MIN_ACCEPTED_EDGE = 1.5;
+const MIN_TOP_PICK_CONFIDENCE = 65;
+const PREFERRED_TOP_PICK_CONFIDENCE = 75;
+const MIN_ACCEPTED_CONFIDENCE = 60;
+const MIN_ACCEPTED_EDGE = 0.5;
+const ELITE_ACCEPTED_CONFIDENCE = 70;
+const ELITE_ACCEPTED_EDGE = 1.5;
 
 function finiteOr(value, fallback = 0) {
   const num = Number(value);
@@ -121,11 +124,10 @@ export function computeDisplayEdgeValue(prop = {}) {
 }
 
 export function confidenceTierLabel(confidence = BASE_CONFIDENCE) {
-  if (confidence >= 90) return "ELITE";
   if (confidence >= 80) return "STRONG";
   if (confidence >= 70) return "SAFE";
-  if (confidence >= 60) return "RISKY";
-  return "REJECT";
+  if (confidence >= 60) return "LEAN";
+  return "RESEARCH ONLY";
 }
 
 export function computeDisplayRiskLevel(confidence = BASE_CONFIDENCE) {
@@ -295,16 +297,17 @@ export function scoreDisplayProp(prop = {}) {
   });
 
   const tier = confidenceTierLabel(calibrated.confidence);
-  const displayResearchOnly = isDisplayResearchOnly(calibrated);
+  const invalidProp = !isValidDisplayProp({ ...calibrated, line, player: prop.player, playerName: prop.playerName });
+  const displayResearchOnly = invalidProp ? true : finiteOr(calibrated.confidence, 0) < 60 || isDisplayResearchOnly(calibrated);
 
   return attachHistoricalPerformance({
     ...calibrated,
     confidenceTier: tier,
     edgeScore: round1(edge * (calibrated.confidence / 50) + (finiteOr(prop.last10HitRate, 0.5) * 3)),
-    displayRejected: calibrated.confidence < 60,
+    displayRejected: invalidProp,
     displayResearchOnly,
-    isDisplayPlayable: !displayResearchOnly,
-    bettingLabel: displayResearchOnly ? "Research only" : calibrated.confidence >= 65 ? "Ready to Bet" : "Watchlist",
+    isDisplayPlayable: !displayResearchOnly && !invalidProp,
+    bettingLabel: labelForConfidence(calibrated.confidence, displayResearchOnly),
     premiumRiskSummary: calibrated.premiumRiskSummary || premiumRiskSummary(calibrated),
   });
 }
@@ -329,21 +332,26 @@ function hasValidPlayerName(prop = {}) {
   return name.length >= 2 && !/^unknown player$/i.test(name);
 }
 
+export function isValidDisplayProp(prop = {}) {
+  if (!hasValidPlayerName(prop)) return false;
+  const line = finiteOr(prop.line, 0);
+  if (!Number.isFinite(line) || line <= 0) return false;
+  const src = String(prop.source || prop.platform || "").trim();
+  if (!src || src.toLowerCase() === "unknown") return false;
+  return true;
+}
+
+function labelForConfidence(confidence = BASE_CONFIDENCE, displayResearchOnly = false) {
+  if (displayResearchOnly || confidence < 60) return "Research only";
+  if (confidence >= 70) return "Ready to Bet";
+  return "Lean";
+}
+
 function isCorrelated(a = {}, b = {}) {
   return playerKey(a) && playerKey(a) === playerKey(b);
 }
 
-export function selectTop2Picks(props = []) {
-  const pool = sortPropsForDisplay(
-    (props || []).filter(
-      (prop) =>
-        hasValidPlayerName(prop) &&
-        finiteOr(prop.confidence, 0) >= MIN_TOP_PICK_CONFIDENCE &&
-        finiteOr(prop.edge, 0) > 0 &&
-        !prop.displayRejected
-    )
-  );
-
+function pickTop2FromPool(pool = []) {
   const selected = [];
   for (const prop of pool) {
     if (selected.length >= 2) break;
@@ -351,6 +359,23 @@ export function selectTop2Picks(props = []) {
     selected.push({ ...prop, topPick: true, whyThisPick: prop.whyThisPick || buildWhyThisPick(prop) });
   }
   return selected;
+}
+
+export function selectTop2Picks(props = []) {
+  const valid = sortPropsForDisplay((props || []).filter(isValidDisplayProp));
+  if (!valid.length) return [];
+
+  const elitePool = valid.filter(
+    (prop) => finiteOr(prop.confidence, 0) >= PREFERRED_TOP_PICK_CONFIDENCE && finiteOr(prop.edge, 0) > 0
+  );
+  const elitePicks = pickTop2FromPool(elitePool);
+  if (elitePicks.length) return elitePicks;
+
+  const preferredPool = valid.filter((prop) => finiteOr(prop.confidence, 0) >= MIN_TOP_PICK_CONFIDENCE);
+  const preferredPicks = pickTop2FromPool(preferredPool);
+  if (preferredPicks.length) return preferredPicks;
+
+  return pickTop2FromPool(valid);
 }
 
 export function selectNearMissProps(props = []) {
@@ -363,17 +388,20 @@ export function selectNearMissProps(props = []) {
 }
 
 export function selectBestValueProps(props = []) {
-  return sortPropsForDisplay(
-    (props || []).filter((prop) => finiteOr(prop.confidence, BASE_CONFIDENCE) >= 60 && !prop.displayRejected)
-  );
+  return sortPropsForDisplay((props || []).filter(isValidDisplayProp));
 }
 
 export function selectReadyToBetProps(props = []) {
-  const sorted = sortPropsForDisplay(
-    (props || []).filter((prop) => finiteOr(prop.confidence, BASE_CONFIDENCE) >= 50 && !prop.displayRejected)
-  );
-  if (sorted.length) return sorted;
-  return sortPropsForDisplay(props).map((prop) => ({ ...prop, needsReview: true }));
+  return sortPropsForDisplay((props || []).filter(isValidDisplayProp)).map((prop) => {
+    const confidence = finiteOr(prop.confidence, BASE_CONFIDENCE);
+    const displayResearchOnly = confidence < 60 || Boolean(prop.displayResearchOnly);
+    return {
+      ...prop,
+      displayResearchOnly,
+      bettingLabel: labelForConfidence(confidence, displayResearchOnly),
+      needsReview: displayResearchOnly,
+    };
+  });
 }
 
 export function selectDemonProps(props = []) {
@@ -400,17 +428,24 @@ export function selectGoblinProps(props = []) {
 
 export function selectAcceptedDisplayProps(props = []) {
   const seenPlayers = new Set();
-  return sortPropsForDisplay(props || []).filter((prop) => {
-    if (!hasValidPlayerName(prop)) return false;
-    if (finiteOr(prop.confidence, 0) < MIN_ACCEPTED_CONFIDENCE) return false;
-    if (finiteOr(prop.edge, 0) < MIN_ACCEPTED_EDGE) return false;
-    const src = String(prop.source || prop.platform || "").trim();
-    if (!src || src.toLowerCase() === "unknown") return false;
-    const pk = playerKey(prop);
-    if (seenPlayers.has(pk)) return false;
-    seenPlayers.add(pk);
-    return true;
-  });
+  return sortPropsForDisplay((props || []).filter(isValidDisplayProp))
+    .filter((prop) => {
+      const pk = playerKey(prop);
+      if (seenPlayers.has(pk)) return false;
+      seenPlayers.add(pk);
+      return true;
+    })
+    .map((prop) => {
+      const confidence = finiteOr(prop.confidence, 0);
+      const edge = finiteOr(prop.edge, 0);
+      const isElite = confidence >= ELITE_ACCEPTED_CONFIDENCE && edge >= ELITE_ACCEPTED_EDGE;
+      return {
+        ...prop,
+        acceptedTier: isElite ? "Elite" : "Accepted",
+        isEliteAccepted: isElite,
+        isAcceptedDisplay: true,
+      };
+    });
 }
 
 export function riskAccentStyle(riskLevel = "") {

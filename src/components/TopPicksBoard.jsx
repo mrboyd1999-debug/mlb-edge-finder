@@ -48,7 +48,7 @@ function TopPicksBoard({ label = "Sport", picks = [], onOpen, compactMode = true
           })}
         </div>
       ) : (
-        <div style={styles.emptyStateCompact}>No picks met the 75+ confidence threshold yet.</div>
+        <div style={styles.emptyStateCompact}>No valid props available for Top Picks yet.</div>
       )}
     </section>
   );

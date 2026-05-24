@@ -1920,7 +1920,7 @@ export default function DFSPropsApp() {
   }, [scoredDisplayProps, sport, platform, marketQuickFilter]);
   const boardDisplayProps = useMemo(() => {
     if (selectedSportProps.length) return selectedSportProps;
-    if (allDisplayProps.length) return applyEmergencyDisplayFallback(allDisplayProps, 10);
+    if (allDisplayProps.length) return allDisplayProps;
     return [];
   }, [selectedSportProps, allDisplayProps]);
   const displayStatusMessage = useMemo(() => {
