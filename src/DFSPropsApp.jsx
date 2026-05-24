@@ -3282,17 +3282,17 @@ export default function DFSPropsApp() {
   }
 
   async function handleAnalyzeManualProp(form) {
-    const manualProp = normalizeManualFormInput(form);
-    console.log("Analyze clicked", manualProp);
+    const editingId = form.editingId || null;
     try {
       const analyzed = await analyzeManualProp(form, scoreManualAnalyzerProp);
+      const finalAnalyzed = editingId ? { ...analyzed, id: editingId } : analyzed;
       persistManualAnalyzerProps((current) =>
-        [analyzed, ...current.filter((row) => row.id !== analyzed.id)].slice(0, 100)
+        [finalAnalyzed, ...current.filter((row) => row.id !== finalAnalyzed.id)].slice(0, 100)
       );
       setLearningSaveNotice(
-        `Analyzed ${analyzed.playerName} — confidence ${Math.round(Number(analyzed.confidenceScore ?? analyzed.confidence ?? 0))}.`
+        `Analyzed ${finalAnalyzed.playerName} — confidence ${Math.round(Number(finalAnalyzed.confidenceScore ?? finalAnalyzed.confidence ?? 0))}.`
       );
-      return analyzed;
+      return finalAnalyzed;
     } catch (error) {
       console.error("[Manual Analyzer] handleAnalyzeManualProp failed", error);
       throw error;
@@ -3859,7 +3859,9 @@ export default function DFSPropsApp() {
       refreshLabel={mobileRefreshLabel}
     />
     <MobileScrollFab onScrollTop={scrollToTop} onScrollTo={scrollToSection} />
-    <RawApiDebugPanel open={rawApiDebugOpen} onToggle={() => setRawApiDebugOpen((open) => !open)} />
+    {debugModeEnabled && showDebugPanels ? (
+      <RawApiDebugPanel open={rawApiDebugOpen} onToggle={() => setRawApiDebugOpen((open) => !open)} />
+    ) : null}
     </>
   );
 }

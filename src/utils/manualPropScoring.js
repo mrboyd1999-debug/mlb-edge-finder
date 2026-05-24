@@ -1,6 +1,6 @@
-import { canonicalMarketKey } from "./marketNormalization.js";
+import { playerNamesMatch } from "./playerNames.js";
 import { normalize, formatNumber } from "./formatters.js";
-import { marketDisplayLabel } from "./marketNormalization.js";
+import { canonicalMarketKey, marketDisplayLabel } from "./marketNormalization.js";
 import { buildRealProjection, hasRealStatInputs } from "../services/realProjectionEngine.js";
 
 function clamp(value, min, max) {
@@ -631,8 +631,16 @@ export function rankManualPropScore(prop = {}) {
   const edgePct = Math.max(Number(prop.edgePercent ?? 0), 0);
   const edge = Math.max(Number(prop.edge ?? 0), 0);
   const conf = Number(prop.confidenceScore ?? prop.confidence ?? 0);
+  const hitChance = Number(prop.impliedHitChance ?? prop.hitChance ?? 0);
   const vol = Number(prop.manualVolatilityScore ?? 0.5);
-  return edgePct * 2.4 + edge * 11 + conf * 1.15 - vol * 24;
+  return edgePct * 2.4 + edge * 11 + conf * 1.15 + hitChance * 0.85 - vol * 24;
+}
+
+function manualPropsCorrelated(a = {}, b = {}) {
+  const playerA = String(a.playerName || a.player || "").trim();
+  const playerB = String(b.playerName || b.player || "").trim();
+  if (playerA && playerB && playerNamesMatch(playerA, playerB)) return true;
+  return false;
 }
 
 export function sortManualPropsByRank(props = []) {
@@ -646,5 +654,12 @@ export function sortManualPropsByRank(props = []) {
 }
 
 export function selectManualTopPicksByRank(props = [], limit = 2) {
-  return sortManualPropsByRank(props).slice(0, Math.max(0, limit));
+  const ranked = sortManualPropsByRank(props);
+  const selected = [];
+  for (const prop of ranked) {
+    if (selected.length >= Math.max(0, limit)) break;
+    if (selected.some((pick) => manualPropsCorrelated(pick, prop))) continue;
+    selected.push(prop);
+  }
+  return selected;
 }

@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import PlayerPropCard from "./PlayerPropCard.jsx";
 import { styles } from "../theme/styles.js";
 import {
@@ -8,7 +8,6 @@ import {
   MANUAL_SIDE_OPTIONS,
   MANUAL_SOURCES,
   MLB_STAT_SUGGESTIONS,
-  normalizeManualFormInput,
   selectManualTopPicks,
   sortManualPropsByConfidence,
   validateManualPropFields,
@@ -39,17 +38,11 @@ function ManualPropsPanel({
 }) {
   const [form, setForm] = useState(DEFAULT_MANUAL_FORM);
   const [formError, setFormError] = useState("");
-  const [analyzedProps, setAnalyzedProps] = useState(() => props || []);
+  const [editingId, setEditingId] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
 
-  useEffect(() => {
-    if (Array.isArray(props) && props.length) {
-      setAnalyzedProps(props);
-    }
-  }, [props]);
-
-  const rankedProps = useMemo(() => sortManualPropsByConfidence(analyzedProps), [analyzedProps]);
-  const topPicks = useMemo(() => selectManualTopPicks(analyzedProps, 2), [analyzedProps]);
+  const rankedProps = useMemo(() => sortManualPropsByConfidence(props), [props]);
+  const topPicks = useMemo(() => selectManualTopPicks(props, 2), [props]);
   const sportOptions = useMemo(() => {
     const sports = new Set(["MLB", ...rankedProps.map((prop) => prop.sport).filter(Boolean)]);
     return Array.from(sports);
@@ -60,10 +53,23 @@ function ManualPropsPanel({
     if (formError) setFormError("");
   }
 
-  const handleAnalyzeManualProp = useCallback(async () => {
-    const manualProp = normalizeManualFormInput(form);
-    console.log("Analyze clicked", manualProp);
+  function handleEditProp(prop = {}) {
+    setForm({
+      playerName: prop.playerName || "",
+      sport: prop.sport || "MLB",
+      team: prop.team || "",
+      opponent: prop.opponent || "",
+      statType: prop.statType || "",
+      line: prop.line != null ? String(prop.line) : "",
+      side: prop.side || prop.bestPick || prop.pick || "over",
+      source: prop.source || prop.platform || "PrizePicks",
+      payoutType: prop.oddsType || prop.payoutRole || prop.payoutType || "standard",
+    });
+    setEditingId(prop.id || null);
+    setFormError("");
+  }
 
+  const handleAnalyzeManualProp = useCallback(async () => {
     setFormError("");
     setAnalyzing(true);
     try {
@@ -73,7 +79,7 @@ function ManualPropsPanel({
         return;
       }
 
-      const numericLine = Number(manualProp.line);
+      const numericLine = Number(form.line);
       if (!Number.isFinite(numericLine) || numericLine <= 0) {
         setFormError("Enter a valid line greater than 0.");
         return;
@@ -81,15 +87,14 @@ function ManualPropsPanel({
 
       let analyzed = null;
       if (typeof onAnalyzeProp === "function") {
-        analyzed = await onAnalyzeProp(form);
+        analyzed = await onAnalyzeProp({ ...form, editingId });
       }
 
       if (!analyzed || !analyzed.playerName) {
         throw new Error("Manual analysis did not return a valid prop.");
       }
 
-      console.log("[Manual Analyzer] analyzed prop", analyzed);
-      setAnalyzedProps((current) => [analyzed, ...current.filter((row) => row.id !== analyzed.id)]);
+      setEditingId(null);
       setForm((current) => ({
         ...DEFAULT_MANUAL_FORM,
         sport: current.sport || "MLB",
@@ -98,12 +103,11 @@ function ManualPropsPanel({
       }));
     } catch (error) {
       const message = error?.message || "Manual analysis failed.";
-      console.error("[Manual Analyzer]", error);
       setFormError(message);
     } finally {
       setAnalyzing(false);
     }
-  }, [form, formError, onAnalyzeProp]);
+  }, [form, editingId, onAnalyzeProp]);
 
   function handleFormSubmit(event) {
     event.preventDefault();
@@ -118,17 +122,13 @@ function ManualPropsPanel({
           {shortReason(prop) || prop.qualificationReason || prop.whyThisPick || MANUAL_OFFLINE_REASON}
         </span>
         <div style={styles.manualPropActions}>
+          <button type="button" style={styles.secondaryButtonSmall} onClick={() => handleEditProp(prop)}>
+            Edit
+          </button>
           <button type="button" style={styles.secondaryButtonSmall} onClick={() => onSavePick?.(prop)}>
             Save
           </button>
-          <button
-            type="button"
-            style={styles.dangerButtonSmall}
-            onClick={() => {
-              setAnalyzedProps((current) => current.filter((row) => row.id !== prop.id));
-              onRemoveProp?.(prop.id);
-            }}
-          >
+          <button type="button" style={styles.dangerButtonSmall} onClick={() => onRemoveProp?.(prop.id)}>
             Remove
           </button>
         </div>
@@ -252,6 +252,12 @@ function ManualPropsPanel({
             </p>
           ) : null}
 
+          {editingId ? (
+            <p style={styles.controlHint} role="status">
+              Editing an existing prop — Analyze updates it in place.
+            </p>
+          ) : null}
+
           <div style={styles.manualPropFormActions}>
             <button
               type="button"
@@ -259,21 +265,26 @@ function ManualPropsPanel({
               disabled={loading || analyzing}
               onClick={handleAnalyzeManualProp}
             >
-              {loading || analyzing ? "Analyzing…" : "Analyze prop"}
+              {loading || analyzing ? "Analyzing…" : editingId ? "Update prop" : "Analyze prop"}
             </button>
+            {editingId ? (
+              <button
+                type="button"
+                style={styles.secondaryButton}
+                onClick={() => {
+                  setEditingId(null);
+                  setForm(DEFAULT_MANUAL_FORM);
+                }}
+              >
+                Cancel edit
+              </button>
+            ) : null}
             {rankedProps.length ? (
               <>
                 <button type="button" style={styles.secondaryButton} onClick={() => onReanalyzeAll?.()}>
                   Re-analyze all
                 </button>
-                <button
-                  type="button"
-                  style={styles.dangerButton}
-                  onClick={() => {
-                    setAnalyzedProps([]);
-                    onClearAll?.();
-                  }}
-                >
+                <button type="button" style={styles.dangerButton} onClick={() => onClearAll?.()}>
                   Clear all
                 </button>
               </>
@@ -289,7 +300,9 @@ function ManualPropsPanel({
           <div style={styles.sectionHeading}>
             <div>
               <h2 style={styles.sectionTitleSmall}>Top 2 Manual Picks</h2>
-              <p className="section-subcopy" style={styles.streakCopy}>Best edge and lowest volatility from your board.</p>
+              <p className="section-subcopy" style={styles.streakCopy}>
+                Best confidence, edge, and hit chance with low volatility.
+              </p>
             </div>
             <p style={styles.countPill}>{topPicks.length} picks</p>
           </div>
