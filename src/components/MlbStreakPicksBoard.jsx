@@ -1,7 +1,7 @@
 import { memo, useMemo, useState } from "react";
 import UnderdogRowCard from "./UnderdogRowCard.jsx";
 import { styles } from "../theme/styles.js";
-import { isUnderdogProp, UNDERDOG_STREAK_EMPTY_MESSAGE } from "../utils/underdogStreakPool.js";
+import { UNDERDOG_STREAK_EMPTY_MESSAGE } from "../utils/underdogStreakPool.js";
 import { SAFE_MODE_LOADING_MESSAGE } from "../utils/safeMode.js";
 import {
   filterUnderdogRowProps,
@@ -18,10 +18,10 @@ function MlbStreakPicksBoard({
 }) {
   const [activeTab, setActiveTab] = useState("all");
 
-  const sourcePool = useMemo(() => {
-    const udOnly = (underdogPool.length ? underdogPool : picks).filter((prop) => isUnderdogProp(prop));
-    return udOnly;
-  }, [underdogPool, picks]);
+  const sourcePool = useMemo(
+    () => filterUnderdogRowProps(underdogPool.length ? underdogPool : picks, { tabId: "all", sport: "MLB" }),
+    [underdogPool, picks]
+  );
 
   const visiblePicks = useMemo(
     () => filterUnderdogRowProps(sourcePool, { tabId: activeTab, sport: "MLB", limit: 2 }),

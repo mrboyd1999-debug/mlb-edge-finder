@@ -2,6 +2,7 @@ import { getShortCacheTtlMs, resilientFetch } from "./fetchUtil.js";
 import { getApiTimeoutMs } from "../utils/apiTimeout.js";
 import { normalizeGameStartTime, startTimeUncertainty } from "../utils/normalizeGameStartTime.js";
 import { inferSportFromText, sportFromUnderdogGame } from "../utils/sportMappings.js";
+import { resolvePropSportLabel } from "../utils/underdogSportDetection.js";
 import { applySportClassification } from "../utils/marketClassification.js";
 import { filterApprovedMarketsOnly } from "../utils/approvedMarkets.js";
 import { normalizeMarketStatType } from "../utils/marketNormalization.js";
@@ -880,7 +881,7 @@ function normalizeStatus(status, startTime) {
 }
 
 function matchesFilter(prop, sport, statType) {
-  const sportOk = sport === "all" || prop.sport === sport;
+  const sportOk = sport === "all" || resolvePropSportLabel(prop) === sport || prop.sport === sport;
   const statOk = statType === "all" || normalizeKey(prop.statType) === normalizeKey(statType);
   return sportOk && statOk;
 }

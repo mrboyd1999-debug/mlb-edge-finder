@@ -4,7 +4,8 @@
  */
 
 import { withNormalizedSource } from "./normalizeSource.js";
-import { detectUnderdogSport } from "./underdogSportDetection.js";
+import { detectUnderdogSport, inferMlbUnderdogProp } from "./underdogSportDetection.js";
+import { resolveUnderdogCategory } from "./underdogRowCard.js";
 import { normalizeGameStartTime } from "./normalizeGameStartTime.js";
 
 export const UNDERDOG_PARSER_MISMATCH_MESSAGE = "Underdog parser mismatch detected.";
@@ -138,9 +139,18 @@ function resolveLineFromRaw(raw = {}) {
   );
 }
 
+function extractStatFromTitle(title = "") {
+  const text = String(title || "");
+  const match = text.match(
+    /\b(Hits\s*\+\s*Runs\s*\+\s*RBIs|Hits\s*\+\s*Runs|Total Bases|Home Runs|Fantasy(?:\s+Score|\s+Points)?|Strikeouts?|Pitcher Strikeouts|RBIs?|Hits?|Runs?)\b/i
+  );
+  return match?.[1]?.trim() || "";
+}
+
 function resolveStatTypeFromRaw(raw = {}) {
   const attrs = attrsOf(raw);
   const statRecord = attrs.appearance_stat || attrs.stat || raw.stat || {};
+  const fromTitle = extractStatFromTitle(attrs.title || raw.title || "");
   return String(
     raw.stat_type ||
       raw.statType ||
@@ -152,6 +162,7 @@ function resolveStatTypeFromRaw(raw = {}) {
       attrs.market ||
       statRecord.display_stat ||
       statRecord.stat ||
+      fromTitle ||
       attrs.title ||
       raw.title ||
       raw.description ||
@@ -160,7 +171,12 @@ function resolveStatTypeFromRaw(raw = {}) {
 }
 
 function resolveSportFromRaw(raw = {}, lookup = {}, context = {}) {
-  return detectUnderdogSport(raw, lookup, context) || "Unknown";
+  const detected = detectUnderdogSport(raw, lookup, context);
+  if (detected) return detected;
+  if (inferMlbUnderdogProp({ ...context, statType: context.statType, playerName: context.player, player: context.player })) {
+    return "MLB";
+  }
+  return "Unknown";
 }
 
 function resolveTeamOpponent(raw = {}, lookup = {}) {
@@ -320,6 +336,7 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
   const oddsType = inferOddsType(raw);
   const startTime = resolveStartTimeFromRaw(raw, lookup);
   const streakOptions = resolveStreakOptionsFromRaw(raw);
+  const underdogCategory = resolveUnderdogCategory({ statType, market: statType, propType: statType });
   const id =
     raw.id ||
     raw.sourceId ||
@@ -339,7 +356,8 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
     team,
     opponent,
     sport,
-    league: sport,
+    league: sport === "MLB" ? "MLB" : sport,
+    underdogCategory,
     startTime,
     gameTime: startTime,
     streakOptions,

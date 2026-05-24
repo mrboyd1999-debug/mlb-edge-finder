@@ -22,8 +22,11 @@ const MLB_TEAM_ABBRS = new Set([
 const NBA_PLAYER_HINTS =
   /\b(wembanyama|gilgeous-alexander|doncic|antetokounmpo|tatum|curry|lebron|jokic|embiid|luka|durant|booker|edwards|brunson|haliburton|maxey|morant|fox|adebayo|banchero|holmgren|siakam|randle|brunson|kyrie|harden|kawhi|paul george|zion|lamelo|trae young|de'aaron fox)\b/i;
 
-const BASKETBALL_STAT = /\b(points?|pts|rebounds?|rebs?|assists?|asts?|pra|3s|threes?|3pm|steals?|blocks?|double double|triple double|fantasy score)\b/i;
-const BASEBALL_STAT = /\b(hits?|runs?|rbis?|strikeouts?|pitcher|total bases|walks?|home runs?|hrs?|innings?|earned runs?)\b/i;
+const MLB_PLAYER_HINTS =
+  /\b(ohtani|acuña|acuna|burleson|rodriguez|marte|judge|trout|betts|freeman|tatis|soto|harper|altuve|devers|bichette|guerrero|vladimir|fernando|correa|semien|seager|yordan|alvarez|kyle tucker|perdomo|witt|julio)\b/i;
+
+const BASEBALL_STAT = /\b(hits?\s*\+\s*runs?\s*\+\s*rbis?|hits?\s*\+\s*runs?|hits?\s*runs?\s*rbis?|hits?|runs?|rbis?|strikeouts?|pitcher|total bases|walks?|home runs?|hrs?|innings?|earned runs?|fantasy(?:\s+score|\s+points)?)\b/i;
+const BASKETBALL_STAT = /\b(points?|pts|rebounds?|rebs?|assists?|asts?|pra|3s|threes?|3pm|steals?|blocks?|double double|triple double)\b/i;
 
 function attrsOf(raw = {}) {
   return raw.attributes || raw.over_under || raw.overUnder || raw;
@@ -67,6 +70,14 @@ function sportFromStatType(statType = "") {
   if (BASKETBALL_STAT.test(stat) && !BASEBALL_STAT.test(stat)) return "NBA";
   if (BASEBALL_STAT.test(stat) && !BASKETBALL_STAT.test(stat)) return "MLB";
   return "";
+}
+
+export function inferMlbUnderdogProp(prop = {}) {
+  const statType = prop.statType || prop.market || prop.propType || "";
+  if (sportFromStatType(statType) === "MLB") return true;
+  if (sportFromTeams(prop.team, prop.opponent, prop.matchup) === "MLB") return true;
+  if (MLB_PLAYER_HINTS.test(String(prop.player || prop.playerName || ""))) return true;
+  return false;
 }
 
 function collectSportText(raw = {}, lookup = {}, context = {}) {
@@ -149,22 +160,34 @@ export function detectUnderdogSport(raw = {}, lookup = {}, context = {}) {
   }
 
   const blob = collectSportText(raw, lookup, context);
+  const fromStat = sportFromStatType(context.statType);
+  if (fromStat) return fromStat;
+
   const fromBlob = inferSportFromText(blob, context);
   if (fromBlob) return fromBlob;
 
   const fromTeams = sportFromTeams(context.team, context.opponent, context.matchup);
   if (fromTeams) return fromTeams;
 
-  if (NBA_PLAYER_HINTS.test(String(context.player || ""))) return "NBA";
+  if (MLB_PLAYER_HINTS.test(String(context.player || ""))) return "MLB";
 
-  const fromStat = sportFromStatType(context.statType);
-  if (fromStat) return fromStat;
+  if (NBA_PLAYER_HINTS.test(String(context.player || ""))) return "NBA";
 
   return "";
 }
 
 export function resolvePropSportLabel(prop = {}) {
-  return canonicalizeSport(prop.sport || prop.league || prop.classifiedSport || "") || String(prop.sport || "").trim();
+  const rawSport = String(prop.sport || prop.league || prop.classifiedSport || "").trim();
+  const direct = canonicalizeSport(rawSport);
+  if (direct && direct !== "Unknown") return direct;
+
+  const fromStat = sportFromStatType(prop.statType || prop.market || prop.propType || "");
+  if (fromStat) return fromStat;
+
+  if (prop.normalizedSource === "underdog" && inferMlbUnderdogProp(prop)) return "MLB";
+
+  if (rawSport && rawSport !== "Unknown") return rawSport;
+  return "";
 }
 
 export function isUnderdogSport(prop = {}, sport = "MLB") {
@@ -176,7 +199,10 @@ export function isUnderdogSport(prop = {}, sport = "MLB") {
 
 export function filterUnderdogPropsBySport(props = [], sport = "MLB") {
   const want = canonicalizeSport(sport) || sport;
-  return (props || []).filter((prop) => prop.normalizedSource === "underdog" && resolvePropSportLabel(prop) === want);
+  return (props || []).filter((prop) => {
+    if (prop.normalizedSource !== "underdog") return false;
+    return resolvePropSportLabel(prop) === want;
+  });
 }
 
 export function countUnderdogPropsBySport(props = []) {

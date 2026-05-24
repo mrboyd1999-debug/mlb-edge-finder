@@ -1,22 +1,105 @@
-import { normalize } from "./formatters.js";
-import { canonicalMarketKey } from "./marketNormalization.js";
+import { compactMarketKey, canonicalMarketKey } from "./marketNormalization.js";
 import { resolvePickSide } from "./pickRecommendation.js";
 import { estimateModelProbability } from "../services/projectionEngine.js";
-import { isUnderdogProp } from "./underdogStreakPool.js";
+import { isUnderdogProp, isPrizePicksProp } from "./underdogStreakPool.js";
+import { resolvePropSportLabel } from "./underdogSportDetection.js";
+
+/** Underdog MLB stat category keys — normalized from any spacing/casing/plus variants. */
+export const UNDERDOG_CATEGORIES = {
+  HITS_RUNS_RBIS: "HITS_RUNS_RBIS",
+  TOTAL_BASES: "TOTAL_BASES",
+  HOME_RUNS: "HOME_RUNS",
+  FANTASY_POINTS: "FANTASY_POINTS",
+};
 
 export const UNDERDOG_STAT_TABS = [
   { id: "all", label: "All" },
-  { id: "hrr", label: "Hits + Runs + RBIs" },
-  { id: "homeRuns", label: "Home Runs" },
-  { id: "totalBases", label: "Total Bases" },
-  { id: "fantasyScore", label: "Fantasy" },
+  { id: UNDERDOG_CATEGORIES.HITS_RUNS_RBIS, label: "Hits + Runs + RBIs" },
+  { id: UNDERDOG_CATEGORIES.HOME_RUNS, label: "Home Runs" },
+  { id: UNDERDOG_CATEGORIES.TOTAL_BASES, label: "Total Bases" },
+  { id: UNDERDOG_CATEGORIES.FANTASY_POINTS, label: "Fantasy" },
+];
+
+const MARKET_KEY_TO_CATEGORY = {
+  hrr: UNDERDOG_CATEGORIES.HITS_RUNS_RBIS,
+  totalbases: UNDERDOG_CATEGORIES.TOTAL_BASES,
+  homeruns: UNDERDOG_CATEGORIES.HOME_RUNS,
+  hr: UNDERDOG_CATEGORIES.HOME_RUNS,
+  fantasyscore: UNDERDOG_CATEGORIES.FANTASY_POINTS,
+};
+
+const CATEGORY_PATTERNS = [
+  { category: UNDERDOG_CATEGORIES.HITS_RUNS_RBIS, pattern: /hits?\s*(\+|and)?\s*runs?\s*(\+|and)?\s*rbis?|hrr\b/i },
+  { category: UNDERDOG_CATEGORIES.TOTAL_BASES, pattern: /total\s*bases?|\btb\b/i },
+  { category: UNDERDOG_CATEGORIES.HOME_RUNS, pattern: /home\s*runs?|\bhr\b/i },
+  { category: UNDERDOG_CATEGORIES.FANTASY_POINTS, pattern: /fantasy(?:\s*score|\s*points)?/i },
 ];
 
 function sideKey(value = "") {
-  const key = normalize(value);
+  const key = String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   if (key.includes("higher") || key.includes("over") || key.includes("more")) return "higher";
   if (key.includes("lower") || key.includes("under") || key.includes("less")) return "lower";
   return "";
+}
+
+/** Normalize stat text to Underdog category — spaces, plus signs, casing ignored. */
+export function resolveUnderdogCategory(prop = {}) {
+  if (prop.underdogCategory) return prop.underdogCategory;
+
+  const statType = String(prop.statType || prop.market || prop.propType || "").trim();
+  if (!statType) return "";
+
+  const compact = compactMarketKey(statType);
+  if (MARKET_KEY_TO_CATEGORY[compact]) return MARKET_KEY_TO_CATEGORY[compact];
+
+  const canonical = canonicalMarketKey(statType);
+  if (MARKET_KEY_TO_CATEGORY[compactMarketKey(canonical)]) {
+    return MARKET_KEY_TO_CATEGORY[compactMarketKey(canonical)];
+  }
+  if (canonical === "hrr") return UNDERDOG_CATEGORIES.HITS_RUNS_RBIS;
+  if (canonical === "totalBases") return UNDERDOG_CATEGORIES.TOTAL_BASES;
+  if (canonical === "homeRuns") return UNDERDOG_CATEGORIES.HOME_RUNS;
+  if (canonical === "fantasyScore") return UNDERDOG_CATEGORIES.FANTASY_POINTS;
+
+  for (const { category, pattern } of CATEGORY_PATTERNS) {
+    if (pattern.test(statType)) return category;
+  }
+
+  if (compact.includes("hitsrunsrbis") || compact.includes("hitsrunsandrbis")) {
+    return UNDERDOG_CATEGORIES.HITS_RUNS_RBIS;
+  }
+  if (compact.includes("totalbases")) return UNDERDOG_CATEGORIES.TOTAL_BASES;
+  if (compact.includes("homerun") || compact === "hr") return UNDERDOG_CATEGORIES.HOME_RUNS;
+  if (compact.includes("fantasy")) return UNDERDOG_CATEGORIES.FANTASY_POINTS;
+
+  return "";
+}
+
+export function propMatchesStatTab(prop = {}, tabId = "all") {
+  if (!tabId || tabId === "all") return true;
+  return resolveUnderdogCategory(prop) === tabId;
+}
+
+export function isMlbUnderdogStreakRow(prop = {}) {
+  return (
+    isUnderdogProp(prop) &&
+    !isPrizePicksProp(prop) &&
+    resolvePropSportLabel(prop) === "MLB"
+  );
+}
+
+export function filterUnderdogRowProps(props = [], { tabId = "all", sport = "MLB", limit = null } = {}) {
+  const rows = (props || [])
+    .filter((prop) => isMlbUnderdogStreakRow(prop))
+    .filter((prop) => !sport || sport === "all" || resolvePropSportLabel(prop) === sport)
+    .filter((prop) => propMatchesStatTab(prop, tabId))
+    .sort(
+      (a, b) =>
+        Number(b.confidenceScore ?? b.confidence ?? 0) - Number(a.confidenceScore ?? a.confidence ?? 0) ||
+        Number(b.edge ?? 0) - Number(a.edge ?? 0)
+    );
+
+  return limit != null ? rows.slice(0, limit) : rows;
 }
 
 function collectStreakOptions(prop = {}) {
@@ -189,25 +272,6 @@ export function buildUnderdogRowViewModel(prop = {}) {
     hasModel,
     recommendedSide,
     statType: prop.statType || prop.market || prop.propType || "",
+    category: resolveUnderdogCategory(prop),
   };
-}
-
-export function propMatchesStatTab(prop = {}, tabId = "all") {
-  if (!tabId || tabId === "all") return true;
-  const key = canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
-  return key === tabId;
-}
-
-export function filterUnderdogRowProps(props = [], { tabId = "all", sport = "MLB", limit = null } = {}) {
-  const rows = (props || [])
-    .filter((prop) => isUnderdogProp(prop))
-    .filter((prop) => !sport || String(prop.sport || prop.league || "MLB") === sport || sport === "all")
-    .filter((prop) => propMatchesStatTab(prop, tabId))
-    .sort(
-      (a, b) =>
-        Number(b.confidenceScore ?? b.confidence ?? 0) - Number(a.confidenceScore ?? a.confidence ?? 0) ||
-        Number(b.edge ?? 0) - Number(a.edge ?? 0)
-    );
-
-  return limit != null ? rows.slice(0, limit) : rows;
 }

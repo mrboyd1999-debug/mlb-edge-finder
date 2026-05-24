@@ -15,8 +15,10 @@ import { UNDERDOG_PARSER_MISMATCH_MESSAGE } from "./parseUnderdogProp.js";
 import {
   countUnderdogPropsBySport,
   filterUnderdogPropsBySport,
+  inferMlbUnderdogProp,
   resolvePropSportLabel,
 } from "./underdogSportDetection.js";
+import { isMlbUnderdogStreakRow } from "./underdogRowCard.js";
 
 function finiteOr(value, fallback = 0) {
   const num = Number(value);
@@ -24,11 +26,16 @@ function finiteOr(value, fallback = 0) {
 }
 
 function shapeUnderdogProp(prop = {}) {
+  const sport =
+    resolvePropSportLabel(prop) ||
+    (inferMlbUnderdogProp(prop) ? "MLB" : prop.sport || prop.league || "");
   return normalizePropsWithSource([
     normalizePropShape(
       {
         ...prop,
         playerName: prop.playerName || prop.player || "",
+        sport,
+        league: sport || prop.league || "",
         streakOptions: prop.streakOptions || [],
         startTime: prop.startTime || prop.gameTime || "",
       },
@@ -42,11 +49,7 @@ function dedupeUnderdogProps(...groups) {
 }
 
 export function isMlbUnderdogStreakProp(prop = {}) {
-  return (
-    prop.normalizedSource === "underdog" &&
-    resolvePropSportLabel(prop) === "MLB" &&
-    !isPrizePicksProp(prop)
-  );
+  return isMlbUnderdogStreakRow(prop);
 }
 
 /** Underdog props for a selected sport — streak pool excludes PrizePicks. */
