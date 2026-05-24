@@ -12,6 +12,7 @@ import {
 } from "../utils/pickRecommendation.js";
 import { displayFullMarketLabel, displaySport } from "../utils/propLabels.js";
 import { readPropMultiplier, readPropProbability } from "../utils/bestPlayRanking.js";
+import { computeCuratedPropEdge } from "../utils/propValidation.js";
 
 function BestPlayRowCard({ prop, onOpen, rank }) {
   const enriched = withPlayerImageUrl(prop || {});
@@ -27,8 +28,8 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
   const sideLabel = formatPlatformSideLabel(enriched);
   const multiplier = readPropMultiplier(enriched);
   const probability = readPropProbability(enriched);
-  const edge = Number(enriched.edge ?? enriched.projectionEdge);
-  const edgeLabel = Number.isFinite(edge) ? formatSignedNumber(edge) : "—";
+  const edge = computeCuratedPropEdge(enriched);
+  const edgeLabel = edge != null ? formatSignedNumber(edge) : "—";
   const reason =
     enriched.reason ||
     enriched.analyticsReason ||

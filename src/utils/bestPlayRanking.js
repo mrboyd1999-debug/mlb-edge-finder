@@ -1,6 +1,11 @@
 import { resolvePickSide } from "./pickRecommendation.js";
 import { canonicalMarketKey } from "./marketNormalization.js";
 import { normalizeSource } from "./normalizeSource.js";
+import {
+  computeCuratedPropEdge,
+  hasValidProjection,
+  isCuratedDisplayProp,
+} from "./propValidation.js";
 
 const UNDER_PREFERRED_MARKETS = new Set([
   "hrr",
@@ -50,12 +55,17 @@ function isOverSide(prop = {}) {
   return side === "OVER";
 }
 
-/** Rank score for Best Plays — PP + Underdog combined, with Under preference on MLB markets. */
+export function isRankableBestPlay(prop = {}) {
+  return isCuratedDisplayProp(prop);
+}
+
+/** Rank score for Best Plays — requires valid projection; edge = projection - line. */
 export function computeBestPlayRankScore(prop = {}) {
+  if (!isRankableBestPlay(prop)) return -Infinity;
+
   const confidence = finiteOr(prop.confidenceScore ?? prop.confidence, 50);
-  const edge = finiteOr(prop.edge ?? prop.projectionEdge, 0);
   const line = finiteOr(prop.line, 1);
-  const projection = finiteOr(prop.projection ?? prop.projectedValue, line);
+  const edge = computeCuratedPropEdge(prop) ?? 0;
   const edgePct = line > 0 ? (Math.abs(edge) / line) * 100 : 0;
 
   let score = confidence * 0.4 + edgePct * 0.45 + (prop.isDisplayPlayable ? 5 : 0);
@@ -75,12 +85,14 @@ export function computeBestPlayRankScore(prop = {}) {
 }
 
 export function sortBestPlayProps(props = []) {
-  return [...(props || [])].sort(
-    (a, b) =>
-      computeBestPlayRankScore(b) - computeBestPlayRankScore(a) ||
-      finiteOr(b.confidenceScore ?? b.confidence) - finiteOr(a.confidenceScore ?? a.confidence) ||
-      finiteOr(b.edge) - finiteOr(a.edge)
-  );
+  return [...(props || [])]
+    .filter(isRankableBestPlay)
+    .sort(
+      (a, b) =>
+        computeBestPlayRankScore(b) - computeBestPlayRankScore(a) ||
+        finiteOr(b.confidenceScore ?? b.confidence) - finiteOr(a.confidenceScore ?? a.confidence) ||
+        Math.abs(computeCuratedPropEdge(b) ?? 0) - Math.abs(computeCuratedPropEdge(a) ?? 0)
+    );
 }
 
 export function readPropMultiplier(prop = {}) {
@@ -97,8 +109,9 @@ export function readPropMultiplier(prop = {}) {
 }
 
 export function readPropProbability(prop = {}) {
+  if (!hasValidProjection(prop)) return null;
   const conf = finiteOr(prop.confidenceScore ?? prop.confidence, null);
-  if (Number.isFinite(conf)) return Math.round(conf);
+  if (Number.isFinite(conf) && conf !== 50) return Math.round(conf);
   const options = prop.streakOptions || [];
   const side = resolvePickSide(prop);
   const match = options.find((opt) => {

@@ -2,7 +2,8 @@ import { compactMarketKey, canonicalMarketKey } from "./marketNormalization.js";
 import { resolvePickSide } from "./pickRecommendation.js";
 import { estimateModelProbability } from "../services/projectionEngine.js";
 import { isUnderdogProp, isPrizePicksProp } from "./underdogStreakPool.js";
-import { isNbaUnderdogProp, resolvePropSportLabel } from "./underdogSportDetection.js";
+import { resolvePropSportLabel, isNbaUnderdogProp } from "./underdogSportDetection.js";
+import { isCuratedDisplayProp } from "./propValidation.js";
 
 /** Underdog MLB stat category keys — normalized from any spacing/casing/plus variants. */
 export const UNDERDOG_CATEGORIES = {
@@ -85,7 +86,8 @@ export function isMlbUnderdogStreakRow(prop = {}) {
     isUnderdogProp(prop) &&
     !isPrizePicksProp(prop) &&
     resolvePropSportLabel(prop) === "MLB" &&
-    !isNbaUnderdogProp(prop)
+    !isNbaUnderdogProp(prop) &&
+    isCuratedDisplayProp(prop)
   );
 }
 
@@ -190,13 +192,18 @@ export function formatUnderdogMatchup(prop = {}) {
 }
 
 function modelHigherProbability(prop = {}) {
-  const edge = Number(prop.edge ?? prop.projectionEdge);
+  const projection = Number(prop.projection ?? prop.projectedValue);
   const line = Number(prop.line);
+  if (!Number.isFinite(projection) || projection <= 0 || !Number.isFinite(line)) {
+    return null;
+  }
+
+  const edge = projection - line;
   const confidenceScore = Number(prop.confidenceScore ?? prop.confidence);
   const dataQualityScore = Number(prop.dataQualityScore ?? prop.modelSignal?.dataQualityScore ?? 50);
   const volatility = Number(prop.volatility ?? prop.marketVolatility);
 
-  if (Number.isFinite(edge) && edge !== 0) {
+  if (edge !== 0) {
     const modelProb = estimateModelProbability({
       edge: Math.abs(edge),
       line,
@@ -207,12 +214,6 @@ function modelHigherProbability(prop = {}) {
     if (Number.isFinite(modelProb)) {
       return edge > 0 ? Math.round(modelProb * 100) : Math.round((1 - modelProb) * 100);
     }
-  }
-
-  const projection = Number(prop.projection ?? prop.projectedValue);
-  if (Number.isFinite(projection) && Number.isFinite(line) && projection !== line) {
-    const base = Number.isFinite(confidenceScore) ? confidenceScore : 58;
-    return projection > line ? Math.min(85, Math.max(52, Math.round(base))) : Math.max(15, Math.min(48, 100 - Math.round(base)));
   }
 
   if (Number.isFinite(confidenceScore) && confidenceScore !== 50) {

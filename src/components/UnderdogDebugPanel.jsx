@@ -37,6 +37,7 @@ export default function UnderdogDebugPanel({ snapshot = null }) {
         <span style={styles.compactFlags}>Eligible Underdog (sport + category): {snapshot.eligibleUnderdogCount ?? 0}</span>
         <span style={styles.compactFlags}>Rejected wrong sport: {snapshot.rejectedWrongSport ?? 0}</span>
         <span style={styles.compactFlags}>Rejected wrong category: {snapshot.rejectedWrongCategory ?? 0}</span>
+        <span style={styles.compactFlags}>Rejected invalid prop: {snapshot.rejectedInvalidProp ?? 0}</span>
         <span style={styles.compactFlags}>Streak eligible MLB UD props: {snapshot.streakEligibleCount ?? 0}</span>
         <span style={styles.compactFlags}>Parser accepted: {parser.acceptedCount ?? snapshot.parsedUdCount ?? 0}</span>
         <span style={styles.compactFlags}>Parser rejected: {parser.rejectedCount ?? 0}</span>
@@ -57,6 +58,25 @@ export default function UnderdogDebugPanel({ snapshot = null }) {
             }}
           >
             {JSON.stringify(parser.rejectionReasons, null, 2)}
+          </pre>
+        </details>
+      ) : null}
+      {Object.keys(snapshot.curatedRejectionReasons || {}).length ? (
+        <details style={{ marginTop: "8px" }}>
+          <summary style={{ ...styles.compactFlags, cursor: "pointer" }}>Curated rejection reasons</summary>
+          <pre
+            style={{
+              margin: "6px 0 0",
+              padding: "8px",
+              borderRadius: "6px",
+              background: "#0b1220",
+              border: "1px solid #1e293b",
+              fontSize: "10px",
+              lineHeight: 1.4,
+              overflowX: "auto",
+            }}
+          >
+            {JSON.stringify(snapshot.curatedRejectionReasons, null, 2)}
           </pre>
         </details>
       ) : null}

@@ -22,6 +22,7 @@ import {
   resolvePropSportLabel,
 } from "./underdogSportDetection.js";
 import { isMlbUnderdogStreakRow, propMatchesStatTab } from "./underdogRowCard.js";
+import { validateCuratedPropRejectReason } from "./propValidation.js";
 
 function finiteOr(value, fallback = 0) {
   const num = Number(value);
@@ -134,26 +135,47 @@ export function auditUnderdogStreakFilter(props = [], { selectedSport = "MLB", s
   const ud = (props || []).filter((p) => p.normalizedSource === "underdog");
   let rejectedWrongSport = 0;
   let rejectedWrongCategory = 0;
+  let rejectedInvalidProp = 0;
+  const rejectionReasons = {};
   let eligible = 0;
 
   for (const prop of ud) {
+    const curatedReject = validateCuratedPropRejectReason(prop);
+    if (curatedReject) {
+      rejectedInvalidProp += 1;
+      rejectionReasons[curatedReject] = (rejectionReasons[curatedReject] || 0) + 1;
+      continue;
+    }
+
     const label = resolvePropSportLabel(prop);
     if (selectedSport !== "all" && label !== selectedSport) {
       rejectedWrongSport += 1;
+      rejectionReasons["Rejected: wrong sport tab"] = (rejectionReasons["Rejected: wrong sport tab"] || 0) + 1;
       continue;
     }
     if (selectedSport === "MLB" && isNbaUnderdogProp(prop)) {
       rejectedWrongSport += 1;
+      rejectionReasons["Rejected: NBA stat under MLB"] =
+        (rejectionReasons["Rejected: NBA stat under MLB"] || 0) + 1;
       continue;
     }
     if (selectedCategory && selectedCategory !== "all" && !propMatchesStatTab(prop, selectedCategory)) {
       rejectedWrongCategory += 1;
+      rejectionReasons["Rejected: wrong category tab"] =
+        (rejectionReasons["Rejected: wrong category tab"] || 0) + 1;
       continue;
     }
     eligible += 1;
   }
 
-  return { eligible, rejectedWrongSport, rejectedWrongCategory, total: ud.length };
+  return {
+    eligible,
+    rejectedWrongSport,
+    rejectedWrongCategory,
+    rejectedInvalidProp,
+    rejectionReasons,
+    total: ud.length,
+  };
 }
 
 export function buildUnderdogDebugSnapshot({
@@ -229,6 +251,8 @@ export function buildUnderdogDebugSnapshot({
     eligibleUnderdogCount: streakFilterAudit.eligible,
     rejectedWrongSport: streakFilterAudit.rejectedWrongSport,
     rejectedWrongCategory: streakFilterAudit.rejectedWrongCategory,
+    rejectedInvalidProp: streakFilterAudit.rejectedInvalidProp,
+    curatedRejectionReasons: streakFilterAudit.rejectionReasons,
     sportCounts,
     streakEligibleCount: streakEligible.length,
     parserDiagnostics,

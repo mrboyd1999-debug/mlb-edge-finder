@@ -9,12 +9,17 @@ import { filterUnderdogStreakPool } from "./underdogStreakPool.js";
 import { filterUnderdogPropsBySport } from "./underdogSportDetection.js";
 import { sortBestPlayProps } from "./bestPlayRanking.js";
 import { buildAnalyticsReason } from "./propReasonEngine.js";
+import { isCuratedDisplayProp, computeCuratedPropEdge } from "./propValidation.js";
 
 function buildBestPlayPool(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
   const mlbDisplay = filterAllDisplayPropsBySport(displayProps, "MLB", "all");
   const mlbRaw = filterActiveSportProps(rawProps || []);
   const udMlb = filterUnderdogPropsBySport(parsedUnderdogProps || [], "MLB");
-  return dedupeLooseProps([...mlbDisplay, ...mlbRaw, ...filterUnderdogStreakPool(udMlb)].filter(isLooseDisplayProp));
+  return dedupeLooseProps(
+    [...mlbDisplay, ...mlbRaw, ...filterUnderdogStreakPool(udMlb)]
+      .filter(isLooseDisplayProp)
+      .filter(isCuratedDisplayProp)
+  );
 }
 
 function annotateFeatured(prop, featuredLabel, featuredKey) {
@@ -54,8 +59,11 @@ export function resolveFeaturedMlbPicks(displayProps = [], rawProps = [], parsed
 
   const ranked = sortBestPlayProps(pool);
   const byEdge = [...pool]
-    .filter((prop) => Number(prop.edge) > 0)
-    .sort((a, b) => Number(b.edge) - Number(a.edge) || Number(b.confidenceScore) - Number(a.confidenceScore));
+    .filter((prop) => {
+      const edge = Number(computeCuratedPropEdge(prop));
+      return Number.isFinite(edge) && edge !== 0;
+    })
+    .sort((a, b) => Math.abs(computeCuratedPropEdge(b) ?? 0) - Math.abs(computeCuratedPropEdge(a) ?? 0));
   const bySafety = [...pool]
     .filter((prop) => formatRiskLevel(prop) !== "High")
     .sort(

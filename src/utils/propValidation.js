@@ -2,6 +2,8 @@ import { normalizePlayerName } from "./playerNames.js";
 import { isParserMergeComboBug } from "./comboMarkets.js";
 import { isOverseasOrPlaceholderProp, OVERSEAS_BLOCKED_PATTERN, getIngestionPropRejectReason } from "./ingestionFilter.js";
 import { isUsableParsedProp, normalizePropShape } from "./propShape.js";
+import { lockSportFromStatType, sportStatMismatchReason } from "./propStatSportLock.js";
+import { resolvePropSportLabel } from "./underdogSportDetection.js";
 
 export const VERIFIED_SPORTSBOOK_PLATFORMS = new Set(["PrizePicks", "Underdog"]);
 export const VERIFIED_LINE_BADGES = new Set(["LIVE", "CACHED", "EMPTY"]);
@@ -114,6 +116,51 @@ export function dedupeVerifiedProps(props = []) {
     }
   });
   return Array.from(seen.values());
+}
+
+export function hasValidProjection(prop = {}) {
+  const projection = Number(prop.projection ?? prop.projectedValue);
+  return Number.isFinite(projection) && projection > 0;
+}
+
+export function computeCuratedPropEdge(prop = {}) {
+  if (!hasValidProjection(prop)) return null;
+  const line = Number(prop.line);
+  const projection = Number(prop.projection ?? prop.projectedValue);
+  if (!Number.isFinite(line)) return null;
+  return projection - line;
+}
+
+export function validateCuratedPropRejectReason(prop = {}) {
+  if (!prop) return "Rejected: missing prop";
+  if (isMalformedPlayerName(prop.playerName || prop.player)) {
+    return "Rejected: player missing";
+  }
+  const line = Number(prop.line);
+  if (!Number.isFinite(line) || line <= 0) {
+    return "Rejected: line invalid";
+  }
+  const statType = prop.statType || prop.market || prop.propType || "";
+  if (!statType) return "Rejected: missing stat type";
+
+  const sport = resolvePropSportLabel(prop) || prop.inferredSport || prop.sport || "";
+  const mismatch = sportStatMismatchReason(sport, statType);
+  if (mismatch) return mismatch;
+
+  const statLock = lockSportFromStatType(statType);
+  if (statLock && sport && statLock !== sport) {
+    return "Rejected: invalid sport/stat combo";
+  }
+
+  if (!hasValidProjection(prop)) {
+    return "Rejected: projection missing";
+  }
+
+  return "";
+}
+
+export function isCuratedDisplayProp(prop = {}) {
+  return !validateCuratedPropRejectReason(prop);
 }
 
 export function validatePropRejectReason(prop = {}) {

@@ -244,13 +244,11 @@ function sideFromRaw(raw = {}, line, projection) {
   return "";
 }
 
-function computeProjectionEdge(line, projection, side) {
+function computeProjectionEdge(line, projection) {
   const ln = Number(line);
   const proj = Number(projection);
-  if (!Number.isFinite(ln) || !Number.isFinite(proj)) return 0;
-  const diff = proj - ln;
-  if (!side) return diff;
-  return side === "under" ? ln - proj : diff;
+  if (!Number.isFinite(ln) || !Number.isFinite(proj) || proj <= 0) return null;
+  return proj - ln;
 }
 
 function normalizeStreakSide(value = "") {
@@ -349,9 +347,9 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
   const projection = Number(
     raw.projection ?? raw.projected_value ?? raw.projectedValue ?? attrsOf(raw).projection ?? NaN
   );
-  const hasProjection = Number.isFinite(projection);
-  const overUnder = sideFromRaw(raw, line, hasProjection ? projection : line);
-  const edge = computeProjectionEdge(line, hasProjection ? projection : line, overUnder);
+  const hasProjection = Number.isFinite(projection) && projection > 0;
+  const overUnder = sideFromRaw(raw, line, hasProjection ? projection : null);
+  const edge = computeProjectionEdge(line, hasProjection ? projection : null);
   const sportInference = inferSportFromProp(
     {
       sport,
@@ -408,10 +406,11 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
     side: overUnder || "",
     pick: overUnder || "",
     bestPick: overUnder || "",
-    confidence: 50,
-    confidenceScore: 50,
-    edge,
-    projectionEdge: edge,
+    confidence: hasProjection ? 50 : null,
+    confidenceScore: hasProjection ? 50 : null,
+    edge: edge ?? null,
+    projectionEdge: edge ?? null,
+    propIncomplete: !hasProjection,
     playable: false,
     isDisplayPlayable: false,
     matchup,

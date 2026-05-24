@@ -10,6 +10,12 @@ import {
   UNDERDOG_SPORT_SLUGS,
 } from "./sportMappings.js";
 import { compactMarketKey } from "./marketNormalization.js";
+import {
+  isMlbOnlyStatType,
+  isNbaOnlyStatType,
+  lockSportFromStatType,
+  sportStatMismatchReason,
+} from "./propStatSportLock.js";
 
 export const INVALID_SPORT_TOKENS = new Set([
   "playerprop",
@@ -91,23 +97,7 @@ function playerMatches(name = "", hints = []) {
 }
 
 export function hasMlbStatIndicator(...parts) {
-  const blob = parts.filter(Boolean).join(" ");
-  if (!blob) return false;
-  if (MLB_STAT_PATTERN.test(blob)) return true;
-  const compact = compactMarketKey(blob);
-  return (
-    compact.includes("hits") ||
-    compact.includes("runs") ||
-    compact.includes("rbis") ||
-    compact.includes("hitsrunsrbis") ||
-    compact.includes("hitsrunsandrbis") ||
-    compact.includes("totalbases") ||
-    compact.includes("homerun") ||
-    compact.includes("strikeout") ||
-    compact.includes("earnedrun") ||
-    compact.includes("double") ||
-    compact.includes("single")
-  );
+  return parts.some((part) => isMlbOnlyStatType(part));
 }
 
 export function hasMlbMarketSignal(...parts) {
@@ -115,8 +105,7 @@ export function hasMlbMarketSignal(...parts) {
 }
 
 export function hasBasketballMarketSignal(...parts) {
-  const blob = parts.filter(Boolean).join(" ");
-  return Boolean(blob && NBA_STAT_PATTERN.test(blob));
+  return parts.some((part) => isNbaOnlyStatType(part));
 }
 
 function sportFromEventCategory(raw = {}, lookup = {}) {
@@ -199,6 +188,14 @@ export function inferSportFromProp(prop = {}, { selectedSport = "" } = {}) {
   const tab = selectedSport || prop.selectedSportTab || prop.selectedSport || "";
   const { raw, player, statType, teamText, eventText } = collectPropContext(prop);
 
+  const statLock = lockSportFromStatType(statType);
+  if (statLock === "NBA") {
+    return { sport: "NBA", reason: "nba-only stat type lock" };
+  }
+  if (statLock === "MLB") {
+    return { sport: "MLB", reason: "mlb-only stat type lock" };
+  }
+
   if (playerMatches(player, MLB_PLAYERS)) {
     return { sport: "MLB", reason: "mlb player name match" };
   }
@@ -255,6 +252,18 @@ export function inferSportFromProp(prop = {}, { selectedSport = "" } = {}) {
   }
 
   return { sport: "", reason: "" };
+}
+
+export function validateInferredSport(prop = {}, inference = {}) {
+  const statType = prop.statType || prop.market || prop.propType || "";
+  const mismatch = sportStatMismatchReason(inference.sport, statType);
+  if (mismatch) {
+    const lock = lockSportFromStatType(statType);
+    if (lock) {
+      return { sport: lock, reason: `${lock.toLowerCase()}-only stat type lock (corrected)` };
+    }
+  }
+  return inference;
 }
 
 export function isNbaUnderdogProp(prop = {}) {
@@ -328,7 +337,8 @@ export function countUnderdogPropsBySport(props = []) {
 }
 
 export function attachSportInference(prop = {}, options = {}) {
-  const inference = inferSportFromProp(prop, options);
+  let inference = inferSportFromProp(prop, options);
+  inference = validateInferredSport(prop, inference);
   if (!inference.sport) return prop;
   return {
     ...prop,
