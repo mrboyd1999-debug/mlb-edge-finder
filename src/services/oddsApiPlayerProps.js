@@ -4,13 +4,21 @@
  */
 import { fetchJsonSafe, getCacheTtlMs } from "./fetchUtil.js";
 import { ENRICHMENT_MAX_RETRIES, getApiTimeoutMs } from "../utils/apiTimeout.js";
-import { getOddsApiKey as getRuntimeOddsApiKey } from "../config/apiConfig.js";
+import {
+  buildOddsApiProxyUrl,
+  getTrimmedOddsApiKey,
+  logOddsApiExchange,
+  ODDS_API_INVALID_KEY_MESSAGE,
+  parseOddsApiAuthFailure,
+} from "./oddsApiClient.js";
 import {
   SOURCE_IDS,
   cachedLinesMessage,
+  isSourceAuthBlocked,
   isSourceInCooldown,
   markSourceCached,
   recordSource429,
+  recordSourceAuthFailure,
   recordSourceSuccess,
   withSourceRequestLock,
 } from "./sourceRateLimit.js";
@@ -67,9 +75,18 @@ export async function fetchOddsApiDisplayProps({ sport = "all" } = {}) {
 }
 
 async function fetchOddsApiDisplayPropsInternal({ sport = "all" } = {}) {
-  const apiKey = getOddsApiKey();
+  const apiKey = getTrimmedOddsApiKey();
   if (!apiKey) {
     return { props: [], warnings: ["Missing Odds API key."], parsedCount: 0 };
+  }
+
+  if (isSourceAuthBlocked(SOURCE_IDS.ODDS_API)) {
+    return {
+      props: [],
+      warnings: [ODDS_API_INVALID_KEY_MESSAGE],
+      authFailed: true,
+      parsedCount: 0,
+    };
   }
 
   if (isSourceInCooldown(SOURCE_IDS.ODDS_API)) {
@@ -144,7 +161,7 @@ async function fetchSportPlayerProps(apiKey, sport) {
   const sportKey = SPORT_KEYS[sport];
   if (!sportKey) return { rows: [] };
   const markets = sport === "MLB" ? MLB_MARKETS : BASKETBALL_MARKETS;
-  const eventsUrl = sportsbookProxyUrl(`/v4/sports/${sportKey}/events`, { apiKey });
+  const eventsUrl = buildOddsApiProxyUrl(`/v4/sports/${sportKey}/events`);
   const result = await fetchJsonSafe(eventsUrl.toString(), {}, {
     source: "Odds API events",
     ttlMs: getCacheTtlMs(),
@@ -153,6 +170,22 @@ async function fetchSportPlayerProps(apiKey, sport) {
     enrichment: true,
     timeoutMs: getApiTimeoutMs({ enrichment: true }),
   });
+  logOddsApiExchange({
+    url: eventsUrl.toString(),
+    status: result.response?.status,
+    text: result.text,
+    data: result.data,
+    label: "Odds API events",
+  });
+  const authFailure = parseOddsApiAuthFailure({
+    data: result.data,
+    status: result.response?.status,
+    text: result.text,
+  });
+  if (authFailure) {
+    recordSourceAuthFailure(SOURCE_IDS.ODDS_API, authFailure);
+    throw new Error(authFailure);
+  }
   if (!result.ok) {
     if (result.rateLimited) throw new Error("Odds API rate limit (429)");
     throw new Error(result.error || "Odds API events failed");
@@ -171,8 +204,7 @@ async function fetchSportPlayerProps(apiKey, sport) {
 }
 
 async function fetchEventOddsRows(apiKey, sportKey, sport, eventId, markets, gameTime) {
-  const url = sportsbookProxyUrl(`/v4/sports/${sportKey}/events/${eventId}/odds`, {
-    apiKey,
+  const url = buildOddsApiProxyUrl(`/v4/sports/${sportKey}/events/${eventId}/odds`, {
     regions: "us",
     markets: markets.join(","),
     oddsFormat: "american",
@@ -185,6 +217,22 @@ async function fetchEventOddsRows(apiKey, sportKey, sport, eventId, markets, gam
     enrichment: true,
     timeoutMs: getApiTimeoutMs({ enrichment: true }),
   });
+  logOddsApiExchange({
+    url: url.toString(),
+    status: result.response?.status,
+    text: result.text,
+    data: result.data,
+    label: "Odds API player props",
+  });
+  const authFailure = parseOddsApiAuthFailure({
+    data: result.data,
+    status: result.response?.status,
+    text: result.text,
+  });
+  if (authFailure) {
+    recordSourceAuthFailure(SOURCE_IDS.ODDS_API, authFailure);
+    throw new Error(authFailure);
+  }
   if (!result.ok) {
     if (result.rateLimited) throw new Error("Odds API rate limit (429)");
     return [];
@@ -285,19 +333,6 @@ export function normalizeOddsApiPropRows(rows = []) {
     const line = Number(prop.line);
     return player.length >= 2 && Number.isFinite(line) && line > 0;
   });
-}
-
-function sportsbookProxyUrl(path, params = {}) {
-  const url = new URL("/api/sportsbookOdds", window.location.origin);
-  url.searchParams.set("path", path);
-  Object.entries(params).forEach(([key, value]) => {
-    if (value != null && value !== "") url.searchParams.set(key, value);
-  });
-  return url;
-}
-
-function getOddsApiKey() {
-  return getRuntimeOddsApiKey();
 }
 
 function writeOddsPropsCache(props = []) {

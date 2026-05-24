@@ -1,5 +1,7 @@
 /** Runtime API keys and proxy URLs — env vars + localStorage (dev overrides). */
 
+import { clearSourceAuthBlock, SOURCE_IDS } from "./sourceRateLimit.js";
+
 export const RUNTIME_SETTING_DEFS = [
   {
     key: "VITE_ODDS_API_KEY",
@@ -97,7 +99,8 @@ export function readRuntimeSettings() {
 export function writeRuntimeSettings(settings = {}) {
   RUNTIME_SETTING_KEYS.forEach((key) => {
     const def = getSettingDef(key);
-    const value = String(settings[key] || "").trim();
+    let value = String(settings[key] || "").trim();
+    if (key === "VITE_ODDS_API_KEY") value = value.replace(/\s+/g, "");
     try {
       if (value) window.localStorage.setItem(key, value);
       else window.localStorage.removeItem(key);
@@ -116,6 +119,7 @@ export function writeRuntimeSettings(settings = {}) {
       } catch {
         // ignore
       }
+      clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
     }
     if (key === "VITE_PRIZEPICKS_PROXY_URL") {
       try {
@@ -169,7 +173,10 @@ export function getProxyUrl(platform = "") {
 }
 
 export function getOddsApiKey() {
-  return getEffectiveSetting("VITE_ODDS_API_KEY");
+  const value = getEffectiveSetting("VITE_ODDS_API_KEY");
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, "");
 }
 
 export function getSportsDataApiKey() {

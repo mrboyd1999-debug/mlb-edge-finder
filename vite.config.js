@@ -296,7 +296,11 @@ async function proxyUpstream(req, res, targetBase, rewriteFn, headers, source) {
   const upstreamUrl = configuredProxyUrl(fullUrl, source) || new URL(targetPath, targetBase);
 
   if (source === "Odds" && ODDS_API_KEY && !upstreamUrl.searchParams.has("apiKey")) {
-    upstreamUrl.searchParams.set("apiKey", ODDS_API_KEY);
+    upstreamUrl.searchParams.set("apiKey", ODDS_API_KEY.trim());
+  }
+  const clientOddsKey = upstreamUrl.searchParams.get("apiKey");
+  if (clientOddsKey) {
+    upstreamUrl.searchParams.set("apiKey", clientOddsKey.trim().replace(/\s+/g, ""));
   }
 
   const controller = new AbortController();
@@ -311,11 +315,17 @@ async function proxyUpstream(req, res, targetBase, rewriteFn, headers, source) {
     console.info("[DFS proxy]", {
       source,
       requestUrl: fullUrl,
-      upstreamUrl: upstreamUrl.toString(),
+      upstreamUrl: upstreamUrl.toString().replace(/apiKey=[^&]+/gi, "apiKey=[REDACTED]"),
       status: upstream.status,
       contentType,
       preview,
     });
+    if (source === "Odds") {
+      console.info("[Odds API proxy]", {
+        responseStatus: upstream.status,
+        responseBody: preview,
+      });
+    }
     if (source === "PrizePicks") console.log("PrizePicks raw response", preview);
 
     if (isJsSourceResponse(text, contentType)) {
@@ -328,6 +338,8 @@ async function proxyUpstream(req, res, targetBase, rewriteFn, headers, source) {
       const error =
         source === "PrizePicks" && upstream.status === 403
           ? "PrizePicks blocked the request (403)"
+          : source === "Odds" && (upstream.status === 401 || upstream.status === 403)
+            ? "Invalid Odds API key or subscription access."
           : `${source} returned status ${upstream.status}.`;
       const statusCode = source === "Underdog" || source === "PrizePicks" ? 200 : upstream.status >= 400 && upstream.status < 600 ? upstream.status : 502;
       sendJson(res, statusCode, apiErrorPayload(source, error, { preview, upstreamStatus: upstream.status }));

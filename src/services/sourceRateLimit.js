@@ -31,6 +31,7 @@ const MIN_REQUEST_INTERVAL_MS = {
 
 /** Per-source soft retry queue — exponential backoff for transient failures. */
 const RETRY_QUEUE_BACKOFF_MS = [750, 1_500, 3_000, 6_000];
+const AUTH_FAILURE_COOLDOWN_MS = 30 * 60 * 1000;
 
 const inFlightPromises = new Map();
 const lastDispatchAt = new Map();
@@ -190,6 +191,47 @@ export function recordSourceSuccess(sourceId) {
   memoryState = state;
   saveState();
   bumpSessionRequestCount(sourceId);
+  return next;
+}
+
+export function clearSourceAuthBlock(sourceId) {
+  const state = loadState();
+  const current = normalizeSourceState(state[sourceId] || {});
+  if (current.status !== "auth_failed") return current;
+  const next = {
+    ...current,
+    status: "active",
+    cooldownUntil: 0,
+    lastError: "",
+  };
+  state[sourceId] = next;
+  memoryState = state;
+  saveState();
+  return next;
+}
+
+export function isSourceAuthBlocked(sourceId) {
+  const state = getSourceState(sourceId);
+  return state.status === "auth_failed" && isSourceInCooldownFromState(state);
+}
+
+export function recordSourceAuthFailure(sourceId, error = "") {
+  const state = loadState();
+  const current = normalizeSourceState(state[sourceId] || {});
+  const cooldownUntil = Date.now() + AUTH_FAILURE_COOLDOWN_MS;
+  const next = {
+    ...current,
+    status: "auth_failed",
+    cooldownUntil,
+    strikeCount: current.strikeCount,
+    lastError: String(error || "Unauthorized"),
+    requestCount: current.requestCount + 1,
+  };
+  state[sourceId] = next;
+  memoryState = state;
+  saveState();
+  bumpSessionRequestCount(sourceId);
+  console.warn(`[DFS Auth] ${sourceId} auth failed — pausing enrichment for ${formatCooldownRemaining(AUTH_FAILURE_COOLDOWN_MS)}.`);
   return next;
 }
 

@@ -371,9 +371,12 @@ export async function safeJsonFetch(url, sourceName = "API", init = {}, options 
   });
 
   if (!response.ok) {
+    const unauthorized = response.status === 401 || response.status === 403;
     const error =
       /prizepicks/i.test(source) && response.status === 403
         ? "PrizePicks blocked the request (403)"
+        : unauthorized && /odds|sportsbook/i.test(source)
+          ? "Invalid Odds API key or subscription access."
         : response.status === 429
           ? `${source} rate limited (429)`
           : `${source} returned status ${response.status}.`;
@@ -387,6 +390,7 @@ export async function safeJsonFetch(url, sourceName = "API", init = {}, options 
       preview,
       contentType,
       rateLimited: response.status === 429,
+      unauthorized,
     };
   }
 

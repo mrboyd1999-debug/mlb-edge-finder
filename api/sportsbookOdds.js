@@ -1,3 +1,13 @@
+function sanitizeOddsApiKey(key = "") {
+  return String(key || "")
+    .trim()
+    .replace(/\s+/g, "");
+}
+
+function redactOddsApiUrl(url = "") {
+  return String(url).replace(/apiKey=[^&]+/gi, "apiKey=[REDACTED]");
+}
+
 export default async function handler(req, res) {
   setCorsHeaders(res);
 
@@ -16,7 +26,9 @@ export default async function handler(req, res) {
       });
     }
 
-    const apiKey = req.query?.apiKey || process.env.ODDS_API_KEY || process.env.VITE_ODDS_API_KEY || "";
+    const apiKey = sanitizeOddsApiKey(
+      req.query?.apiKey || process.env.ODDS_API_KEY || process.env.VITE_ODDS_API_KEY || ""
+    );
     if (!apiKey) {
       return res.status(200).json({
         error: true,
@@ -37,17 +49,36 @@ export default async function handler(req, res) {
     });
     upstreamUrl.searchParams.set("apiKey", apiKey);
 
+    console.info("[Sportsbook Odds API] request", {
+      path,
+      upstreamUrl: redactOddsApiUrl(upstreamUrl.toString()),
+      keyLength: apiKey.length,
+    });
+
     const upstream = await fetch(upstreamUrl, {
       headers: { accept: "application/json" },
     });
     const text = await upstream.text();
     const contentType = upstream.headers.get("content-type") || "application/json";
+    const preview = text.slice(0, 240);
 
-    console.info("[Sportsbook Odds API] upstream", {
+    console.info("[Sportsbook Odds API] response", {
       path,
       status: upstream.status,
       contentType,
+      bodyPreview: preview,
     });
+
+    if (upstream.status === 401 || upstream.status === 403) {
+      return res.status(upstream.status).json({
+        error: true,
+        source: "The Odds API",
+        upstreamStatus: upstream.status,
+        message: "Invalid Odds API key or subscription access.",
+        preview,
+        data: null,
+      });
+    }
 
     let data = null;
     try {
@@ -58,7 +89,18 @@ export default async function handler(req, res) {
         source: "The Odds API",
         status: upstream.status,
         message: "The Odds API did not return valid JSON.",
-        preview: text.slice(0, 300),
+        preview,
+        data: null,
+      });
+    }
+
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({
+        error: true,
+        source: "The Odds API",
+        upstreamStatus: upstream.status,
+        message: data?.message || `The Odds API returned status ${upstream.status}.`,
+        preview,
         data: null,
       });
     }

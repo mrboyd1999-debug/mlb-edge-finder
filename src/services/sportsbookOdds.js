@@ -2,16 +2,24 @@ import { fetchJsonSafe, getCacheTtlMs } from "./fetchUtil.js";
 import { ENRICHMENT_MAX_RETRIES, getApiTimeoutMs } from "../utils/apiTimeout.js";
 import { canonicalStatType } from "../utils/marketNormalization.js";
 import {
+  buildOddsApiProxyUrl,
+  getTrimmedOddsApiKey,
+  logOddsApiExchange,
+  ODDS_API_INVALID_KEY_MESSAGE,
+  parseOddsApiAuthFailure,
+} from "./oddsApiClient.js";
+import {
   SOURCE_IDS,
   cachedLinesMessage,
+  isSourceAuthBlocked,
   isSourceInCooldown,
   recordSource429,
+  recordSourceAuthFailure,
   recordSourceSuccess,
   recordSourceFailure,
   markSourceCached,
   withSourceRequestLock,
 } from "./sourceRateLimit.js";
-import { getOddsApiKey as getRuntimeOddsApiKey } from "../config/apiConfig.js";
 
 const ODDS_CACHE_KEY = "dfs-odds-last-good-comparisons";
 const ODDS_CACHE_MAX_MS = 60 * 60 * 1000;
@@ -40,7 +48,7 @@ export async function fetchSportsbookComparison({ props = [] } = {}) {
 }
 
 async function fetchSportsbookComparisonInternal({ props = [] } = {}) {
-  const apiKey = getOddsApiKey();
+  const apiKey = getTrimmedOddsApiKey();
   if (!props.length) {
     return {
       source: "Sportsbook comparison",
@@ -53,6 +61,15 @@ async function fetchSportsbookComparisonInternal({ props = [] } = {}) {
       source: "Sportsbook comparison",
       comparisons: [],
       warnings: ["Missing API key."],
+    };
+  }
+
+  if (isSourceAuthBlocked(SOURCE_IDS.ODDS_API)) {
+    return {
+      source: "Sportsbook comparison",
+      comparisons: [],
+      warnings: [ODDS_API_INVALID_KEY_MESSAGE],
+      authFailed: true,
     };
   }
 
@@ -164,7 +181,7 @@ async function fetchSportMarkets(apiKey, sport, propsForSport) {
   const markets = unique(propsForSport.map(marketForProp).filter(Boolean));
   if (!markets.length) return [];
 
-  const eventsUrl = sportsbookProxyUrl(`/v4/sports/${sportKey}/events`, { apiKey });
+  const eventsUrl = buildOddsApiProxyUrl(`/v4/sports/${sportKey}/events`);
 
   const result = await fetchJsonSafe(eventsUrl.toString(), {}, {
     source: "Sportsbook odds events",
@@ -174,6 +191,22 @@ async function fetchSportMarkets(apiKey, sport, propsForSport) {
     enrichment: true,
     timeoutMs: getApiTimeoutMs({ enrichment: true }),
   });
+  logOddsApiExchange({
+    url: eventsUrl.toString(),
+    status: result.response?.status,
+    text: result.text,
+    data: result.data,
+    label: "Sportsbook odds events",
+  });
+  const authFailure = parseOddsApiAuthFailure({
+    data: result.data,
+    status: result.response?.status,
+    text: result.text,
+  });
+  if (authFailure) {
+    recordSourceAuthFailure(SOURCE_IDS.ODDS_API, authFailure);
+    throw new Error(authFailure);
+  }
   if (!result.ok) {
     if (result.rateLimited) throw new Error(oddsApiErrorMessage(429));
     throw new Error(result.error || "Could not load sportsbook comparison data.");
@@ -187,7 +220,7 @@ async function fetchSportMarkets(apiKey, sport, propsForSport) {
     .slice(0, MAX_EVENTS_PER_SPORT);
 
   const settled = await Promise.allSettled(
-    upcomingEvents.map((event) => fetchEventPlayerProps(apiKey, sportKey, sport, event.id, markets))
+    upcomingEvents.map((event) => fetchEventPlayerProps(sportKey, sport, event.id, markets))
   );
 
   return aggregateSportsbookLines(
@@ -195,9 +228,8 @@ async function fetchSportMarkets(apiKey, sport, propsForSport) {
   );
 }
 
-async function fetchEventPlayerProps(apiKey, sportKey, sport, eventId, markets) {
-  const url = sportsbookProxyUrl(`/v4/sports/${sportKey}/events/${eventId}/odds`, {
-    apiKey,
+async function fetchEventPlayerProps(sportKey, sport, eventId, markets) {
+  const url = buildOddsApiProxyUrl(`/v4/sports/${sportKey}/events/${eventId}/odds`, {
     regions: "us",
     markets: markets.join(","),
     oddsFormat: "american",
@@ -211,6 +243,22 @@ async function fetchEventPlayerProps(apiKey, sportKey, sport, eventId, markets) 
     enrichment: true,
     timeoutMs: getApiTimeoutMs({ enrichment: true }),
   });
+  logOddsApiExchange({
+    url: url.toString(),
+    status: result.response?.status,
+    text: result.text,
+    data: result.data,
+    label: "Sportsbook odds props",
+  });
+  const authFailure = parseOddsApiAuthFailure({
+    data: result.data,
+    status: result.response?.status,
+    text: result.text,
+  });
+  if (authFailure) {
+    recordSourceAuthFailure(SOURCE_IDS.ODDS_API, authFailure);
+    throw new Error(authFailure);
+  }
   if (!result.ok) {
     if (result.rateLimited) throw new Error(oddsApiErrorMessage(429));
     throw new Error(result.error || "Could not load sportsbook comparison data.");
@@ -225,15 +273,6 @@ async function fetchEventPlayerProps(apiKey, sportKey, sport, eventId, markets) 
         (market.outcomes || []).map((outcome) => normalizeOutcome({ sport, book, market, outcome })).filter(Boolean)
       )
     );
-}
-
-function sportsbookProxyUrl(path, params = {}) {
-  const url = new URL("/api/sportsbookOdds", window.location.origin);
-  url.searchParams.set("path", path);
-  Object.entries(params).forEach(([key, value]) => {
-    if (value != null && value !== "") url.searchParams.set(key, value);
-  });
-  return url;
 }
 
 function normalizeOutcome({ sport, book, market, outcome }) {
@@ -363,12 +402,8 @@ function normalize(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function getOddsApiKey() {
-  return getRuntimeOddsApiKey();
-}
-
 function oddsApiErrorMessage(status) {
-  if (status === 401 || status === 403) return "Missing API key.";
+  if (status === 401 || status === 403) return ODDS_API_INVALID_KEY_MESSAGE;
   if (status === 429) return "API limit reached. Try again later or upgrade plan.";
   if (status === 422) return "Unsupported sportsbook market skipped.";
   return "Could not load sportsbook comparison data.";
@@ -376,6 +411,8 @@ function oddsApiErrorMessage(status) {
 
 function friendlyOddsError(error) {
   const message = error?.message || "Could not load sportsbook comparison data.";
+  if (message.includes(ODDS_API_INVALID_KEY_MESSAGE)) return message;
+  if (/401|403|unauthorized|invalid api key|subscription/i.test(message)) return ODDS_API_INVALID_KEY_MESSAGE;
   if (message.includes("Unsupported sportsbook market")) return message;
   if (message.includes("API limit reached")) return message;
   if (message.includes("Missing API key")) return message;

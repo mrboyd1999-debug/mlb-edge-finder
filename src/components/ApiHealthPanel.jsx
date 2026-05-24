@@ -1,4 +1,5 @@
 import { providerStatusStyle } from "../services/providerHealth.js";
+import { getOddsApiKeyDebugInfo, ODDS_API_INVALID_KEY_MESSAGE, sanitizeOddsApiUiMessage } from "../services/oddsApiClient.js";
 import { formatDateTime } from "../utils/formatters.js";
 import { styles } from "../theme/styles.js";
 
@@ -12,19 +13,40 @@ function sportsDataKeySaved(row) {
   return Boolean(row?.keySaved || row?.keyConfigured);
 }
 
+function formatProviderError(row = {}) {
+  if (!row?.showError) return "";
+  const raw = row?.lastError || row?.preview || row?.message || "";
+  if (String(row?.provider || "").toLowerCase() === "odds api") {
+    return sanitizeOddsApiUiMessage(raw) || ODDS_API_INVALID_KEY_MESSAGE;
+  }
+  const text = String(raw || "").trim();
+  if (!text) return "";
+  if (text.startsWith("{") || text.startsWith("[")) return "Connection check failed.";
+  return text.slice(0, 180);
+}
+
 function providerDetails(label, row, testedAt) {
   if (label === "SportsDataIO") {
     return {
       savedKey: sportsDataKeySaved(row) ? "Yes" : "No",
       lastTested: testedAt ? formatDateTime(testedAt) : "Not tested",
       result: row?.settingsLine || "Not Used",
-      error: row?.showError ? row?.lastError || row?.preview || "Connection failed" : "",
+      error: formatProviderError(row),
       debugLine: row?.debugLine || "",
+    };
+  }
+  if (label === "Odds API") {
+    const keyDebug = getOddsApiKeyDebugInfo();
+    return {
+      result: row?.settingsLine || "Not tested",
+      error: formatProviderError(row),
+      keyLength: row?.keyLength ?? keyDebug.keyLength,
+      keyConfigured: row?.keyConfigured ?? keyDebug.configured,
     };
   }
   return {
     result: row?.settingsLine || "Not tested",
-    error: row?.showError ? row?.lastError || row?.preview || "" : "",
+    error: formatProviderError(row),
   };
 }
 
@@ -44,6 +66,7 @@ export default function ApiHealthPanel({ connectionReport = null, lastTestedAt =
           const settingsLine = row?.settingsLine || row?.displayStatus || (label === "SportsDataIO" ? "Not Used" : "Not tested");
           const details = providerDetails(label, row, testedAt);
           const isSportsData = label === "SportsDataIO";
+          const isOddsApi = label === "Odds API";
 
           return (
             <div
@@ -67,11 +90,18 @@ export default function ApiHealthPanel({ connectionReport = null, lastTestedAt =
                   <span style={styles.compactFlags}>Last tested: {details.lastTested}</span>
                   <span style={styles.compactFlags}>Result: {details.result}</span>
                 </>
+              ) : isOddsApi ? (
+                <>
+                  <span style={styles.compactFlags}>Status: {details.result}</span>
+                  <span style={styles.compactFlags}>
+                    Odds key length: {details.keyConfigured ? details.keyLength : 0}
+                  </span>
+                </>
               ) : (
                 <span style={styles.compactFlags}>Status: {details.result}</span>
               )}
               {details.error ? (
-                <span style={{ ...styles.compactFlags, color: "#fca5a5" }}>Error: {details.error}</span>
+                <span style={{ ...styles.compactFlags, color: "#fca5a5" }}>{details.error}</span>
               ) : null}
               {isSportsData && details.debugLine ? (
                 <span style={{ ...styles.compactFlags, color: "#86efac" }}>{details.debugLine}</span>

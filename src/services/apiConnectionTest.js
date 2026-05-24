@@ -1,5 +1,13 @@
 import { getOddsApiKey, getProxyUrl, getSportsDataApiKey, getStatmuseApiKey } from "../config/apiConfig.js";
 import {
+  buildOddsApiProxyUrl,
+  getOddsApiKeyDebugInfo,
+  logOddsApiExchange,
+  ODDS_API_INVALID_KEY_MESSAGE,
+  parseOddsApiAuthFailure,
+  redactOddsApiUrl,
+} from "./oddsApiClient.js";
+import {
   ENRICHMENT_TIMEOUT_MESSAGE,
   getApiTimeoutMs,
   isAbortOrTimeoutError,
@@ -10,7 +18,7 @@ import {
   SPORTSDATA_CONNECTED_VIA_PROXY,
   SPORTSDATA_MLB_STATUS_ROUTE,
 } from "./sportsDataService.js";
-import { getSourceState, isSourceInCooldown, SOURCE_IDS } from "./sourceRateLimit.js";
+import { getSourceState, isSourceInCooldown, recordSourceAuthFailure, SOURCE_IDS } from "./sourceRateLimit.js";
 import { readCachedBoard, readVerifiedCacheBoard } from "./pickStore.js";
 import { buildFeedHealthContext, mergeConnectionReportWithFeeds } from "./providerHealth.js";
 
@@ -26,6 +34,7 @@ export const CONNECTION_MESSAGES = {
   CONNECTED: "Connected",
   NOT_CONFIGURED: "Not configured",
   INVALID: "Invalid key or unauthorized",
+  INVALID_ODDS_KEY: ODDS_API_INVALID_KEY_MESSAGE,
   RATE_LIMITED: "Rate limited — using cache",
   DEGRADED: "Degraded — partial response",
   FAILED: "Connection failed",
@@ -51,20 +60,36 @@ async function probeFetch(url, { method = "GET", headers = {} } = {}) {
         payload = null;
       }
     }
+    const upstreamStatus = Number(payload?.upstreamStatus ?? payload?.responseCode ?? response.status ?? 0);
+    const unauthorized =
+      upstreamStatus === 401 ||
+      upstreamStatus === 403 ||
+      Boolean(parseOddsApiAuthFailure({ data: payload, status: upstreamStatus, text: trimmed }));
     const result = {
-      ok: response.ok && looksJson && !looksHtml,
-      status: response.status,
+      ok: response.ok && looksJson && !looksHtml && !payload?.error && !unauthorized,
+      status: upstreamStatus || response.status,
       contentType,
-      preview: text.slice(0, 160).replace(/\s+/g, " ").trim() || "(empty)",
+      preview: unauthorized
+        ? ODDS_API_INVALID_KEY_MESSAGE
+        : text.slice(0, 160).replace(/\s+/g, " ").trim() || "(empty)",
       durationMs: Date.now() - startedAt,
       payload,
-      rateLimited: response.status === 429,
-      unauthorized: response.status === 401 || response.status === 403,
+      rateLimited: (upstreamStatus || response.status) === 429,
+      unauthorized,
       looksHtml,
       url,
     };
+    if (/odds|sportsbook/i.test(String(url))) {
+      logOddsApiExchange({
+        url,
+        status: upstreamStatus || response.status,
+        text: trimmed,
+        data: payload,
+        label: "Odds API health probe",
+      });
+    }
     if (!result.ok) {
-      const redactedUrl = String(url).replace(/apiKey=[^&]+/gi, "apiKey=[REDACTED]");
+      const redactedUrl = redactOddsApiUrl(String(url));
       console.error(
         `[API Health] Probe failed — url=${redactedUrl} status=${result.status} preview=${result.preview}`
       );
@@ -126,7 +151,9 @@ function classifyLineSourceProbe(result, { requiresKey = false, keyConfigured = 
   if (result.unauthorized) {
     return {
       status: CONNECTION_STATUS.FAILED,
-      message: CONNECTION_MESSAGES.INVALID,
+      message: sourceId === SOURCE_IDS.ODDS_API ? ODDS_API_INVALID_KEY_MESSAGE : CONNECTION_MESSAGES.INVALID,
+      settingsLine: sourceId === SOURCE_IDS.ODDS_API ? "Invalid Key" : "Failed",
+      unauthorized: true,
     };
   }
   if (result.ok) {
@@ -209,6 +236,7 @@ async function testUnderdog() {
 
 async function testOddsApi() {
   const key = getOddsApiKey();
+  const keyDebug = getOddsApiKeyDebugInfo();
   if (!key) {
     return {
       provider: "Odds API",
@@ -218,13 +246,16 @@ async function testOddsApi() {
       preview: "No VITE_ODDS_API_KEY configured",
       durationMs: 0,
       keyConfigured: false,
+      keyLength: 0,
     };
   }
-  const url = new URL("/api/sportsbookOdds", window.location.origin);
-  url.searchParams.set("path", "/v4/sports");
-  url.searchParams.set("apiKey", key);
+  const url = buildOddsApiProxyUrl("/v4/sports");
   const route = url.pathname + url.search;
+  console.info("[Odds API Test] Request URL:", redactOddsApiUrl(route));
+  console.info("[Odds API Test] Odds key length:", keyDebug.keyLength);
   const result = await probeFetch(route);
+  console.info("[Odds API Test] Response status:", result.status);
+  console.info("[Odds API Test] Response body:", result.preview);
   const sportsListOk = result.ok && Array.isArray(result.payload) && result.payload.length > 0;
   if (sportsListOk) {
     const state = getSourceState(SOURCE_IDS.ODDS_API);
@@ -232,8 +263,11 @@ async function testOddsApi() {
       provider: "Odds API",
       route,
       keyConfigured: true,
+      keyLength: keyDebug.keyLength,
       status: CONNECTION_STATUS.LIVE,
       message: CONNECTION_MESSAGES.CONNECTED,
+      settingsLine: "Connected",
+      settingsStatus: "Connected",
       sportsListOk: true,
       sportsCount: result.payload.length,
       ...result,
@@ -241,6 +275,7 @@ async function testOddsApi() {
       requestCount: state.requestCount || 0,
       lastError: "",
       cooldownRemainingMs: Math.max(0, Number(state.cooldownUntil || 0) - Date.now()),
+      showError: false,
     };
   }
   const classified = classifyLineSourceProbe(result, {
@@ -249,17 +284,24 @@ async function testOddsApi() {
     sourceId: SOURCE_IDS.ODDS_API,
   });
   const state = getSourceState(SOURCE_IDS.ODDS_API);
+  if (result.unauthorized) {
+    recordSourceAuthFailure(SOURCE_IDS.ODDS_API, ODDS_API_INVALID_KEY_MESSAGE);
+  }
   return {
     provider: "Odds API",
     route,
     keyConfigured: true,
+    keyLength: keyDebug.keyLength,
     sportsListOk: false,
     ...classified,
     ...result,
+    settingsLine: classified.settingsLine || (result.unauthorized ? "Invalid Key" : "Failed"),
+    settingsStatus: classified.settingsLine || (result.unauthorized ? "Invalid Key" : "Failed"),
     lastSuccessfulFetchAt: state.lastSuccessfulFetchAt || "",
     requestCount: state.requestCount || 0,
-    lastError: classified.status === CONNECTION_STATUS.FAILED ? result.preview : "",
+    lastError: result.unauthorized ? ODDS_API_INVALID_KEY_MESSAGE : classified.status === CONNECTION_STATUS.FAILED ? result.preview : "",
     cooldownRemainingMs: Math.max(0, Number(state.cooldownUntil || 0) - Date.now()),
+    showError: Boolean(result.unauthorized || classified.status === CONNECTION_STATUS.FAILED),
   };
 }
 

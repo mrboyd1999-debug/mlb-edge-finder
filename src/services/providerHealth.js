@@ -195,7 +195,7 @@ function resolveLineProviderStatus(provider = "", { probe = {}, feed = {} } = {}
   const boardCount = finiteOr(feed.boardCount ?? feed.usableCount, 0);
   const hasBoardProps = boardCount > 0;
 
-  if (probe?.unauthorized) {
+  if (probe?.unauthorized && name !== "Odds API") {
     return {
       settingsStatus: "Failed",
       settingsLine: "Failed",
@@ -210,6 +210,13 @@ function resolveLineProviderStatus(provider = "", { probe = {}, feed = {} } = {}
         settingsStatus: PROVIDER_UI_STATUS.NOT_USED,
         settingsLine: PROVIDER_UI_STATUS.NOT_USED,
         showError: false,
+      };
+    }
+    if (probe?.unauthorized) {
+      return {
+        settingsStatus: PROVIDER_UI_STATUS.INVALID_KEY,
+        settingsLine: "Invalid Key",
+        showError: true,
       };
     }
     if (probe?.sportsListOk) {
@@ -234,8 +241,10 @@ function resolveLineProviderStatus(provider = "", { probe = {}, feed = {} } = {}
       };
     }
     return {
-      settingsStatus: "Failed",
-      settingsLine: "Failed",
+      settingsStatus: PROVIDER_UI_STATUS.INVALID_KEY,
+      settingsLine: /401|403|invalid|unauthorized|subscription/i.test(String(probe?.preview || ""))
+        ? "Invalid Key"
+        : "Failed",
       showError: true,
     };
   }
@@ -354,6 +363,7 @@ export function providerStatusStyle(status = "") {
     "PROXY REQUIRED": { bg: "rgba(234,179,8,0.18)", text: "#fde047" },
     "INVALID API KEY": { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
     "INVALID KEY": { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
+    "Invalid Key": { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
     "NOT TESTED": { bg: "rgba(148,163,184,0.15)", text: "#cbd5e1" },
     "TIMED OUT": { bg: "rgba(234,179,8,0.18)", text: "#fde047" },
     "TIMED OUT — USING BASE FEED.": { bg: "rgba(234,179,8,0.18)", text: "#fde047" },
