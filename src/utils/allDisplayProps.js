@@ -1,4 +1,5 @@
 import { normalizeSportLabel, sportLabelsMatch } from "./sportMappings.js";
+import { isDevEnvironment } from "../services/fetchUtil.js";
 import {
   dedupeDisplayProps,
   enrichDisplayPropsPipeline,
@@ -246,7 +247,7 @@ export function buildDisplayDebugCounts({
 }
 
 export function logAllDisplayPropsSample(allDisplayProps = []) {
-  if (!allDisplayProps.length) return;
+  if (!isDevEnvironment() || !allDisplayProps.length) return;
   console.table(
     allDisplayProps.slice(0, 10).map((prop) => ({
       player: prop.player,

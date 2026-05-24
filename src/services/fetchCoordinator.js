@@ -4,7 +4,7 @@
  *  `sourceRateLimit.js` still throttle actual upstream API calls, so this
  *  cannot spam providers. Window-focus refetch is disabled in the app shell. */
 const AUTO_REFRESH_MS = 5 * 60 * 1000;
-const MANUAL_REFRESH_COOLDOWN_MS = 90 * 1000;
+const MANUAL_REFRESH_COOLDOWN_MS = 45 * 1000;
 
 let boardFetchInFlight = false;
 let queuedBoardFetch = null;

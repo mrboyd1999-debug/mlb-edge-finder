@@ -1,10 +1,5 @@
 import { memo, useMemo } from "react";
 import PlayerPropCard from "./PlayerPropCard.jsx";
-import VirtualCardList from "./VirtualCardList.jsx";
-import { RENDER_LIMITS } from "../utils/approvedMarkets.js";
-import { computeRankScore } from "../services/projectionEngine.js";
-import { isGoblinProp } from "../utils/propLabels.js";
-import { isVerifiedSportsbookProp } from "../utils/propValidation.js";
 import { styles } from "../theme/styles.js";
 
 function EmptyState({ text }) {
@@ -12,15 +7,7 @@ function EmptyState({ text }) {
 }
 
 function GoblinBoard({ picks = [], loading, onOpen, compactMode = true }) {
-  const goblins = useMemo(
-    () =>
-      [...picks]
-        .filter(isVerifiedSportsbookProp)
-        .filter(isGoblinProp)
-        .sort((a, b) => computeRankScore(b) - computeRankScore(a))
-        .slice(0, RENDER_LIMITS.goblins),
-    [picks]
-  );
+  const goblins = useMemo(() => (picks || []).filter(Boolean).slice(0, 2), [picks]);
 
   const renderCard = useMemo(
     () => (prop) => (
@@ -33,19 +20,19 @@ function GoblinBoard({ picks = [], loading, onOpen, compactMode = true }) {
     <section style={styles.section}>
       <div style={styles.sectionHeading}>
         <div>
-          <p style={styles.eyebrow}>Verified Goblin</p>
+          <p style={styles.eyebrow}>High hit rate · low variance</p>
           <h2 style={styles.sectionTitle}>Goblin Picks</h2>
         </div>
-        <p style={styles.countPill}>{goblins.length} picks</p>
+        <p style={styles.countPill}>{goblins.length}/2</p>
       </div>
       {loading ? (
         <EmptyState text="Loading Goblin lines…" />
       ) : goblins.length === 0 ? (
-        <EmptyState text="No verified Goblin props available right now." />
+        <EmptyState text="No Goblin picks (80+ confidence, low variance) available right now." />
       ) : (
         <>
-          <VirtualCardList items={goblins} renderCard={renderCard} initialVisible={10} />
-          <p style={styles.compactFlags}>Lower payout does not guarantee a hit.</p>
+          <div style={styles.topPicksList}>{goblins.map((prop) => renderCard(prop))}</div>
+          <p style={styles.compactFlags}>Safer lines — lower payout does not guarantee a hit.</p>
         </>
       )}
     </section>

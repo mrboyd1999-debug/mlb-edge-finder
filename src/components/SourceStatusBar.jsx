@@ -198,11 +198,11 @@ export default function SourceStatusBar({
                       {row.badge ? <span style={styles.lineSourceBadge(row.badge)}>{row.badge}</span> : null}
                       {row.label !== "Upcoming slate" && devMode ? <span className="api-health-count-line">{countLine}</span> : null}
                       <span>Last OK: {formatHealthTime(row.lastFetchAt)}</span>
-                      {row.cacheAge ? <span>Cache age: {row.cacheAge}</span> : null}
+                      {devMode && row.cacheAge ? <span>Cache age: {row.cacheAge}</span> : null}
                       {Number(row.cooldownRemainingMs) > 0 ? (
                         <span>Cooldown: {formatCooldownRemaining(row.cooldownRemainingMs)}</span>
                       ) : null}
-                      {sessionCount != null ? <span>Requests (session): {sessionCount}</span> : null}
+                      {devMode && sessionCount != null ? <span>Requests (session): {sessionCount}</span> : null}
                       {row.lastError ? (
                         <span className="api-health-error-preview">Last error: {row.lastError}</span>
                       ) : null}

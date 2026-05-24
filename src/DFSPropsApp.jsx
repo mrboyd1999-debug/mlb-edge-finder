@@ -9,6 +9,7 @@ import {
 import { resolveSourceHealthState, resolveFetchHealthBadge, summarizeSourceCounts, HEALTH_STATES, EMPTY_SOURCE_MESSAGE } from "./services/sourceHealth.js";
 import { enrichLineMovementWithTags } from "./services/lineMovementTrust.js";
 import { fetchSportsbookComparison } from "./services/sportsbookOdds";
+import { fetchOddsApiDisplayProps } from "./services/oddsApiPlayerProps.js";
 import { fetchPlayerStats, findStatProfile } from "./services/playerStats";
 import { PRIZEPICKS_HTML_BANNER } from "./services/prizepicks";
 import { fetchInjuryNews } from "./services/injuryNews";
@@ -182,7 +183,7 @@ import {
   selectReadyFromDisplayProps,
   selectTop2FromDisplayProps,
 } from "./utils/allDisplayProps.js";
-import { enrichDisplayPropsPipeline, selectDemonProps, selectGoblinProps } from "./utils/displayPropScoring.js";
+import { enrichDisplayPropsPipeline, selectAcceptedDisplayProps, selectDemonProps, selectGoblinProps, matchesMarketQuickFilter } from "./utils/displayPropScoring.js";
 import {
   buildPipelineStageReport,
   buildUsablePropsPool,
@@ -549,10 +550,10 @@ const BASE_SPORT_OPTIONS = [
 ];
 
 const ALL_STREAK_TAB_OPTIONS = [
-  { value: "MLB", label: "MLB", type: "sport", always: true },
-  { value: "WNBA", label: "WNBA", type: "sport", always: true },
-  { value: "NBA", label: "NBA", type: "sport", always: true },
-  { value: "Tennis", label: "Tennis", type: "sport", always: true },
+  { value: "MLB", label: "MLB", type: "sport" },
+  { value: "WNBA", label: "WNBA", type: "sport" },
+  { value: "NBA", label: "NBA", type: "sport" },
+  { value: "Tennis", label: "Tennis", type: "sport" },
   { value: "goblins", label: "Goblins", type: "goblin", always: true },
   { value: "demons", label: "Demons", type: "demon", always: true },
 ];
@@ -920,6 +921,12 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
   let prizePicksResult = null;
   let underdogResult = null;
+  let oddsApiPlayerResult = null;
+  const oddsApiPromise = fetchOddsApiDisplayProps({ sport: fetchSport }).catch((error) => ({
+    props: [],
+    warnings: [error?.message || "Odds API player props failed"],
+    parsedCount: 0,
+  }));
   if (wantsPrizePicks) {
     try {
       prizePicksResult = await fetchPrizePicksProps({ sport: fetchSport, statType: "all" });
@@ -1014,6 +1021,26 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     sourceWarnings.unshift(PRIZEPICKS_RATE_LIMIT_MESSAGE);
   }
 
+  oddsApiPlayerResult = await oddsApiPromise;
+  if (oddsApiPlayerResult?.props?.length) {
+    sourceStatus["The Odds API"] = oddsApiPlayerResult.cached ? "Cached" : "Partial";
+  }
+  debugInfo.sources["The Odds API"] = {
+    ...debugInfo.sources["The Odds API"],
+    status: oddsApiPlayerResult?.props?.length ? (oddsApiPlayerResult.cached ? "Cached" : "Partial") : debugInfo.sources["The Odds API"]?.status || "Pending",
+    apiStatus: oddsApiPlayerResult?.props?.length ? "Connected" : "Pending",
+    rawPropsLoaded: Number(oddsApiPlayerResult?.parsedCount || oddsApiPlayerResult?.props?.length || 0),
+    propsAfterParsing: Number(oddsApiPlayerResult?.parsedCount || oddsApiPlayerResult?.props?.length || 0),
+    usablePropsCount: Number(oddsApiPlayerResult?.props?.length || 0),
+    message: (oddsApiPlayerResult?.warnings || []).join(" ") || (oddsApiPlayerResult?.props?.length ? "Player props parsed" : EMPTY_SOURCE_MESSAGE),
+    lastSuccessfulFetchAt: oddsApiPlayerResult?.lastSuccessfulFetchAt || "",
+    lineSourceBadge: oddsApiPlayerResult?.props?.length
+      ? oddsApiPlayerResult.cached || oddsApiPlayerResult.rateLimited
+        ? "CACHED"
+        : "LIVE"
+      : "EMPTY",
+  };
+
   const scopedRawProps = filterActiveSportProps(rawProps);
   if (MLB_ONLY_MODE && scopedRawProps.length !== rawProps.length) {
     console.info("[DFS Pipeline] MLB-only scope removed non-MLB props", {
@@ -1034,7 +1061,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     underdogResult,
     sport: fetchSport,
     selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
-    oddsApi: [],
+    oddsApi: oddsApiPlayerResult?.props || [],
   });
   if (!allDisplayProps.length && rawProps.length) {
     allDisplayProps = enrichDisplayPropsPipeline(
@@ -1218,25 +1245,28 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
           : result.value.rateLimited
             ? "Cached"
             : sportsbookSourceStatus(result.value);
+        const playerPropsCount = Number(debugInfo.sources["The Odds API"]?.propsAfterParsing || 0);
         debugInfo.sources["The Odds API"] = {
           ...debugInfo.sources["The Odds API"],
           status: sourceStatus["The Odds API"],
           apiStatus: sourceStatus["The Odds API"],
-          rawPropsLoaded: normalProps.length,
-          propsAfterParsing: background.comparisons.length,
+          rawPropsLoaded: Math.max(playerPropsCount, normalProps.length),
+          propsAfterParsing: Math.max(playerPropsCount, background.comparisons.length),
           propsAfterFilters: background.comparisons.length,
-          usablePropsCount: background.comparisons.length,
+          usablePropsCount: Math.max(playerPropsCount, background.comparisons.length),
           message:
-            background.comparisons.length > 0
-              ? (result.value.warnings || []).join(" ")
-              : EMPTY_SOURCE_MESSAGE,
-          lastSuccessfulFetchAt: result.value.lastSuccessfulFetchAt || "",
+            playerPropsCount > 0
+              ? `${playerPropsCount} player props · ${background.comparisons.length} line comparisons`
+              : background.comparisons.length > 0
+                ? (result.value.warnings || []).join(" ")
+                : EMPTY_SOURCE_MESSAGE,
+          lastSuccessfulFetchAt: result.value.lastSuccessfulFetchAt || debugInfo.sources["The Odds API"]?.lastSuccessfulFetchAt || "",
           lineSourceBadge:
-            background.comparisons.length > 0
+            playerPropsCount > 0 || background.comparisons.length > 0
               ? result.value.cached || result.value.rateLimited
                 ? "CACHED"
                 : "LIVE"
-              : "EMPTY",
+              : debugInfo.sources["The Odds API"]?.lineSourceBadge || "EMPTY",
         };
       }
       if (label === "stats") {
@@ -1476,6 +1506,7 @@ export default function DFSPropsApp() {
   const [readyOnly, setReadyOnly] = useState(false);
   const [compactMode, setCompactMode] = useState(() => readCompactModePreference());
   const [showDebugPanels, setShowDebugPanels] = useState(() => readShowDebugPanelsPreference());
+  const [marketQuickFilter, setMarketQuickFilter] = useState("all");
   const [searchText, setSearchText] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [visibleLimits, setVisibleLimits] = useState(() => ({
@@ -1873,22 +1904,30 @@ export default function DFSPropsApp() {
     }
   }, [platform, sourceStatus, debugInfo]);
 
+  const devEnvironment = isDevEnvironment();
+  const debugPanelsVisible = devEnvironment && showDebugPanels;
+
   const scoredDisplayProps = useMemo(() => allDisplayProps, [allDisplayProps]);
 
-  const selectedSportProps = useMemo(
-    () => filterAllDisplayPropsBySport(scoredDisplayProps, sport, platform),
-    [scoredDisplayProps, sport, platform]
-  );
+  const selectedSportProps = useMemo(() => {
+    let rows = filterAllDisplayPropsBySport(scoredDisplayProps, sport, platform);
+    if (marketQuickFilter === "goblins") rows = selectGoblinProps(rows);
+    else if (marketQuickFilter === "demons") rows = selectDemonProps(rows);
+    else if (marketQuickFilter && marketQuickFilter !== "all") {
+      rows = rows.filter((prop) => matchesMarketQuickFilter(prop, marketQuickFilter));
+    }
+    return rows;
+  }, [scoredDisplayProps, sport, platform, marketQuickFilter]);
   const boardDisplayProps = useMemo(() => {
     if (selectedSportProps.length) return selectedSportProps;
     if (allDisplayProps.length) return applyEmergencyDisplayFallback(allDisplayProps, 10);
     return [];
   }, [selectedSportProps, allDisplayProps]);
   const displayStatusMessage = useMemo(() => {
-    if (loading) return "";
+    if (!devEnvironment || loading) return "";
     if (allDisplayProps.length > 0) return "Showing live/cached props";
     return "";
-  }, [loading, allDisplayProps.length]);
+  }, [devEnvironment, loading, allDisplayProps.length]);
   const preFilterDebugProps = useMemo(() => allDisplayProps.slice(0, 20), [allDisplayProps]);
   const streakFinderProps = useMemo(
     () =>
@@ -1934,7 +1973,18 @@ export default function DFSPropsApp() {
     () => buildStreakSportCategoryBoards(streakFinderProps, visibleHistory),
     [streakFinderProps, visibleHistory]
   );
-  const visibleStreakSports = useMemo(() => visibleStreakSportOptions(streakSportBoards), [streakSportBoards]);
+  const visibleStreakSports = useMemo(() => {
+    const sportCounts = new Map();
+    allDisplayProps.forEach((prop) => {
+      const key = streakSportKey(prop);
+      if (key) sportCounts.set(key, (sportCounts.get(key) || 0) + 1);
+    });
+    return STREAK_TAB_OPTIONS.filter((option) => {
+      if (option.always) return true;
+      if ((streakSportBoards[option.value]?.candidateCount || 0) > 0) return true;
+      return (sportCounts.get(option.value) || 0) > 0;
+    });
+  }, [streakSportBoards, allDisplayProps]);
   const currentStreakBoard = streakSportBoards[streakSport] || emptyStreakSportBoard(streakSport);
   const currentCategoryPicks = currentStreakBoard.picks || [];
   const currentCategoryLabel = currentStreakBoard.label || STREAK_TAB_OPTIONS.find((option) => option.value === streakSport)?.label || "MLB";
@@ -1956,18 +2006,16 @@ export default function DFSPropsApp() {
   );
   const hydratedRenderableProps = useMemo(() => boardDisplayProps, [boardDisplayProps]);
   const finalAcceptedProps = useMemo(() => {
+    const displayAccepted = selectAcceptedDisplayProps(boardDisplayProps);
+    if (displayAccepted.length) return displayAccepted;
     const acceptedCount = Number(pipelineCounters.accepted ?? 0);
-    const pool = resolveFinalAcceptedPropsFromHydrated({
-      hydratedRenderableProps,
+    return resolveFinalAcceptedPropsFromHydrated({
+      hydratedRenderableProps: boardDisplayProps,
       pipelineAcceptedPools: [acceptedPropsForRender, counterAcceptedSource, qualifiedReadyProps],
       acceptedCount,
     });
-    console.log("PIPELINE ACCEPTED COUNT", acceptedCount);
-    console.log("HYDRATED RENDERABLE PROPS", hydratedRenderableProps);
-    console.log("FINAL ACCEPTED PROPS", pool);
-    return pool;
   }, [
-    hydratedRenderableProps,
+    boardDisplayProps,
     acceptedPropsForRender,
     counterAcceptedSource,
     qualifiedReadyProps,
@@ -1990,6 +2038,13 @@ export default function DFSPropsApp() {
       });
     }
   }, [selectedSportProps.length, allDisplayProps.length, sport]);
+
+  useEffect(() => {
+    if (!visibleStreakSports.length) return;
+    if (!visibleStreakSports.some((option) => option.value === streakSport)) {
+      setStreakSport(visibleStreakSports[0].value);
+    }
+  }, [visibleStreakSports, streakSport]);
 
   const topPicksForTracking = useMemo(() => topPicksDisplay, [topPicksDisplay]);
   const goblinPropsForTracking = useMemo(
@@ -2456,6 +2511,8 @@ export default function DFSPropsApp() {
           propTypes={PRIORITY_PROP_TYPES}
           edgeFilters={EDGE_FILTER_OPTIONS}
           dateFilters={DATE_FILTER_OPTIONS}
+          marketQuickFilter={marketQuickFilter}
+          setMarketQuickFilter={setMarketQuickFilter}
         />
       </details>
       </div>
@@ -2522,7 +2579,7 @@ export default function DFSPropsApp() {
 
       {visibleError && !allDisplayProps.length ? <section style={styles.errorPanel}>{visibleError}</section> : null}
 
-      {preFilterDebugProps.length ? (
+      {devEnvironment && preFilterDebugProps.length ? (
         <details className="all-props-debug-section dfs-section" style={styles.compactDetails} open>
           <summary style={styles.detailsSummary}>
             <span className="details-summary-stack">
@@ -2549,9 +2606,9 @@ export default function DFSPropsApp() {
 
       <div id="section-top-picks" className="dfs-section dfs-order-top-picks">
       {isGoblinTab ? (
-        <GoblinBoard picks={goblinDisplayProps.length ? goblinDisplayProps : streakFinderProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
+        <GoblinBoard picks={goblinDisplayProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
       ) : isDemonTab ? (
-        <DemonBoard picks={demonDisplayProps.length ? demonDisplayProps : streakFinderProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
+        <DemonBoard picks={demonDisplayProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
       ) : (
         <TopPicksBoard
           label={currentCategoryLabel}
@@ -2637,7 +2694,7 @@ export default function DFSPropsApp() {
         stale={Boolean(staleDataWarning)}
         apiHealth={apiHealth}
         lastUpdated={lastUpdated}
-        devMode={isDevEnvironment()}
+        devMode={devEnvironment}
         upcomingSlateCount={debugInfo.upcomingSlateCount ?? pipelineAudit.upcomingSlate ?? 0}
         slateExcludedCount={debugInfo.slateExcludedCount ?? pipelineAudit.slateExcluded ?? 0}
         pregameWindowHours={debugInfo.pregameWindowHours ?? filterPrefs.pregameWindowHours ?? DEFAULT_PREGAME_WINDOW_HOURS}
@@ -2653,7 +2710,7 @@ export default function DFSPropsApp() {
       />
       </div>
 
-      {showDebugPanels ? (
+      {debugPanelsVisible ? (
       <div className="dfs-section dfs-order-debug">
       {Object.keys(pipelineCounters).length > 0 ? (
         <LazyDebugDetails

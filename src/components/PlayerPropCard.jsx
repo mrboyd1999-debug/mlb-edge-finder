@@ -193,50 +193,80 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
         </div>
       </div>
       <div className="prop-card-meta-row prop-card-meta-primary" style={styles.compactMetaRow}>
-        <span className="prop-card-stat-highlight" style={styles.compactMetaItem}>
-          <span style={styles.metaLabel}>Prop</span>
-          <strong>{displayMarketLabel(prop)}</strong>
-        </span>
-        <span style={styles.compactMetaItem}>
-          <span style={styles.metaLabel}>Line</span>
-          <strong>
-            {formatNumber(prop.line)}
-            {movementLabel ? <span style={{ marginLeft: "4px", color: "#7dd3fc", fontSize: "11px" }}>{movementLabel}</span> : null}
-          </strong>
-        </span>
-        <span className="prop-card-conf-highlight" style={styles.compactMetaItem}>
-          <span style={styles.metaLabel}>Conf</span>
-          <strong style={styles.metaValueStrong}>
-            {confDisplay != null ? `${confDisplay}%` : "—"}
-          </strong>
-        </span>
-        <span style={styles.compactMetaItem}>
-          <span style={styles.metaLabel}>Lean</span>
-          <strong style={styles.metaValueStrong}>{lean}</strong>
-        </span>
-        {topPick ? (
+        {compact ? (
+          <>
+            <span className="prop-card-stat-highlight prop-card-prop-line-row" style={{ ...styles.compactMetaItem, flex: "1 1 100%" }}>
+              <strong>
+                {displayMarketLabel(prop)} · Line {formatNumber(prop.line)}
+                {movementLabel ? <span style={{ marginLeft: "4px", color: "#7dd3fc", fontSize: "10px" }}>{movementLabel}</span> : null}
+              </strong>
+            </span>
+            <div className="prop-card-badge-row" style={styles.badgeRow}>
+              <span style={{ ...styles.scoreBadge, borderColor: "#166534", color: "#86efac" }}>
+                CONF {confDisplay != null ? `${confDisplay}%` : "—"}
+              </span>
+              <span style={{ ...styles.scoreBadge, borderColor: "#1d4ed8", color: "#93c5fd" }}>
+                EDGE {edgeDisplay}
+              </span>
+              <span style={{ ...styles.scoreBadge, borderColor: riskShort === "LOW" ? "#166534" : riskShort === "HIGH" ? "#991b1b" : "#854d0e", color: riskShort === "LOW" ? "#86efac" : riskShort === "HIGH" ? "#fca5a5" : "#fde68a" }}>
+                RISK {riskShort}
+              </span>
+            </div>
+          </>
+        ) : (
+          <>
+            <span className="prop-card-stat-highlight" style={styles.compactMetaItem}>
+              <span style={styles.metaLabel}>Prop</span>
+              <strong>{displayMarketLabel(prop)}</strong>
+            </span>
+            <span style={styles.compactMetaItem}>
+              <span style={styles.metaLabel}>Line</span>
+              <strong>
+                {formatNumber(prop.line)}
+                {movementLabel ? <span style={{ marginLeft: "4px", color: "#7dd3fc", fontSize: "11px" }}>{movementLabel}</span> : null}
+              </strong>
+            </span>
+            <span className="prop-card-conf-highlight" style={styles.compactMetaItem}>
+              <span style={styles.metaLabel}>Conf</span>
+              <strong style={styles.metaValueStrong}>
+                {confDisplay != null ? `${confDisplay}%` : "—"}
+              </strong>
+            </span>
+            <span style={styles.compactMetaItem}>
+              <span style={styles.metaLabel}>Lean</span>
+              <strong style={styles.metaValueStrong}>{lean}</strong>
+            </span>
+          </>
+        )}
+        {topPick && !compact ? (
           <p className="prop-meta-top-pick-inline">
             CONF {confDisplay != null ? `${confDisplay}%` : "—"} • EDGE {edgeDisplay} • RISK {riskShort}
           </p>
         ) : null}
-        <span className="prop-meta-secondary" style={styles.compactMetaItem}>
-          <span style={styles.metaLabel}>Proj</span>
-          <strong style={styles.metaValueStrong}>
-            {prop.projectedValue != null
-              ? formatNumber(prop.projectedValue)
-              : prop.projection != null
-                ? formatNumber(prop.projection)
-                : "—"}
-          </strong>
-        </span>
-        <span className={`prop-meta-conf-edge-risk${topPick ? " prop-meta-top-pick-hide" : ""}`} style={styles.compactMetaItem}>
-          <span style={styles.metaLabel}>Edge</span>
-          <strong style={styles.metaValueStrong}>{edgeDisplay}</strong>
-        </span>
-        <span className={`prop-meta-conf-edge-risk${topPick ? " prop-meta-top-pick-hide" : ""}`} style={styles.compactMetaItem}>
-          <span style={styles.metaLabel}>Risk</span>
-          <strong>{riskShort}</strong>
-        </span>
+        {!compact ? (
+          <>
+            <span className="prop-meta-secondary" style={styles.compactMetaItem}>
+              <span style={styles.metaLabel}>Proj</span>
+              <strong style={styles.metaValueStrong}>
+                {prop.projectedValue != null
+                  ? formatNumber(prop.projectedValue)
+                  : prop.projection != null
+                    ? formatNumber(prop.projection)
+                    : "—"}
+              </strong>
+            </span>
+            <span className={`prop-meta-conf-edge-risk${topPick ? " prop-meta-top-pick-hide" : ""}`} style={styles.compactMetaItem}>
+              <span style={styles.metaLabel}>Edge</span>
+              <strong style={styles.metaValueStrong}>{edgeDisplay}</strong>
+            </span>
+            <span className={`prop-meta-conf-edge-risk${topPick ? " prop-meta-top-pick-hide" : ""}`} style={styles.compactMetaItem}>
+              <span style={styles.metaLabel}>Risk</span>
+              <strong>{riskShort}</strong>
+            </span>
+          </>
+        ) : null}
+        {!compact ? (
+          <>
         <span className="prop-meta-secondary" style={styles.compactMetaItem}>
           <span style={styles.metaLabel}>EV</span>
           <strong>{Number.isFinite(Number(prop.expectedValueScore)) ? Math.round(Number(prop.expectedValueScore)) : "—"}</strong>
@@ -269,6 +299,8 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
               {formatNumber(sportsbookEdgeNum)}
             </strong>
           </span>
+        ) : null}
+          </>
         ) : null}
         {!compact && prop.edgeScore != null && (
           <span style={styles.compactMetaItem}>

@@ -1,5 +1,17 @@
 import { styles } from "../theme/styles.js";
 
+const MARKET_QUICK_FILTERS = [
+  { id: "all", label: "All" },
+  { id: "points", label: "Points" },
+  { id: "rebounds", label: "Rebounds" },
+  { id: "assists", label: "Assists" },
+  { id: "pra", label: "PRA" },
+  { id: "threes", label: "3PM" },
+  { id: "fantasy", label: "Fantasy" },
+  { id: "goblins", label: "Goblins" },
+  { id: "demons", label: "Demons" },
+];
+
 export default function PropFilters({
   platform,
   setPlatform,
@@ -22,6 +34,8 @@ export default function PropFilters({
   propTypes = [],
   edgeFilters = [],
   dateFilters = [],
+  marketQuickFilter = "all",
+  setMarketQuickFilter,
 }) {
   const updatePref = (key, value) => {
     setFilterPrefs?.((current) => ({ ...current, [key]: value }));
@@ -85,6 +99,21 @@ export default function PropFilters({
             placeholder="Player, prop, team"
           />
         </label>
+      </section>
+      <section style={styles.quickFilters} aria-label="Market filters">
+        <span style={styles.controlLabel}>Markets</span>
+        <div style={{ ...styles.segmentRow, flexWrap: "wrap", gap: "6px" }}>
+          {MARKET_QUICK_FILTERS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              style={marketQuickFilter === option.id ? styles.segmentActive : styles.segment}
+              onClick={() => setMarketQuickFilter?.(option.id)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
       </section>
       <section style={styles.quickFilters} aria-label="Edge filters">
         <span style={styles.controlLabel}>Edge</span>

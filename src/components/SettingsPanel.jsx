@@ -11,6 +11,7 @@ import {
 } from "../services/runtimeSettings.js";
 import { validateApiConfig } from "../config/apiConfig.js";
 import { connectionStatusStyle, testAllApiConnections } from "../services/apiConnectionTest.js";
+import { isDevEnvironment } from "../services/fetchUtil.js";
 
 export default function SettingsPanel({
   onSaved,
@@ -82,6 +83,7 @@ export default function SettingsPanel({
             {testing ? "Testing…" : "Test API"}
           </button>
         </div>
+        {isDevEnvironment() ? (
         <label
           style={{
             ...styles.selectLabel,
@@ -98,6 +100,7 @@ export default function SettingsPanel({
           />
           Show Debug Panels
         </label>
+        ) : null}
         <p className="mobile-hide-verbose" style={{ ...styles.compactFlags, margin: "8px 0 0" }}>
           Keys are stored in <code>localStorage</code> for development. For production, set the same{" "}
           <code>VITE_*</code> variables in Vercel — never commit <code>.env.local</code>.

@@ -1,8 +1,5 @@
 import { memo, useMemo } from "react";
 import PlayerPropCard from "./PlayerPropCard.jsx";
-import VirtualCardList from "./VirtualCardList.jsx";
-import { RENDER_LIMITS } from "../utils/approvedMarkets.js";
-import { isDemonEligible, sortDecisionBoard } from "../services/decisionEngine.js";
 import { styles } from "../theme/styles.js";
 
 function EmptyState({ text }) {
@@ -10,10 +7,7 @@ function EmptyState({ text }) {
 }
 
 function DemonBoard({ picks = [], loading, onOpen, compactMode = true }) {
-  const demons = useMemo(
-    () => sortDecisionBoard(picks.filter(isDemonEligible)).slice(0, RENDER_LIMITS.demons),
-    [picks]
-  );
+  const demons = useMemo(() => (picks || []).filter(Boolean).slice(0, 2), [picks]);
 
   const renderCard = useMemo(
     () => (prop) => (
@@ -26,18 +20,18 @@ function DemonBoard({ picks = [], loading, onOpen, compactMode = true }) {
     <section style={styles.section}>
       <div style={styles.sectionHeading}>
         <div>
-          <p style={styles.eyebrow}>Verified Demon</p>
+          <p style={styles.eyebrow}>Higher payout · ceiling upside</p>
           <h2 style={styles.sectionTitle}>Demon Picks</h2>
         </div>
-        <p style={styles.countPill}>{demons.length} picks</p>
+        <p style={styles.countPill}>{demons.length}/2</p>
       </div>
       {loading ? (
         <EmptyState text="Loading Demon lines…" />
       ) : demons.length === 0 ? (
-        <EmptyState text="No verified Demon props available right now." />
+        <EmptyState text="No Demon picks (65–79 confidence with upside) available right now." />
       ) : (
         <>
-          <VirtualCardList items={demons} renderCard={renderCard} initialVisible={10} />
+          <div style={styles.topPicksList}>{demons.map((prop) => renderCard(prop))}</div>
           <p style={styles.compactFlags}>Higher payout means higher variance.</p>
         </>
       )}

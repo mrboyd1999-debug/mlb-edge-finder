@@ -261,10 +261,22 @@ body,
     border-radius: 6px !important;
   }
 
-  .prop-card-top-pick .player-image-wrap {
-    flex: 0 0 26px !important;
-    width: 26px !important;
-    height: 26px !important;
+  .prop-card-badge-row {
+    width: 100%;
+  }
+
+  .prop-card-prop-line-row strong {
+    font-size: 11px !important;
+    color: #e2e8f0;
+  }
+
+  .why-this-pick-block {
+    margin-top: 4px !important;
+    padding: 5px 6px !important;
+  }
+
+  .why-this-pick-block p {
+    font-size: 10px !important;
   }
 
   .player-image-wrap .player-initials-text {
