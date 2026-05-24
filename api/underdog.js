@@ -37,12 +37,17 @@ export default async function handler(req, res) {
     }
 
     const props = underdogPropsFromPayload(parsed.data);
+    const root = parsed.data && typeof parsed.data === "object" && !Array.isArray(parsed.data) ? parsed.data : {};
     return res.status(200).json({
       ok: true,
       error: false,
       source: "Underdog",
       props,
       data: parsed.data,
+      over_under_lines: root.over_under_lines || props,
+      players: root.players || [],
+      games: root.games || root.matches || [],
+      appearances: root.appearances || [],
     });
   } catch (error) {
     return res.status(200).json({

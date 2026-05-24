@@ -47,6 +47,7 @@ import {
   logUnderdogResponseShape,
   UNDERDOG_PARSER_MISMATCH_MESSAGE,
 } from "../utils/parseUnderdogProp.js";
+import { unwrapUnderdogPayload } from "../utils/underdogEnvelope.js";
 import { filterResolvedSportProps } from "../utils/underdogSportDetection.js";
 import { recordProviderResponse } from "../utils/rawResponseDebug.js";
 
@@ -513,10 +514,7 @@ function readCachedPayloadSavedAt() {
 }
 
 function rawUnderdogRecordCount(payload) {
-  const normalizedPayload = unwrapProxyPayload(payload);
-  if (Array.isArray(normalizedPayload)) return normalizedPayload.length;
-  const lines = normalizedPayload.over_under_lines || normalizedPayload.overUnders || normalizedPayload.data || normalizedPayload.items || normalizedPayload.results || [];
-  return Array.isArray(lines) ? lines.length : 0;
+  return extractRawUnderdogRecords(payload).length;
 }
 
 function underdogDebug({ apiUrl, apiStatus, endpointsTried, rawPropsLoaded, parsedPropsCount, message, underdogParser = null, rawUnderdogSamples = [], responseShape = null }) {
@@ -543,13 +541,9 @@ function absoluteUrl(endpoint) {
 }
 
 function unwrapProxyPayload(payload) {
-  if (Array.isArray(payload)) return payload;
-  if (payload?.source === "Underdog" && payload?.data && !Array.isArray(payload.data)) return unwrapProxyPayload(payload.data);
-  if (payload?.source === "Underdog" && Array.isArray(payload.data)) return payload.data;
-  if (Array.isArray(payload?.data) && !payload.players && !payload.games && !payload.over_under_lines) return payload.data;
-  if (Array.isArray(payload?.items)) return payload.items;
-  if (Array.isArray(payload?.results)) return payload.results;
-  return payload || {};
+  const normalized = unwrapUnderdogPayload(payload);
+  if (Array.isArray(normalized)) return normalized;
+  return normalized || {};
 }
 
 function setupWarningFromPayload(payload, source) {

@@ -1223,14 +1223,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   const needsUnderdogBackup = wantsUnderdog;
   const fetchUnderdog = needsUnderdogBackup || (wantsUnderdog && !wantsPrizePicks);
 
-  const [ppSettled, udSettled] = await Promise.allSettled([
-    wantsPrizePicks ? fetchPrizePicksProps({ sport: fetchSport, statType: "all" }) : Promise.resolve(null),
-    fetchUnderdog ? fetchUnderdogProviderProps({ sport: fetchSport, statType: "all" }) : Promise.resolve(null),
-  ]);
-
   if (fetchUnderdog) {
-    if (udSettled.status === "fulfilled" && udSettled.value) {
-      underdogResult = udSettled.value;
+    try {
+      underdogResult = await fetchUnderdogProviderProps({ sport: fetchSport, statType: "all" });
       console.info("[DFS Source Audit] Underdog result", {
         status: underdogResult.status,
         props: underdogResult.props?.length || 0,
@@ -1262,8 +1257,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       } else if (underdogResult.debug?.underdogParser?.parserMismatch && !(underdogResult.parsedProps?.length || underdogResult.props?.length)) {
         sourceWarnings.push(buildUnderdogParserFailureMessage(underdogResult.debug));
       }
-    } else {
-      const error = udSettled.status === "rejected" ? udSettled.reason : new Error("Underdog returned no data");
+    } catch (error) {
       sourceStatus.Underdog = "Unavailable";
       console.warn("[DFS Source Audit] Underdog load failed", error);
       sourceWarnings.push(UNDERDOG_UNAVAILABLE_MESSAGE);
@@ -1279,8 +1273,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   }
 
   if (wantsPrizePicks) {
-    if (ppSettled.status === "fulfilled" && ppSettled.value) {
-      prizePicksResult = ppSettled.value;
+    try {
+      prizePicksResult = await fetchPrizePicksProps({ sport: fetchSport, statType: "all" });
       console.info("[DFS Source Audit] PrizePicks result", {
         status: prizePicksResult.status,
         props: prizePicksResult.props?.length || 0,
@@ -1296,8 +1290,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         sourceStatus,
         debugInfo,
       });
-    } else {
-      const error = ppSettled.status === "rejected" ? ppSettled.reason : new Error("PrizePicks returned no data");
+    } catch (error) {
       sourceStatus.PrizePicks = "Failed";
       console.warn("[DFS Source Audit] PrizePicks load failed", error);
       if (!rawProps.length) {
@@ -1610,6 +1603,19 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       debugInfo.parserPreview =
         typeof window !== "undefined" ? window.__DEBUG_PARSER_PREVIEW__ || [] : [];
     } else {
+      const lastGood = readLastGoodBoard();
+      if (lastGood) {
+        const restored = boardFromLastGood(lastGood, sourceStatus);
+        allDisplayProps = restored.allDisplayProps;
+        rawProps.length = 0;
+        rawProps.push(...restored.props);
+        pipelineFallback = true;
+        workingActiveProps = filterActiveSportProps(allDisplayProps);
+        workingNormalProps = workingActiveProps;
+        usablePropsPool = buildUsablePropsPool(rawProps);
+        debugInfo.ingestionFallback = restored.ingestionSource || "last-good-board";
+        sourceStatus.SportsDataIO = sourceStatus.SportsDataIO || lastGood.sourceStatus?.SportsDataIO || "Connected";
+      } else {
     debugInfo.totals = {
       rawPropsLoaded: canonicalProps.length,
       upcomingSlateCount: pipelineAudit.upcomingSlate,
@@ -1653,6 +1659,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       debugInfo: attachDebugArtifacts(sanitizeDebugInfoForMlbOnly(debugInfo), pipelineAudit),
       pipelineAudit: coercePipelineAudit(pipelineAudit),
     };
+      }
     }
   }
 

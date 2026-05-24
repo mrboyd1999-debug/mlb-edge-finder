@@ -14,7 +14,10 @@ import {
   discoverUnderdogLineRecords,
   flattenUnderdogLineRecord,
 } from "./underdogDynamicParser.js";
+import { unwrapUnderdogPayload, extractUnderdogLineRecords } from "./underdogEnvelope.js";
 import { recordParserPreview } from "./rawResponseDebug.js";
+
+export { unwrapUnderdogPayload } from "./underdogEnvelope.js";
 
 export const UNDERDOG_PARSER_MISMATCH_MESSAGE = "Underdog parser mismatch detected.";
 
@@ -25,27 +28,6 @@ function mapById(rows = []) {
     if (id != null) map.set(String(id), row);
   });
   return map;
-}
-
-export function unwrapUnderdogPayload(payload) {
-  if (Array.isArray(payload)) return payload;
-  if (!payload || typeof payload !== "object") return payload || {};
-  if (payload.over_under_lines || payload.players || payload.games || payload.appearances) {
-    return payload;
-  }
-  if (payload?.source === "Underdog" && payload?.data && !Array.isArray(payload.data)) {
-    return unwrapUnderdogPayload(payload.data);
-  }
-  if (payload?.source === "Underdog" && Array.isArray(payload.data)) {
-    return { over_under_lines: payload.data, players: payload.players || [], games: payload.games || [] };
-  }
-  if (Array.isArray(payload?.data) && !payload.players && !payload.games && !payload.over_under_lines) {
-    return { over_under_lines: payload.data, players: [], games: [] };
-  }
-  if (Array.isArray(payload?.items)) return { over_under_lines: payload.items, players: [], games: [] };
-  if (Array.isArray(payload?.results)) return { over_under_lines: payload.results, players: [], games: [] };
-  if (Array.isArray(payload?.props)) return { over_under_lines: payload.props, players: [], games: [] };
-  return payload || {};
 }
 
 export function logUnderdogResponseShape(payload) {
@@ -97,20 +79,7 @@ export function filterMlbPickemRecords(rawRecords = [], lookup = {}) {
 }
 
 export function extractRawUnderdogRecords(payload) {
-  const normalized = unwrapUnderdogPayload(payload);
-  if (Array.isArray(normalized)) return normalized;
-  if (normalized && typeof normalized === "object") {
-    const lines =
-      normalized.over_under_lines ||
-      normalized.overUnders ||
-      normalized.data ||
-      normalized.items ||
-      normalized.results ||
-      normalized.props ||
-      [];
-    if (Array.isArray(lines) && lines.length) return lines;
-  }
-  return [];
+  return extractUnderdogLineRecords(payload);
 }
 
 export function buildUnderdogLookupMaps(payload) {
@@ -139,7 +108,35 @@ export function buildUnderdogLookupMaps(payload) {
 }
 
 function attrsOf(raw = {}) {
-  return raw.attributes || raw.over_under || raw.overUnder || raw;
+  return raw.attributes || raw;
+}
+
+function nestedOverUnder(raw = {}) {
+  return raw.over_under || raw.overUnder || {};
+}
+
+function appearanceIdFromRaw(raw = {}, attrs = {}) {
+  const ou = nestedOverUnder(raw);
+  return (
+    attrs.appearance_id ||
+    raw.appearance_id ||
+    ou.appearance_stat?.appearance_id ||
+    attrs.appearance_stat?.appearance_id ||
+    raw.appearance_stat?.appearance_id ||
+    ou.appearance_id ||
+    raw.relationships?.appearance?.data?.id ||
+    attrs.relationships?.appearance?.data?.id ||
+    null
+  );
+}
+
+function playerFromOptions(raw = {}) {
+  const options = raw.options || raw.choices || [];
+  if (!Array.isArray(options) || !options.length) return "";
+  const header = options.find((option) => option?.selection_header)?.selection_header;
+  const name = String(header || "").trim();
+  if (name.length >= 2 && !/^unknown$/i.test(name)) return name;
+  return "";
 }
 
 function playerFullName(player = {}) {
@@ -156,6 +153,13 @@ function titlePlayerName(title = "") {
 }
 
 function resolvePlayerFromRaw(raw = {}, lookup = {}) {
+  const fromOptions = playerFromOptions(raw);
+  if (fromOptions) return fromOptions;
+
+  const ou = nestedOverUnder(raw);
+  const fromOuTitle = titlePlayerName(ou.title || ou.display_name || "");
+  if (fromOuTitle.length >= 2) return fromOuTitle;
+
   const attrs = attrsOf(raw);
   const direct =
     raw.player_name ||
@@ -166,6 +170,7 @@ function resolvePlayerFromRaw(raw = {}, lookup = {}) {
     attrs.player_name ||
     attrs.playerName ||
     attrs.name ||
+    ou.player_name ||
     "";
   if (direct && String(direct).trim().length >= 2 && !/^unknown$/i.test(String(direct).trim())) {
     return String(direct).trim();
@@ -173,12 +178,7 @@ function resolvePlayerFromRaw(raw = {}, lookup = {}) {
 
   const { players, appearances } = lookup;
   if (players?.size && appearances?.size) {
-    const appearanceId =
-      attrs.appearance_id ||
-      raw.appearance_id ||
-      raw.over_under?.appearance_id ||
-      raw.relationships?.appearance?.data?.id ||
-      attrs.relationships?.appearance?.data?.id;
+    const appearanceId = appearanceIdFromRaw(raw, attrs);
     const appearance = appearances.get(String(appearanceId)) || {};
     const playerId =
       appearance.player_id ||
@@ -204,7 +204,9 @@ function resolvePlayerFromRaw(raw = {}, lookup = {}) {
 
 function resolveLineFromRaw(raw = {}) {
   const attrs = attrsOf(raw);
-  const statRecord = attrs.appearance_stat || attrs.stat || raw.stat || raw.over_under?.appearance_stat || {};
+  const ou = nestedOverUnder(raw);
+  const statRecord =
+    ou.appearance_stat || attrs.appearance_stat || attrs.stat || raw.stat || raw.appearance_stat || {};
   return Number(
     raw.line ??
       raw.stat_value ??
@@ -214,8 +216,8 @@ function resolveLineFromRaw(raw = {}) {
       attrs.stat_value ??
       attrs.value ??
       attrs.non_discounted_stat_value ??
-      raw.over_under?.stat_value ??
-      raw.over_under?.line ??
+      ou.stat_value ??
+      ou.line ??
       statRecord.stat_value ??
       statRecord.line ??
       statRecord.value
@@ -232,8 +234,9 @@ function extractStatFromTitle(title = "") {
 
 function resolveStatTypeFromRaw(raw = {}) {
   const attrs = attrsOf(raw);
-  const statRecord = attrs.appearance_stat || attrs.stat || raw.stat || {};
-  const fromTitle = extractStatFromTitle(attrs.title || raw.title || "");
+  const ou = nestedOverUnder(raw);
+  const statRecord = ou.appearance_stat || attrs.appearance_stat || attrs.stat || raw.stat || raw.appearance_stat || {};
+  const fromTitle = extractStatFromTitle(ou.title || attrs.title || raw.title || "");
   return String(
     raw.stat_type ||
       raw.statType ||
@@ -243,9 +246,12 @@ function resolveStatTypeFromRaw(raw = {}) {
       attrs.statType ||
       attrs.stat ||
       attrs.market ||
+      ou.stat_type ||
+      ou.market ||
       statRecord.display_stat ||
       statRecord.stat ||
       fromTitle ||
+      ou.title ||
       attrs.title ||
       raw.title ||
       raw.description ||
@@ -555,10 +561,6 @@ export function parseUnderdogRawBatch(rawRecords = [], options = {}) {
   const parserErrors = [];
   let rejectedCount = 0;
   const props = [];
-
-  records.slice(0, 3).forEach((raw, index) => {
-    console.log("RAW UD PROP", JSON.stringify(records[index] ?? raw, null, 2));
-  });
 
   records.forEach((raw) => {
     try {

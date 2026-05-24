@@ -109,6 +109,41 @@ function roundHalf(value) {
   return Math.round(Number(value) * 2) / 2;
 }
 
+function perGameProjection(row = {}, field = "") {
+  const raw = Number(row?.[field]);
+  if (!Number.isFinite(raw) || raw <= 0) return NaN;
+  const games = Number(row?.Games ?? row?.GamesPlayed ?? row?.Started ?? 0);
+  if (Number.isFinite(games) && games > 0) return raw / games;
+  return raw;
+}
+
+function buildProjectionRows(snapshot = {}) {
+  const projections = snapshot.projections?.data || [];
+  if (projections.length) {
+    return { rows: projections, source: "projections", warnings: [] };
+  }
+
+  const seasonRows = (snapshot.seasonStats?.data || []).filter(
+    (row) =>
+      row?.Name &&
+      (Number(row.AtBats) > 0 || Number(row.InningsPitched) > 0 || Number(row.Games) > 0 || Number(row.GamesPlayed) > 0)
+  );
+  if (seasonRows.length) {
+    return {
+      rows: seasonRows,
+      source: "season-stats",
+      warnings: ["SportsDataIO daily projections unavailable — using season-rate fallback."],
+    };
+  }
+
+  return { rows: [], source: "none", warnings: ["SportsDataIO returned no projection rows."] };
+}
+
+function projectionValueForMarket(row = {}, field = "", source = "projections") {
+  if (source === "season-stats") return perGameProjection(row, field);
+  return Number(row?.[field]);
+}
+
 function inferOpponent(row = {}, games = []) {
   const team = String(row?.Team || "").toUpperCase();
   if (!team) return "";
@@ -140,23 +175,24 @@ export async function generateMlbPropsFromSportsData({ limit = 48 } = {}) {
     payload: {
       projections: (snapshot.projections?.data || []).slice(0, 3),
       games: (snapshot.games?.data || []).slice(0, 3),
+      seasonStats: (snapshot.seasonStats?.data || []).slice(0, 3),
     },
     parsedCount: (snapshot.projections?.data || []).length,
     normalizedCount: 0,
     message: "Slate snapshot loaded",
   });
 
-  const projections = snapshot.projections?.data || [];
+  const { rows: projectionRows, source: rowSource, warnings: rowWarnings } = buildProjectionRows(snapshot);
   const games = snapshot.games?.data || [];
-  const warnings = [...(snapshot.warnings || [])].filter(Boolean);
+  const warnings = [...(snapshot.warnings || []), ...rowWarnings].filter(Boolean);
   const props = [];
 
-  projections.slice(0, Math.max(12, Math.ceil(limit / 3))).forEach((row) => {
+  projectionRows.slice(0, Math.max(12, Math.ceil(limit / 3))).forEach((row) => {
     if (!row?.Name) return;
     const team = row.Team || "";
     const opponent = inferOpponent(row, games);
     SDIO_FALLBACK_MARKETS.forEach((market) => {
-      const projection = Number(row[market.field]);
+      const projection = projectionValueForMarket(row, market.field, rowSource);
       if (!Number.isFinite(projection) || projection <= 0) return;
       const line = Math.max(0.5, roundHalf(projection * market.lineFactor));
       props.push({
@@ -173,7 +209,7 @@ export async function generateMlbPropsFromSportsData({ limit = 48 } = {}) {
         line,
         projection,
         projectedValue: projection,
-        projectionSource: "sportsdataio-generated",
+        projectionSource: rowSource === "projections" ? "sportsdataio-generated" : `sportsdataio-${rowSource}`,
         side: projection >= line ? "over" : "under",
         pick: projection >= line ? "over" : "under",
         confidence: 58,

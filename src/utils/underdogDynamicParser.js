@@ -3,17 +3,10 @@
  */
 
 import { discoverArrayCollections, walkPayloadArrays } from "./rawResponseDebug.js";
+import { unwrapUnderdogPayload } from "./underdogEnvelope.js";
 
 function unwrapRoot(payload) {
-  if (Array.isArray(payload)) return payload;
-  if (!payload || typeof payload !== "object") return payload || {};
-  if (payload.over_under_lines || payload.players || payload.games || payload.appearances) return payload;
-  if (payload?.source === "Underdog" && payload?.data && !Array.isArray(payload.data)) return unwrapRoot(payload.data);
-  if (payload?.source === "Underdog" && Array.isArray(payload.data)) {
-    return { over_under_lines: payload.data, players: payload.players || [], games: payload.games || [] };
-  }
-  if (Array.isArray(payload?.data)) return { over_under_lines: payload.data, players: payload.players || [], games: payload.games || [] };
-  return payload;
+  return unwrapUnderdogPayload(payload);
 }
 
 function staticLineExtract(payload) {
@@ -136,11 +129,18 @@ export function buildDynamicUnderdogLookupMaps(payload) {
 
 export function flattenUnderdogLineRecord(raw = {}) {
   if (!raw || typeof raw !== "object") return raw;
-  if (raw.over_under && typeof raw.over_under === "object") {
-    return { ...raw.over_under, ...raw, over_under: raw.over_under };
+  const ou = raw.over_under || raw.overUnder;
+  const appearanceStat = ou?.appearance_stat || raw.appearance_stat;
+  const hoisted = {
+    appearance_id: appearanceStat?.appearance_id || raw.appearance_id,
+    appearance_stat: appearanceStat,
+    stat_type: appearanceStat?.display_stat || appearanceStat?.stat,
+  };
+  if (ou && typeof ou === "object") {
+    return { ...ou, ...hoisted, ...raw, over_under: ou };
   }
   if (raw.attributes && typeof raw.attributes === "object") {
-    return { ...raw.attributes, ...raw, attributes: raw.attributes };
+    return { ...raw.attributes, ...hoisted, ...raw, attributes: raw.attributes };
   }
-  return raw;
+  return { ...hoisted, ...raw };
 }
