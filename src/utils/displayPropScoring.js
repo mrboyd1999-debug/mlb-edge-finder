@@ -499,26 +499,52 @@ export function selectReadyToBetProps(props = []) {
   }));
 }
 
-export function selectDemonProps(props = []) {
-  return sortPropsForDisplay(
-    (props || []).filter((prop) => {
-      const conf = finiteOr(prop.confidence, BASE_CONFIDENCE);
-      const edge = finiteOr(prop.edge, 0);
-      const upside = Math.abs(finiteOr(prop.projection, prop.line) - finiteOr(prop.line, 0));
-      return conf >= 65 && conf <= 79 && (edge >= 2 || upside >= 1.5 || Number(prop.multiplier) > 1);
-    })
-  ).slice(0, 2);
+const CURATED_GOBLIN_LIMIT = 6;
+const CURATED_DEMON_LIMIT = 6;
+
+export function hasAdvancedDisplayStats(prop = {}) {
+  const sampleSize = Number(prop.sampleSize || prop.modelSignal?.sampleSize || 0);
+  const dataQuality = Number(prop.dataQualityScore || 0);
+  const hasHitRate = Number.isFinite(Number(prop.last10HitRate ?? prop.recentHitRate ?? prop.last5HitRate));
+  return sampleSize >= 3 || dataQuality >= 55 || hasHitRate;
 }
 
-export function selectGoblinProps(props = []) {
-  return sortPropsForDisplay(
-    (props || []).filter((prop) => {
-      const conf = finiteOr(prop.confidence, BASE_CONFIDENCE);
-      const hit = finiteOr(prop.last10HitRate ?? prop.recentHitRate, 0.55);
-      const vol = finiteOr(prop.volatility, 2.5);
-      return conf >= 80 && hit >= 0.55 && vol <= 2.75 && String(prop.riskLevel || "").toUpperCase() === "LOW";
-    })
-  ).slice(0, 2);
+export function markDisplayFallbackProps(props = []) {
+  return (props || []).map((prop) => {
+    const fallback = prop.displayFallback || !hasAdvancedDisplayStats(prop);
+    return {
+      ...prop,
+      displayFallback: fallback,
+      fallbackLabel: fallback ? "Fallback" : prop.fallbackLabel || "",
+      bettingLabel: fallback && !prop.bettingLabel ? "Fallback" : prop.bettingLabel,
+    };
+  });
+}
+
+export function selectDemonProps(props = [], limit = CURATED_DEMON_LIMIT) {
+  return markDisplayFallbackProps(
+    sortPropsForDisplay(
+      (props || []).filter((prop) => {
+        const conf = finiteOr(prop.confidence, BASE_CONFIDENCE);
+        const edge = finiteOr(prop.edge, 0);
+        const upside = Math.abs(finiteOr(prop.projection, prop.line) - finiteOr(prop.line, 0));
+        return conf >= 65 && conf <= 79 && (edge >= 2 || upside >= 1.5 || Number(prop.multiplier) > 1);
+      })
+    ).slice(0, limit)
+  );
+}
+
+export function selectGoblinProps(props = [], limit = CURATED_GOBLIN_LIMIT) {
+  return markDisplayFallbackProps(
+    sortPropsForDisplay(
+      (props || []).filter((prop) => {
+        const conf = finiteOr(prop.confidence, BASE_CONFIDENCE);
+        const hit = finiteOr(prop.last10HitRate ?? prop.recentHitRate, 0.55);
+        const vol = finiteOr(prop.volatility, 2.5);
+        return conf >= 80 && hit >= 0.55 && vol <= 2.75 && String(prop.riskLevel || "").toUpperCase() === "LOW";
+      })
+    ).slice(0, limit)
+  );
 }
 
 export function selectAcceptedDisplayProps(props = []) {

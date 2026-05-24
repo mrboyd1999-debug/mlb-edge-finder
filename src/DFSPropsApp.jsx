@@ -147,15 +147,19 @@ import {
   sortBoardProps,
   BOARD_SORT_MODES,
 } from "./services/propPriority.js";
-import SportTabs from "./components/SportTabs.jsx";
-import TopPicksBoard from "./components/TopPicksBoard.jsx";
+import CuratedPicksScreen from "./components/CuratedPicksScreen.jsx";
+import {
+  CURATED_SPORT_ORDER,
+  resolveCuratedSportPicks,
+  resolveCuratedBoardPicks,
+  isManuallySavedPick,
+  historyPickToDisplayProp,
+} from "./utils/curatedPicks.js";
 import NearMissBoard from "./components/NearMissBoard.jsx";
 import RejectionAnalyticsPanel from "./components/RejectionAnalyticsPanel.jsx";
 import QualificationAnalyticsPanel from "./components/QualificationAnalyticsPanel.jsx";
 import CacheAnalyticsPanel from "./components/CacheAnalyticsPanel.jsx";
 import LazyDebugDetails from "./components/LazyDebugDetails.jsx";
-import GoblinBoard from "./components/GoblinBoard.jsx";
-import DemonBoard from "./components/DemonBoard.jsx";
 import VirtualCardList from "./components/VirtualCardList.jsx";
 import PropFilters from "./components/PropFilters.jsx";
 import PlayerPropCard from "./components/PlayerPropCard.jsx";
@@ -227,7 +231,7 @@ import { runFilterPipeline, runUiPipeline } from "./utils/pipelineStages.js";
 import MobileQuickActionBar from "./components/MobileQuickActionBar.jsx";
 import MobileScrollFab from "./components/MobileScrollFab.jsx";
 import LazyBelowFold from "./components/LazyBelowFold.jsx";
-import { isHeavyDebugEnabled, readShowDebugPanelsPreference, shouldLogVerbose, shouldTrackRejectedProps, writeShowDebugPanelsPreference } from "./utils/devMode.js";
+import { isHeavyDebugEnabled, isDebugModeEnabled, readShowDebugPanelsPreference, shouldLogVerbose, shouldTrackRejectedProps, writeShowDebugPanelsPreference } from "./utils/devMode.js";
 import { canonicalStatType } from "./utils/marketNormalization.js";
 import {
   filterVerifiedSportsbookProps,
@@ -1906,7 +1910,8 @@ export default function DFSPropsApp() {
   }, [platform, sourceStatus, debugInfo]);
 
   const devEnvironment = isDevEnvironment();
-  const debugPanelsVisible = devEnvironment && showDebugPanels;
+  const debugModeEnabled = isDebugModeEnabled();
+  const debugPanelsVisible = debugModeEnabled && showDebugPanels;
 
   const scoredDisplayProps = useMemo(() => allDisplayProps, [allDisplayProps]);
 
@@ -1925,10 +1930,10 @@ export default function DFSPropsApp() {
     return [];
   }, [selectedSportProps, allDisplayProps]);
   const displayStatusMessage = useMemo(() => {
-    if (!devEnvironment || loading) return "";
+    if (!debugModeEnabled || loading) return "";
     if (allDisplayProps.length > 0) return "Showing live/cached props";
     return "";
-  }, [devEnvironment, loading, allDisplayProps.length]);
+  }, [debugModeEnabled, loading, allDisplayProps.length]);
   const preFilterDebugProps = useMemo(() => allDisplayProps.slice(0, 20), [allDisplayProps]);
   const streakFinderProps = useMemo(
     () =>
@@ -2010,22 +2015,29 @@ export default function DFSPropsApp() {
     [pipelineAudit?.acceptedPropsForRender, debugInfo?.acceptedPropsForRender, debugInfo?.pipelineAudit?.acceptedPropsForRender]
   );
   const hydratedRenderableProps = useMemo(() => boardDisplayProps, [boardDisplayProps]);
-  const finalAcceptedProps = useMemo(() => {
-    const displayAccepted = selectAcceptedDisplayProps(boardDisplayProps);
-    if (displayAccepted.length) return displayAccepted;
-    const acceptedCount = Number(pipelineCounters.accepted ?? 0);
-    return resolveFinalAcceptedPropsFromHydrated({
-      hydratedRenderableProps: boardDisplayProps,
-      pipelineAcceptedPools: [acceptedPropsForRender, counterAcceptedSource, qualifiedReadyProps],
-      acceptedCount,
-    });
-  }, [
-    boardDisplayProps,
-    acceptedPropsForRender,
-    counterAcceptedSource,
-    qualifiedReadyProps,
-    pipelineCounters.accepted,
-  ]);
+  const finalAcceptedProps = useMemo(
+    () =>
+      visibleHistory
+        .filter(isManuallySavedPick)
+        .map(historyPickToDisplayProp)
+        .slice(0, 40),
+    [visibleHistory]
+  );
+  const curatedSportPicks = useMemo(() => {
+    const entries = CURATED_SPORT_ORDER.map((sport) => [
+      sport,
+      resolveCuratedSportPicks(sport, streakSportBoards, scoredDisplayProps),
+    ]);
+    return Object.fromEntries(entries);
+  }, [streakSportBoards, scoredDisplayProps]);
+  const curatedGoblinPicks = useMemo(
+    () => resolveCuratedBoardPicks(streakSportBoards.goblins?.picks, selectGoblinProps, boardDisplayProps, 6),
+    [streakSportBoards, boardDisplayProps]
+  );
+  const curatedDemonPicks = useMemo(
+    () => resolveCuratedBoardPicks(streakSportBoards.demons?.picks, selectDemonProps, boardDisplayProps, 6),
+    [streakSportBoards, boardDisplayProps]
+  );
   const topPickPool = useMemo(() => boardDisplayProps, [boardDisplayProps]);
   const topPicksDisplay = useMemo(() => selectTop2FromDisplayProps(topPickPool), [topPickPool]);
 
@@ -2522,14 +2534,8 @@ export default function DFSPropsApp() {
       </details>
       </div>
 
-      <div className="dfs-section dfs-order-sport-tabs">
-      <section style={styles.streakControls} aria-label="Sport category tabs">
-        <SportTabs options={visibleStreakSports} active={streakSport} onChange={setStreakSport} boards={streakSportBoards} />
-        {learningSaveNotice ? <p className="mobile-hide-verbose" style={styles.streakNotice}>{learningSaveNotice}</p> : null}
-      </section>
-      </div>
-
       <div className="dfs-section dfs-order-notices">
+      {learningSaveNotice ? <p className="mobile-hide-verbose" style={styles.streakNotice}>{learningSaveNotice}</p> : null}
       {MLB_ONLY_MODE ? (
         <section className="mobile-hide-verbose" style={styles.compactPanel}>
           <p style={styles.compactFlags}>
@@ -2584,8 +2590,8 @@ export default function DFSPropsApp() {
 
       {visibleError && !allDisplayProps.length ? <section style={styles.errorPanel}>{visibleError}</section> : null}
 
-      {devEnvironment && preFilterDebugProps.length ? (
-        <details className="all-props-debug-section dfs-section" style={styles.compactDetails} open>
+      {debugModeEnabled && preFilterDebugProps.length ? (
+        <details className="all-props-debug-section dfs-section" style={styles.compactDetails}>
           <summary style={styles.detailsSummary}>
             <span className="details-summary-stack">
               <span style={styles.eyebrow}>Debug</span>
@@ -2610,24 +2616,23 @@ export default function DFSPropsApp() {
       </div>
 
       <div id="section-top-picks" className="dfs-section dfs-order-top-picks">
-      {isGoblinTab ? (
-        <GoblinBoard picks={goblinDisplayProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
-      ) : isDemonTab ? (
-        <DemonBoard picks={demonDisplayProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
-      ) : (
-        <TopPicksBoard
-          label={currentCategoryLabel}
-          picks={topPicksDisplay}
+        <CuratedPicksScreen
+          sportPicks={curatedSportPicks}
+          parlayPicks={quickParlayPicks}
+          goblinPicks={curatedGoblinPicks}
+          demonPicks={curatedDemonPicks}
+          loading={loading}
           onOpen={setSelectedEvaluation}
           compactMode={compactMode}
         />
-      )}
       </div>
 
       <div id="section-accepted" className="dfs-section dfs-order-accepted">
       <AcceptedPropsPanel props={finalAcceptedProps} onOpen={setSelectedEvaluation} compactMode={compactMode} />
       </div>
 
+      {debugPanelsVisible ? (
+      <>
       <div className="dfs-section dfs-order-ready">
       <section style={styles.section} aria-label="Ready to Bet board">
         <div style={styles.sectionHeading}>
@@ -2683,7 +2688,6 @@ export default function DFSPropsApp() {
       </section>
       </div>
 
-      <LazyBelowFold>
       <div className="dfs-section dfs-order-near-miss">
       <NearMissBoard picks={nearMissProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
       </div>
@@ -2728,6 +2732,8 @@ export default function DFSPropsApp() {
         pregameWindowHours={debugInfo.pregameWindowHours ?? filterPrefs.pregameWindowHours ?? DEFAULT_PREGAME_WINDOW_HOURS}
       />
       </div>
+      </>
+      ) : null}
 
       <div className="dfs-section dfs-order-settings">
       <SettingsPanel
@@ -2735,6 +2741,7 @@ export default function DFSPropsApp() {
         onClearCaches={handleSettingsSaved}
         showDebugPanels={showDebugPanels}
         onShowDebugPanelsChange={setShowDebugPanels}
+        lastUpdated={lastUpdated}
       />
       </div>
 
@@ -2801,6 +2808,7 @@ export default function DFSPropsApp() {
       </div>
       ) : null}
 
+      <LazyBelowFold>
       <div className="dfs-section dfs-order-history">
       <details style={styles.compactDetails}>
         <summary style={styles.detailsSummary}>

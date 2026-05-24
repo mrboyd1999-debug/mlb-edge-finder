@@ -6,8 +6,8 @@ function EmptyState({ text }) {
   return <div style={styles.emptyState}>{text}</div>;
 }
 
-function GoblinBoard({ picks = [], loading, onOpen, compactMode = true }) {
-  const goblins = useMemo(() => (picks || []).filter(Boolean).slice(0, 2), [picks]);
+function GoblinBoard({ picks = [], loading, onOpen, compactMode = true, limit = 6 }) {
+  const goblins = useMemo(() => (picks || []).filter(Boolean).slice(0, limit), [picks, limit]);
 
   const renderCard = useMemo(
     () => (prop) => (
@@ -23,7 +23,7 @@ function GoblinBoard({ picks = [], loading, onOpen, compactMode = true }) {
           <p style={styles.eyebrow}>High hit rate · low variance</p>
           <h2 style={styles.sectionTitle}>Goblin Picks</h2>
         </div>
-        <p style={styles.countPill}>{goblins.length}/2</p>
+        <p style={styles.countPill}>{goblins.length}/{limit}</p>
       </div>
       {loading ? (
         <EmptyState text="Loading Goblin lines…" />

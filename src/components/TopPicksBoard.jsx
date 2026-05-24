@@ -9,8 +9,8 @@ function TopPicksBoard({ label = "Sport", picks = [], onOpen, compactMode = true
     <section className="top-picks-section" style={styles.section}>
       <div style={styles.sectionHeading}>
         <div>
-          <p style={styles.eyebrow}>Top 2 · {label}</p>
-          <h2 style={styles.sectionTitle}>Top Picks</h2>
+          <p style={styles.eyebrow}>Top 2 Streak · {label}</p>
+          <h2 style={styles.sectionTitle}>Streak Picks</h2>
         </div>
         <p style={styles.countPill}>{topPicks.length}/2</p>
       </div>

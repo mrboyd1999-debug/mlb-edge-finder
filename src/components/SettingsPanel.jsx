@@ -10,14 +10,16 @@ import {
   writeSettingsMeta,
 } from "../services/runtimeSettings.js";
 import { validateApiConfig } from "../config/apiConfig.js";
-import { connectionStatusStyle, testAllApiConnections } from "../services/apiConnectionTest.js";
-import { isDevEnvironment } from "../services/fetchUtil.js";
+import ApiHealthPanel from "./ApiHealthPanel.jsx";
+import { testAllApiConnections } from "../services/apiConnectionTest.js";
+import { isDebugModeEnabled } from "../utils/devMode.js";
 
 export default function SettingsPanel({
   onSaved,
   onClearCaches,
   showDebugPanels = false,
   onShowDebugPanelsChange,
+  lastUpdated = "",
 }) {
   const panelRef = useRef(null);
   const [draft, setDraft] = useState(() => readRuntimeSettings());
@@ -25,29 +27,24 @@ export default function SettingsPanel({
   const [meta, setMeta] = useState(() => readSettingsMeta());
   const [notice, setNotice] = useState("");
   const [testing, setTesting] = useState(false);
-  const [connectionReport, setConnectionReport] = useState(null);
+  const [connectionReport, setConnectionReport] = useState(() => {
+    const storedMeta = readSettingsMeta();
+    if (storedMeta.lastTestedAt && Array.isArray(storedMeta.lastConnectionReport)) {
+      return { testedAt: storedMeta.lastTestedAt, results: storedMeta.lastConnectionReport };
+    }
+    return null;
+  });
 
   const isSaved = settingsDraftMatchesSaved(draft, saved);
   const apiValidation = validateApiConfig();
+  const debugModeEnabled = isDebugModeEnabled();
 
   function collapsePanel() {
     if (panelRef.current) panelRef.current.open = false;
   }
 
-  function handleSave() {
-    writeRuntimeSettings(draft);
-    const nextSaved = readRuntimeSettings();
-    setSaved(nextSaved);
-    setMeta(readSettingsMeta());
-    setNotice("Settings saved.");
-    onClearCaches?.();
-    onSaved?.(nextSaved);
-    collapsePanel();
-  }
-
-  async function handleTestConnections() {
+  async function runConnectionTest({ collapseAfter = false } = {}) {
     setTesting(true);
-    setConnectionReport(null);
     try {
       const report = await testAllApiConnections();
       setConnectionReport(report);
@@ -57,12 +54,37 @@ export default function SettingsPanel({
         lastConnectionReport: report.results,
       });
       setMeta(readSettingsMeta());
-      collapsePanel();
+      const failed = (report.results || []).filter((row) =>
+        ["FAILED", "INVALID"].includes(String(row.status || "").toUpperCase())
+      );
+      setNotice(
+        failed.length
+          ? `${failed.length} provider${failed.length === 1 ? "" : "s"} failed — see API Health below.`
+          : "All probed providers responded."
+      );
+      if (collapseAfter) collapsePanel();
+      return report;
     } catch (error) {
       setNotice(error?.message || "Connection test failed.");
+      return null;
     } finally {
       setTesting(false);
     }
+  }
+
+  async function handleSave() {
+    writeRuntimeSettings(draft);
+    const nextSaved = readRuntimeSettings();
+    setSaved(nextSaved);
+    setMeta(readSettingsMeta());
+    setNotice("Settings saved — testing connections…");
+    onClearCaches?.();
+    onSaved?.(nextSaved);
+    await runConnectionTest();
+  }
+
+  async function handleTestConnections() {
+    await runConnectionTest({ collapseAfter: true });
   }
 
   return (
@@ -83,7 +105,7 @@ export default function SettingsPanel({
             {testing ? "Testing…" : "Test API"}
           </button>
         </div>
-        {isDevEnvironment() ? (
+        {debugModeEnabled ? (
         <label
           style={{
             ...styles.selectLabel,
@@ -105,15 +127,16 @@ export default function SettingsPanel({
           Keys are stored in <code>localStorage</code> for development. For production, set the same{" "}
           <code>VITE_*</code> variables in Vercel — never commit <code>.env.local</code>.
         </p>
-        {apiValidation.warnings.length > 0 ? (
+        {apiValidation.warnings.length > 0 && debugModeEnabled ? (
           <ul className="mobile-hide-verbose" style={{ ...styles.explanationList, margin: "4px 0 0", paddingLeft: "18px" }}>
             {apiValidation.warnings.map((warning) => (
-              <li key={warning} style={{ ...styles.compactFlags, color: apiValidation.ok ? "#fcd34d" : "#fca5a5" }}>
+              <li key={warning} style={{ ...styles.compactFlags, color: "#fcd34d" }}>
                 {warning}
               </li>
             ))}
           </ul>
         ) : null}
+        <ApiHealthPanel connectionReport={connectionReport} lastUpdated={lastUpdated} />
         <details className="settings-keys-expand" style={{ ...styles.compactDetails, marginTop: "8px" }}>
           <summary style={styles.detailsSummary}>
             <span>
@@ -154,19 +177,6 @@ export default function SettingsPanel({
           ) : null}
           {notice ? <p style={styles.compactFlags}>{notice}</p> : null}
         </div>
-        {connectionReport?.results?.length ? (
-          <div style={{ marginTop: "8px" }}>
-            <strong style={{ fontSize: 13 }}>Connection test</strong>
-            {connectionReport.results.map((row) => (
-              <div key={row.provider} style={{ ...styles.apiHealthRow, marginTop: "6px" }}>
-                <div style={styles.apiHealthRowTop}>
-                  <span style={styles.sourceName}>{row.provider}</span>
-                  <span style={connectionStatusStyle(row.status)}>{row.status}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
       </div>
     </details>
   );

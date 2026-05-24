@@ -2,33 +2,35 @@ import { memo } from "react";
 import PlayerPropCard from "./PlayerPropCard.jsx";
 import { styles } from "../theme/styles.js";
 
-function AcceptedPropsPanel({ props = [], onOpen, compactMode = true }) {
+function SavedPicksPanel({ props = [], onOpen, compactMode = true }) {
   const rows = (props || []).filter(Boolean);
-  if (!rows.length) return null;
-  const eliteCount = rows.filter((prop) => prop.isEliteAccepted || prop.acceptedTier === "Elite").length;
 
   return (
-    <section className="accepted-props-section" style={styles.section} aria-label="Accepted props">
+    <section className="saved-picks-section" style={styles.section} aria-label="Saved picks">
       <div style={styles.sectionHeading}>
-        <h2 style={styles.sectionTitle}>Accepted Props</h2>
-        <p style={styles.countPill}>
-          {eliteCount > 0 ? `${eliteCount} elite · ` : ""}
-          {rows.length} accepted
-        </p>
+        <h2 style={styles.sectionTitle}>Saved Picks</h2>
+        <p style={styles.countPill}>{rows.length} saved</p>
       </div>
-      <div className="accepted-props-grid" style={styles.cardGridCompact}>
-        {rows.map((prop, idx) => (
-          <PlayerPropCard
-            key={prop.id || `accepted-${idx}`}
-            prop={prop}
-            rank={idx + 1}
-            compact={compactMode}
-            onOpen={onOpen}
-          />
-        ))}
-      </div>
+      {rows.length === 0 ? (
+        <div style={styles.emptyStateCompact}>
+          No saved picks yet. Open a pick and tap Save to keep it here.
+        </div>
+      ) : (
+        <div className="saved-picks-grid" style={styles.cardGridCompact}>
+          {rows.map((prop, idx) => (
+            <PlayerPropCard
+              key={prop.id || `saved-${idx}`}
+              prop={prop}
+              rank={idx + 1}
+              compact={compactMode}
+              onOpen={onOpen}
+              savedResult={prop.resultStatus || prop.finalResult || prop.status}
+            />
+          ))}
+        </div>
+      )}
     </section>
   );
 }
 
-export default memo(AcceptedPropsPanel);
+export default memo(SavedPicksPanel);

@@ -64,7 +64,7 @@ body,
     width: 100%;
     max-width: 100%;
     padding: 8px !important;
-    padding-bottom: 68px !important;
+    padding-bottom: 80px !important;
   }
 
   .dfs-app-page {
@@ -299,7 +299,39 @@ body,
   }
 
   .prop-card-why-link {
-    display: none;
+    display: block;
+    font-size: 10px !important;
+    margin-top: 2px !important;
+    padding: 0 !important;
+    background: transparent !important;
+    border: none !important;
+    color: #7dd3fc !important;
+    text-align: left;
+  }
+
+  .prop-card-compact {
+    padding: 4px 5px !important;
+    gap: 2px !important;
+  }
+
+  .prop-card-compact .prop-card-player-name {
+    font-size: 12px !important;
+    line-height: 1.15 !important;
+  }
+
+  .prop-card-compact .prop-card-platform {
+    font-size: 9px !important;
+  }
+
+  .curated-picks-screen .dfs-section,
+  .curated-picks-screen section {
+    margin-bottom: 6px !important;
+  }
+
+  .curated-parlay-grid,
+  .top-picks-grid,
+  .saved-picks-grid {
+    gap: 4px !important;
   }
 
   /* Horizontal category chips */
@@ -310,6 +342,7 @@ body,
     overflow-y: hidden;
     white-space: nowrap;
     -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
     scrollbar-width: none;
     padding-bottom: 2px;
   }

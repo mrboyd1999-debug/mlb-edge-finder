@@ -6,8 +6,8 @@ function EmptyState({ text }) {
   return <div style={styles.emptyState}>{text}</div>;
 }
 
-function DemonBoard({ picks = [], loading, onOpen, compactMode = true }) {
-  const demons = useMemo(() => (picks || []).filter(Boolean).slice(0, 2), [picks]);
+function DemonBoard({ picks = [], loading, onOpen, compactMode = true, limit = 6 }) {
+  const demons = useMemo(() => (picks || []).filter(Boolean).slice(0, limit), [picks, limit]);
 
   const renderCard = useMemo(
     () => (prop) => (
@@ -23,7 +23,7 @@ function DemonBoard({ picks = [], loading, onOpen, compactMode = true }) {
           <p style={styles.eyebrow}>Higher payout · ceiling upside</p>
           <h2 style={styles.sectionTitle}>Demon Picks</h2>
         </div>
-        <p style={styles.countPill}>{demons.length}/2</p>
+        <p style={styles.countPill}>{demons.length}/{limit}</p>
       </div>
       {loading ? (
         <EmptyState text="Loading Demon lines…" />

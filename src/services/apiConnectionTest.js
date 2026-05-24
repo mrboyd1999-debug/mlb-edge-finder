@@ -40,7 +40,7 @@ async function probeFetch(url, { method = "GET", headers = {} } = {}) {
         payload = null;
       }
     }
-    return {
+    const result = {
       ok: response.ok && looksJson && !looksHtml,
       status: response.status,
       contentType,
@@ -50,9 +50,17 @@ async function probeFetch(url, { method = "GET", headers = {} } = {}) {
       rateLimited: response.status === 429,
       unauthorized: response.status === 401 || response.status === 403,
       looksHtml,
+      url,
     };
+    if (!result.ok) {
+      console.error(
+        `[API Health] Probe failed — url=${url} status=${result.status} preview=${result.preview}`
+      );
+    }
+    return result;
   } catch (error) {
     const message = error?.message || "Failed to fetch";
+    console.error(`[API Health] Probe failed — url=${url} status=? error=${message}`);
     return {
       ok: false,
       status: "?",
@@ -63,6 +71,7 @@ async function probeFetch(url, { method = "GET", headers = {} } = {}) {
       rateLimited: false,
       unauthorized: false,
       networkError: true,
+      url,
     };
   } finally {
     window.clearTimeout(timer);
