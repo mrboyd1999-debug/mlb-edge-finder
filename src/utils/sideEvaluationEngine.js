@@ -3,7 +3,13 @@
  */
 
 import { canonicalMarketKey } from "./marketNormalization.js";
-import { hasValidProjection } from "./propValidation.js";
+import {
+  computeAbsoluteProjectionEdge,
+  hasRenderableProjection,
+  resolveProjectionQuality,
+  resolveProjectionValue,
+  PROJECTION_QUALITY,
+} from "./projectionQuality.js";
 
 export const TIER_STRONG = 80;
 export const TIER_PLAYABLE = 70;
@@ -64,21 +70,6 @@ export function confidenceTierFromScore(score = 0) {
 
 export function isResearchTier(score = 0) {
   return finiteOr(score, 0) < TIER_LEAN;
-}
-
-function resolveProjectionForEvaluation(prop = {}) {
-  const raw = Number(prop.projection ?? prop.projectedValue);
-  if (Number.isFinite(raw) && raw > 0) {
-    return { projection: raw, estimated: Boolean(prop.estimatedProjection) };
-  }
-  const line = Number(prop.line);
-  if (!Number.isFinite(line) || line <= 0) {
-    return { projection: null, estimated: false };
-  }
-  if (isUnderPreferredMarket(prop)) {
-    return { projection: line * 0.88, estimated: true };
-  }
-  return { projection: line * 0.96, estimated: true };
 }
 
 /** Signed edge for a side: positive = that side is favored. */
@@ -167,6 +158,9 @@ function projectionQualityScore(prop = {}) {
 }
 
 function sideConfidence(prop = {}, side = "OVER", edge = 0) {
+  const projection = resolveProjectionValue(prop);
+  if (projection == null) return null;
+
   const base = finiteOr(prop.confidenceScore ?? prop.confidence, 50);
   const line = finiteOr(prop.line, 1);
   const edgePct = line > 0 ? (Math.max(0, edge) / line) * 100 : 0;
@@ -199,7 +193,7 @@ function isLineProjectionOnly(prop = {}) {
 }
 
 function sideRankScore(prop = {}, side = "OVER") {
-  const { projection } = resolveProjectionForEvaluation(prop);
+  const projection = resolveProjectionValue(prop);
   const line = Number(prop.line);
   const edge = sideEdge(projection, line, side);
   const edgePct = line > 0 ? (Math.max(0, edge) / line) * 100 : 0;
@@ -241,30 +235,26 @@ function round2(n) {
 }
 
 export function evaluateBothSides(prop = {}) {
-  const { projection, estimated } = resolveProjectionForEvaluation(prop);
-  const evalProp = {
-    ...prop,
-    projection,
-    estimatedProjection: estimated || prop.estimatedProjection,
-  };
-
-  if (projection == null) {
-    const conf = 50;
+  if (!hasRenderableProjection(prop)) {
     return {
-      recommendedSide: isUnderPreferredMarket(prop) ? "UNDER" : "OVER",
-      pass: false,
+      recommendedSide: "PASS",
+      pass: true,
       over: null,
       under: null,
       edge: 0,
-      confidence: conf,
-      tier: "Research Only",
+      confidence: null,
+      tier: "No projection data available",
       varianceLevel: varianceLevel(prop),
-      reason: "Limited data — default lean",
-      rankScore: 40,
-      estimatedProjection: true,
+      reason: "No projection data available",
+      rankScore: -Infinity,
+      estimatedProjection: false,
     };
   }
 
+  const projection = resolveProjectionValue(prop);
+  const quality = resolveProjectionQuality(prop);
+  const estimated = quality === PROJECTION_QUALITY.ESTIMATED;
+  const evalProp = { ...prop, projection, estimatedProjection: estimated };
   const over = sideRankScore(evalProp, "OVER");
   const under = sideRankScore(evalProp, "UNDER");
   const line = finiteOr(prop.line, 0);
@@ -275,19 +265,17 @@ export function evaluateBothSides(prop = {}) {
   const underValid = under.edge > 0;
 
   if (!overValid && !underValid) {
-    const fallback = isUnderPreferredMarket(prop) ? under : over;
-    const conf = Math.min(Math.max(over.confidence, under.confidence), estimated ? 60 : 58);
     return {
-      recommendedSide: fallback.side,
-      pass: false,
+      recommendedSide: "PASS",
+      pass: true,
       over,
       under,
-      edge: fallback.edge,
-      confidence: conf,
+      edge: 0,
+      confidence: null,
       tier: "Research Only",
       varianceLevel: varianceLevel(prop),
-      reason: estimated ? "Estimated projection" : "Thin edge — research only",
-      rankScore: Math.max(35, fallback.rankScore),
+      reason: "No positive edge on either side",
+      rankScore: -Infinity,
       estimatedProjection: estimated,
     };
   }
@@ -394,13 +382,17 @@ export function enrichPropWithSideEvaluation(prop = {}) {
   return {
     ...prop,
     estimatedProjection: evaluation.estimatedProjection || prop.estimatedProjection,
-    projectionLabel: evaluation.estimatedProjection ? "Estimated projection" : prop.projectionLabel || "",
+    projectionLabel: evaluation.pass
+      ? "No projection data available"
+      : evaluation.estimatedProjection
+        ? "Estimated projection"
+        : prop.projectionLabel || "Verified Projection",
     recommendedSide: evaluation.recommendedSide,
     side: sidePick || prop.side || "",
     pick: sidePick || prop.pick || "",
     bestPick: sidePick || prop.bestPick || "",
     overUnder: sidePick || prop.overUnder || "",
-    edge: evaluation.edge ?? prop.edge ?? null,
+    edge: evaluation.pass ? 0 : (computeAbsoluteProjectionEdge(prop) || (evaluation.edge ?? null)),
     projectionEdge: evaluation.edge ?? prop.projectionEdge ?? null,
     confidence: evaluation.confidence ?? prop.confidence ?? null,
     confidenceScore: evaluation.confidence ?? prop.confidenceScore ?? null,

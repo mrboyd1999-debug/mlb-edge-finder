@@ -6,7 +6,7 @@ import {
   markDisplayFallbackProps,
   sortPropsForDisplay,
 } from "./displayPropScoring.js";
-import { isRankableCandidateProp } from "./propValidation.js";
+import { annotateProjectionFields, isProjectionRankedProp, isStreakRankEligible } from "./projectionQuality.js";
 import { MLB_ONLY_MODE } from "./mlbOnlyMode.js";
 import { isSafeModeEnabled } from "./safeMode.js";
 import {
@@ -14,7 +14,6 @@ import {
   resolveSafeMlbStreakPicks,
   sortLoosePropsByConfidence,
 } from "./safeModePipeline.js";
-import { filterByDisplayConfidenceFloor, MIN_STREAK_CONFIDENCE } from "./mlbConfidenceEngine.js";
 import { resolveCuratedGoblinDemonBoards } from "./goblinDemonPairs.js";
 import { isGoblinProp, isDemonProp } from "./propLabels.js";
 import {
@@ -26,7 +25,6 @@ import {
   extractParsedUnderdogProps,
   filterMlbUnderdogStreakEligible,
   filterUnderdogPropsForSport,
-  filterStreakEligibleUdProps,
   isStreakEligibleUdProp,
 } from "./underdogPickPool.js";
 import { resolvePropSportLabel } from "./underdogSportDetection.js";
@@ -209,8 +207,12 @@ export function resolveUnderdogSectionFallbacks(
   }
 
   return {
-    streakPicks: markDisplayFallbackProps(filterByDisplayConfidenceFloor(nextStreakPicks)),
-    parlayPicks: markDisplayFallbackProps(filterByDisplayConfidenceFloor(nextParlayPicks)),
+    streakPicks: markDisplayFallbackProps(
+      nextStreakPicks.map(annotateProjectionFields).filter(isStreakRankEligible)
+    ),
+    parlayPicks: markDisplayFallbackProps(
+      nextParlayPicks.map(annotateProjectionFields).filter(isProjectionRankedProp)
+    ),
     goblins: nextGoblins.slice(0, goblinLimit),
     demons: nextDemons.slice(0, demonLimit),
     udPoolCount: udPool.length,
@@ -249,11 +251,14 @@ export function resolveMlbStreakPicks(
   parsedUnderdogProps = []
 ) {
   const udParsedPool = resolveUnderdogPickPool(displayProps, rawProps, parsedUnderdogProps, "MLB");
-  const streakEligible = filterMlbUnderdogStreakEligible(udParsedPool).filter(isRankableCandidateProp);
+  const streakEligible = filterMlbUnderdogStreakEligible(udParsedPool)
+    .map(annotateProjectionFields)
+    .filter(isStreakRankEligible);
 
   const boardPicks = filterUnderdogStreakPool(streakBoards.MLB?.picks || [])
     .filter((prop) => !isPrizePicksProp(prop) && resolvePropSportLabel(prop) === "MLB")
-    .filter(isRankableCandidateProp)
+    .map(annotateProjectionFields)
+    .filter(isStreakRankEligible)
     .slice(0, limit)
     .map((prop) => annotateMlbPick(prop, false));
 
@@ -262,28 +267,7 @@ export function resolveMlbStreakPicks(
     .map((prop) => annotateMlbPick(prop, false));
 
   const merged = mergeUniquePicks(boardPicks, validated, limit).filter((prop) => !isPrizePicksProp(prop));
-  if (merged.length) {
-    return filterByDisplayConfidenceFloor(merged, MIN_STREAK_CONFIDENCE);
-  }
-
-  const allUd = filterStreakEligibleUdProps(extractParsedUnderdogProps({ parsedUnderdogProps, rawProps, displayProps }));
-  if (allUd.length) {
-    return filterByDisplayConfidenceFloor(
-      sortPropsForDisplay(allUd).slice(0, limit).map((prop) =>
-        annotateMlbPick(
-          {
-            ...prop,
-            streakSportLabel: resolvePropSportLabel(prop) || "Unknown",
-            streakSectionMode: "underdog-available",
-          },
-          false
-        )
-      ),
-      MIN_STREAK_CONFIDENCE
-    );
-  }
-
-  return [];
+  return merged;
 }
 
 export function resolveCuratedSportPicks(sport, streakBoards = {}, displayProps = [], limit = DISPLAY_LIMITS.streakPerSport, rawProps = []) {

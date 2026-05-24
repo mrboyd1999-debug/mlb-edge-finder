@@ -3,7 +3,7 @@ import { resolvePickSide } from "./pickRecommendation.js";
 import { estimateModelProbability } from "../services/projectionEngine.js";
 import { isUnderdogProp, isPrizePicksProp } from "./underdogStreakPool.js";
 import { resolvePropSportLabel, isNbaUnderdogProp } from "./underdogSportDetection.js";
-import { isRankableCandidateProp } from "./propValidation.js";
+import { isStreakRankEligible } from "./projectionQuality.js";
 
 /** Underdog MLB stat category keys — normalized from any spacing/casing/plus variants. */
 export const UNDERDOG_CATEGORIES = {
@@ -87,12 +87,12 @@ export function isMlbUnderdogStreakRow(prop = {}) {
     !isPrizePicksProp(prop) &&
     resolvePropSportLabel(prop) === "MLB" &&
     !isNbaUnderdogProp(prop) &&
-    isRankableCandidateProp(prop)
+    isStreakRankEligible(prop)
   );
 }
 
 export function isUnderdogAvailableRow(prop = {}) {
-  return isUnderdogProp(prop) && !isPrizePicksProp(prop) && isRankableCandidateProp(prop);
+  return isUnderdogProp(prop) && !isPrizePicksProp(prop) && isStreakRankEligible(prop);
 }
 
 export function filterUnderdogAvailableProps(props = [], { tabId = "all", limit = null } = {}) {

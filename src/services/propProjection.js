@@ -86,10 +86,11 @@ function volatilityShrink(projection, volatility, line) {
 
 function normalizeMlbProjection(value, line, key = "") {
   const projected = finiteNumber(value);
-  if (!Number.isFinite(projected)) return null;
+  if (!Number.isFinite(projected) || projected <= 0) return null;
   const ln = finiteNumber(line) || projected;
   const ceiling = Math.max(ln * 2.2, ln + (key === "strikeouts" ? 12 : 8));
-  return round(clamp(projected, 0, ceiling), 1);
+  const normalized = round(clamp(projected, 0.01, ceiling), 1);
+  return normalized > 0 ? normalized : null;
 }
 
 function consistencyMultiplier(profile = {}) {
@@ -158,11 +159,27 @@ function projectMlbProp(prop = {}, profile = {}, injury = null, context = {}) {
 
   if (key === "strikeouts" || key === "outs" || key === "pitchesThrown") {
     if (profile.strikeoutTrend) reasoning.push(`Strikeout trend: ${profile.strikeoutTrend}.`);
+    if (Number.isFinite(profile.opponentStrikeoutRate)) {
+      multiplier *= sigmoidScale(profile.opponentStrikeoutRate - 0.22, 0, 4);
+      reasoning.push(`Opponent K rate ${Math.round(profile.opponentStrikeoutRate * 100)}%.`);
+    }
+    if (Number.isFinite(profile.recentStrikeoutRate)) {
+      multiplier *= sigmoidScale(profile.recentStrikeoutRate - 0.24, 0, 3);
+      reasoning.push(`Pitcher recent K% ${Math.round(profile.recentStrikeoutRate * 100)}%.`);
+    }
+    if (Number.isFinite(profile.pitchCountProjection)) {
+      multiplier *= sigmoidScale((profile.pitchCountProjection - 90) / 20, 0, 2);
+      reasoning.push(`Pitch count projection ~${round(profile.pitchCountProjection)}.`);
+    }
     if (Number.isFinite(profile.opponentPitcherWhip)) {
       multiplier *= sigmoidScale(profile.opponentPitcherWhip - 1.25, 0, 3);
       reasoning.push(`Opponent WHIP proxy ${round(profile.opponentPitcherWhip)}.`);
     }
   } else if (["hits", "homeRuns", "totalBases", "rbis", "runs"].includes(key)) {
+    if (Number.isFinite(profile.opponentBullpenEra)) {
+      multiplier *= sigmoidScale((5.0 - profile.opponentBullpenEra) / 1.5, 0, 2);
+      reasoning.push(`Opponent bullpen ERA proxy ${round(profile.opponentBullpenEra, 2)}.`);
+    }
     if (Number.isFinite(profile.opponentPitcherHrAllowed)) {
       multiplier *= sigmoidScale(profile.opponentPitcherHrAllowed - 1.0, 0, 2);
     }

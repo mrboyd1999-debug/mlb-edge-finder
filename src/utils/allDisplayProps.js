@@ -32,14 +32,11 @@ function normalizeSourceLabel(value = "") {
 
 export function computeDisplayEdge(prop = {}) {
   const line = finiteOr(prop.line, 0);
-  const projection = finiteOr(prop.projection, line);
-  const side = String(prop.side || "").toLowerCase();
-  if (side.includes("under") || side.includes("less") || side.includes("lower")) return line - projection;
-  if (side.includes("over") || side.includes("more") || side.includes("higher")) return projection - line;
-  if (Number.isFinite(projection) && Number.isFinite(line) && projection !== line) {
-    return projection > line ? projection - line : line - projection;
+  const projection = finiteOr(prop.projection ?? prop.projectedValue, NaN);
+  if (!Number.isFinite(projection) || projection <= 0 || !Number.isFinite(line) || line <= 0) {
+    return 0;
   }
-  return 0;
+  return Math.abs(projection - line);
 }
 
 function resolveDisplaySide(raw = {}, prop = {}, line, projection) {
@@ -76,7 +73,7 @@ export function normalizeDisplayProp(prop = {}, { selectedSport = "MLB", source 
   const confidence = finiteOr(raw.confidence ?? raw.confidenceScore ?? prop.confidence ?? prop.confidenceScore, 50);
   const edge = finiteOr(
     raw.edge ?? prop.edge,
-    computeDisplayEdge({ line, projection: hasProjection ? projection : line, side })
+    hasProjection && projection > 0 ? computeDisplayEdge({ line, projection, side }) : 0
   );
   const imageSource = prop?.raw && typeof prop.raw === "object" ? prop.raw : raw;
   const playerImageUrl =

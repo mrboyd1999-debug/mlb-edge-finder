@@ -1,16 +1,13 @@
 import { canonicalMarketKey } from "./marketNormalization.js";
 import { normalizeSource } from "./normalizeSource.js";
-import {
-  computeCuratedPropEdge,
-  isRankableCandidateProp,
-} from "./propValidation.js";
+import { computeCuratedPropEdge } from "./propValidation.js";
 import {
   enrichPropWithSideEvaluation,
   evaluateBothSides,
   isUnderPreferredMarket,
   variancePenalty,
 } from "./sideEvaluationEngine.js";
-import { MIN_BEST_PLAY_CONFIDENCE } from "./mlbConfidenceEngine.js";
+import { isBestPlayEligible } from "./projectionQuality.js";
 
 export { readPropMultiplier, readPropProbability } from "./bestPlayRankingDisplay.js";
 
@@ -20,17 +17,15 @@ function finiteOr(value, fallback = 0) {
 }
 
 export function isRankableBestPlay(prop = {}) {
-  if (!isRankableCandidateProp(prop)) return false;
-  const evaluation = prop.sideEvaluation || evaluateBothSides(prop);
-  const conf = finiteOr(evaluation.confidence ?? prop.confidenceScore ?? prop.confidence, 50);
-  return conf >= MIN_BEST_PLAY_CONFIDENCE || evaluation.pass === false;
+  return isBestPlayEligible(prop);
 }
 
 /** Rank score — uses dual-side evaluation output when present. */
 export function computeBestPlayRankScore(prop = {}) {
-  if (!isRankableCandidateProp(prop)) return -Infinity;
+  if (!isBestPlayEligible(prop)) return -Infinity;
 
   const evaluation = prop.sideEvaluation || evaluateBothSides(prop);
+  if (evaluation.pass || evaluation.rankScore === -Infinity) return -Infinity;
   if (evaluation.rankScore != null && Number.isFinite(evaluation.rankScore)) {
     return evaluation.rankScore;
   }
@@ -60,7 +55,7 @@ export function prepareBestPlayProps(props = []) {
 
 export function sortBestPlayProps(props = []) {
   return prepareBestPlayProps(props)
-    .filter(isRankableCandidateProp)
+    .filter(isBestPlayEligible)
     .sort(
       (a, b) =>
         computeBestPlayRankScore(b) - computeBestPlayRankScore(a) ||

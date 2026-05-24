@@ -3332,7 +3332,7 @@ function scoreDFSProp(prop, context) {
   }
 
   const sportsbookLine = Number(sportsbookComparison?.marketAverageLine);
-  const projectedValue = Number.isFinite(projection) ? round(projection) : null;
+  let projectedValue = Number.isFinite(projection) ? round(projection) : null;
   let edgeResult = resolveProjectionEdge(projectedValue, {
     dfsLine: line,
     sportsbookLine: Number.isFinite(sportsbookLine) && sportsbookLine > 0 ? sportsbookLine : null,
@@ -3360,7 +3360,12 @@ function scoreDFSProp(prop, context) {
   }
 
   projection = projectedValue ?? projection;
-  const hasProjection = Number.isFinite(projection);
+  if (!Number.isFinite(projection) || projection <= 0) {
+    projection = null;
+    projectedValue = null;
+    projectionSource = "missing";
+  }
+  const hasProjection = Number.isFinite(projection) && projection > 0;
   const bestPick = edgeResult.bestPick || "";
   let edge = edgeResult.edge || 0;
   if (edge <= 0 && hasProjection && Number.isFinite(line)) {
@@ -3368,6 +3373,9 @@ function scoreDFSProp(prop, context) {
     if (fallbackDiff >= 0.01) {
       edge = round(fallbackDiff);
     }
+  }
+  if (!hasProjection) {
+    edge = 0;
   }
   const absoluteEdge = Math.abs(edge);
   const lineValueBoost = lineComparison ? Math.min(10, Math.abs(lineComparison.difference) * 4) : 0;

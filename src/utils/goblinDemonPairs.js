@@ -12,8 +12,13 @@ import { resolvePickSide } from "./pickRecommendation.js";
 import { filterResolvedSportProps, filterUnderdogPropsBySport } from "./underdogSportDetection.js";
 import { filterActiveSportProps } from "./mlbOnlyMode.js";
 import { isLooseDisplayProp, dedupeLooseProps } from "./safeModePipeline.js";
-import { filterByDisplayConfidenceFloor, MIN_GOBLIN_DEMON_CONFIDENCE } from "./mlbConfidenceEngine.js";
 import { normalizeSource } from "./normalizeSource.js";
+import {
+  annotateProjectionFields,
+  isDemonRankEligible,
+  isGoblinRankEligible,
+  isProjectionRankedProp,
+} from "./projectionQuality.js";
 
 const MIN_LINE_GAP = 0.5;
 const GOBLIN_CONFIDENCE_BOOST = 10;
@@ -183,7 +188,10 @@ function buildPropPool(displayProps = [], rawProps = [], parsedUnderdogProps = [
   const sportRaw = filterResolvedSportProps(filterActiveSportProps(rawProps || []), sport, { selectedSportTab: sport });
   const udParsed = filterUnderdogPropsBySport(Array.isArray(parsedUnderdogProps) ? parsedUnderdogProps : [], sport);
   return dedupeLooseProps(
-    [...udParsed, ...sportDisplay, ...sportRaw].filter(isLooseDisplayProp)
+    [...udParsed, ...sportDisplay, ...sportRaw]
+      .filter(isLooseDisplayProp)
+      .map(annotateProjectionFields)
+      .filter(isProjectionRankedProp)
   );
 }
 
@@ -258,8 +266,8 @@ export function resolveCuratedGoblinDemonBoards(
   const pool = buildPropPool(displayProps, rawProps, parsedUnderdogProps, selectedSport);
   const paired = resolveGoblinDemonBoards(pool, { goblinLimit, demonLimit });
 
-  let goblins = paired.goblins;
-  let demons = paired.demons;
+  let goblins = paired.goblins.filter(isGoblinRankEligible);
+  let demons = paired.demons.filter(isDemonRankEligible);
 
   if (!goblins.length) {
     const verified = (goblinBoardPicks || []).filter(isGoblinProp).slice(0, goblinLimit);
@@ -268,10 +276,9 @@ export function resolveCuratedGoblinDemonBoards(
     );
   }
   if (!goblins.length) {
-    goblins = filterByDisplayConfidenceFloor(
-      pool.filter(isGoblinProp),
-      MIN_GOBLIN_DEMON_CONFIDENCE
-    )
+    goblins = pool
+      .filter(isGoblinProp)
+      .filter(isGoblinRankEligible)
       .slice(0, goblinLimit)
       .map((prop) => annotatePayoutProp(prop, "goblin", { verified: isGoblinProp(prop), pairedLine: null }));
   }
@@ -283,10 +290,9 @@ export function resolveCuratedGoblinDemonBoards(
     );
   }
   if (!demons.length) {
-    demons = filterByDisplayConfidenceFloor(
-      pool.filter(isDemonProp),
-      MIN_GOBLIN_DEMON_CONFIDENCE
-    )
+    demons = pool
+      .filter(isDemonProp)
+      .filter(isDemonRankEligible)
       .slice(0, demonLimit)
       .map((prop) => annotatePayoutProp(prop, "demon", { verified: isDemonProp(prop), pairedLine: null }));
   }

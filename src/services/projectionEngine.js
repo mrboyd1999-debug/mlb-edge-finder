@@ -90,7 +90,7 @@ export function computeConfidence({
     cap = 62 + clamp(lineValueBoost + sportsbookBoost + Math.max(0, movementBoost), 0, 10);
     capReason = "Limited stat context — confidence derived mainly from line/market signals.";
   } else if (projectionSource === "missing") {
-    cap = 58;
+    cap = 0;
     capReason = "Projection missing.";
   } else if (profileIsFallback || dataQualityScore < 45) {
     cap = 66;
@@ -114,7 +114,7 @@ export function computeConfidence({
     cap = 85;
   }
 
-  const score = Math.round(clamp(raw, 35, cap));
+  const score = projectionSource === "missing" ? 0 : Math.round(clamp(raw, 35, cap));
   return { score, cap, verifiedHistory, strongData, capReason };
 }
 

@@ -5,13 +5,14 @@ import { withPlayerImageUrl } from "./playerImageFields.js";
 import { filterUnderdogPropsBySport, filterResolvedSportProps } from "./underdogSportDetection.js";
 import { sortBestPlayProps, prepareBestPlayProps } from "./bestPlayRanking.js";
 import { buildAnalyticsReason } from "./propReasonEngine.js";
-import {
-  computeCuratedPropEdge,
-  isRankableCandidateProp,
-  isVerifiedSportsbookProp,
-} from "./propValidation.js";
+import { computeCuratedPropEdge, isVerifiedSportsbookProp } from "./propValidation.js";
 import { enrichPropWithSideEvaluation } from "./sideEvaluationEngine.js";
 import { normalizeSource } from "./normalizeSource.js";
+import {
+  annotateProjectionFields,
+  isBestPlayEligible,
+  isProjectionRankedProp,
+} from "./projectionQuality.js";
 
 function isPrizePicksOrUnderdog(prop = {}) {
   const src = normalizeSource(prop);
@@ -27,14 +28,17 @@ function buildBestPlayPool(displayProps = [], rawProps = [], parsedUnderdogProps
     .filter((prop) => normalizeSource(prop) === "prizepicks");
   const udMlb = filterUnderdogPropsBySport(parsedUnderdogProps || [], "MLB").filter(isVerifiedSportsbookProp);
   return dedupeLooseProps(
-    [...mlbDisplay, ...ppRaw, ...udMlb].filter(isLooseDisplayProp).filter(isRankableCandidateProp)
+    [...mlbDisplay, ...ppRaw, ...udMlb]
+      .filter(isLooseDisplayProp)
+      .map(annotateProjectionFields)
+      .filter(isProjectionRankedProp)
   );
 }
 
 function annotateFeatured(prop, featuredLabel, featuredKey) {
   if (!prop) return null;
   return withPlayerImageUrl({
-    ...prop,
+    ...annotateProjectionFields(prop),
     featuredLabel,
     featuredKey,
     isFeaturedMlbPick: true,
@@ -60,7 +64,7 @@ function pickUnique(candidates = [], usedKeys = new Set()) {
 
 export function resolveFeaturedMlbPicks(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
   const rawPool = buildBestPlayPool(displayProps, rawProps, parsedUnderdogProps);
-  const pool = prepareBestPlayProps(rawPool);
+  const pool = prepareBestPlayProps(rawPool).filter(isBestPlayEligible);
 
   if (!pool.length) {
     return { bestOverall: null, sharpestEdge: null, safestPlay: null, bestPlays: [] };

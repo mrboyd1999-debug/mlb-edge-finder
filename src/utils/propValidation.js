@@ -4,6 +4,7 @@ import { isOverseasOrPlaceholderProp, OVERSEAS_BLOCKED_PATTERN, getIngestionProp
 import { isUsableParsedProp, normalizePropShape } from "./propShape.js";
 import { lockSportFromStatType, sportStatMismatchReason } from "./propStatSportLock.js";
 import { resolvePropSportLabel } from "./underdogSportDetection.js";
+import { computeAbsoluteProjectionEdge } from "./projectionQuality.js";
 
 export const VERIFIED_SPORTSBOOK_PLATFORMS = new Set(["PrizePicks", "Underdog"]);
 export const VERIFIED_LINE_BADGES = new Set(["LIVE", "CACHED", "EMPTY"]);
@@ -131,23 +132,8 @@ function resolvePickSideKey(prop = {}) {
 }
 
 export function computeCuratedPropEdge(prop = {}) {
-  const line = Number(prop.line);
-  const projection = Number(prop.projection ?? prop.projectedValue);
-  if (!Number.isFinite(line)) return null;
-
-  const side = resolvePickSideKey(prop);
-  if (!Number.isFinite(projection) || projection <= 0) {
-    if (side === "under" && line > 0) return line;
-    return null;
-  }
-
-  if (side === "under") return line - projection;
-  if (side === "over") return projection - line;
-
-  if (projection !== line) {
-    return projection > line ? projection - line : line - projection;
-  }
-  return null;
+  const edge = computeAbsoluteProjectionEdge(prop);
+  return edge > 0 ? edge : null;
 }
 
 /** Hard reject — only impossible/invalid props. Used for ranked pick candidates. */
