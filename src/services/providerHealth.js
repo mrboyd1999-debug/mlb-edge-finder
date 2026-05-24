@@ -1,7 +1,7 @@
 /** Provider health — merge probe results with actual parsed feed data. */
 
 import { getOddsApiKey } from "../config/apiConfig.js";
-import { ENRICHMENT_TIMEOUT_MESSAGE } from "../utils/apiTimeout.js";
+import { ENRICHMENT_TIMEOUT_MESSAGE, isTimeoutPreview } from "../utils/apiTimeout.js";
 import { SPORTSDATA_CONNECTED_VIA_PROXY } from "./sportsDataService.js";
 import { CONNECTION_STATUS } from "./apiConnectionTest.js";
 

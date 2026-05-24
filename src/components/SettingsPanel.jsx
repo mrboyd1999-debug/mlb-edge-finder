@@ -11,6 +11,7 @@ import {
 } from "../services/runtimeSettings.js";
 import { validateApiConfig } from "../config/apiConfig.js";
 import ApiHealthPanel from "./ApiHealthPanel.jsx";
+import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import { testAllApiConnections, testSportsDataIO, mergeConnectionReportWithFeeds } from "../services/apiConnectionTest.js";
 import { isDebugModeEnabled } from "../utils/devMode.js";
 
@@ -142,7 +143,12 @@ export default function SettingsPanel({
             }
           : null;
       if (!base?.results?.length) return current;
-      return mergeConnectionReportWithFeeds(base, feedHealthContext);
+      try {
+        return mergeConnectionReportWithFeeds(base, feedHealthContext);
+      } catch (error) {
+        console.error("[API Health] Feed merge failed — keeping last report", error);
+        return current;
+      }
     });
   }, [feedHealthContext]);
 
@@ -198,7 +204,19 @@ export default function SettingsPanel({
             ))}
           </ul>
         ) : null}
-        <ApiHealthPanel connectionReport={connectionReport} lastTestedAt={meta.lastTestedAt} />
+        <SectionErrorBoundary
+          name="API Health"
+          fallback={
+            <div className="api-health-settings-panel" style={{ marginTop: "10px" }}>
+              <strong style={{ fontSize: 13 }}>API Health</strong>
+              <p style={{ ...styles.compactFlags, margin: "6px 0 0", color: "#fcd34d" }}>
+                API diagnostics temporarily unavailable.
+              </p>
+            </div>
+          }
+        >
+          <ApiHealthPanel connectionReport={connectionReport} lastTestedAt={meta.lastTestedAt} />
+        </SectionErrorBoundary>
         <details className="settings-keys-expand" style={{ ...styles.compactDetails, marginTop: "8px" }}>
           <summary style={styles.detailsSummary}>
             <span>

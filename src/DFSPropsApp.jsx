@@ -2928,6 +2928,15 @@ export default function DFSPropsApp() {
       </div>
 
       <div className="dfs-section dfs-order-api-health">
+      <SectionErrorBoundary
+        name="Source Status"
+        onError={handleSectionRenderError}
+        fallback={
+          <div style={{ padding: "8px 0", color: "#fcd34d", fontSize: 12 }}>
+            API diagnostics temporarily unavailable.
+          </div>
+        }
+      >
       <SourceStatusBar
         sourceStatus={displaySourceStatus}
         sourceHealth={sourceHealth}
@@ -2940,12 +2949,13 @@ export default function DFSPropsApp() {
         slateExcludedCount={debugInfo.slateExcludedCount ?? pipelineAudit.slateExcluded ?? 0}
         pregameWindowHours={debugInfo.pregameWindowHours ?? filterPrefs.pregameWindowHours ?? DEFAULT_PREGAME_WINDOW_HOURS}
       />
+      </SectionErrorBoundary>
       </div>
       </>
       ) : null}
 
       <div className="dfs-section dfs-order-settings">
-      <SectionErrorBoundary name="API Health / Settings" onError={handleSectionRenderError}>
+      <SectionErrorBoundary name="Settings" onError={handleSectionRenderError}>
       <SettingsPanel
         onSaved={handleSettingsSaved}
         onClearCaches={handleSettingsSaved}
@@ -3033,6 +3043,7 @@ export default function DFSPropsApp() {
 
       <LazyBelowFold>
       <div className="dfs-section dfs-order-history">
+      <SectionErrorBoundary name="Saved Picks" onError={handleSectionRenderError}>
       <details style={styles.compactDetails}>
         <summary style={styles.detailsSummary}>
           <span className="details-summary-stack">
@@ -3054,6 +3065,7 @@ export default function DFSPropsApp() {
           />
         </div>
       </details>
+      </SectionErrorBoundary>
       </div>
       </LazyBelowFold>
 
