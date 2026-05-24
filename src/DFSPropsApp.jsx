@@ -2975,6 +2975,7 @@ export default function DFSPropsApp() {
           <CuratedPicksScreen
             featuredPicks={featuredMlbPicks}
             mlbStreakPicks={curatedSportPicks}
+            underdogPool={selectedSportUdProps}
             parlayPicks={quickParlayPicks.slice(0, DISPLAY_LIMITS.parlayLegs)}
             goblinPicks={curatedGoblinPicks}
             demonPicks={curatedDemonPicks}

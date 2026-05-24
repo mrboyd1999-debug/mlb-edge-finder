@@ -5,6 +5,7 @@
 
 import { withNormalizedSource } from "./normalizeSource.js";
 import { detectUnderdogSport } from "./underdogSportDetection.js";
+import { normalizeGameStartTime } from "./normalizeGameStartTime.js";
 
 export const UNDERDOG_PARSER_MISMATCH_MESSAGE = "Underdog parser mismatch detected.";
 
@@ -221,6 +222,60 @@ function sideFromRaw(raw = {}) {
   return "over";
 }
 
+function normalizeStreakSide(value = "") {
+  const key = String(value || "").toLowerCase();
+  if (key.includes("higher") || key.includes("over") || key.includes("more")) return "Higher";
+  if (key.includes("lower") || key.includes("under") || key.includes("less")) return "Lower";
+  return String(value || "Higher");
+}
+
+function resolveStartTimeFromRaw(raw = {}, lookup = {}) {
+  const attrs = attrsOf(raw);
+  const { games, appearances } = lookup;
+  let game = {};
+  if (games?.size && appearances?.size) {
+    const appearanceId = attrs.appearance_id || raw.appearance_id;
+    const appearance = appearances.get(String(appearanceId)) || {};
+    game = games.get(String(appearance.game_id || appearance.match_id || attrs.game_id)) || {};
+  }
+  return normalizeGameStartTime(
+    raw.start_time ||
+      raw.startTime ||
+      raw.game_time ||
+      raw.scheduled_at ||
+      attrs.start_time ||
+      attrs.scheduled_at ||
+      game.scheduled_at ||
+      game.start_time ||
+      game.startTime
+  );
+}
+
+function resolveStreakOptionsFromRaw(raw = {}) {
+  const attrs = attrsOf(raw);
+  const options = raw.options || raw.choices || attrs.options || attrs.choices || [];
+  if (!Array.isArray(options) || !options.length) return [];
+
+  return options
+    .map((option) => {
+      const multiplier = Number(
+        option.payout_multiplier ??
+          option.multiplier ??
+          option.boosted_multiplier ??
+          option.payoutMultiplier ??
+          option.payout
+      );
+      return {
+        side: normalizeStreakSide(option.choice_display || option.choice || option.side || option.label),
+        multiplier,
+        rawProbability: Number(option.raw_probability ?? option.rawProbability),
+        optionId: option.id,
+        label: option.selection_subheader || option.choice_display || "",
+      };
+    })
+    .filter((option) => Number.isFinite(option.multiplier) && option.multiplier > 0);
+}
+
 /**
  * Parse one raw Underdog record into normalized app prop shape.
  * @returns {object|null} prop or null if rejected
@@ -263,6 +318,8 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
   );
   const overUnder = sideFromRaw(raw);
   const oddsType = inferOddsType(raw);
+  const startTime = resolveStartTimeFromRaw(raw, lookup);
+  const streakOptions = resolveStreakOptionsFromRaw(raw);
   const id =
     raw.id ||
     raw.sourceId ||
@@ -283,6 +340,9 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
     opponent,
     sport,
     league: sport,
+    startTime,
+    gameTime: startTime,
+    streakOptions,
     normalizedSource: "underdog",
     source: "Underdog",
     platform: "Underdog",

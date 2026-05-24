@@ -88,6 +88,72 @@ body,
     inset 0 0 0 1px rgba(59, 130, 246, 0.24);
 }
 
+.underdog-row-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.underdog-row-card {
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.underdog-row-card:hover {
+  border-color: #2563eb;
+  background: #0f172a;
+}
+
+.underdog-row-card .player-image-wrap {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  flex-basis: 40px;
+}
+
+.underdog-side-btn-active .underdog-side-label {
+  color: #86efac;
+}
+
+.underdog-side-btn-active .underdog-side-multiplier {
+  color: #dcfce7;
+}
+
+.underdog-side-btn-active .underdog-side-prob {
+  color: #bbf7d0;
+}
+
+.underdog-stat-tabs {
+  scrollbar-width: none;
+}
+
+.underdog-stat-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+@media (max-width: 420px) {
+  .underdog-row-card {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+
+  .underdog-row-card .player-image-wrap {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    flex-basis: 36px;
+  }
+
+  .underdog-side-btn {
+    min-width: 58px;
+    padding: 6px 8px;
+  }
+
+  .underdog-stat-tab {
+    font-size: 10px;
+    padding: 5px 8px;
+  }
+}
+
 .mobile-warning-banner {
   display: block;
   margin: 0 0 8px;

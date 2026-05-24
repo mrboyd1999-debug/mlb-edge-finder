@@ -46,6 +46,7 @@ function ParlayBuilderSection({ picks = [], loading, onOpen, hasMlbProps = false
 function CuratedPicksScreen({
   featuredPicks = {},
   mlbStreakPicks = [],
+  underdogPool = [],
   parlayPicks = [],
   goblinPicks = [],
   demonPicks = [],
@@ -72,6 +73,7 @@ function CuratedPicksScreen({
         <SectionErrorBoundary name="MLB Streak Picks" onError={onSectionError}>
           <MlbStreakPicksBoard
             picks={mlbStreakPicks}
+            underdogPool={underdogPool}
             loading={loading}
             onOpen={onOpen}
             hasUnderdogProps={hasUnderdogProps}

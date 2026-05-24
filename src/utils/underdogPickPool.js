@@ -26,7 +26,12 @@ function finiteOr(value, fallback = 0) {
 function shapeUnderdogProp(prop = {}) {
   return normalizePropsWithSource([
     normalizePropShape(
-      { ...prop, playerName: prop.playerName || prop.player || "" },
+      {
+        ...prop,
+        playerName: prop.playerName || prop.player || "",
+        streakOptions: prop.streakOptions || [],
+        startTime: prop.startTime || prop.gameTime || "",
+      },
       { platform: "Underdog", source: "Underdog" }
     ),
   ])[0];
