@@ -18,6 +18,28 @@ body,
   gap: 10px;
 }
 
+.streak-grid,
+.pick-grid,
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 700px) {
+  .streak-grid,
+  .pick-grid,
+  .cards-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.mlb-featured-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
 .mlb-outlook-card .player-image-wrap {
   width: 48px;
   height: 48px;
@@ -36,12 +58,6 @@ body,
 
 .mlb-demon-card {
   box-shadow: inset 0 0 0 1px rgba(232, 121, 249, 0.12);
-}
-
-@media (min-width: 641px) {
-  .mlb-featured-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
 }
 
 .mobile-warning-banner {
@@ -657,8 +673,13 @@ body,
 @media (min-width: 641px) {
   .accepted-props-grid,
   .top-picks-grid,
-  .mlb-outlook-grid {
+  .mlb-outlook-grid:not(.mlb-featured-grid) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .mlb-featured-grid.mlb-outlook-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 12px;
   }
 }

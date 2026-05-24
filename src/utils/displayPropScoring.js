@@ -176,15 +176,15 @@ export function computeDisplayEdgeValue(prop = {}) {
 }
 
 export function confidenceTierLabel(confidence = BASE_CONFIDENCE) {
-  if (confidence >= 76) return "ELITE";
-  if (confidence >= 68) return "STRONG";
-  if (confidence >= 59) return "PLAYABLE";
+  if (confidence >= 80) return "STRONG";
+  if (confidence >= 70) return "PLAYABLE";
+  if (confidence >= 60) return "LEAN";
   return "RESEARCH ONLY";
 }
 
 export function computeDisplayRiskLevel(confidence = BASE_CONFIDENCE) {
-  if (confidence >= 76) return "LOW";
-  if (confidence >= 59) return "MEDIUM";
+  if (confidence >= 80) return "LOW";
+  if (confidence >= 60) return "MEDIUM";
   return "HIGH";
 }
 
@@ -377,7 +377,7 @@ export function scoreDisplayProp(prop = {}) {
   const invalidProp = !isValidDisplayProp({ ...finalized, line, player: prop.player, playerName: prop.playerName });
   const displayResearchOnly = invalidProp
     ? true
-    : finiteOr(finalized.confidence, 0) < 59 || isDisplayResearchOnly(finalized);
+    : finiteOr(finalized.confidence, 0) < 60 || isDisplayResearchOnly(finalized);
   const isDisplayPlayable = !displayResearchOnly && !invalidProp;
   const bettingLabel = displayResearchOnly ? "Research only" : labelForConfidence(finalized.confidence, false);
 
@@ -421,8 +421,9 @@ export function isValidDisplayProp(prop = {}) {
 }
 
 function labelForConfidence(confidence = BASE_CONFIDENCE, displayResearchOnly = false) {
-  if (displayResearchOnly || confidence < 59) return "Research only";
-  if (confidence >= 68) return "Ready to Bet";
+  if (displayResearchOnly || confidence < 60) return "Research only";
+  if (confidence >= 80) return "Strong Play";
+  if (confidence >= 70) return "Playable";
   return "Lean";
 }
 

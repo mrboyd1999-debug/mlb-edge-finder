@@ -16,35 +16,42 @@ function finiteOr(value, fallback = 0) {
   return Number.isFinite(num) ? num : fallback;
 }
 
-export function confidenceBandLabel(confidence) {
-  const c = finiteOr(confidence, 50);
-  if (c >= 76) return "elite";
-  if (c >= 68) return "strong";
-  if (c >= 59) return "playable";
+export function confidenceBandLabel(score) {
+  const c = finiteOr(score, 50);
+  if (c >= 80) return "strong";
+  if (c >= 70) return "playable";
+  if (c >= 60) return "lean";
   return "weak";
 }
 
-export function confidenceBandDisplay(confidence) {
-  const band = confidenceBandLabel(confidence);
-  if (band === "elite") return "Elite";
-  if (band === "strong") return "Strong";
+export function confidenceBandDisplay(score) {
+  const band = confidenceBandLabel(score);
+  if (band === "strong") return "Strong Play";
   if (band === "playable") return "Playable";
-  return "Research";
+  if (band === "lean") return "Lean";
+  return "Research Only";
 }
 
-export function confidenceBandPalette(confidence) {
-  const band = confidenceBandLabel(confidence);
-  if (band === "elite") return { bg: "#1e3a8a", border: "#60a5fa", color: "#dbeafe" };
+export function confidenceBandPalette(score) {
+  const band = confidenceBandLabel(score);
   if (band === "strong") return { bg: "#14532d", border: "#22c55e", color: "#bbf7d0" };
   if (band === "playable") return { bg: "#422006", border: "#ca8a04", color: "#fef08a" };
+  if (band === "lean") return { bg: "#1e3a8a", border: "#60a5fa", color: "#dbeafe" };
   return { bg: "#1e293b", border: "#64748b", color: "#94a3b8" };
 }
 
+/** Prefer playability when present; otherwise confidence. */
+export function resolveBandScore(prop = {}) {
+  const playability = finiteOr(prop.playabilityScore, NaN);
+  if (Number.isFinite(playability)) return Math.round(playability);
+  return Math.round(finiteOr(prop.confidenceScore ?? prop.confidence, 50));
+}
+
 function computeEdgePercentLocal(prop = {}, edge = null) {
-  const e = Math.abs(finiteOr(edge ?? prop.edge, 0));
-  const line = finiteOr(prop.line, 0);
-  if (line <= 0) return 0;
-  return (e / line) * 100;
+  const e = finiteOr(edge ?? prop.edge, NaN);
+  const projection = finiteOr(prop.projection ?? prop.projectedValue, NaN);
+  if (!Number.isFinite(e) || !Number.isFinite(projection) || projection <= 0) return 0;
+  return Math.round((e / projection) * 100);
 }
 
 function hasMajorRisk(prop = {}) {

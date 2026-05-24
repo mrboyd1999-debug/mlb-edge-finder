@@ -19,9 +19,9 @@ function normalizeSport(prop = {}) {
 
 export function computeEdgePercent(prop = {}, edge = null) {
   const e = finiteOr(edge ?? prop.edge, NaN);
-  const line = finiteOr(prop.line, 0);
-  if (!Number.isFinite(e) || line <= 0) return null;
-  return round1((Math.abs(e) / line) * 100);
+  const projection = finiteOr(prop.projection ?? prop.projectedValue, NaN);
+  if (!Number.isFinite(e) || !Number.isFinite(projection) || projection <= 0) return null;
+  return Math.round((e / projection) * 100);
 }
 
 export function hasMajorRiskFlags(prop = {}) {

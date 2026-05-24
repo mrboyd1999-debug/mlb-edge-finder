@@ -15,7 +15,7 @@ function TopPicksBoard({ label = "Sport", picks = [], onOpen, compactMode = true
         <p style={styles.countPill}>{topPicks.length}/2</p>
       </div>
       {topPicks.length > 0 ? (
-        <div className="top-picks-grid" style={styles.topPicksList}>
+        <div className="top-picks-grid streak-grid pick-grid cards-grid" style={styles.topPicksList}>
           {topPicks.map((prop, idx) => (
             <PlayerPropCard
               key={prop.id || `top-pick-${idx}`}

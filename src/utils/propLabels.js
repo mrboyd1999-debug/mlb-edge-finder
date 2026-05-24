@@ -33,7 +33,10 @@ export function displayFullMarketLabel(prop = {}) {
 export { fullMarketDisplayLabel };
 
 export function confidenceTier(prop) {
-  const score = Number(prop.confidenceScore || prop.modelSignal?.confidenceScore || 0);
+  const playability = Number(prop.playabilityScore);
+  const score = Number.isFinite(playability)
+    ? playability
+    : Number(prop.confidenceScore || prop.modelSignal?.confidenceScore || 0);
   return confidenceTierLabel(score, prop.riskLevel || "", {
     strongData: prop.strongData,
     verifiedHistory: prop.verifiedHistory,

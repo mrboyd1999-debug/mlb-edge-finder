@@ -13,6 +13,13 @@ import {
 } from "./safeModePipeline.js";
 import { filterByDisplayConfidenceFloor } from "./mlbConfidenceEngine.js";
 import { resolveCuratedGoblinDemonBoards } from "./goblinDemonPairs.js";
+import { filterActiveSportProps } from "./mlbOnlyMode.js";
+import {
+  filterUnderdogStreakPool,
+  UNDERDOG_STREAK_EMPTY_MESSAGE,
+} from "./underdogStreakPool.js";
+
+export { UNDERDOG_STREAK_EMPTY_MESSAGE } from "./underdogStreakPool.js";
 
 export {
   GOBLIN_EMPTY_MESSAGE,
@@ -69,7 +76,17 @@ export function countMlbDisplayProps(displayProps = [], rawProps = []) {
   return filterAllDisplayPropsBySport(displayProps, "MLB", "all").filter(isValidDisplayProp).length;
 }
 
-/** Always return up to 2 MLB streak picks when MLB props exist. */
+export function countUnderdogStreakProps(displayProps = [], rawProps = []) {
+  const pool = isSafeModeEnabled()
+    ? filterUnderdogStreakPool(buildSafeMlbPropPool(displayProps, rawProps))
+    : filterUnderdogStreakPool([
+        ...filterAllDisplayPropsBySport(displayProps, "MLB", "all"),
+        ...filterActiveSportProps(rawProps || []),
+      ]);
+  return pool.length;
+}
+
+/** Return up to 2 MLB streak picks from Underdog props only. */
 export function resolveMlbStreakPicks(
   streakBoards = {},
   displayProps = [],
@@ -77,30 +94,27 @@ export function resolveMlbStreakPicks(
   rawProps = []
 ) {
   if (isSafeModeEnabled()) {
-    const safe = resolveSafeMlbStreakPicks(displayProps, rawProps, limit);
-    if (safe.length) return safe;
+    return resolveSafeMlbStreakPicks(displayProps, rawProps, limit);
   }
 
-  const mlbProps = filterAllDisplayPropsBySport(displayProps, "MLB", "all");
-  const boardPicks = (streakBoards.MLB?.picks || []).slice(0, limit).map((prop) => annotateMlbPick(prop, false));
+  const mlbUnderdogProps = filterUnderdogStreakPool(filterAllDisplayPropsBySport(displayProps, "MLB", "all"));
+  const boardPicks = filterUnderdogStreakPool(streakBoards.MLB?.picks || [])
+    .slice(0, limit)
+    .map((prop) => annotateMlbPick(prop, false));
 
-  const fallbackPool = sortPropsForDisplay(mlbProps.filter(isValidDisplayProp)).map((prop) =>
+  const fallbackPool = sortPropsForDisplay(mlbUnderdogProps.filter(isValidDisplayProp)).map((prop) =>
     annotateMlbPick(prop, true)
   );
 
   const merged = mergeUniquePicks(boardPicks, fallbackPool, limit);
   if (merged.length) return markDisplayFallbackProps(filterByDisplayConfidenceFloor(merged));
 
-  if (mlbProps.length) {
+  if (mlbUnderdogProps.length) {
     return markDisplayFallbackProps(
-      sortPropsForDisplay(mlbProps.filter(isValidDisplayProp))
+      sortPropsForDisplay(mlbUnderdogProps.filter(isValidDisplayProp))
         .slice(0, limit)
         .map((prop) => annotateMlbPick(prop, true))
     );
-  }
-
-  if (isSafeModeEnabled()) {
-    return resolveSafeMlbStreakPicks(displayProps, rawProps, limit);
   }
 
   return [];

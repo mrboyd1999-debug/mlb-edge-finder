@@ -15,8 +15,8 @@ function buildMlbPool(displayProps = [], rawProps = []) {
 function overallScore(prop = {}) {
   const conf = Number(prop.confidenceScore ?? prop.confidence ?? 0);
   const edge = Math.max(0, Number(prop.edge ?? 0));
-  const line = Math.max(1, Number(prop.line) || 1);
-  const edgePct = (edge / line) * 100;
+  const projection = Math.max(0.1, Number(prop.projection ?? prop.projectedValue) || Number(prop.line) || 1);
+  const edgePct = projection > 0 ? (edge / projection) * 100 : 0;
   return conf * 0.45 + edgePct * 0.55 + (prop.isDisplayPlayable ? 4 : 0);
 }
 

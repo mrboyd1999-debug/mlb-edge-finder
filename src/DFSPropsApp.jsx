@@ -149,7 +149,8 @@ import {
 } from "./services/propPriority.js";
 import CuratedPicksScreen from "./components/CuratedPicksScreen.jsx";
 import SectionErrorBoundary from "./components/SectionErrorBoundary.jsx";
-import { DISPLAY_LIMITS, resolveCuratedGoblinDemonBoards, resolveMlbStreakPicks, countMlbDisplayProps, isManuallySavedPick, historyPickToDisplayProp } from "./utils/curatedPicks.js";
+import { DISPLAY_LIMITS, resolveCuratedGoblinDemonBoards, resolveMlbStreakPicks, countMlbDisplayProps, countUnderdogStreakProps, isManuallySavedPick, historyPickToDisplayProp } from "./utils/curatedPicks.js";
+import { isUnderdogProp } from "./utils/underdogStreakPool.js";
 import { resolveFeaturedMlbPicks } from "./utils/mlbFeaturedPicks.js";
 import { isSafeModeEnabled, SAFE_MODE_FALLBACK_MESSAGE, SAFE_MODE_LOADING_MESSAGE } from "./utils/safeMode.js";
 import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks, resolveSafeMlbStreakPicks } from "./utils/safeModePipeline.js";
@@ -2199,6 +2200,10 @@ export default function DFSPropsApp() {
     () => countMlbDisplayProps(scoredDisplayProps, props),
     [scoredDisplayProps, props]
   );
+  const underdogStreakPropCount = useMemo(
+    () => countUnderdogStreakProps(scoredDisplayProps, props),
+    [scoredDisplayProps, props]
+  );
   const curatedGoblinDemonBoards = useMemo(
     () =>
       resolveCuratedGoblinDemonBoards(boardDisplayProps, props, {
@@ -2850,6 +2855,7 @@ export default function DFSPropsApp() {
             loading={loading}
             onOpen={setSelectedEvaluation}
             hasMlbProps={mlbDisplayPropCount > 0}
+            hasUnderdogProps={underdogStreakPropCount > 0}
             onSectionError={handleSectionRenderError}
           />
         </SectionErrorBoundary>
@@ -4401,7 +4407,11 @@ function buildStreakSportCategoryBoards(props, history) {
         ? ladderPlays.filter(isDemonProp)
         : tabOption.type === "goblin"
           ? ladderPlays.filter(isGoblinProp)
-        : ladderPlays.filter((prop) => streakSportKey(prop) === tabOption.value);
+        : ladderPlays.filter(
+            (prop) =>
+              streakSportKey(prop) === tabOption.value &&
+              (tabOption.type !== "sport" || isUnderdogProp(prop))
+          );
     const sorted = [...tabCandidates].sort((a, b) => streakLifeScore(b, tabOption.value, history) - streakLifeScore(a, tabOption.value, history));
     const picks = selectTopStreakPicks(sorted, tabOption, history);
 
@@ -4446,7 +4456,9 @@ function streakTabCandidates(tabOption, mainCandidates, ladderPlays) {
     const strict = [...mainCandidates, ...ladderPlays].filter(isDemonCandidate);
     return strict.length ? strict : [...mainCandidates, ...ladderPlays].filter(isDemonProp).slice(0, 12);
   }
-  const sportMatches = mainCandidates.filter((prop) => streakSportKey(prop) === tabOption.value);
+  const sportMatches = mainCandidates.filter(
+    (prop) => streakSportKey(prop) === tabOption.value && isUnderdogProp(prop)
+  );
   const strict = sportMatches.filter(meetsStandardStreakRules);
   return strict.length >= 2 ? strict : sportMatches.slice(0, 24);
 }
@@ -4522,15 +4534,19 @@ function statEdgeForSide(projection, line, side) {
   return normalizedSide === "Lower" ? round(propLine - projected) : round(projected - propLine);
 }
 
-function edgePercentFromValues(edge, line) {
+function edgePercentFromValues(edge, projection) {
   const numericEdge = Number(edge);
-  const numericLine = Number(line);
-  if (!Number.isFinite(numericEdge) || !Number.isFinite(numericLine) || numericLine === 0) return null;
-  return round(numericEdge / Math.abs(numericLine));
+  const numericProjection = Number(projection);
+  if (!Number.isFinite(numericEdge) || !Number.isFinite(numericProjection) || numericProjection <= 0) return null;
+  return Math.round((numericEdge / numericProjection) * 100);
 }
 
 function edgePercentForProp(prop) {
-  return prop.edgePercentage ?? edgePercentFromValues(streakStatEdge(prop) ?? prop.edge, prop.line);
+  if (prop.edgePercentage != null && Number.isFinite(Number(prop.edgePercentage))) {
+    return Number(prop.edgePercentage);
+  }
+  const projection = prop.projection ?? prop.projectedValue;
+  return edgePercentFromValues(streakStatEdge(prop) ?? prop.edge, projection);
 }
 
 function isStaleOrStarted(prop) {
@@ -4936,7 +4952,7 @@ function enrichStreakCandidate(prop, history) {
       : null;
   const projection = Number(signal.projection ?? prop.projection);
   const statEdge = statEdgeForSide(projection, prop.line, prop.side);
-  const edgePercentage = edgePercentFromValues(statEdge, prop.line);
+  const edgePercentage = edgePercentFromValues(statEdge, projection);
   const highMultiplierPenalty = multiplier > 1 ? -12 : 0;
   const multiplierScore = clamp((1 - multiplier) * 55, 0, 18);
   const probabilityScore = Number.isFinite(Number(prop.rawProbability))

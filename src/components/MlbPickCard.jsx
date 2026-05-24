@@ -18,6 +18,7 @@ import {
   CONFIDENCE_TOOLTIP,
   confidenceBandDisplay,
   confidenceBandPalette,
+  resolveBandScore,
 } from "../utils/mlbConfidenceEngine.js";
 import { buildAnalyticsReason } from "../utils/propReasonEngine.js";
 
@@ -75,7 +76,7 @@ function MlbPickCard({ prop, onOpen, rank, cardStyle, streakAction = false }) {
   const side = resolvePickSide(enriched);
   const dfsSide = formatDfsSide(side);
   const playerName = enriched.playerName || enriched.player || "Unknown Player";
-  const platform = normalizeSourceLabel(enriched);
+  const platform = streakAction ? "Underdog" : normalizeSourceLabel(enriched);
   const platformPalette = platformBadgePalette(platform);
   const riskLevel = formatRiskLevel(enriched);
   const riskPalette = riskLevelPalette(riskLevel);
@@ -86,8 +87,9 @@ function MlbPickCard({ prop, onOpen, rank, cardStyle, streakAction = false }) {
   const projection = formatNumber(enriched.projection ?? enriched.projectedValue);
   const conf = enriched.confidenceScore ?? enriched.confidence;
   const confRounded = conf != null ? Math.round(Number(conf)) : null;
-  const confBand = confRounded != null ? confidenceBandDisplay(confRounded) : null;
-  const confPalette = confRounded != null ? confidenceBandPalette(confRounded) : null;
+  const bandScore = resolveBandScore(enriched);
+  const confBand = bandScore != null ? confidenceBandDisplay(bandScore) : null;
+  const confPalette = bandScore != null ? confidenceBandPalette(bandScore) : null;
   const edge = Number(enriched.edge ?? enriched.projectionEdge);
   const edgeLabel = Number.isFinite(edge) ? formatSignedNumber(edge) : "—";
   const reason =

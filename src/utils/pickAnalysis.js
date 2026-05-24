@@ -13,10 +13,13 @@ import {
 import { displaySport } from "./propLabels.js";
 
 export function edgePercentForProp(prop) {
+  if (prop.edgePercent != null && Number.isFinite(Number(prop.edgePercent))) {
+    return Number(prop.edgePercent);
+  }
   const edge = Number(prop.edge ?? prop.projectionEdge);
-  const line = Number(prop.line);
-  if (!Number.isFinite(edge) || !Number.isFinite(line) || line === 0) return null;
-  return Math.round((edge / Math.abs(line)) * 1000) / 10;
+  const projection = Number(prop.projection ?? prop.projectedValue);
+  if (!Number.isFinite(edge) || !Number.isFinite(projection) || projection <= 0) return null;
+  return Math.round((edge / projection) * 100);
 }
 
 export function dataSourcesUsed(prop) {
