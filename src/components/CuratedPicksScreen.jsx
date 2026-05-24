@@ -2,12 +2,12 @@ import { memo } from "react";
 import MlbStreakPicksBoard from "./MlbStreakPicksBoard.jsx";
 import GoblinBoard from "./GoblinBoard.jsx";
 import DemonBoard from "./DemonBoard.jsx";
-import PlayerPropCard from "./PlayerPropCard.jsx";
+import MlbPickCard from "./MlbPickCard.jsx";
 import { styles } from "../theme/styles.js";
 import { DISPLAY_LIMITS, MLB_EMPTY_MESSAGE } from "../utils/curatedPicks.js";
 import { MLB_ONLY_MODE } from "../utils/mlbOnlyMode.js";
 
-function ParlayBuilderSection({ picks = [], loading, onOpen, compactMode = true, hasMlbProps = false }) {
+function ParlayBuilderSection({ picks = [], loading, onOpen, hasMlbProps = false }) {
   const legs = (picks || []).filter(Boolean).slice(0, DISPLAY_LIMITS.parlayLegs);
 
   return (
@@ -26,11 +26,10 @@ function ParlayBuilderSection({ picks = [], loading, onOpen, compactMode = true,
       ) : (
         <div className="curated-parlay-grid" style={styles.topPicksList}>
           {legs.map((prop, idx) => (
-            <PlayerPropCard
+            <MlbPickCard
               key={prop.id || `parlay-${idx}`}
               prop={prop}
               rank={idx + 1}
-              compact={compactMode}
               onOpen={onOpen}
               cardStyle={styles.parlayCard}
             />
@@ -48,7 +47,6 @@ function CuratedPicksScreen({
   demonPicks = [],
   loading = false,
   onOpen,
-  compactMode = true,
   hasMlbProps = false,
 }) {
   if (MLB_ONLY_MODE) {
@@ -58,31 +56,24 @@ function CuratedPicksScreen({
           picks={mlbStreakPicks}
           loading={loading}
           onOpen={onOpen}
-          compactMode={compactMode}
           hasMlbProps={hasMlbProps}
         />
-        <ParlayBuilderSection
-          picks={parlayPicks}
-          loading={loading}
-          onOpen={onOpen}
-          compactMode={compactMode}
-          hasMlbProps={hasMlbProps}
-        />
+        <ParlayBuilderSection picks={parlayPicks} loading={loading} onOpen={onOpen} hasMlbProps={hasMlbProps} />
         <GoblinBoard
           picks={goblinPicks.slice(0, DISPLAY_LIMITS.goblins)}
           loading={loading}
           onOpen={onOpen}
-          compactMode={compactMode}
           limit={DISPLAY_LIMITS.goblins}
           title="MLB Goblins"
+          useMlbCard
         />
         <DemonBoard
           picks={demonPicks.slice(0, DISPLAY_LIMITS.demons)}
           loading={loading}
           onOpen={onOpen}
-          compactMode={compactMode}
           limit={DISPLAY_LIMITS.demons}
           title="MLB Demons"
+          useMlbCard
         />
       </div>
     );

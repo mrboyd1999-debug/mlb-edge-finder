@@ -8,13 +8,23 @@ function findProviderRow(results = [], name) {
   return results.find((row) => String(row.provider || "").toLowerCase() === name.toLowerCase()) || null;
 }
 
-function keySavedLabel(row) {
-  if (row?.provider === "SportsDataIO") {
-    return row.keySaved || row.keyConfigured ? "Key saved" : "Key not saved";
+function sportsDataKeySaved(row) {
+  return Boolean(row?.keySaved || row?.keyConfigured);
+}
+
+function providerDetails(label, row, testedAt) {
+  if (label === "SportsDataIO") {
+    return {
+      savedKey: sportsDataKeySaved(row) ? "Yes" : "No",
+      lastTested: testedAt ? formatDateTime(testedAt) : "Not tested",
+      result: row?.settingsLine || "Not Used",
+      error: row?.showError ? row?.lastError || row?.preview || "Connection failed" : "",
+    };
   }
-  if (row?.keyConfigured === false) return "Key not saved";
-  if (row?.keyConfigured) return "Key saved";
-  return "";
+  return {
+    result: row?.settingsLine || "Not tested",
+    error: row?.showError ? row?.lastError || row?.preview || "" : "",
+  };
 }
 
 export default function ApiHealthPanel({ connectionReport = null, lastTestedAt = "" }) {
@@ -24,20 +34,20 @@ export default function ApiHealthPanel({ connectionReport = null, lastTestedAt =
   return (
     <div className="api-health-settings-panel" style={{ marginTop: "10px" }}>
       <strong style={{ fontSize: 13 }}>API Health</strong>
-      {testedAt ? (
-        <p style={{ ...styles.compactFlags, margin: "6px 0 0" }}>Last tested: {formatDateTime(testedAt)}</p>
-      ) : (
-        <p style={{ ...styles.compactFlags, margin: "6px 0 0" }}>Last tested: Not tested</p>
-      )}
+      <p style={{ ...styles.compactFlags, margin: "6px 0 0" }}>
+        Last tested: {testedAt ? formatDateTime(testedAt) : "Not tested"}
+      </p>
       <div className="api-health-cards" style={{ marginTop: "10px", display: "grid", gap: "8px" }}>
         {PRIMARY_PROVIDERS.map((label) => {
           const row = findProviderRow(results, label);
-          const settingsLine = row?.settingsLine || row?.displayStatus || "Not Tested";
-          const keyLabel = keySavedLabel(row);
+          const settingsLine = row?.settingsLine || row?.displayStatus || (label === "SportsDataIO" ? "Not Used" : "Not tested");
+          const details = providerDetails(label, row, testedAt);
+          const isSportsData = label === "SportsDataIO";
+
           return (
             <div
               key={label}
-              className="api-health-card"
+              className={`api-health-card${isSportsData ? " api-health-card-sportsdata" : ""}`}
               style={{
                 ...styles.compactPanel,
                 padding: "10px 12px",
@@ -50,9 +60,17 @@ export default function ApiHealthPanel({ connectionReport = null, lastTestedAt =
                 <strong style={{ fontSize: 13 }}>{label}</strong>
                 <span style={providerStatusStyle(settingsLine)}>{settingsLine}</span>
               </div>
-              {keyLabel ? <span style={styles.compactFlags}>{keyLabel}</span> : null}
-              {row?.lastError && row.showError ? (
-                <span style={{ ...styles.compactFlags, color: "#fca5a5" }}>{row.lastError}</span>
+              {isSportsData ? (
+                <>
+                  <span style={styles.compactFlags}>Saved key: {details.savedKey}</span>
+                  <span style={styles.compactFlags}>Last tested: {details.lastTested}</span>
+                  <span style={styles.compactFlags}>Result: {details.result}</span>
+                </>
+              ) : (
+                <span style={styles.compactFlags}>Status: {details.result}</span>
+              )}
+              {details.error ? (
+                <span style={{ ...styles.compactFlags, color: "#fca5a5" }}>Error: {details.error}</span>
               ) : null}
             </div>
           );

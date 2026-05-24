@@ -1,6 +1,6 @@
 /** Provider health — merge probe results with actual parsed feed data. */
 
-import { getOddsApiKey, getProxyUrl } from "../config/apiConfig.js";
+import { getOddsApiKey } from "../config/apiConfig.js";
 import { CONNECTION_STATUS } from "./apiConnectionTest.js";
 
 export const PROVIDER_UI_STATUS = {
@@ -30,53 +30,56 @@ export const SPORTSDATA_SETTINGS_STATUS = {
   ERROR: "Error",
 };
 
-function resolveSportsDataSettingsStatus(probe = {}) {
+function propUsesSportsData(prop = {}) {
+  const sources = [
+    ...(prop.statEnrichmentSources || []),
+    ...(prop.dataSources || []),
+    ...(prop.modelSignal?.statEnrichmentSources || []),
+  ];
+  return sources.some((source) => /sportsdata/i.test(String(source || "")));
+}
+
+function resolveSportsDataSettingsStatus(probe = {}, feed = {}) {
   const keySaved = Boolean(probe.keyConfigured);
   if (!keySaved) {
     return {
-      settingsStatus: SPORTSDATA_SETTINGS_STATUS.NOT_TESTED,
-      settingsLine: SPORTSDATA_SETTINGS_STATUS.NOT_TESTED,
+      settingsStatus: PROVIDER_UI_STATUS.NOT_USED,
+      settingsLine: PROVIDER_UI_STATUS.NOT_USED,
       keySaved: false,
       showError: false,
     };
   }
   if (probe.unauthorized) {
     return {
-      settingsStatus: SPORTSDATA_SETTINGS_STATUS.INVALID_KEY,
-      settingsLine: SPORTSDATA_SETTINGS_STATUS.INVALID_KEY,
+      settingsStatus: "Failed",
+      settingsLine: "Failed",
       keySaved: true,
       showError: true,
     };
   }
-  if (probe.rateLimited) {
+  const apiConnected =
+    probe.ok && (!Array.isArray(probe.payload) || probe.payload.length > 0);
+  if (apiConnected && !feed.usedOnBoard) {
     return {
-      settingsStatus: SPORTSDATA_SETTINGS_STATUS.RATE_LIMITED,
-      settingsLine: SPORTSDATA_SETTINGS_STATUS.RATE_LIMITED,
+      settingsStatus: PROVIDER_UI_STATUS.CONNECTED,
+      settingsLine: "Connected — not used for current board",
       keySaved: true,
       showError: false,
     };
   }
-  if (probe.ok && Array.isArray(probe.payload) && probe.payload.length) {
+  if (apiConnected) {
     return {
-      settingsStatus: SPORTSDATA_SETTINGS_STATUS.CONNECTED,
-      settingsLine: SPORTSDATA_SETTINGS_STATUS.CONNECTED,
+      settingsStatus: PROVIDER_UI_STATUS.CONNECTED,
+      settingsLine: PROVIDER_UI_STATUS.CONNECTED,
       keySaved: true,
       showError: false,
-    };
-  }
-  if (!probe.ok || probe.networkError) {
-    return {
-      settingsStatus: SPORTSDATA_SETTINGS_STATUS.ERROR,
-      settingsLine: SPORTSDATA_SETTINGS_STATUS.ERROR,
-      keySaved: true,
-      showError: true,
     };
   }
   return {
-    settingsStatus: SPORTSDATA_SETTINGS_STATUS.NOT_TESTED,
-    settingsLine: SPORTSDATA_SETTINGS_STATUS.NOT_TESTED,
+    settingsStatus: "Failed",
+    settingsLine: "Failed",
     keySaved: true,
-    showError: false,
+    showError: true,
   };
 }
 
@@ -135,28 +138,17 @@ export function buildFeedHealthContext({
     PrizePicks: buildRow("PrizePicks", pp, "PrizePicks"),
     Underdog: buildRow("Underdog", ud, "Underdog"),
     "Odds API": buildRow("Odds API", odds, "The Odds API"),
+    SportsDataIO: {
+      usedOnBoard: (allDisplayProps || []).some(propUsesSportsData),
+    },
   };
-}
-
-function isProxyBlockedProbe(probe = {}) {
-  if (!probe) return false;
-  if (probe.unauthorized || probe.rateLimited) return false;
-  if (probe.networkError) return true;
-  if (probe.looksHtml) return true;
-  if (String(probe.status) === "0") return true;
-  return /failed to fetch|cors|network|blocked|timeout|abort/i.test(String(probe.preview || ""));
 }
 
 function mapUiStatusToConnectionStatus(settingsStatus = "") {
   const key = String(settingsStatus || "").toUpperCase();
   if (key === "LIVE" || key === "CONNECTED") return CONNECTION_STATUS.LIVE;
-  if (key === "CACHED") return CONNECTION_STATUS.CACHED;
-  if (key === "PROXY REQUIRED") return "PROXY REQUIRED";
-  if (key === "INVALID API KEY") return CONNECTION_STATUS.FAILED;
-  if (key === "RATE LIMITED") return CONNECTION_STATUS.CACHED;
-  if (key === "NOT CONFIGURED" || key === "NOT USED" || key === "KEY SAVED") {
-    return CONNECTION_STATUS.NOT_CONFIGURED;
-  }
+  if (key === "FAILED") return CONNECTION_STATUS.FAILED;
+  if (key === "NOT USED") return CONNECTION_STATUS.NOT_CONFIGURED;
   return settingsStatus;
 }
 
@@ -167,8 +159,8 @@ function resolveLineProviderStatus(provider = "", { probe = {}, feed = {} } = {}
 
   if (probe?.unauthorized) {
     return {
-      settingsStatus: PROVIDER_UI_STATUS.INVALID_KEY,
-      settingsLine: PROVIDER_UI_STATUS.INVALID_KEY,
+      settingsStatus: "Failed",
+      settingsLine: "Failed",
       showError: true,
     };
   }
@@ -196,54 +188,25 @@ function resolveLineProviderStatus(provider = "", { probe = {}, feed = {} } = {}
         showError: false,
       };
     }
-    if (keyConfigured && !probe?.sportsListOk && !hasBoardProps) {
-      return {
-        settingsStatus: PROVIDER_UI_STATUS.KEY_SAVED,
-        settingsLine: PROVIDER_UI_STATUS.KEY_SAVED,
-        showError: false,
-      };
-    }
+    return {
+      settingsStatus: "Failed",
+      settingsLine: "Failed",
+      showError: true,
+    };
   }
 
   if (name === "PrizePicks" || name === "Underdog") {
-    if (hasBoardProps) {
-      return {
-        settingsStatus: feed.cached ? PROVIDER_UI_STATUS.CACHED : PROVIDER_UI_STATUS.LIVE,
-        settingsLine: feed.cached ? PROVIDER_UI_STATUS.CACHED : PROVIDER_UI_STATUS.LIVE,
-        showError: false,
-      };
-    }
-    if (probe?.rateLimited || feed.cached) {
-      return {
-        settingsStatus: PROVIDER_UI_STATUS.RATE_LIMITED,
-        settingsLine: PROVIDER_UI_STATUS.RATE_LIMITED,
-        showError: false,
-      };
-    }
-    if (isProxyBlockedProbe(probe)) {
-      const proxyConfigured = Boolean(getProxyUrl(name === "PrizePicks" ? "prizepicks" : "underdog"));
-      if (!proxyConfigured) {
-        return {
-          settingsStatus: PROVIDER_UI_STATUS.PROXY_REQUIRED,
-          settingsLine: PROVIDER_UI_STATUS.PROXY_REQUIRED,
-          showError: false,
-        };
-      }
-    }
-    if (probe?.ok || probe?.lastSuccessfulFetchAt) {
+    if (hasBoardProps || probe?.ok || probe?.lastSuccessfulFetchAt) {
       return {
         settingsStatus: PROVIDER_UI_STATUS.LIVE,
         settingsLine: PROVIDER_UI_STATUS.LIVE,
         showError: false,
       };
     }
-  }
-
-  if (probe?.rateLimited) {
     return {
-      settingsStatus: PROVIDER_UI_STATUS.RATE_LIMITED,
-      settingsLine: PROVIDER_UI_STATUS.RATE_LIMITED,
-      showError: false,
+      settingsStatus: "Failed",
+      settingsLine: "Failed",
+      showError: Boolean(probe?.preview),
     };
   }
 
@@ -257,15 +220,15 @@ function resolveLineProviderStatus(provider = "", { probe = {}, feed = {} } = {}
 
   if (probe?.status === CONNECTION_STATUS.NOT_CONFIGURED) {
     return {
-      settingsStatus: PROVIDER_UI_STATUS.NOT_CONFIGURED,
-      settingsLine: PROVIDER_UI_STATUS.NOT_CONFIGURED,
+      settingsStatus: PROVIDER_UI_STATUS.NOT_USED,
+      settingsLine: PROVIDER_UI_STATUS.NOT_USED,
       showError: false,
     };
   }
 
   return {
-    settingsStatus: "Unavailable",
-    settingsLine: "Unavailable",
+    settingsStatus: "Failed",
+    settingsLine: "Failed",
     showError: Boolean(probe?.preview && !hasBoardProps),
   };
 }
@@ -288,7 +251,8 @@ export function mergeConnectionReportWithFeeds(report = {}, feedContext = {}) {
   const results = (report.results || []).map((row) => {
     const provider = row.provider || "";
     if (provider === "SportsDataIO") {
-      const effective = resolveSportsDataSettingsStatus(row);
+      const feed = feedContext.SportsDataIO || {};
+      const effective = resolveSportsDataSettingsStatus(row, feed);
       return {
         ...row,
         ...effective,
@@ -338,6 +302,7 @@ export function providerStatusStyle(status = "") {
     "NOT CONFIGURED": { bg: "rgba(148,163,184,0.15)", text: "#cbd5e1" },
     DEGRADED: { bg: "rgba(249,115,22,0.18)", text: "#fdba74" },
     FAILED: { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
+    Failed: { bg: "rgba(239,68,68,0.15)", text: "#fca5a5" },
     UNAVAILABLE: { bg: "rgba(249,115,22,0.18)", text: "#fdba74" },
   };
   const palette = colors[key] || colors.DEGRADED;
