@@ -53,6 +53,7 @@ function CuratedPicksScreen({
   onOpen,
   hasMlbProps = false,
   hasUnderdogProps = false,
+  underdogEmptyMessage = "",
   onSectionError,
 }) {
   if (MLB_ONLY_MODE) {
@@ -74,6 +75,7 @@ function CuratedPicksScreen({
             loading={loading}
             onOpen={onOpen}
             hasUnderdogProps={hasUnderdogProps}
+            emptyMessage={underdogEmptyMessage}
           />
         </SectionErrorBoundary>
         <SectionErrorBoundary name="MLB 4-Man Builder" onError={onSectionError}>

@@ -6,6 +6,7 @@ import { calibrateRealisticConfidence } from "./mlbConfidenceEngine.js";
 import { isDebugModeEnabled } from "./devMode.js";
 import { isSafeModeEnabled } from "./safeMode.js";
 import { filterUnderdogStreakPool } from "./underdogStreakPool.js";
+import { extractParsedUnderdogProps } from "./underdogPickPool.js";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -65,8 +66,16 @@ function annotateSafePick(prop = {}) {
   };
 }
 
-export function resolveSafeMlbStreakPicks(displayProps = [], rawProps = [], limit = 2) {
-  return filterUnderdogStreakPool(buildSafeMlbPropPool(displayProps, rawProps))
+export function resolveSafeMlbStreakPicks(displayProps = [], rawProps = [], limit = 2, parsedUnderdogProps = []) {
+  const pool = extractParsedUnderdogProps({
+    parsedUnderdogProps,
+    rawProps,
+    displayProps,
+  });
+  const streakPool = pool.length
+    ? pool
+    : filterUnderdogStreakPool(buildSafeMlbPropPool(displayProps, rawProps));
+  return filterUnderdogStreakPool(streakPool)
     .filter((prop) => calibrateRealisticConfidence(prop.confidenceScore ?? prop.confidence ?? 0, prop) >= 55 || isDebugModeEnabled())
     .slice(0, limit)
     .map(annotateSafePick);

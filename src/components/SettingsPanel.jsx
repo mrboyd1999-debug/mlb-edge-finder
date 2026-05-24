@@ -11,6 +11,7 @@ import {
 } from "../services/runtimeSettings.js";
 import { validateApiConfig } from "../config/apiConfig.js";
 import ApiHealthPanel from "./ApiHealthPanel.jsx";
+import UnderdogDebugPanel from "./UnderdogDebugPanel.jsx";
 import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import { testAllApiConnections, testSportsDataIO, mergeConnectionReportWithFeeds } from "../services/apiConnectionTest.js";
 import { isDebugModeEnabled } from "../utils/devMode.js";
@@ -22,6 +23,7 @@ export default function SettingsPanel({
   onShowDebugPanelsChange,
   lastUpdated = "",
   feedHealthContext = null,
+  underdogDebugSnapshot = null,
 }) {
   const panelRef = useRef(null);
   const [draft, setDraft] = useState(() => readRuntimeSettings());
@@ -217,6 +219,7 @@ export default function SettingsPanel({
         >
           <ApiHealthPanel connectionReport={connectionReport} lastTestedAt={meta.lastTestedAt} />
         </SectionErrorBoundary>
+        <UnderdogDebugPanel snapshot={underdogDebugSnapshot} />
         <details className="settings-keys-expand" style={{ ...styles.compactDetails, marginTop: "8px" }}>
           <summary style={styles.detailsSummary}>
             <span>

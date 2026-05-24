@@ -59,7 +59,7 @@ export function resolveFetchHealthBadge({
   parsedCount = 0,
   usableCount = 0,
 } = {}) {
-  if (usableCount > 0 || parsedCount > 0) {
+  if (rawCount > 0 && (usableCount > 0 || parsedCount > 0)) {
     if (rateLimited || cached) {
       return {
         pipelineStatus: "Cached",
@@ -71,6 +71,13 @@ export function resolveFetchHealthBadge({
       pipelineStatus: "Full",
       badge: HEALTH_STATES.LIVE,
       message: "",
+    };
+  }
+  if (rawCount > 0 && usableCount === 0 && parsedCount === 0) {
+    return {
+      pipelineStatus: "Empty",
+      badge: HEALTH_STATES.EMPTY,
+      message: "Underdog connected, but parser returned 0 props.",
     };
   }
   if (failed || ok === false) {
@@ -87,7 +94,7 @@ export function resolveFetchHealthBadge({
       message: usableCount > 0 ? "" : rateLimited ? "Rate limited with no usable cached props." : EMPTY_SOURCE_MESSAGE,
     };
   }
-  if (usableCount > 0) {
+  if (rawCount > 0 && usableCount > 0) {
     return {
       pipelineStatus: "Full",
       badge: HEALTH_STATES.LIVE,

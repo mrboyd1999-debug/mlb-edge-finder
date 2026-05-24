@@ -4,7 +4,7 @@ import { styles } from "../theme/styles.js";
 import { UNDERDOG_STREAK_EMPTY_MESSAGE } from "../utils/underdogStreakPool.js";
 import { SAFE_MODE_LOADING_MESSAGE } from "../utils/safeMode.js";
 
-function MlbStreakPicksBoard({ picks = [], onOpen, hasUnderdogProps = false, loading = false }) {
+function MlbStreakPicksBoard({ picks = [], onOpen, hasUnderdogProps = false, emptyMessage = "", loading = false }) {
   const streakPicks = (picks || []).filter(Boolean).slice(0, 2);
 
   return (
@@ -33,7 +33,8 @@ function MlbStreakPicksBoard({ picks = [], onOpen, hasUnderdogProps = false, loa
         </div>
       ) : (
         <div style={styles.emptyStateCompact}>
-          {hasUnderdogProps ? "No Underdog streak picks ranked yet." : UNDERDOG_STREAK_EMPTY_MESSAGE}
+          {emptyMessage ||
+            (hasUnderdogProps ? "No Underdog streak picks ranked yet." : UNDERDOG_STREAK_EMPTY_MESSAGE)}
         </div>
       )}
     </section>

@@ -151,7 +151,13 @@ import CuratedPicksScreen from "./components/CuratedPicksScreen.jsx";
 import SectionErrorBoundary from "./components/SectionErrorBoundary.jsx";
 import { normalizePropsWithSource } from "./utils/normalizeSource.js";
 import { DISPLAY_LIMITS, resolveCuratedGoblinDemonBoards, resolveMlbStreakPicks, countMlbDisplayProps, countUnderdogStreakProps, isManuallySavedPick, historyPickToDisplayProp, resolveUnderdogSectionFallbacks, shouldApplyUnderdogSectionFallbacks } from "./utils/curatedPicks.js";
-import { isUnderdogProp } from "./utils/underdogStreakPool.js";
+import { isUnderdogProp, filterUnderdogStreakPool } from "./utils/underdogStreakPool.js";
+import {
+  buildUnderdogDebugSnapshot,
+  extractParsedUnderdogProps,
+  mergeUnderdogIntoFinderPool,
+  resolveUnderdogStreakEmptyMessage,
+} from "./utils/underdogPickPool.js";
 import { resolveFeaturedMlbPicks } from "./utils/mlbFeaturedPicks.js";
 import { isSafeModeEnabled, SAFE_MODE_FALLBACK_MESSAGE, SAFE_MODE_LOADING_MESSAGE } from "./utils/safeMode.js";
 import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks, resolveSafeMlbStreakPicks } from "./utils/safeModePipeline.js";
@@ -715,10 +721,15 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
   const boardPropCount = (board?.props || []).length;
   const resolveBadge = (row, status, fallbackTs = boardTs) => {
     const counts = summarizeSourceCounts(row);
+    const rawCount = Number(row.rawPropsLoaded ?? counts.rawCount ?? 0);
     const usableCount = Number(row.usablePropsCount ?? counts.usableCount ?? 0);
-    if (usableCount > 0) {
+    const parsedCount = Number(row.propsAfterParsing ?? counts.parsedCount ?? 0);
+    if (rawCount > 0 && usableCount > 0) {
       if (/cached/i.test(String(status || row.status || row.lineSourceBadge || ""))) return HEALTH_STATES.CACHED;
       return HEALTH_STATES.LIVE;
+    }
+    if (rawCount > 0 && usableCount === 0 && parsedCount === 0) {
+      return HEALTH_STATES.EMPTY;
     }
     return resolveSourceHealthState({
       status: status || row.status,
@@ -1090,6 +1101,13 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         debugInfo,
       });
       applyUnderdogProviderToDebug(debugInfo, underdogResult);
+      if (underdogResult?.props?.length) {
+        debugInfo.parsedUnderdogProps = normalizePropsWithSource(
+          underdogResult.props.map((prop) =>
+            normalizePropShape(prop, { platform: "Underdog", source: "Underdog" })
+          )
+        );
+      }
       if (!underdogOk && !rawProps.length && prizePicksResult?.props?.length) {
         rawProps.push(...prizePicksResult.props);
         sourceStatus.PrizePicks = prizePicksResult.status;
@@ -1168,6 +1186,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   }
   rawProps.length = 0;
   rawProps.push(...normalizePropsWithSource(scopedRawProps));
+  if (!debugInfo.parsedUnderdogProps?.length) {
+    debugInfo.parsedUnderdogProps = filterUnderdogStreakPool(rawProps);
+  }
 
   const parsedCount = Math.max(
     Number(prizePicksResult?.props?.length || 0),
@@ -2104,17 +2125,46 @@ export default function DFSPropsApp() {
     return "";
   }, [debugModeEnabled, loading, allDisplayProps.length]);
   const preFilterDebugProps = useMemo(() => allDisplayProps.slice(0, 20), [allDisplayProps]);
-  const streakFinderProps = useMemo(
+  const parsedUnderdogProps = useMemo(
     () =>
-      (allDisplayProps.length ? allDisplayProps : streakProps).filter(
-        (prop) =>
-          matchesPlatformFilter(prop, platform) &&
-          matchesStatTypeFilter(prop, statType) &&
-          matchesDateFilter(prop, dateFilter) &&
-          matchesSearchFilter(prop, debouncedSearch)
-      ),
-    [allDisplayProps, streakProps, platform, statType, dateFilter, debouncedSearch]
+      extractParsedUnderdogProps({
+        parsedUnderdogProps: debugInfo.parsedUnderdogProps || [],
+        rawProps: props,
+        displayProps: scoredDisplayProps,
+      }),
+    [debugInfo.parsedUnderdogProps, props, scoredDisplayProps]
   );
+  const underdogDebugSnapshot = useMemo(
+    () =>
+      buildUnderdogDebugSnapshot({
+        debugInfo,
+        parsedUnderdogProps: debugInfo.parsedUnderdogProps || parsedUnderdogProps,
+        rawProps: props,
+        displayProps: scoredDisplayProps,
+      }),
+    [debugInfo, parsedUnderdogProps, props, scoredDisplayProps]
+  );
+  const streakFinderProps = useMemo(() => {
+    const merged = mergeUnderdogIntoFinderPool(
+      allDisplayProps.length ? allDisplayProps : streakProps,
+      parsedUnderdogProps
+    );
+    return merged.filter(
+      (prop) =>
+        matchesPlatformFilter(prop, platform) &&
+        matchesStatTypeFilter(prop, statType) &&
+        matchesDateFilter(prop, dateFilter) &&
+        matchesSearchFilter(prop, debouncedSearch)
+    );
+  }, [
+    allDisplayProps,
+    streakProps,
+    parsedUnderdogProps,
+    platform,
+    statType,
+    dateFilter,
+    debouncedSearch,
+  ]);
   const readyToBetProps = useMemo(
     () => selectReadyFromDisplayProps(boardDisplayProps).slice(0, RENDER_LIMITS.readyToBet),
     [boardDisplayProps]
@@ -2204,23 +2254,30 @@ export default function DFSPropsApp() {
     [boardDisplayProps, props]
   );
   const curatedSportPicks = useMemo(() => {
-    const primary = resolveMlbStreakPicks(streakSportBoards, scoredDisplayProps, DISPLAY_LIMITS.streakPerSport, props);
-    const udCount = countUnderdogStreakProps(scoredDisplayProps, props);
+    const primary = resolveMlbStreakPicks(
+      streakSportBoards,
+      scoredDisplayProps,
+      DISPLAY_LIMITS.streakPerSport,
+      props,
+      parsedUnderdogProps
+    );
+    const udCount = countUnderdogStreakProps(scoredDisplayProps, props, parsedUnderdogProps);
     if (!shouldApplyUnderdogSectionFallbacks(primary.length, udCount, DISPLAY_LIMITS.streakPerSport)) {
       return primary;
     }
     return resolveUnderdogSectionFallbacks(scoredDisplayProps, props, {
       streakPicks: primary,
       streakLimit: DISPLAY_LIMITS.streakPerSport,
+      parsedUnderdogProps,
     }).streakPicks;
-  }, [streakSportBoards, scoredDisplayProps, props]);
+  }, [streakSportBoards, scoredDisplayProps, props, parsedUnderdogProps]);
   const mlbDisplayPropCount = useMemo(
     () => countMlbDisplayProps(scoredDisplayProps, props),
     [scoredDisplayProps, props]
   );
   const underdogStreakPropCount = useMemo(
-    () => countUnderdogStreakProps(scoredDisplayProps, props),
-    [scoredDisplayProps, props]
+    () => countUnderdogStreakProps(scoredDisplayProps, props, parsedUnderdogProps),
+    [scoredDisplayProps, props, parsedUnderdogProps]
   );
   const curatedGoblinDemonBoards = useMemo(() => {
     const primary = resolveCuratedGoblinDemonBoards(boardDisplayProps, props, {
@@ -2228,8 +2285,9 @@ export default function DFSPropsApp() {
       demonBoardPicks: streakSportBoards.demons?.picks,
       goblinLimit: DISPLAY_LIMITS.goblins,
       demonLimit: DISPLAY_LIMITS.demons,
+      parsedUnderdogProps,
     });
-    const udCount = countUnderdogStreakProps(scoredDisplayProps, props);
+    const udCount = countUnderdogStreakProps(scoredDisplayProps, props, parsedUnderdogProps);
     const needsFallback =
       shouldApplyUnderdogSectionFallbacks(primary.goblins.length, udCount, DISPLAY_LIMITS.goblins) ||
       shouldApplyUnderdogSectionFallbacks(primary.demons.length, udCount, DISPLAY_LIMITS.demons);
@@ -2239,9 +2297,10 @@ export default function DFSPropsApp() {
       demons: primary.demons,
       goblinLimit: DISPLAY_LIMITS.goblins,
       demonLimit: DISPLAY_LIMITS.demons,
+      parsedUnderdogProps,
     });
     return { goblins: filled.goblins, demons: filled.demons };
-  }, [streakSportBoards, boardDisplayProps, props, scoredDisplayProps]);
+  }, [streakSportBoards, boardDisplayProps, props, scoredDisplayProps, parsedUnderdogProps]);
   const curatedGoblinPicks = curatedGoblinDemonBoards.goblins;
   const curatedDemonPicks = curatedGoblinDemonBoards.demons;
   const safeModeFallbackActive = useMemo(() => {
@@ -2388,15 +2447,16 @@ export default function DFSPropsApp() {
         primary = resolveSafeMlbBoardPicks(scoredDisplayProps, props, DISPLAY_LIMITS.parlayLegs);
       }
     }
-    const udCount = countUnderdogStreakProps(scoredDisplayProps, props);
+    const udCount = countUnderdogStreakProps(scoredDisplayProps, props, parsedUnderdogProps);
     if (!shouldApplyUnderdogSectionFallbacks(primary.length, udCount, DISPLAY_LIMITS.parlayLegs)) {
       return primary;
     }
     return resolveUnderdogSectionFallbacks(scoredDisplayProps, props, {
       parlayPicks: primary,
       parlayLimit: DISPLAY_LIMITS.parlayLegs,
+      parsedUnderdogProps,
     }).parlayPicks;
-  }, [streakSportBoards, parlayRiskMode, scoredDisplayProps, props]);
+  }, [streakSportBoards, parlayRiskMode, scoredDisplayProps, props, parsedUnderdogProps]);
   const parlayDashboard = useMemo(() => buildParlayDashboard(parlayHistory), [parlayHistory]);
   const refreshBlocked = loading || refreshCooldownSec > 0 || sourceCooldownSec > 0;
   const refreshCountdownSec = Math.max(refreshCooldownSec, sourceCooldownSec);
@@ -2894,6 +2954,7 @@ export default function DFSPropsApp() {
             onOpen={setSelectedEvaluation}
             hasMlbProps={mlbDisplayPropCount > 0}
             hasUnderdogProps={underdogStreakPropCount > 0}
+            underdogEmptyMessage={underdogDebugSnapshot ? resolveUnderdogStreakEmptyMessage(underdogDebugSnapshot) : undefined}
             onSectionError={handleSectionRenderError}
           />
         </SectionErrorBoundary>
@@ -3003,6 +3064,7 @@ export default function DFSPropsApp() {
         onShowDebugPanelsChange={setShowDebugPanels}
         lastUpdated={lastUpdated}
         feedHealthContext={feedHealthContext}
+        underdogDebugSnapshot={underdogDebugSnapshot}
       />
       </SectionErrorBoundary>
       </div>

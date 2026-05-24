@@ -120,6 +120,19 @@ export function applyUnderdogProviderToDebug(debugInfo = {}, providerResult = {}
     message: diag.message || debugInfo.sources.Underdog?.message || "",
     providerHealth: diag.health || providerResult.health,
     providerDiagnostics: diag,
+    rawPropsLoaded: finiteOr(
+      debugInfo.sources.Underdog?.rawPropsLoaded ?? diag.rawPropsLoaded ?? providerResult.debug?.rawPropsLoaded,
+      0
+    ),
+    propsAfterParsing: finiteOr(
+      debugInfo.sources.Underdog?.propsAfterParsing ?? diag.parsedPropsCount ?? providerResult.props?.length,
+      0
+    ),
   };
   return debugInfo;
+}
+
+function finiteOr(value, fallback = 0) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
 }

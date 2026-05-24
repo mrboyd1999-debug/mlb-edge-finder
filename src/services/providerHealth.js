@@ -2,6 +2,8 @@
 
 import { getOddsApiKey } from "../config/apiConfig.js";
 import { ENRICHMENT_TIMEOUT_MESSAGE, isTimeoutPreview } from "../utils/apiTimeout.js";
+import { isUnderdogProp } from "../utils/underdogStreakPool.js";
+import { normalizeSource } from "../utils/normalizeSource.js";
 import { SPORTSDATA_CONNECTED_VIA_PROXY } from "./sportsDataService.js";
 import { CONNECTION_STATUS } from "./apiConnectionTest.js";
 
@@ -134,9 +136,10 @@ function countPropsForProvider(props = [], provider = "") {
   const needle = normalizePlatform(provider);
   if (!needle) return 0;
   return (props || []).filter((prop) => {
-    const platform = normalizePlatform(prop.platform || prop.source);
-    if (needle.includes("prize") && platform.includes("prize")) return true;
-    if (needle.includes("underdog") && platform.includes("underdog")) return true;
+    const normalized = normalizeSource(prop);
+    const platform = normalizePlatform(prop.platform || prop.source || normalized);
+    if (needle.includes("prize") && (platform.includes("prize") || normalized === "prizepicks")) return true;
+    if (needle.includes("underdog") && (isUnderdogProp(prop) || normalized === "underdog")) return true;
     if (needle.includes("odds") && platform.includes("odds")) return true;
     return platform.includes(needle);
   }).length;
@@ -250,7 +253,30 @@ function resolveLineProviderStatus(provider = "", { probe = {}, feed = {} } = {}
   }
 
   if (name === "PrizePicks" || name === "Underdog") {
-    if (hasBoardProps || probe?.ok || probe?.lastSuccessfulFetchAt) {
+    const rawCount = finiteOr(feed.rawCount ?? probe?.rawPropsLoaded, 0);
+    const parsedCount = finiteOr(feed.parsedCount ?? feed.boardCount, 0);
+    if (rawCount > 0 && (parsedCount > 0 || hasBoardProps)) {
+      return {
+        settingsStatus: PROVIDER_UI_STATUS.LIVE,
+        settingsLine: PROVIDER_UI_STATUS.LIVE,
+        showError: false,
+      };
+    }
+    if (rawCount > 0 && parsedCount === 0 && !hasBoardProps) {
+      return {
+        settingsStatus: "Connected",
+        settingsLine: "Connected — 0 props",
+        showError: false,
+      };
+    }
+    if ((probe?.ok || probe?.lastSuccessfulFetchAt) && rawCount === 0) {
+      return {
+        settingsStatus: "Connected",
+        settingsLine: "Connected — 0 props",
+        showError: false,
+      };
+    }
+    if (hasBoardProps) {
       return {
         settingsStatus: PROVIDER_UI_STATUS.LIVE,
         settingsLine: PROVIDER_UI_STATUS.LIVE,

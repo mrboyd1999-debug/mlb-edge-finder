@@ -178,11 +178,12 @@ function pickBestPair(group = []) {
   return best;
 }
 
-function buildPropPool(displayProps = [], rawProps = []) {
+function buildPropPool(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
   const mlbDisplay = filterAllDisplayPropsBySport(displayProps, "MLB", "all");
   const mlbRaw = filterActiveSportProps(rawProps || []);
+  const udParsed = Array.isArray(parsedUnderdogProps) ? parsedUnderdogProps : [];
   return filterByDisplayConfidenceFloor(
-    dedupeLooseProps([...mlbDisplay, ...mlbRaw].filter(isLooseDisplayProp))
+    dedupeLooseProps([...udParsed, ...mlbDisplay, ...mlbRaw].filter(isLooseDisplayProp))
   );
 }
 
@@ -252,9 +253,9 @@ export function resolveGoblinDemonBoards(
 export function resolveCuratedGoblinDemonBoards(
   displayProps = [],
   rawProps = [],
-  { goblinBoardPicks = [], demonBoardPicks = [], goblinLimit = 6, demonLimit = 6 } = {}
+  { goblinBoardPicks = [], demonBoardPicks = [], goblinLimit = 6, demonLimit = 6, parsedUnderdogProps = [] } = {}
 ) {
-  const pool = buildPropPool(displayProps, rawProps);
+  const pool = buildPropPool(displayProps, rawProps, parsedUnderdogProps);
   const paired = resolveGoblinDemonBoards(pool, { goblinLimit, demonLimit });
 
   let goblins = paired.goblins;

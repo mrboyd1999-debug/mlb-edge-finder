@@ -1,4 +1,21 @@
-export function normalizeSource(prop) {
+export function propProviderText(prop = {}) {
+  try {
+    return JSON.stringify(prop).toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+export function propTextIncludesUnderdog(prop = {}) {
+  return propProviderText(prop).includes("underdog");
+}
+
+export function propTextIncludesPrizePicks(prop = {}) {
+  const text = propProviderText(prop);
+  return text.includes("prizepicks") || /\bpp\b/.test(text);
+}
+
+export function normalizeSource(prop = {}) {
   const raw = String(
     prop.source ||
     prop.platform ||
@@ -12,6 +29,8 @@ export function normalizeSource(prop) {
   if (raw.includes("prizepicks") || raw === "pp" || /\bpp\b/.test(raw)) return "prizepicks";
   if (raw.includes("sleeper")) return "sleeper";
   if (raw.includes("chalkboard")) return "chalkboard";
+  if (propTextIncludesUnderdog(prop)) return "underdog";
+  if (propTextIncludesPrizePicks(prop)) return "prizepicks";
   return raw;
 }
 
