@@ -1,4 +1,5 @@
 import { withPlayerImageUrl } from "./playerImageFields.js";
+import { withNormalizedSource } from "./normalizeSource.js";
 import { fullMarketDisplayLabel } from "./marketNormalization.js";
 import { normalizeSportLabel, sportLabelsMatch } from "./sportMappings.js";
 import { isDevEnvironment } from "../services/fetchUtil.js";
@@ -76,43 +77,45 @@ export function normalizeDisplayProp(prop = {}, { selectedSport = "MLB", source 
     prop.id ||
     [src, player, statType, line, side, sportNorm].join("|").toLowerCase().replace(/\s+/g, "-");
 
-  return withPlayerImageUrl({
-    id,
-    player,
-    playerName: player,
-    sport: sportNorm,
-    league,
-    team: String(raw.team || prop.team || "").trim(),
-    opponent: String(raw.opponent || prop.opponent || "").trim(),
-    statType,
-    market: statType,
-    propType: statType,
-    fullMarketLabel,
-    line,
-    projection,
-    projectedValue: projection,
-    side,
-    pick: side,
-    bestPick: side,
-    source: src,
-    platform: src,
-    playerImageUrl,
-    playerImage: playerImageUrl,
-    headshot: playerImageUrl,
-    imageUrl: playerImageUrl,
-    mlbId: raw.mlbId || raw.mlbamId || prop.mlbId || null,
-    confidence,
-    confidenceScore: confidence,
-    edge,
-    status: cached ? "cached" : "live",
-    lineSourceBadge: cached ? "CACHED" : "LIVE",
-    startTime: raw.startTime || prop.startTime || null,
-    raw,
-    displayFallback: Boolean(prop.displayFallback),
-    needsReview: Boolean(prop.needsReview),
-    sportsbookVerified: true,
-    verifiedBadge: "VERIFIED",
-  });
+  return withNormalizedSource(
+    withPlayerImageUrl({
+      id,
+      player,
+      playerName: player,
+      sport: sportNorm,
+      league,
+      team: String(raw.team || prop.team || "").trim(),
+      opponent: String(raw.opponent || prop.opponent || "").trim(),
+      statType,
+      market: statType,
+      propType: statType,
+      fullMarketLabel,
+      line,
+      projection,
+      projectedValue: projection,
+      side,
+      pick: side,
+      bestPick: side,
+      source: src,
+      platform: src,
+      playerImageUrl,
+      playerImage: playerImageUrl,
+      headshot: playerImageUrl,
+      imageUrl: playerImageUrl,
+      mlbId: raw.mlbId || raw.mlbamId || prop.mlbId || null,
+      confidence,
+      confidenceScore: confidence,
+      edge,
+      status: cached ? "cached" : "live",
+      lineSourceBadge: cached ? "CACHED" : "LIVE",
+      startTime: raw.startTime || prop.startTime || null,
+      raw,
+      displayFallback: Boolean(prop.displayFallback),
+      needsReview: Boolean(prop.needsReview),
+      sportsbookVerified: true,
+      verifiedBadge: "VERIFIED",
+    })
+  );
 }
 
 export function propSourceCacheKey(sport = "all", source = "PrizePicks") {

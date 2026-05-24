@@ -10,7 +10,7 @@ import { attachHistoricalPerformance } from "./historicalPropAnalytics.js";
 import { resolveGoblinDemonBoards } from "./goblinDemonPairs.js";
 import { withPlayerImageUrl } from "./playerImageFields.js";
 import { fullMarketDisplayLabel } from "./marketNormalization.js";
-import { calibrateRealisticConfidence } from "./mlbConfidenceEngine.js";
+import { calibrateRealisticConfidence, confidenceBandDisplay, resolveBandScore } from "./mlbConfidenceEngine.js";
 import { buildAnalyticsReason } from "./propReasonEngine.js";
 
 const BASE_CONFIDENCE = 50;
@@ -379,7 +379,8 @@ export function scoreDisplayProp(prop = {}) {
     ? true
     : finiteOr(finalized.confidence, 0) < 60 || isDisplayResearchOnly(finalized);
   const isDisplayPlayable = !displayResearchOnly && !invalidProp;
-  const bettingLabel = displayResearchOnly ? "Research only" : labelForConfidence(finalized.confidence, false);
+  const bandScore = resolveBandScore(finalized);
+  const bettingLabel = displayResearchOnly ? "Research only" : confidenceBandDisplay(bandScore);
 
   return attachHistoricalPerformance(
     attachRankScore(
@@ -575,7 +576,7 @@ export function selectReadyToBetProps(props = []) {
     ...prop,
     displayResearchOnly: false,
     isDisplayPlayable: true,
-    bettingLabel: labelForConfidence(finiteOr(prop.confidence, BASE_CONFIDENCE), false),
+    bettingLabel: confidenceBandDisplay(resolveBandScore(prop)),
     needsReview: false,
   }));
 }

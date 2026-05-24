@@ -54,7 +54,7 @@ function SideBanner({ side, streakAction = false }) {
     <div
       className="mlb-outlook-side-banner"
       style={{
-        marginTop: "10px",
+        marginTop: "7px",
         padding: "10px 12px",
         borderRadius: "8px",
         border: `2px solid ${palette.border}`,
@@ -125,7 +125,7 @@ function MlbPickCard({ prop, onOpen, rank, cardStyle, streakAction = false }) {
 
   return (
     <article
-      className={`mlb-pick-card mlb-outlook-card${isGoblin ? " mlb-goblin-card" : ""}${isDemon ? " mlb-demon-card" : ""}`}
+      className={`mlb-pick-card mlb-outlook-card${streakAction ? " mlb-streak-card" : ""}${isGoblin ? " mlb-goblin-card" : ""}${isDemon ? " mlb-demon-card" : ""}`}
       style={{ ...styles.mlbOutlookCard, ...cardStyle }}
       role="button"
       tabIndex={0}
@@ -164,7 +164,7 @@ function MlbPickCard({ prop, onOpen, rank, cardStyle, streakAction = false }) {
 
       <SideBanner side={side} streakAction={streakAction} />
 
-      <div className="mlb-outlook-hero-line" style={{ marginTop: "10px", textAlign: "center" }}>
+      <div className="mlb-outlook-hero-line" style={{ marginTop: "7px", textAlign: "center" }}>
         <p style={{ margin: 0, fontSize: "11px", color: "#64748b", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>
           {propType}
         </p>
@@ -173,7 +173,7 @@ function MlbPickCard({ prop, onOpen, rank, cardStyle, streakAction = false }) {
         </p>
       </div>
 
-      <div className="mlb-outlook-metrics" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "12px" }}>
+      <div className="mlb-outlook-metrics" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginTop: "8px" }}>
         <div style={{ padding: "8px", borderRadius: "8px", background: "#111827", border: "1px solid #1e293b" }}>
           <p style={{ margin: 0, fontSize: "10px", color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>Confidence</p>
           <p style={{ margin: "4px 0 0", fontSize: "22px", fontWeight: 900, color: "#f8fafc" }}>
@@ -199,7 +199,7 @@ function MlbPickCard({ prop, onOpen, rank, cardStyle, streakAction = false }) {
         <div
           className="mlb-outlook-payout-badge"
           style={{
-            marginTop: "10px",
+            marginTop: "7px",
             padding: "7px 10px",
             borderRadius: "8px",
             fontWeight: 800,
@@ -218,7 +218,7 @@ function MlbPickCard({ prop, onOpen, rank, cardStyle, streakAction = false }) {
       ) : null}
 
       {reason ? (
-        <div style={{ marginTop: "12px", padding: "8px 10px", borderRadius: "8px", background: "#0b1220", border: "1px solid #1e293b" }}>
+        <div style={{ marginTop: "8px", padding: "8px 10px", borderRadius: "8px", background: "#0b1220", border: "1px solid #1e293b" }}>
           <p style={{ margin: 0, fontSize: "10px", color: "#64748b", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em" }}>
             Why this pick
           </p>

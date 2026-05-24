@@ -110,13 +110,13 @@ export const styles = {
   mlbOutlookGrid: {
     display: "grid",
     gridTemplateColumns: "1fr",
-    gap: "10px",
+    gap: "7px",
   },
   mlbOutlookCard: {
     border: "1px solid #243244",
     background: "linear-gradient(180deg, #111827 0%, #0f172a 100%)",
     borderRadius: "12px",
-    padding: "12px",
+    padding: "8px",
     minWidth: 0,
     cursor: "pointer",
     boxShadow: "0 1px 0 rgba(148, 163, 184, 0.08)",

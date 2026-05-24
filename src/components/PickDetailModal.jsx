@@ -5,7 +5,6 @@ import { isReadyToBet, READY_MIN_CONFIDENCE, READY_MIN_DATA_QUALITY, PROJECTION_
 import { readManualStatsForProp } from "../services/pickStore.js";
 import DataQualityBadge from "./DataQualityBadge.jsx";
 import PlayerImage from "./PlayerImage.jsx";
-import { confidenceTier } from "../utils/propLabels.js";
 import { confidenceBandDisplay, resolveBandScore } from "../utils/mlbConfidenceEngine.js";
 import {
   dataSourcesUsed,
@@ -25,7 +24,7 @@ import {
   warningFlags,
 } from "../utils/pickAnalysis.js";
 import { buildHistoricalPerformance } from "../utils/historicalPropAnalytics.js";
-import { styles, riskStyle, tierStyle } from "../theme/styles.js";
+import { styles, riskStyle } from "../theme/styles.js";
 
 const NO_EDGE_MESSAGE = "No betting edge detected. More data needed before this becomes a confident pick.";
 
@@ -68,7 +67,6 @@ function FlagRow({ flags = [], tone = "positive" }) {
 export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveManualStats, onSavePick }) {
   const lean = formatLeanSide(prop.bestPick || prop.side || "Watch");
   const ready = prop.isDisplayPlayable !== false && (Boolean(prop.isQualificationAccepted) || isReadyToBet(prop));
-  const tier = confidenceTier(prop);
   const bandLabel = confidenceBandDisplay(resolveBandScore(prop));
   const badge = prop.dataQualityBadge || dataQualityBadge(prop);
   const historical = useMemo(
@@ -165,9 +163,8 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
         </div>
 
         <div style={styles.tagRow}>
-          <span style={tierStyle(tier)}>{tier}</span>
-          <span style={riskStyle(prop.riskLevel)}>{prop.riskLevel || "Medium"}</span>
           <span style={ready ? styles.segmentActive : styles.segment}>{bandLabel}</span>
+          <span style={riskStyle(prop.riskLevel)}>{prop.riskLevel || "Medium"}</span>
           {Number.isFinite(Number(prop.playabilityScore)) ? (
             <span style={styles.valueTag}>Playability {Math.round(Number(prop.playabilityScore))}</span>
           ) : null}

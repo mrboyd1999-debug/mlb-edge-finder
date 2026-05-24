@@ -13,6 +13,7 @@ import { filterAllDisplayPropsBySport } from "./allDisplayProps.js";
 import { filterActiveSportProps } from "./mlbOnlyMode.js";
 import { isLooseDisplayProp, dedupeLooseProps } from "./safeModePipeline.js";
 import { filterByDisplayConfidenceFloor } from "./mlbConfidenceEngine.js";
+import { normalizeSource } from "./normalizeSource.js";
 
 const MIN_LINE_GAP = 0.5;
 const GOBLIN_CONFIDENCE_BOOST = 10;
@@ -41,13 +42,6 @@ function normalizeStat(prop = {}) {
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-");
-}
-
-function normalizeSource(prop = {}) {
-  const raw = String(prop.source || prop.platform || "").trim().toLowerCase();
-  if (/prizepicks|pp/.test(raw)) return "prizepicks";
-  if (/underdog|ud/.test(raw)) return "underdog";
-  return raw.replace(/[^a-z0-9]+/g, "-") || "unknown";
 }
 
 /** player + prop type + source */

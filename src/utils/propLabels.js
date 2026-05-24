@@ -45,12 +45,19 @@ export function confidenceTier(prop) {
 
 export { propPayoutLabel };
 
+function inferOddsTypeRole(prop = {}, role = "") {
+  const oddsType = String(prop.oddsType || prop.odds_type || prop.adjustedOddsType || "").toLowerCase();
+  return oddsType.includes(role);
+}
+
 export function isGoblinProp(prop) {
-  return Boolean(prop?.verifiedAdjustedOdds) && propPayoutLabel(prop) === "Goblin";
+  if (propPayoutLabel(prop) === "Goblin") return true;
+  return inferOddsTypeRole(prop, "goblin");
 }
 
 export function isDemonProp(prop) {
-  return Boolean(prop?.verifiedAdjustedOdds) && propPayoutLabel(prop) === "Demon";
+  if (propPayoutLabel(prop) === "Demon") return true;
+  return inferOddsTypeRole(prop, "demon");
 }
 
 export function playerInitials(name = "") {

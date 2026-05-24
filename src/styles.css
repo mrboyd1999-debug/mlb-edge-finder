@@ -53,11 +53,26 @@ body,
 }
 
 .mlb-goblin-card {
-  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.12);
+  border-color: #0891b2;
+  box-shadow:
+    0 0 14px rgba(34, 211, 238, 0.22),
+    inset 0 0 0 1px rgba(34, 211, 238, 0.28);
 }
 
 .mlb-demon-card {
-  box-shadow: inset 0 0 0 1px rgba(232, 121, 249, 0.12);
+  border-color: #7f1d1d;
+  background: linear-gradient(180deg, #1a0a0a 0%, #0f172a 100%);
+  box-shadow:
+    0 0 14px rgba(220, 38, 38, 0.28),
+    inset 0 0 0 1px rgba(232, 121, 249, 0.18);
+}
+
+.mlb-streak-card {
+  border-color: #2563eb;
+  background: linear-gradient(180deg, #0b1224 0%, #0f172a 100%);
+  box-shadow:
+    0 0 14px rgba(37, 99, 235, 0.32),
+    inset 0 0 0 1px rgba(59, 130, 246, 0.24);
 }
 
 .mobile-warning-banner {
@@ -536,18 +551,18 @@ body,
     background: transparent;
     color: #cbd5e1;
     border-radius: 8px;
-    padding: 4px 2px;
-    min-height: 44px;
+    padding: 3px 2px;
+    min-height: 38px;
     cursor: pointer;
   }
 
   .mobile-quick-bar-icon {
-    font-size: 14px;
+    font-size: 12px;
     line-height: 1;
   }
 
   .mobile-quick-bar-label {
-    font-size: 9px;
+    font-size: 8px;
     font-weight: 800;
     line-height: 1.1;
     max-width: 100%;
@@ -569,7 +584,7 @@ body,
   .mobile-scroll-fab {
     position: fixed;
     right: 8px;
-    bottom: calc(54px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(48px + env(safe-area-inset-bottom, 0px));
     z-index: 999;
     display: flex;
     flex-direction: column;
@@ -577,8 +592,8 @@ body,
   }
 
   .mobile-scroll-fab-btn {
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
     border-radius: 999px;
     border: 1px solid #334155;
     background: rgba(15, 23, 42, 0.92);
@@ -630,7 +645,18 @@ body,
   }
 
   .dfs-app-page {
-    padding-bottom: 74px !important;
+    padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .mlb-outlook-card {
+    padding: 7px !important;
+  }
+
+  .mlb-outlook-card .player-image-wrap {
+    width: 40px !important;
+    height: 40px !important;
+    min-width: 40px !important;
+    flex-basis: 40px !important;
   }
 
   .dfs-app-page *,
