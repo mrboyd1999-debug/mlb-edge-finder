@@ -66,6 +66,21 @@ export function isResearchTier(score = 0) {
   return finiteOr(score, 0) < TIER_LEAN;
 }
 
+function resolveProjectionForEvaluation(prop = {}) {
+  const raw = Number(prop.projection ?? prop.projectedValue);
+  if (Number.isFinite(raw) && raw > 0) {
+    return { projection: raw, estimated: Boolean(prop.estimatedProjection) };
+  }
+  const line = Number(prop.line);
+  if (!Number.isFinite(line) || line <= 0) {
+    return { projection: null, estimated: false };
+  }
+  if (isUnderPreferredMarket(prop)) {
+    return { projection: line * 0.88, estimated: true };
+  }
+  return { projection: line * 0.96, estimated: true };
+}
+
 /** Signed edge for a side: positive = that side is favored. */
 export function sideEdge(projection, line, side = "OVER") {
   const proj = Number(projection);
@@ -162,9 +177,8 @@ function sideConfidence(prop = {}, side = "OVER", edge = 0) {
 
   if (side === "UNDER") conf += 4;
 
-  if (!hasMeaningfulRecentStats(prop)) conf = Math.min(conf, 65);
-  if (isLineProjectionOnly(prop)) conf = Math.min(conf, 60);
-  if (prop.displayFallback || prop.isFallback || prop.estimatedProjection) conf = Math.min(conf, 55);
+  if (prop.estimatedProjection) conf = Math.min(conf, 65);
+  if (!hasMeaningfulRecentStats(prop)) conf = Math.min(conf, 60);
 
   if (edge >= 0.5 && base >= 68) conf = Math.max(conf, 62);
   if (edge >= 0.75 && base >= 72) conf = Math.max(conf, 68);
@@ -185,14 +199,14 @@ function isLineProjectionOnly(prop = {}) {
 }
 
 function sideRankScore(prop = {}, side = "OVER") {
-  const projection = Number(prop.projection ?? prop.projectedValue);
+  const { projection } = resolveProjectionForEvaluation(prop);
   const line = Number(prop.line);
   const edge = sideEdge(projection, line, side);
   const edgePct = line > 0 ? (Math.max(0, edge) / line) * 100 : 0;
   const confidence = sideConfidence(prop, side, edge);
 
   let score = confidence * 0.42 + edgePct * 0.38 + consistencyScore(prop, side, line) * 0.9;
-  score += projectionQualityScore(prop);
+  score += projectionQualityScore({ ...prop, projection });
   score -= variancePenalty(prop);
 
   if (side === "UNDER") {
@@ -204,7 +218,7 @@ function sideRankScore(prop = {}, side = "OVER") {
   }
 
   if (line === WEAK_HALF_LINE && Math.abs(edge) < WEAK_HALF_EDGE) {
-    score -= WEAK_HALF_PENALTY;
+    score -= WEAK_HALF_PENALTY * 0.5;
   }
 
   const payout = finiteOr(prop.multiplier ?? prop.payout, NaN);
@@ -227,23 +241,32 @@ function round2(n) {
 }
 
 export function evaluateBothSides(prop = {}) {
-  if (!hasValidProjection(prop)) {
+  const { projection, estimated } = resolveProjectionForEvaluation(prop);
+  const evalProp = {
+    ...prop,
+    projection,
+    estimatedProjection: estimated || prop.estimatedProjection,
+  };
+
+  if (projection == null) {
+    const conf = 50;
     return {
-      recommendedSide: "PASS",
-      pass: true,
+      recommendedSide: isUnderPreferredMarket(prop) ? "UNDER" : "OVER",
+      pass: false,
       over: null,
       under: null,
-      edge: null,
-      confidence: null,
+      edge: 0,
+      confidence: conf,
       tier: "Research Only",
       varianceLevel: varianceLevel(prop),
-      reason: "Projection missing — no side evaluation",
-      rankScore: -Infinity,
+      reason: "Limited data — default lean",
+      rankScore: 40,
+      estimatedProjection: true,
     };
   }
 
-  const over = sideRankScore(prop, "OVER");
-  const under = sideRankScore(prop, "UNDER");
+  const over = sideRankScore(evalProp, "OVER");
+  const under = sideRankScore(evalProp, "UNDER");
   const line = finiteOr(prop.line, 0);
   const confGap = Math.abs(over.confidence - under.confidence);
   const scoreGap = Math.abs(over.rankScore - under.rankScore);
@@ -252,32 +275,37 @@ export function evaluateBothSides(prop = {}) {
   const underValid = under.edge > 0;
 
   if (!overValid && !underValid) {
+    const fallback = isUnderPreferredMarket(prop) ? under : over;
+    const conf = Math.min(Math.max(over.confidence, under.confidence), estimated ? 60 : 58);
     return {
-      recommendedSide: "PASS",
-      pass: true,
+      recommendedSide: fallback.side,
+      pass: false,
       over,
       under,
-      edge: null,
-      confidence: Math.max(over.confidence, under.confidence),
-      tier: "Pass",
+      edge: fallback.edge,
+      confidence: conf,
+      tier: "Research Only",
       varianceLevel: varianceLevel(prop),
-      reason: "No positive edge on either side",
-      rankScore: -Infinity,
+      reason: estimated ? "Estimated projection" : "Thin edge — research only",
+      rankScore: Math.max(35, fallback.rankScore),
+      estimatedProjection: estimated,
     };
   }
 
   if (confGap < PASS_CONFIDENCE_GAP && scoreGap < 3 && overValid && underValid) {
+    const tiePick = under.rankScore >= over.rankScore ? under : over;
     return {
-      recommendedSide: "PASS",
-      pass: true,
+      recommendedSide: tiePick.side,
+      pass: false,
       over,
       under,
-      edge: null,
-      confidence: Math.max(over.confidence, under.confidence),
-      tier: "Pass",
+      edge: tiePick.edge,
+      confidence: Math.min(tiePick.confidence, 62),
+      tier: confidenceTierFromScore(tiePick.confidence),
       varianceLevel: varianceLevel(prop),
-      reason: "MORE and LESS confidence too close — pass",
-      rankScore: -Infinity,
+      reason: tiePick.side === "UNDER" ? "Under preferred on close call" : "More/Higher on close call",
+      rankScore: tiePick.rankScore,
+      estimatedProjection: estimated,
     };
   }
 
@@ -292,20 +320,21 @@ export function evaluateBothSides(prop = {}) {
 
   if (line === WEAK_HALF_LINE && Math.abs(chosen.edge) < WEAK_HALF_EDGE) {
     return {
-      recommendedSide: "PASS",
-      pass: true,
+      recommendedSide: chosen.side,
+      pass: false,
       over,
       under,
       edge: chosen.edge,
-      confidence: chosen.confidence,
-      tier: "Pass",
+      confidence: Math.min(chosen.confidence, 58),
+      tier: "Research Only",
       varianceLevel: varianceLevel(prop),
-      reason: "Weak 0.5 line — edge too small to rank",
-      rankScore: -Infinity,
+      reason: "Weak 0.5 line — research only",
+      rankScore: Math.max(30, chosen.rankScore * 0.65),
+      estimatedProjection: estimated,
     };
   }
 
-  const reason = buildSideReason(prop, chosen, over, under);
+  const reason = buildSideReason(evalProp, chosen, over, under);
 
   return {
     recommendedSide: chosen.side,
@@ -313,12 +342,13 @@ export function evaluateBothSides(prop = {}) {
     over,
     under,
     edge: chosen.edge,
-    confidence: chosen.confidence,
+    confidence: estimated ? Math.min(chosen.confidence, 65) : chosen.confidence,
     tier: chosen.tier,
     varianceLevel: varianceLevel(prop),
-    reason,
+    reason: estimated ? `${reason} · Estimated projection`.replace(/^ · /, "") : reason,
     rankScore: chosen.rankScore,
-    consistency: consistencyScore(prop, chosen.side, finiteOr(prop.line, 0)),
+    estimatedProjection: estimated,
+    consistency: consistencyScore(evalProp, chosen.side, finiteOr(prop.line, 0)),
   };
 }
 
@@ -363,6 +393,8 @@ export function enrichPropWithSideEvaluation(prop = {}) {
 
   return {
     ...prop,
+    estimatedProjection: evaluation.estimatedProjection || prop.estimatedProjection,
+    projectionLabel: evaluation.estimatedProjection ? "Estimated projection" : prop.projectionLabel || "",
     recommendedSide: evaluation.recommendedSide,
     side: sidePick || prop.side || "",
     pick: sidePick || prop.pick || "",

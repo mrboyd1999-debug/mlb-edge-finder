@@ -300,6 +300,31 @@ export function filterUnderdogPropsBySport(props = [], sport = "MLB") {
   });
 }
 
+/** Filter PP + UD props by resolved sport — uses stat lock when sport field is missing/wrong. */
+export function filterResolvedSportProps(props = [], sport = "MLB", { selectedSportTab = sport } = {}) {
+  const want = canonicalizeSport(sport) || sport;
+  return (props || []).filter((prop) => {
+    const statType = prop.statType || prop.market || prop.propType || "";
+    const statLock = lockSportFromStatType(statType);
+    const label = resolvePropSportLabel({ ...prop, selectedSportTab });
+
+    if (statLock === "NBA" || statLock === "WNBA") {
+      return want === statLock;
+    }
+    if (statLock === "MLB") {
+      return want === "MLB";
+    }
+    if (label) {
+      if (want === "MLB" && (label === "NBA" || label === "WNBA")) return false;
+      return label === want;
+    }
+    if (want === "MLB" && selectedSportTab === "MLB" && hasMlbStatIndicator(statType)) {
+      return true;
+    }
+    return false;
+  });
+}
+
 export function countUnderdogPropsBySport(props = []) {
   const ud = (props || []).filter((p) => p.normalizedSource === "underdog");
   const count = (sport) => {

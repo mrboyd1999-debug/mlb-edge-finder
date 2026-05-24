@@ -34,7 +34,7 @@ function MlbFeaturedPicksBoard({
       {loading ? (
         <EmptyState text={SAFE_MODE_LOADING_MESSAGE} />
       ) : picks.length === 0 ? (
-        <EmptyState text={hasMlbProps ? "No best plays above confidence floor." : MLB_EMPTY_MESSAGE} />
+        <EmptyState text={hasMlbProps ? "No ranked MLB plays yet — check feed refresh." : MLB_EMPTY_MESSAGE} />
       ) : (
         <div className="best-play-row-list" style={styles.bestPlayRowList}>
           {picks.map((prop, idx) => (

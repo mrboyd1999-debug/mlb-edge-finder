@@ -3,6 +3,9 @@
 import { isDebugModeEnabled } from "./devMode.js";
 
 export const MIN_DISPLAY_CONFIDENCE = 55;
+export const MIN_BEST_PLAY_CONFIDENCE = 55;
+export const MIN_GOBLIN_DEMON_CONFIDENCE = 50;
+export const MIN_STREAK_CONFIDENCE = 50;
 
 export const CONFIDENCE_TOOLTIP =
   "Confidence combines projection edge, matchup quality, recent form, and line difficulty.";
@@ -127,7 +130,10 @@ export function calibrateRealisticConfidence(rawConfidence, prop = {}, edge = nu
   ) {
     maxCap = Math.min(maxCap, 60);
   }
-  if (prop.displayFallback || prop.isFallback || prop.estimatedProjection || prop.projectionSource === "fallback-player-stats") {
+  if (prop.estimatedProjection || prop.projectionSource === "fallback-player-stats") {
+    maxCap = Math.min(maxCap, 65);
+  }
+  if (prop.displayFallback || prop.isFallback) {
     maxCap = Math.min(maxCap, 55);
   }
 
@@ -139,11 +145,11 @@ export function calibrateRealisticConfidence(rawConfidence, prop = {}, edge = nu
   return score;
 }
 
-export function passesDisplayConfidenceFloor(prop = {}) {
+export function passesDisplayConfidenceFloor(prop = {}, floor = MIN_DISPLAY_CONFIDENCE) {
   if (isDebugModeEnabled()) return true;
-  return finiteOr(prop.confidenceScore ?? prop.confidence, 0) >= MIN_DISPLAY_CONFIDENCE;
+  return finiteOr(prop.confidenceScore ?? prop.confidence, 50) >= floor;
 }
 
-export function filterByDisplayConfidenceFloor(props = []) {
-  return (props || []).filter(passesDisplayConfidenceFloor);
+export function filterByDisplayConfidenceFloor(props = [], floor = MIN_DISPLAY_CONFIDENCE) {
+  return (props || []).filter((prop) => passesDisplayConfidenceFloor(prop, floor));
 }

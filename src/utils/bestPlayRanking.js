@@ -2,15 +2,15 @@ import { canonicalMarketKey } from "./marketNormalization.js";
 import { normalizeSource } from "./normalizeSource.js";
 import {
   computeCuratedPropEdge,
-  isCuratedDisplayProp,
+  isRankableCandidateProp,
 } from "./propValidation.js";
 import {
   enrichPropWithSideEvaluation,
   evaluateBothSides,
   isUnderPreferredMarket,
   variancePenalty,
-  TIER_LEAN,
 } from "./sideEvaluationEngine.js";
+import { MIN_BEST_PLAY_CONFIDENCE } from "./mlbConfidenceEngine.js";
 
 export { readPropMultiplier, readPropProbability } from "./bestPlayRankingDisplay.js";
 
@@ -20,16 +20,15 @@ function finiteOr(value, fallback = 0) {
 }
 
 export function isRankableBestPlay(prop = {}) {
-  if (!isCuratedDisplayProp(prop)) return false;
+  if (!isRankableCandidateProp(prop)) return false;
   const evaluation = prop.sideEvaluation || evaluateBothSides(prop);
-  if (evaluation.pass) return false;
-  if (evaluation.recommendedSide === "PASS") return false;
-  return finiteOr(evaluation.confidence ?? prop.confidenceScore ?? prop.confidence, 0) >= TIER_LEAN;
+  const conf = finiteOr(evaluation.confidence ?? prop.confidenceScore ?? prop.confidence, 50);
+  return conf >= MIN_BEST_PLAY_CONFIDENCE || evaluation.pass === false;
 }
 
 /** Rank score — uses dual-side evaluation output when present. */
 export function computeBestPlayRankScore(prop = {}) {
-  if (!isRankableBestPlay(prop)) return -Infinity;
+  if (!isRankableCandidateProp(prop)) return -Infinity;
 
   const evaluation = prop.sideEvaluation || evaluateBothSides(prop);
   if (evaluation.rankScore != null && Number.isFinite(evaluation.rankScore)) {
@@ -46,8 +45,8 @@ export function computeBestPlayRankScore(prop = {}) {
   if (normalizeSource(prop) === "underdog") score += 1.5;
   if (normalizeSource(prop) === "prizepicks") score += 1;
   if (evaluation.recommendedSide === "UNDER") {
-    score += 8;
-    if (isUnderPreferredMarket(prop)) score += 5;
+    score += 10;
+    if (isUnderPreferredMarket(prop)) score += 6;
   }
 
   return score;
@@ -61,7 +60,7 @@ export function prepareBestPlayProps(props = []) {
 
 export function sortBestPlayProps(props = []) {
   return prepareBestPlayProps(props)
-    .filter(isRankableBestPlay)
+    .filter(isRankableCandidateProp)
     .sort(
       (a, b) =>
         computeBestPlayRankScore(b) - computeBestPlayRankScore(a) ||

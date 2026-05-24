@@ -3,7 +3,7 @@ import { resolvePickSide } from "./pickRecommendation.js";
 import { estimateModelProbability } from "../services/projectionEngine.js";
 import { isUnderdogProp, isPrizePicksProp } from "./underdogStreakPool.js";
 import { resolvePropSportLabel, isNbaUnderdogProp } from "./underdogSportDetection.js";
-import { isCuratedDisplayProp } from "./propValidation.js";
+import { isRankableCandidateProp } from "./propValidation.js";
 
 /** Underdog MLB stat category keys — normalized from any spacing/casing/plus variants. */
 export const UNDERDOG_CATEGORIES = {
@@ -87,8 +87,24 @@ export function isMlbUnderdogStreakRow(prop = {}) {
     !isPrizePicksProp(prop) &&
     resolvePropSportLabel(prop) === "MLB" &&
     !isNbaUnderdogProp(prop) &&
-    isCuratedDisplayProp(prop)
+    isRankableCandidateProp(prop)
   );
+}
+
+export function isUnderdogAvailableRow(prop = {}) {
+  return isUnderdogProp(prop) && !isPrizePicksProp(prop) && isRankableCandidateProp(prop);
+}
+
+export function filterUnderdogAvailableProps(props = [], { tabId = "all", limit = null } = {}) {
+  const rows = (props || [])
+    .filter((prop) => isUnderdogAvailableRow(prop))
+    .filter((prop) => propMatchesStatTab(prop, tabId))
+    .sort(
+      (a, b) =>
+        Number(b.confidenceScore ?? b.confidence ?? 0) - Number(a.confidenceScore ?? a.confidence ?? 0) ||
+        Number(b.edge ?? 0) - Number(a.edge ?? 0)
+    );
+  return limit != null ? rows.slice(0, limit) : rows;
 }
 
 export function filterUnderdogRowProps(props = [], { tabId = "all", sport = "MLB", limit = null } = {}) {

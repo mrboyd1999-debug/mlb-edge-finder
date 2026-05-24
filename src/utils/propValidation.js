@@ -150,25 +150,8 @@ export function computeCuratedPropEdge(prop = {}) {
   return null;
 }
 
-function resolveValidatedSide(prop = {}) {
-  const explicit = resolvePickSideKey(prop);
-  if (explicit) return explicit;
-  const line = Number(prop.line);
-  const projection = Number(prop.projection ?? prop.projectedValue);
-  if (Number.isFinite(line) && Number.isFinite(projection) && projection > 0 && projection !== line) {
-    return projection > line ? "over" : "under";
-  }
-  return "";
-}
-
-function hasMatchupContext(prop = {}) {
-  const matchup = String(prop.matchup || "").trim();
-  const team = String(prop.team || "").trim();
-  const opponent = String(prop.opponent || "").trim();
-  return Boolean(matchup || (team && opponent) || team);
-}
-
-export function validateCuratedPropRejectReason(prop = {}) {
+/** Hard reject — only impossible/invalid props. Used for ranked pick candidates. */
+export function validateRankableCandidateRejectReason(prop = {}) {
   if (!prop) return "Rejected: missing prop";
   if (prop.isDemoData || prop.manualEntry || prop.isFallback || prop.displayFallback) {
     return "Rejected: fallback/non-live prop";
@@ -184,35 +167,31 @@ export function validateCuratedPropRejectReason(prop = {}) {
   if (!statType) return "Rejected: missing stat type";
 
   const sport = resolvePropSportLabel(prop) || prop.inferredSport || prop.sport || prop.league || "";
-  if (!sport || sport === "Unknown" || sport === "Unsupported") {
-    return "Rejected: sport missing";
-  }
-  const mismatch = sportStatMismatchReason(sport, statType);
-  if (mismatch) return mismatch;
-
   const statLock = lockSportFromStatType(statType);
-  if (statLock && sport && statLock !== sport) {
+  const effectiveSport = sport && sport !== "Unknown" && sport !== "Unsupported" ? sport : statLock || "";
+
+  if (statLock && effectiveSport && statLock !== effectiveSport) {
     return "Rejected: invalid sport/stat combo";
   }
-
-  if (!hasValidProjection(prop)) {
-    return "Rejected: projection missing";
-  }
-
-  if (!hasMatchupContext(prop)) {
-    return "Rejected: matchup missing";
-  }
-
-  const side = resolveValidatedSide(prop);
-  if (!side) {
-    return "Rejected: side undetermined";
+  if (effectiveSport) {
+    const mismatch = sportStatMismatchReason(effectiveSport, statType);
+    if (mismatch) return mismatch;
   }
 
   return "";
 }
 
+export function isRankableCandidateProp(prop = {}) {
+  return !validateRankableCandidateRejectReason(prop);
+}
+
+/** @deprecated alias — curated boards use the same loose gate as rankable candidates */
+export function validateCuratedPropRejectReason(prop = {}) {
+  return validateRankableCandidateRejectReason(prop);
+}
+
 export function isCuratedDisplayProp(prop = {}) {
-  return !validateCuratedPropRejectReason(prop);
+  return isRankableCandidateProp(prop);
 }
 
 export function validatePropRejectReason(prop = {}) {

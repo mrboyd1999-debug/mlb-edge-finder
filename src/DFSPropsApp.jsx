@@ -3027,7 +3027,11 @@ export default function DFSPropsApp() {
             onOpen={setSelectedEvaluation}
             hasMlbProps={mlbDisplayPropCount > 0}
             hasUnderdogProps={underdogStreakPropCount > 0}
-            underdogEmptyMessage={underdogDebugSnapshot ? resolveUnderdogStreakEmptyMessage(underdogDebugSnapshot) : undefined}
+            underdogEmptyMessage={
+              underdogDebugSnapshot
+                ? resolveUnderdogStreakEmptyMessage(underdogDebugSnapshot, { debugMode: debugModeEnabled })
+                : undefined
+            }
             streakCategoryTab={streakCategoryTab}
             onStreakCategoryTabChange={setStreakCategoryTab}
             onSectionError={handleSectionRenderError}

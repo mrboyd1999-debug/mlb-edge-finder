@@ -5,6 +5,7 @@ import { UNDERDOG_STREAK_EMPTY_MESSAGE } from "../utils/underdogStreakPool.js";
 import { SAFE_MODE_LOADING_MESSAGE } from "../utils/safeMode.js";
 import {
   filterUnderdogRowProps,
+  filterUnderdogAvailableProps,
   UNDERDOG_STAT_TABS,
 } from "../utils/underdogRowCard.js";
 
@@ -25,15 +26,24 @@ function MlbStreakPicksBoard({
     if (categoryTab == null) setInternalTab(tabId);
   };
 
-  const sourcePool = useMemo(
-    () => filterUnderdogRowProps(underdogPool.length ? underdogPool : picks, { tabId: "all", sport: "MLB" }),
-    [underdogPool, picks]
+  const underdogAvailableMode = useMemo(
+    () => picks.some((prop) => prop.streakSectionMode === "underdog-available"),
+    [picks]
   );
 
-  const visiblePicks = useMemo(
-    () => filterUnderdogRowProps(sourcePool, { tabId: activeTab, sport: "MLB", limit: 2 }),
-    [sourcePool, activeTab]
-  );
+  const sourcePool = useMemo(() => {
+    if (underdogAvailableMode && underdogPool.length) {
+      return filterUnderdogRowProps(underdogPool, { tabId: "all", sport: "all" });
+    }
+    return filterUnderdogRowProps(underdogPool.length ? underdogPool : picks, { tabId: "all", sport: "MLB" });
+  }, [underdogPool, picks, underdogAvailableMode]);
+
+  const visiblePicks = useMemo(() => {
+    if (underdogAvailableMode) {
+      return filterUnderdogAvailableProps(picks.length ? picks : sourcePool, { tabId: activeTab, limit: 2 });
+    }
+    return filterUnderdogRowProps(sourcePool, { tabId: activeTab, sport: "MLB", limit: 2 });
+  }, [sourcePool, activeTab, underdogAvailableMode, picks]);
 
   const tabCounts = useMemo(() => {
     const counts = { all: sourcePool.length };
@@ -48,8 +58,8 @@ function MlbStreakPicksBoard({
     <section className="mlb-streak-picks-section" style={styles.section} aria-label="MLB Streak Picks">
       <div style={styles.sectionHeading}>
         <div>
-          <p style={styles.eyebrow}>Top 2 · Underdog only</p>
-          <h2 style={styles.sectionTitle}>MLB Streak Picks</h2>
+          <p style={styles.eyebrow}>{underdogAvailableMode ? "Underdog Available" : "Top 2 · Underdog only"}</p>
+          <h2 style={styles.sectionTitle}>{underdogAvailableMode ? "Underdog Available" : "MLB Streak Picks"}</h2>
         </div>
         <p style={styles.countPill}>{visiblePicks.length}/2</p>
       </div>

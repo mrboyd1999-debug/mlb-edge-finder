@@ -299,17 +299,25 @@ export function buildUnderdogDebugSnapshot({
   };
 }
 
-export function resolveUnderdogStreakEmptyMessage(snapshot = {}) {
-  if (snapshot.parserMismatch) return UNDERDOG_PARSER_MISMATCH_MESSAGE;
-  if (snapshot.parserEmpty) return UNDERDOG_PARSER_EMPTY_MESSAGE;
+export const MLB_STREAK_USER_MESSAGE =
+  "No MLB Underdog props found. Showing PrizePicks MLB best plays.";
+
+export function resolveUnderdogStreakEmptyMessage(snapshot = {}, { debugMode = false } = {}) {
+  if (debugMode) {
+    if (snapshot.parserMismatch) return UNDERDOG_PARSER_MISMATCH_MESSAGE;
+    if (snapshot.parserEmpty) return UNDERDOG_PARSER_EMPTY_MESSAGE;
+    if (snapshot.hasParsedUnderdog && !snapshot.hasMlbUnderdog) {
+      return MLB_SPORT_MISMAP_MESSAGE;
+    }
+    if (snapshot.hasParsedUnderdog && snapshot.streakEligibleCount === 0) {
+      return MLB_SPORT_MISMAP_MESSAGE;
+    }
+    if (snapshot.hasRawUnderdog && !snapshot.hasParsedUnderdog) {
+      return UNDERDOG_PARSER_EMPTY_MESSAGE;
+    }
+  }
   if (snapshot.hasParsedUnderdog && !snapshot.hasMlbUnderdog) {
-    return MLB_SPORT_MISMAP_MESSAGE;
-  }
-  if (snapshot.hasParsedUnderdog && snapshot.streakEligibleCount === 0) {
-    return MLB_SPORT_MISMAP_MESSAGE;
-  }
-  if (snapshot.hasRawUnderdog && !snapshot.hasParsedUnderdog) {
-    return UNDERDOG_PARSER_EMPTY_MESSAGE;
+    return MLB_STREAK_USER_MESSAGE;
   }
   return MLB_UNDERDOG_STREAK_EMPTY_MESSAGE;
 }
