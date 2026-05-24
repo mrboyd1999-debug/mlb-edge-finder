@@ -26,7 +26,7 @@ function ParlayBuilderSection({ picks = [], loading, onOpen, hasMlbProps = false
       ) : legs.length === 0 ? (
         <div style={styles.emptyStateCompact}>{hasMlbProps ? "No strong MLB 4-man combo yet." : MLB_EMPTY_MESSAGE}</div>
       ) : (
-        <div className="curated-parlay-grid" style={styles.topPicksList}>
+        <div className="mlb-outlook-grid curated-parlay-grid" style={styles.mlbOutlookGrid}>
           {legs.map((prop, idx) => (
             <MlbPickCard
               key={prop.id || `parlay-${idx}`}

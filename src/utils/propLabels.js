@@ -1,6 +1,6 @@
 import { confidenceTierLabel, propPayoutLabel } from "../services/projectionEngine.js";
 import { classifyPropSport, isTennisSportLabel } from "./marketClassification.js";
-import { marketDisplayLabel } from "./marketNormalization.js";
+import { marketDisplayLabel, fullMarketDisplayLabel } from "./marketNormalization.js";
 import { normalize } from "./formatters.js";
 
 export function canonicalSportFromProp(prop) {
@@ -20,9 +20,17 @@ export function displaySport(propOrSport) {
 }
 
 export function displayMarketLabel(prop = {}) {
+  if (prop?.fullMarketLabel) return prop.fullMarketLabel;
   if (prop?.marketLabel) return prop.marketLabel;
   return marketDisplayLabel(prop?.statType, prop?.sport);
 }
+
+export function displayFullMarketLabel(prop = {}) {
+  if (prop?.fullMarketLabel) return prop.fullMarketLabel;
+  return fullMarketDisplayLabel(prop?.statType || prop?.market, prop?.sport);
+}
+
+export { fullMarketDisplayLabel };
 
 export function confidenceTier(prop) {
   const score = Number(prop.confidenceScore || prop.modelSignal?.confidenceScore || 0);

@@ -4,6 +4,7 @@
  */
 
 import { buildPropDedupeKey } from "./displayPropScoring.js";
+import { withPlayerImageUrl } from "./playerImageFields.js";
 import { isDemonProp, isGoblinProp } from "./propLabels.js";
 import { resolvePickSide } from "./pickRecommendation.js";
 import { filterAllDisplayPropsBySport } from "./allDisplayProps.js";
@@ -97,7 +98,7 @@ function adjustRoleConfidence(confidence, role) {
 function annotatePayoutProp(prop = {}, role, { pairedLine = null, pairedWith = null, verified = false } = {}) {
   const isGoblin = role === "goblin";
   const conf = adjustRoleConfidence(baseConfidence(prop), role);
-  return {
+  return withPlayerImageUrl({
     ...prop,
     confidence: conf,
     confidenceScore: conf,
@@ -112,7 +113,7 @@ function annotatePayoutProp(prop = {}, role, { pairedLine = null, pairedWith = n
     displayFallback: false,
     isFallbackMlbPick: false,
     fallbackLabel: "",
-  };
+  });
 }
 
 function sourceSupportsRole(prop, role) {

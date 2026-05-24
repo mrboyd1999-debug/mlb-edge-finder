@@ -1,3 +1,5 @@
+import { withPlayerImageUrl } from "./playerImageFields.js";
+import { fullMarketDisplayLabel } from "./marketNormalization.js";
 import { normalizeSportLabel, sportLabelsMatch } from "./sportMappings.js";
 import { isDevEnvironment } from "../services/fetchUtil.js";
 import {
@@ -56,13 +58,25 @@ export function normalizeDisplayProp(prop = {}, { selectedSport = "MLB", source 
     String(raw.status || prop.status || "").toLowerCase() === "cached";
   const confidence = finiteOr(raw.confidence ?? raw.confidenceScore ?? prop.confidence ?? prop.confidenceScore, 50);
   const edge = finiteOr(raw.edge ?? prop.edge, computeDisplayEdge({ line, projection, side }));
+  const imageSource = prop?.raw && typeof prop.raw === "object" ? prop.raw : raw;
+  const playerImageUrl =
+    imageSource.playerImageUrl ||
+    imageSource.playerImage ||
+    imageSource.player_image ||
+    imageSource.imageUrl ||
+    imageSource.image_url ||
+    imageSource.headshot ||
+    imageSource.headshot_url ||
+    prop.playerImageUrl ||
+    "";
+  const fullMarketLabel = fullMarketDisplayLabel(statType, sportNorm);
 
   const id =
     raw.id ||
     prop.id ||
     [src, player, statType, line, side, sportNorm].join("|").toLowerCase().replace(/\s+/g, "-");
 
-  return {
+  return withPlayerImageUrl({
     id,
     player,
     playerName: player,
@@ -73,6 +87,7 @@ export function normalizeDisplayProp(prop = {}, { selectedSport = "MLB", source 
     statType,
     market: statType,
     propType: statType,
+    fullMarketLabel,
     line,
     projection,
     projectedValue: projection,
@@ -81,6 +96,11 @@ export function normalizeDisplayProp(prop = {}, { selectedSport = "MLB", source 
     bestPick: side,
     source: src,
     platform: src,
+    playerImageUrl,
+    playerImage: playerImageUrl,
+    headshot: playerImageUrl,
+    imageUrl: playerImageUrl,
+    mlbId: raw.mlbId || raw.mlbamId || prop.mlbId || null,
     confidence,
     confidenceScore: confidence,
     edge,
@@ -92,7 +112,7 @@ export function normalizeDisplayProp(prop = {}, { selectedSport = "MLB", source 
     needsReview: Boolean(prop.needsReview),
     sportsbookVerified: true,
     verifiedBadge: "VERIFIED",
-  };
+  });
 }
 
 export function propSourceCacheKey(sport = "all", source = "PrizePicks") {

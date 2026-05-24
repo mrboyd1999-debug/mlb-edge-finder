@@ -19,7 +19,7 @@ function MlbStreakPicksBoard({ picks = [], onOpen, hasMlbProps = false, loading 
       {loading ? (
         <div style={styles.emptyStateCompact}>{SAFE_MODE_LOADING_MESSAGE}</div>
       ) : streakPicks.length > 0 ? (
-        <div className="mlb-streak-picks-grid" style={styles.topPicksList}>
+        <div className="mlb-outlook-grid" style={styles.mlbOutlookGrid}>
           {streakPicks.map((prop, idx) => (
             <MlbPickCard
               key={prop.id || `mlb-streak-${idx}`}

@@ -8,6 +8,8 @@ import {
 } from "./propCalibration.js";
 import { attachHistoricalPerformance } from "./historicalPropAnalytics.js";
 import { resolveGoblinDemonBoards } from "./goblinDemonPairs.js";
+import { withPlayerImageUrl } from "./playerImageFields.js";
+import { fullMarketDisplayLabel } from "./marketNormalization.js";
 
 const BASE_CONFIDENCE = 50;
 const MIN_TOP_PICK_CONFIDENCE = 65;
@@ -367,16 +369,19 @@ export function scoreDisplayProp(prop = {}) {
   const bettingLabel = displayResearchOnly ? "Research only" : labelForConfidence(calibrated.confidence, false);
 
   return attachHistoricalPerformance(
-    attachRankScore({
-      ...calibrated,
-      confidenceTier: tier,
-      edgeScore: round1(edge * (calibrated.confidence / 50) + (finiteOr(prop.last10HitRate, 0.5) * 3)),
-      displayRejected: invalidProp,
-      displayResearchOnly,
-      isDisplayPlayable,
-      bettingLabel,
-      premiumRiskSummary: calibrated.premiumRiskSummary || premiumRiskSummary(calibrated),
-    })
+    attachRankScore(
+      withPlayerImageUrl({
+        ...calibrated,
+        fullMarketLabel: fullMarketDisplayLabel(calibrated.statType || prop.statType, calibrated.sport || prop.sport),
+        confidenceTier: tier,
+        edgeScore: round1(edge * (calibrated.confidence / 50) + (finiteOr(prop.last10HitRate, 0.5) * 3)),
+        displayRejected: invalidProp,
+        displayResearchOnly,
+        isDisplayPlayable,
+        bettingLabel,
+        premiumRiskSummary: calibrated.premiumRiskSummary || premiumRiskSummary(calibrated),
+      })
+    )
   );
 }
 

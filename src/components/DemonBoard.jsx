@@ -26,7 +26,7 @@ function DemonBoard({ picks = [], loading, onOpen, compactMode = true, limit = 6
         <EmptyState text={DEMON_EMPTY_MESSAGE} />
       ) : (
         <>
-          <div style={styles.topPicksList}>
+          <div className="mlb-outlook-grid" style={styles.mlbOutlookGrid}>
             {demons.map((prop, idx) =>
               useMlbCard ? (
                 <MlbPickCard key={prop.id || `demon-${idx}`} prop={prop} rank={idx + 1} onOpen={onOpen} cardStyle={styles.demonCard} />

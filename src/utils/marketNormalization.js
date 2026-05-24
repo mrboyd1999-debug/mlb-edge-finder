@@ -431,6 +431,16 @@ export function marketDisplayLabel(statType = "", sport = "") {
   return key ? key.toUpperCase() : text;
 }
 
+/** Full readable market name for research cards (no abbreviations). */
+export function fullMarketDisplayLabel(statType = "", sport = "") {
+  const key = canonicalMarketKey(statType);
+  if (key && CANONICAL_STAT_TYPES[key]) return CANONICAL_STAT_TYPES[key];
+  const normalized = normalizeMarketStatType(statType);
+  if (normalized) return normalized;
+  const text = String(statType || "").trim();
+  return text || "Prop";
+}
+
 export function isComboMarketKey(key = "") {
   return COMBO_MARKET_KEYS.has(String(key || ""));
 }

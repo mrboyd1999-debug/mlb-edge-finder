@@ -12,6 +12,24 @@ body,
   box-sizing: border-box;
 }
 
+.mlb-outlook-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.mlb-outlook-card .player-image-wrap {
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  flex-basis: 48px;
+  border: 1px solid #334155;
+}
+
+.mlb-outlook-card:hover {
+  border-color: #38bdf8;
+}
+
 .mobile-warning-banner {
   display: block;
   margin: 0 0 8px;
@@ -346,7 +364,8 @@ body,
 
   .curated-parlay-grid,
   .top-picks-grid,
-  .saved-picks-grid {
+  .saved-picks-grid,
+  .mlb-outlook-grid {
     gap: 4px !important;
   }
 
@@ -623,9 +642,10 @@ body,
 
 @media (min-width: 641px) {
   .accepted-props-grid,
-  .top-picks-grid {
+  .top-picks-grid,
+  .mlb-outlook-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
+    gap: 12px;
   }
 }
 

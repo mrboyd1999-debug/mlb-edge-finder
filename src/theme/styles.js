@@ -107,6 +107,28 @@ export const styles = {
     gap: "5px",
   },
   topPicksList: { display: "grid", gap: "6px" },
+  mlbOutlookGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr",
+    gap: "10px",
+  },
+  mlbOutlookCard: {
+    border: "1px solid #243244",
+    background: "linear-gradient(180deg, #111827 0%, #0f172a 100%)",
+    borderRadius: "12px",
+    padding: "12px",
+    minWidth: 0,
+    cursor: "pointer",
+    boxShadow: "0 1px 0 rgba(148, 163, 184, 0.08)",
+    transition: "border-color 0.15s ease, transform 0.15s ease",
+  },
+  mlbOutlookHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "8px",
+  },
+  streakCard: { borderColor: "#2563eb", background: "#0b1224" },
   whyPickBlock: {
     marginTop: "4px",
     padding: "6px 8px",

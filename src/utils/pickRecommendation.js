@@ -55,12 +55,55 @@ export function formatRecommendationLabel(side = "", { streak = false } = {}) {
   return "WATCH";
 }
 
+export function formatDfsSide(side = "") {
+  if (side === "OVER") return "More";
+  if (side === "UNDER") return "Less";
+  return "Watch";
+}
+
 export function formatRiskShort(prop = {}) {
   const text = String(prop.riskLevel || "").toUpperCase();
   if (text.includes("LOW")) return "LOW";
   if (text.includes("HIGH")) return "HIGH";
   if (text.includes("MED") || text.includes("MOD")) return "MED";
   return text.slice(0, 8) || "—";
+}
+
+export function formatRiskLevel(prop = {}) {
+  const text = String(prop.riskLevel || "").toUpperCase();
+  if (text.includes("LOW")) return "Low";
+  if (text.includes("HIGH")) return "High";
+  if (text.includes("MED") || text.includes("MOD")) return "Medium";
+
+  const conf = Number(prop.confidenceScore ?? prop.confidence ?? NaN);
+  if (Number.isFinite(conf)) {
+    if (conf >= 74) return "Low";
+    if (conf >= 60) return "Medium";
+    return "High";
+  }
+  return "Medium";
+}
+
+export function riskLevelPalette(level = "") {
+  const key = String(level || "").toLowerCase();
+  if (key.includes("low")) {
+    return { bg: "#052e16", border: "#22c55e", color: "#86efac" };
+  }
+  if (key.includes("high")) {
+    return { bg: "#450a0a", border: "#ef4444", color: "#fca5a5" };
+  }
+  return { bg: "#422006", border: "#ca8a04", color: "#fde68a" };
+}
+
+export function platformBadgePalette(platform = "") {
+  const key = String(platform || "").toLowerCase();
+  if (/prize/.test(key)) {
+    return { bg: "#2e1065", border: "#7c3aed", color: "#ddd6fe", label: "PrizePicks" };
+  }
+  if (/underdog/.test(key)) {
+    return { bg: "#422006", border: "#eab308", color: "#fef08a", label: "Underdog" };
+  }
+  return { bg: "#1e293b", border: "#475569", color: "#cbd5e1", label: platform || "DFS" };
 }
 
 export function normalizeSourceLabel(prop = {}) {

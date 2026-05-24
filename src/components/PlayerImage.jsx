@@ -5,7 +5,7 @@ import { hasCachedPlayerImage, preloadPlayerImage, rememberPlayerImage } from ".
 
 function buildHeadshotCandidates(prop = {}) {
   const candidates = [];
-  const direct = prop.playerImage || prop.headshot || prop.imageUrl || prop.photo || "";
+  const direct = prop.playerImageUrl || prop.playerImage || prop.headshot || prop.imageUrl || prop.photo || "";
   if (direct) candidates.push(direct);
 
   const sport = String(prop.sport || prop.league || "").toUpperCase();

@@ -26,7 +26,7 @@ function GoblinBoard({ picks = [], loading, onOpen, compactMode = true, limit = 
         <EmptyState text={GOBLIN_EMPTY_MESSAGE} />
       ) : (
         <>
-          <div style={styles.topPicksList}>
+          <div className="mlb-outlook-grid" style={styles.mlbOutlookGrid}>
             {goblins.map((prop, idx) =>
               useMlbCard ? (
                 <MlbPickCard key={prop.id || `goblin-${idx}`} prop={prop} rank={idx + 1} onOpen={onOpen} cardStyle={styles.goblinCard} />
