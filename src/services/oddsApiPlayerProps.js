@@ -83,8 +83,9 @@ async function fetchOddsApiDisplayPropsInternal({ sport = "all" } = {}) {
   if (isSourceAuthBlocked(SOURCE_IDS.ODDS_API)) {
     return {
       props: [],
-      warnings: [ODDS_API_INVALID_KEY_MESSAGE],
+      warnings: [],
       authFailed: true,
+      authDisabled: true,
       parsedCount: 0,
     };
   }

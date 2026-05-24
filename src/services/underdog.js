@@ -44,8 +44,10 @@ import { MLB_ONLY_MODE, emptySourcePipelineAudit } from "../utils/mlbOnlyMode.js
 import {
   parseUnderdogPayloadDedicated,
   extractRawUnderdogRecords,
+  logUnderdogResponseShape,
   UNDERDOG_PARSER_MISMATCH_MESSAGE,
 } from "../utils/parseUnderdogProp.js";
+import { filterResolvedSportProps } from "../utils/underdogSportDetection.js";
 
 const UNDERDOG_ENDPOINTS = [
   "/api/underdog",
@@ -148,10 +150,13 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all" } = 
         });
       }
       const rawCount = rawUnderdogRecordCount(payload);
+      logUnderdogResponseShape(payload);
       const rawSamples = extractRawUnderdogRecords(payload).slice(0, 3);
-      const { props: parsedProps, audit, diagnostics } = parseUnderdogPayload(payload, "LIVE");
+      const { props: parsedProps, audit, diagnostics, responseShape } = parseUnderdogPayload(payload, "LIVE", sport);
       logPipelineAudit("Underdog", audit);
-      const props = parsedProps.filter((prop) => matchesFilter(prop, sport, statType));
+      const props = MLB_ONLY_MODE
+        ? filterResolvedSportProps(parsedProps, sport === "all" ? "MLB" : sport, { selectedSportTab: "MLB" })
+        : parsedProps.filter((prop) => matchesFilter(prop, sport, statType));
       const usableCount = countUsableProps(props);
       if (parsedProps.length > 0) {
         writeCachedPayload(sanitizeUnderdogPayloadForCache(payload));
@@ -167,34 +172,41 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all" } = 
       if (!usableCount) {
         const cachedResult = buildCachedUnderdogResult({ sport, statType, attempts, reason: "empty-parse" });
         if (cachedResult && !diagnostics?.parserMismatch) return cachedResult;
+        const parserMessage =
+          rawCount > 0 && parsedProps.length === 0
+            ? `${UNDERDOG_PARSER_MISMATCH_MESSAGE} ${Object.entries(diagnostics?.rejectionReasons || {})
+                .map(([k, v]) => `${k}(${v})`)
+                .join(", ")}`
+            : parsedProps.length > 0
+              ? "Underdog props parsed but none matched MLB filters."
+              : EMPTY_SOURCE_MESSAGE;
         console.warn(`${UNDERDOG_AUDIT_PREFIX} no usable parsed props`, {
           url: apiUrl,
           rawPropsLoaded: rawCount,
           parsedPropsCount: parsedProps.length,
+          filteredCount: props.length,
           diagnostics,
+          responseShape,
         });
-        const parserMessage =
-          rawCount > 0 && parsedProps.length === 0
-            ? UNDERDOG_PARSER_MISMATCH_MESSAGE
-            : EMPTY_SOURCE_MESSAGE;
         return {
           source: "Underdog",
-          status: rawCount > 0 && parsedProps.length === 0 ? "Connected" : "Empty",
-          props: parsedProps,
-          parsedProps,
+          status: rawCount > 0 ? "Connected" : "Empty",
+          props: parsedProps.length ? parsedProps : props,
+          parsedProps: parsedProps.length ? parsedProps : props,
           warnings: [parserMessage],
-          health: usableCount > 0 ? "LIVE" : "EMPTY",
-          lineSourceBadge: usableCount > 0 ? "LIVE" : "EMPTY",
+          health: parsedProps.length ? "LIVE" : "EMPTY",
+          lineSourceBadge: parsedProps.length ? "LIVE" : "EMPTY",
           pipelineAudit: audit,
           debug: underdogDebug({
             apiUrl,
-            apiStatus: rawCount > 0 && parsedProps.length === 0 ? "Connected" : "Empty",
+            apiStatus: rawCount > 0 ? "Connected" : "Empty",
             endpointsTried: attempts.map((item) => item.url),
             rawPropsLoaded: rawCount,
             parsedPropsCount: parsedProps.length,
             message: parserMessage,
             underdogParser: diagnostics,
             rawUnderdogSamples: rawSamples,
+            responseShape,
           }),
         };
       }
@@ -413,22 +425,20 @@ function failedUnderdogResult({ apiUrl, endpointsTried, rawPropsLoaded = 0, mess
   };
 }
 
-function parseUnderdogPayload(payload, lineSourceBadge = "LIVE") {
-  return safeParse("Underdog.parsePayload", () => parseUnderdogPayloadInternal(payload, lineSourceBadge), {
+function parseUnderdogPayload(payload, lineSourceBadge = "LIVE", selectedSport = "MLB") {
+  return safeParse("Underdog.parsePayload", () => parseUnderdogPayloadInternal(payload, lineSourceBadge, selectedSport), {
     props: [],
     audit: coercePipelineAudit(emptySourcePipelineAudit()),
     diagnostics: { rawCount: 0, acceptedCount: 0, rejectedCount: 0, rejectionReasons: {}, parserMismatch: false },
   });
 }
 
-function parseUnderdogPayloadInternal(payload, lineSourceBadge = "LIVE") {
+function parseUnderdogPayloadInternal(payload, lineSourceBadge = "LIVE", selectedSport = "MLB") {
   let audit = safeCreateEmptyPipelineAudit();
   try {
     audit = createEmptyPipelineAudit();
-    const rawRecords = extractRawUnderdogRecords(payload);
-    audit.fetched = rawRecords.length;
-
-    const { props, diagnostics } = parseUnderdogPayloadDedicated(payload, lineSourceBadge);
+    const { props, diagnostics, responseShape } = parseUnderdogPayloadDedicated(payload, lineSourceBadge, selectedSport);
+    audit.fetched = diagnostics.rawCount || props.length;
     audit.normalized = props.length;
     props.forEach((prop) => recordNormalizedSample(audit, prop));
 
@@ -453,6 +463,7 @@ function parseUnderdogPayloadInternal(payload, lineSourceBadge = "LIVE") {
         underdogParser: diagnostics,
       }),
       diagnostics,
+      responseShape,
     };
   } catch (error) {
     console.warn("[Underdog] dedicated parse payload failed; returning empty audit-safe result", error);
@@ -495,7 +506,7 @@ function rawUnderdogRecordCount(payload) {
   return Array.isArray(lines) ? lines.length : 0;
 }
 
-function underdogDebug({ apiUrl, apiStatus, endpointsTried, rawPropsLoaded, parsedPropsCount, message, underdogParser = null, rawUnderdogSamples = [] }) {
+function underdogDebug({ apiUrl, apiStatus, endpointsTried, rawPropsLoaded, parsedPropsCount, message, underdogParser = null, rawUnderdogSamples = [], responseShape = null }) {
   return {
     selectedSource: "Underdog",
     apiUrl,
@@ -506,6 +517,7 @@ function underdogDebug({ apiUrl, apiStatus, endpointsTried, rawPropsLoaded, pars
     message,
     underdogParser,
     rawUnderdogSamples,
+    responseShape,
   };
 }
 

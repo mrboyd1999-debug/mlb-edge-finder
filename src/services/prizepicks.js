@@ -42,11 +42,11 @@ import {
 import { getProxyUrl } from "../config/apiConfig.js";
 
 export const PRIZEPICKS_HTML_BANNER = "API route is serving source/HTML instead of JSON. Check proxy/backend routing.";
-export const PRIZEPICKS_RATE_LIMIT_MESSAGE = "Rate limited. Showing cached lines until cooldown ends.";
+export const PRIZEPICKS_RATE_LIMIT_MESSAGE = "PrizePicks rate limited, using other sources.";
 
 const PRIZEPICKS_ENDPOINTS = ["/api/prizepicks"];
 const PRIZEPICKS_CACHE_KEY = "dfs-prizepicks-last-good-payload";
-const PRIZEPICKS_CACHE_MAX_MS = 60 * 60 * 1000;
+const PRIZEPICKS_CACHE_MAX_MS = 15 * 60 * 1000;
 const PRIZEPICKS_CLIENT_STALE_MS = 5 * 60 * 1000;
 
 const SPORT_ALIASES = {
@@ -127,8 +127,10 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all" } 
 
     if (parsed.ok && parsed.payload) {
       const isFallback = parsed.payload?.fallback === true;
-      const isRateLimited = Boolean(parsed.payload?.rateLimited || parsed.rateLimited);
-      if (isRateLimited) recordSource429(SOURCE_IDS.PRIZEPICKS);
+      const isRateLimited = Boolean(
+        parsed.rateLimited || (parsed.payload?.rateLimited && !isFallback) || parsed.payload?.upstreamStatus === 429
+      );
+      if (isRateLimited && !isFallback) recordSource429(SOURCE_IDS.PRIZEPICKS);
 
       const setupWarning = setupWarningFromPayload(parsed.payload, "PrizePicks");
       if (parsed.payload?.error && parsed.payload?.needsSetup) {
@@ -169,6 +171,8 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all" } 
       const warnings = [];
       if (isFallback) {
         warnings.push(parsed.payload.message || PRIZEPICKS_RATE_LIMIT_MESSAGE);
+      } else if (isRateLimited) {
+        warnings.push(PRIZEPICKS_RATE_LIMIT_MESSAGE);
       } else if (setupWarning) {
         warnings.push(setupWarning);
       }
@@ -233,7 +237,7 @@ function buildCachedPrizePicksResult({ sport, statType, attempts, endpoint, reas
   markSourceCached(SOURCE_IDS.PRIZEPICKS, savedAt);
   const warning =
     reason === "rate-limit" || reason === "cooldown"
-      ? cachedLinesMessage(savedAt) || RATE_LIMIT_COOLDOWN_MESSAGE
+      ? PRIZEPICKS_RATE_LIMIT_MESSAGE
       : "PrizePicks live fetch failed; showing last cached real lines.";
   return {
     source: "PrizePicks",

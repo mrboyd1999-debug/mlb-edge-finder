@@ -38,6 +38,7 @@ import {
   RATE_LIMIT_COOLDOWN_MESSAGE,
   VERIFIED_CACHE_FALLBACK_MESSAGE,
   SOURCE_IDS,
+  isSourceAuthBlocked,
 } from "./services/sourceRateLimit.js";
 import {
   buildBoardCacheMetaFromFetch,
@@ -161,6 +162,12 @@ import {
 } from "./utils/underdogPickPool.js";
 import { resolveTopMlbPlaySections, auditTopMlbPlayPool } from "./utils/topMlbPlays.js";
 import { logPipelineStage } from "./utils/mlbPipelineDebug.js";
+import {
+  mergeProviderRawProps,
+  buildUnderdogParserFailureMessage,
+  hasAnyProviderProps,
+} from "./services/providerOrchestration.js";
+import { enrichPropsWithSportsData } from "./services/propSportsDataEnrichment.js";
 import { logLiveFetchResult, buildLiveFetchFailureSummary } from "./utils/liveFetchAudit.js";
 import { isSafeModeEnabled, SAFE_MODE_FALLBACK_MESSAGE, SAFE_MODE_LOADING_MESSAGE } from "./utils/safeMode.js";
 import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks, resolveSafeMlbStreakPicks } from "./utils/safeModePipeline.js";
@@ -900,7 +907,8 @@ function applySourceResult({
   );
   const usableCount = countUsableProps(props);
   logLiveFetchResult(label, result);
-  const failed = result.status === "Failed" || result.status === "Unavailable";
+  const failed =
+    result.status === "Failed" || (result.status === "Unavailable" && !(incoming || []).length);
   const rateLimited = Boolean(result.rateLimited || result.cached);
   const cached = result.status === "Cached" || rateLimited;
   const timedOut = /timed?\s*out/i.test(String(result.debug?.message || result.warnings?.join(" ") || ""));
@@ -918,47 +926,65 @@ function applySourceResult({
 
   if (label === "Underdog" && failed) {
     const detailWarnings = result.warnings?.length ? result.warnings : [UNDERDOG_UNAVAILABLE_MESSAGE];
-    sourceStatus.Underdog = "Unavailable";
+    if (result.debug?.underdogParser?.parserMismatch) {
+      detailWarnings.unshift(buildUnderdogParserFailureMessage(result.debug));
+    }
+    sourceStatus.Underdog = props.length ? "Degraded" : "Unavailable";
     detailWarnings.forEach((warning) => {
       if (!sourceWarnings.includes(warning)) sourceWarnings.push(warning);
     });
+    if (props.length) {
+      rawProps.push(...props);
+    }
     debugInfo.sources[label] = {
       ...debugInfo.sources[label],
-      status: "Unavailable",
-      apiStatus: result.debug?.apiStatus || "Unavailable",
+      status: props.length ? "Connected" : "Unavailable",
+      apiStatus: result.debug?.apiStatus || (props.length ? "Connected" : "Unavailable"),
       apiUrl: result.debug?.apiUrl || "",
       endpointsTried: result.debug?.endpointsTried || [],
       rawPropsLoaded: rawCount,
-      propsAfterParsing: 0,
-      usablePropsCount: 0,
+      propsAfterParsing: parsedCount,
+      usablePropsCount: usableCount,
       message: result.debug?.message || detailWarnings.join(" | "),
       lastSuccessfulFetchAt: result.lastSuccessfulFetchAt || "",
-      lineSourceBadge: HEALTH_STATES.FAILED,
+      lineSourceBadge: props.length ? health.badge : HEALTH_STATES.FAILED,
+      underdogParser: result.debug?.underdogParser || null,
+      rawUnderdogSamples: result.debug?.rawUnderdogSamples || [],
+      responseShape: result.debug?.responseShape || null,
     };
-    return false;
+    return usableCount > 0 || props.length > 0;
   }
 
   if (failed) {
     const detailWarnings = result.warnings || [];
-    sourceWarnings.push(...detailWarnings);
-    if (label === "PrizePicks") {
-      sourceFailures.push(...(detailWarnings.length ? detailWarnings : ["PrizePicks data failed to load."]));
+    if (props.length) rawProps.push(...props);
+    if (label === "PrizePicks" && rateLimited) {
+      sourceStatus[label] = props.length ? "Cached" : "Rate Limited";
+      if (!sourceWarnings.includes(PRIZEPICKS_RATE_LIMIT_MESSAGE)) {
+        sourceWarnings.push(PRIZEPICKS_RATE_LIMIT_MESSAGE);
+      }
+    } else {
+      sourceWarnings.push(...detailWarnings);
+      if (label === "PrizePicks") {
+        sourceFailures.push(...(detailWarnings.length ? detailWarnings : ["PrizePicks data failed to load."]));
+      }
+      sourceStatus[label] = props.length ? "Degraded" : "Failed";
     }
-    sourceStatus[label] = "Failed";
     debugInfo.sources[label] = {
       ...debugInfo.sources[label],
-      status: "Failed",
-      apiStatus: result.debug?.apiStatus || "Failed",
+      status: sourceStatus[label],
+      apiStatus: result.debug?.apiStatus || sourceStatus[label],
       apiUrl: result.debug?.apiUrl || "",
       endpointsTried: result.debug?.endpointsTried || [],
       rawPropsLoaded: rawCount,
-      propsAfterParsing: 0,
-      usablePropsCount: 0,
-      message: result.debug?.message || detailWarnings.join(" | "),
+      propsAfterParsing: parsedCount,
+      usablePropsCount: usableCount,
+      message: health.message || result.debug?.message || detailWarnings.join(" | "),
       lastSuccessfulFetchAt: result.lastSuccessfulFetchAt || "",
-      lineSourceBadge: HEALTH_STATES.FAILED,
+      lineSourceBadge: props.length ? health.badge : HEALTH_STATES.FAILED,
+      statusLabel: health.message,
     };
-    return false;
+    return usableCount > 0 || props.length > 0;
   }
 
   const pipelineStatus =
@@ -1006,6 +1032,17 @@ function emptyOddsApiResult({ timedOut = false, warnings = [] } = {}) {
 }
 
 function applyOddsApiSourceState(oddsApiPlayerResult, sourceStatus, debugInfo) {
+  if (oddsApiPlayerResult?.authDisabled || isSourceAuthBlocked(SOURCE_IDS.ODDS_API)) {
+    sourceStatus["The Odds API"] = "Disabled";
+    debugInfo.sources["The Odds API"] = {
+      ...debugInfo.sources["The Odds API"],
+      status: "Disabled",
+      apiStatus: "Disabled",
+      message: "Odds API disabled (invalid key)",
+      lineSourceBadge: "DISABLED",
+    };
+    return;
+  }
   logLiveFetchResult("OddsAPI", {
     status: oddsApiPlayerResult?.timedOut ? "Failed" : oddsApiPlayerResult?.props?.length ? "OK" : "Empty",
     debug: {
@@ -1125,48 +1162,15 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     fetchUnderdog ? fetchUnderdogProviderProps({ sport: fetchSport, statType: "all" }) : Promise.resolve(null),
   ]);
 
-  if (wantsPrizePicks) {
-    if (ppSettled.status === "fulfilled" && ppSettled.value) {
-      prizePicksResult = ppSettled.value;
-      console.info("[DFS Source Audit] PrizePicks result", {
-        status: prizePicksResult.status,
-        props: prizePicksResult.props?.length || 0,
-        lineSourceBadge: prizePicksResult.lineSourceBadge,
-      });
-      applySourceResult({
-        label: "PrizePicks",
-        result: prizePicksResult,
-        sourceWarnings,
-        sourceFailures,
-        rawProps,
-        sourceStatus,
-        debugInfo,
-      });
-    } else {
-      const error = ppSettled.status === "rejected" ? ppSettled.reason : new Error("PrizePicks returned no data");
-      sourceStatus.PrizePicks = "Failed";
-      console.warn("[DFS Source Audit] PrizePicks load failed", error);
-      sourceFailures.push(sourceFailureMessage("Could not load PrizePicks lines.", error));
-      debugInfo.sources.PrizePicks = {
-        ...debugInfo.sources.PrizePicks,
-        status: "Failed",
-        apiStatus: "Failed",
-        message: getErrorMessage(error) || "Could not load PrizePicks lines.",
-        lineSourceBadge: "",
-      };
-    }
-  }
-
   if (fetchUnderdog) {
     if (udSettled.status === "fulfilled" && udSettled.value) {
       underdogResult = udSettled.value;
-      console.info("[DFS Source Audit] Underdog backup result", {
+      console.info("[DFS Source Audit] Underdog result", {
         status: underdogResult.status,
         props: underdogResult.props?.length || 0,
         lineSourceBadge: underdogResult.lineSourceBadge,
-        backup: Boolean(prizePicksResult && !prizePicksSucceeded(prizePicksResult)),
       });
-      const underdogOk = applySourceResult({
+      applySourceResult({
         label: "Underdog",
         result: underdogResult,
         sourceWarnings,
@@ -1188,15 +1192,14 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         );
         debugInfo.underdogParser = underdogResult.debug?.underdogParser || underdogResult.pipelineAudit?.underdogParser || null;
         debugInfo.rawUnderdogSamples = underdogResult.debug?.rawUnderdogSamples || [];
-      }
-      if (!underdogOk && !rawProps.length && prizePicksResult?.props?.length) {
-        rawProps.push(...prizePicksResult.props);
-        sourceStatus.PrizePicks = prizePicksResult.status;
+        debugInfo.underdogResponseShape = underdogResult.debug?.responseShape || null;
+      } else if (underdogResult.debug?.underdogParser?.parserMismatch) {
+        sourceWarnings.push(buildUnderdogParserFailureMessage(underdogResult.debug));
       }
     } else {
       const error = udSettled.status === "rejected" ? udSettled.reason : new Error("Underdog returned no data");
       sourceStatus.Underdog = "Unavailable";
-      console.warn("[DFS Source Audit] Underdog backup failed", error);
+      console.warn("[DFS Source Audit] Underdog load failed", error);
       sourceWarnings.push(UNDERDOG_UNAVAILABLE_MESSAGE);
       debugInfo.sources.Underdog = {
         ...debugInfo.sources.Underdog,
@@ -1206,13 +1209,54 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         message: error?.debug?.message || UNDERDOG_UNAVAILABLE_MESSAGE,
         lineSourceBadge: "STALE",
       };
-      if (prizePicksResult?.props?.length) {
-        rawProps.push(...prizePicksResult.props);
-      }
     }
   }
 
-  if (!rawProps.length && prizePicksResult?.warnings?.includes(PRIZEPICKS_RATE_LIMIT_MESSAGE)) {
+  if (wantsPrizePicks) {
+    if (ppSettled.status === "fulfilled" && ppSettled.value) {
+      prizePicksResult = ppSettled.value;
+      console.info("[DFS Source Audit] PrizePicks result", {
+        status: prizePicksResult.status,
+        props: prizePicksResult.props?.length || 0,
+        lineSourceBadge: prizePicksResult.lineSourceBadge,
+        rateLimited: prizePicksResult.rateLimited,
+      });
+      applySourceResult({
+        label: "PrizePicks",
+        result: prizePicksResult,
+        sourceWarnings,
+        sourceFailures,
+        rawProps,
+        sourceStatus,
+        debugInfo,
+      });
+    } else {
+      const error = ppSettled.status === "rejected" ? ppSettled.reason : new Error("PrizePicks returned no data");
+      sourceStatus.PrizePicks = "Failed";
+      console.warn("[DFS Source Audit] PrizePicks load failed", error);
+      if (!rawProps.length) {
+        sourceFailures.push(sourceFailureMessage("Could not load PrizePicks lines.", error));
+      }
+      debugInfo.sources.PrizePicks = {
+        ...debugInfo.sources.PrizePicks,
+        status: "Failed",
+        apiStatus: "Failed",
+        message: getErrorMessage(error) || "Could not load PrizePicks lines.",
+        lineSourceBadge: "",
+      };
+    }
+  }
+
+  const mergedProviderProps = mergeProviderRawProps({
+    underdogProps: underdogResult?.parsedProps || underdogResult?.props || [],
+    prizePicksProps: prizePicksResult?.props || [],
+  });
+  if (mergedProviderProps.length) {
+    rawProps.length = 0;
+    rawProps.push(...mergedProviderProps);
+  }
+
+  if (!rawProps.length && prizePicksResult?.rateLimited) {
     sourceWarnings.unshift(PRIZEPICKS_RATE_LIMIT_MESSAGE);
   }
 
@@ -1282,9 +1326,35 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       underdogResult,
       sport: fetchSport,
       selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
-      oddsApi: oddsApiPlayerResult?.props || [],
+      oddsApi: oddsApiPlayerResult?.authDisabled ? [] : oddsApiPlayerResult?.props || [],
     })
   );
+  if (!allDisplayProps.length && rawProps.length) {
+    const sportsData = await enrichPropsWithSportsData(rawProps);
+    if (sportsData.enrichedCount > 0 || sportsData.props.length) {
+      rawProps.length = 0;
+      rawProps.push(...normalizePropsWithSource(sportsData.props));
+      allDisplayProps = normalizePropsWithSource(
+        enrichDisplayPropsPipeline(
+          rawProps.map((prop) =>
+            normalizeDisplayProp(prop, {
+              selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
+              source: prop.platform || prop.source || "Underdog",
+              status: String(prop.lineSourceBadge || "").toUpperCase() === "CACHED" ? "cached" : "live",
+            })
+          )
+        )
+      );
+      sourceStatus.SportsDataIO = "Connected";
+      debugInfo.sources.SportsDataIO = {
+        ...debugInfo.sources.SportsDataIO,
+        status: "Connected",
+        apiStatus: "Connected",
+        message: `Enriched ${sportsData.enrichedCount} props with projections/matchups`,
+        lineSourceBadge: "LIVE",
+      };
+    }
+  }
   if (!allDisplayProps.length && rawProps.length) {
     allDisplayProps = normalizePropsWithSource(
       enrichDisplayPropsPipeline(
@@ -1401,7 +1471,10 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   debugInfo.pregameWindowHours = filterOptions.pregameWindowHours ?? DEFAULT_PREGAME_WINDOW_HOURS;
   if (shouldLogVerbose()) logPipelineAudit("board", pipelineAudit);
 
-  if (!workingActiveProps.length && !usablePropsPool.length && !allDisplayProps.length) {
+  if (
+    !hasAnyProviderProps({ rawProps, allDisplayProps, usableProps: usablePropsPool }) &&
+    !workingActiveProps.length
+  ) {
     debugInfo.totals = {
       rawPropsLoaded: canonicalProps.length,
       upcomingSlateCount: pipelineAudit.upcomingSlate,

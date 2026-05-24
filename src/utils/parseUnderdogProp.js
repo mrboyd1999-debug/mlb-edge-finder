@@ -4,7 +4,8 @@
  */
 
 import { withNormalizedSource } from "./normalizeSource.js";
-import { detectUnderdogSport, attachSportInference, inferSportFromProp } from "./underdogSportDetection.js";
+import { detectUnderdogSport, attachSportInference, inferSportFromProp, hasMlbStatIndicator } from "./underdogSportDetection.js";
+import { MLB_ONLY_MODE } from "./mlbOnlyMode.js";
 import { resolveUnderdogCategory } from "./underdogRowCard.js";
 import { normalizeGameStartTime } from "./normalizeGameStartTime.js";
 import { sportFromUnderdogGame } from "./sportMappings.js";
@@ -22,17 +23,65 @@ function mapById(rows = []) {
 
 export function unwrapUnderdogPayload(payload) {
   if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== "object") return payload || {};
+  if (payload.over_under_lines || payload.players || payload.games || payload.appearances) {
+    return payload;
+  }
   if (payload?.source === "Underdog" && payload?.data && !Array.isArray(payload.data)) {
     return unwrapUnderdogPayload(payload.data);
   }
-  if (payload?.source === "Underdog" && Array.isArray(payload.data)) return payload.data;
-  if (Array.isArray(payload?.data) && !payload.players && !payload.games && !payload.over_under_lines) {
-    return payload.data;
+  if (payload?.source === "Underdog" && Array.isArray(payload.data)) {
+    return { over_under_lines: payload.data, players: payload.players || [], games: payload.games || [] };
   }
-  if (Array.isArray(payload?.items)) return payload.items;
-  if (Array.isArray(payload?.results)) return payload.results;
-  if (Array.isArray(payload?.props)) return payload.props;
+  if (Array.isArray(payload?.data) && !payload.players && !payload.games && !payload.over_under_lines) {
+    return { over_under_lines: payload.data, players: [], games: [] };
+  }
+  if (Array.isArray(payload?.items)) return { over_under_lines: payload.items, players: [], games: [] };
+  if (Array.isArray(payload?.results)) return { over_under_lines: payload.results, players: [], games: [] };
+  if (Array.isArray(payload?.props)) return { over_under_lines: payload.props, players: [], games: [] };
   return payload || {};
+}
+
+export function logUnderdogResponseShape(payload) {
+  const normalized = unwrapUnderdogPayload(payload);
+  const rawRecords = extractRawUnderdogRecords(payload);
+  const shape = Array.isArray(normalized)
+    ? {
+        type: "array",
+        length: normalized.length,
+        sampleKeys: Object.keys(normalized[0] || {}),
+      }
+    : {
+        type: "object",
+        keys: Object.keys(normalized || {}),
+        lineCount: rawRecords.length,
+        players: Array.isArray(normalized?.players) ? normalized.players.length : 0,
+        games: Array.isArray(normalized?.games) ? normalized.games.length : 0,
+        appearances: Array.isArray(normalized?.appearances) ? normalized.appearances.length : 0,
+        sampleLineKeys: Object.keys(rawRecords[0] || {}),
+      };
+  console.info("[Underdog Parser] response shape", shape);
+  if (rawRecords[0]) {
+    console.info("[Underdog Parser] sample line", rawRecords[0]);
+  }
+  return shape;
+}
+
+export function isMlbPickemRecord(raw = {}, lookup = {}) {
+  const statType = resolveStatTypeFromRaw(raw);
+  const sport = detectUnderdogSport(raw, lookup, {
+    player: resolvePlayerFromRaw(raw, lookup),
+    statType,
+    selectedSport: "MLB",
+  });
+  if (sport === "MLB") return true;
+  if (sport === "NBA" || sport === "WNBA" || sport === "NHL") return false;
+  return hasMlbStatIndicator(statType);
+}
+
+export function filterMlbPickemRecords(rawRecords = [], lookup = {}) {
+  if (!MLB_ONLY_MODE) return rawRecords;
+  return (rawRecords || []).filter((raw) => isMlbPickemRecord(raw, lookup));
 }
 
 export function extractRawUnderdogRecords(payload) {
@@ -89,7 +138,7 @@ function playerFullName(player = {}) {
 function titlePlayerName(title = "") {
   const text = String(title || "");
   const marker = text.match(
-    /^(.*?)\s+(Points|Pts|Rebounds|Assists|Hits|Runs|Total Bases|Strikeouts|Pitcher Strikeouts|RBIs|Fantasy|Walks|Home Runs)/i
+    /^(.*?)\s+(Points|Pts|Rebounds|Assists|Hits\s*\+\s*Runs\s*\+\s*RBIs|Hits\s*\+\s*Runs|Total Bases|Home Runs?|Fantasy(?:\s+Score|\s+Points)?|Pitcher Strikeouts|Strikeouts?|RBIs?|Hits?|Runs?|Walks?|Singles?|Doubles?)/i
   );
   return marker?.[1]?.trim() || "";
 }
@@ -115,6 +164,7 @@ function resolvePlayerFromRaw(raw = {}, lookup = {}) {
     const appearanceId =
       attrs.appearance_id ||
       raw.appearance_id ||
+      raw.over_under?.appearance_id ||
       raw.relationships?.appearance?.data?.id ||
       attrs.relationships?.appearance?.data?.id;
     const appearance = appearances.get(String(appearanceId)) || {};
@@ -128,7 +178,9 @@ function resolvePlayerFromRaw(raw = {}, lookup = {}) {
     if (fromMap.length >= 2) return fromMap;
   }
 
-  const fromTitle = titlePlayerName(attrs.title || raw.title || attrs.display_name || "");
+  const fromTitle = titlePlayerName(
+    attrs.title || raw.title || attrs.display_name || raw.over_under?.title || raw.over_under?.display_name || ""
+  );
   if (fromTitle.length >= 2) return fromTitle;
 
   return "";
@@ -136,7 +188,7 @@ function resolvePlayerFromRaw(raw = {}, lookup = {}) {
 
 function resolveLineFromRaw(raw = {}) {
   const attrs = attrsOf(raw);
-  const statRecord = attrs.appearance_stat || attrs.stat || raw.stat || {};
+  const statRecord = attrs.appearance_stat || attrs.stat || raw.stat || raw.over_under?.appearance_stat || {};
   return Number(
     raw.line ??
       raw.stat_value ??
@@ -146,6 +198,8 @@ function resolveLineFromRaw(raw = {}) {
       attrs.stat_value ??
       attrs.value ??
       attrs.non_discounted_stat_value ??
+      raw.over_under?.stat_value ??
+      raw.over_under?.line ??
       statRecord.stat_value ??
       statRecord.line ??
       statRecord.value
@@ -416,7 +470,8 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
     attrsOf(raw).id ||
     `underdog|${player}|${statType}|${line}|${overUnder}`.toLowerCase().replace(/\s+/g, "-");
 
-  const prop = withNormalizedSource({
+  const prop = attachSportInference(
+    withNormalizedSource({
     id: String(id),
     player,
     playerName: player,
@@ -462,7 +517,10 @@ export function parseUnderdogProp(raw = {}, { lookup = {}, lineSourceBadge = "LI
     sportsbookVerified: true,
     verifiedBadge: "VERIFIED",
     raw,
-  });
+    _lookup: lookup,
+  }),
+    { selectedSport: selectedSport || "MLB", selectedSportTab: selectedSport || "MLB" }
+  );
 
   return prop;
 }
@@ -513,6 +571,7 @@ export function parseUnderdogRawBatch(rawRecords = [], options = {}) {
     rejectedCount,
     rejectionReasons,
     parserMismatch: records.length > 0 && props.length === 0,
+    sampleKeys: records[0] && typeof records[0] === "object" ? Object.keys(records[0]) : [],
   };
 
   if (diagnostics.parserMismatch) {
@@ -528,7 +587,11 @@ export function parseUnderdogRawBatch(rawRecords = [], options = {}) {
  * Parse full Underdog API payload — extracts raw lines then maps each record.
  */
 export function parseUnderdogPayloadDedicated(payload, lineSourceBadge = "LIVE", selectedSport = "MLB") {
-  const rawRecords = extractRawUnderdogRecords(payload);
+  const responseShape = logUnderdogResponseShape(payload);
   const lookup = buildUnderdogLookupMaps(payload);
-  return parseUnderdogRawBatch(rawRecords, { lookup, lineSourceBadge, selectedSport });
+  const rawRecords = filterMlbPickemRecords(extractRawUnderdogRecords(payload), lookup);
+  return {
+    ...parseUnderdogRawBatch(rawRecords, { lookup, lineSourceBadge, selectedSport }),
+    responseShape,
+  };
 }

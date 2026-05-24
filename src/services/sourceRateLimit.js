@@ -23,7 +23,7 @@ export const MIN_SOURCE_CACHE_MS = 10 * 60 * 1000;
  * button, which is the most common cause of 429s.
  */
 const MIN_REQUEST_INTERVAL_MS = {
-  PrizePicks: 45_000,
+  PrizePicks: 15 * 60 * 1000,
   Underdog: 5_000,
   "Odds API": 4_000,
   SportsDataIO: 2_000,

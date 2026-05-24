@@ -9,12 +9,13 @@ import {
 export const UNDERDOG_PROVIDER_ID = "underdog";
 export const UNDERDOG_SOFT_MESSAGE = UNDERDOG_TEMPORARY_MESSAGE;
 
-const DEGRADED_STATUSES = new Set(["Failed", "Unavailable", "Not Connected"]);
+const HARD_FAIL_STATUSES = new Set(["Failed"]);
 
 export function resolveUnderdogHealth(result = {}) {
   const badge = String(result.lineSourceBadge || result.health || "").toUpperCase();
   const status = String(result.status || "");
-  if (DEGRADED_STATUSES.has(status) && !result.props?.length) {
+  const hasProps = Boolean(result.props?.length || result.parsedProps?.length);
+  if (HARD_FAIL_STATUSES.has(status) && !hasProps) {
     if (badge === "CACHED") return "CACHED";
     if (badge === "STALE") return "STALE";
     return result.lastSuccessfulFetchAt ? "DEGRADED" : "OFFLINE";
@@ -22,9 +23,9 @@ export function resolveUnderdogHealth(result = {}) {
   if (badge === "CACHED") return "CACHED";
   if (badge === "STALE") return "STALE";
   if (status === "Cached") return "CACHED";
-  if (["Connected", "Full"].includes(status) && result.props?.length) return "LIVE";
-  if (result.props?.length) return "LIVE";
-  return "DEGRADED";
+  if (["Connected", "Full", "Empty"].includes(status) && hasProps) return "LIVE";
+  if (hasProps) return "LIVE";
+  return status === "Connected" ? "DEGRADED" : "DEGRADED";
 }
 
 export function buildUnderdogDiagnostics(result = {}, durationMs = 0) {
@@ -36,25 +37,30 @@ export function buildUnderdogDiagnostics(result = {}, durationMs = 0) {
     apiStatus: debug.apiStatus || result.status || "Unknown",
     endpointsTried: debug.endpointsTried || [],
     rawPropsLoaded: debug.rawPropsLoaded ?? 0,
-    parsedPropsCount: debug.parsedPropsCount ?? result.props?.length ?? 0,
+    parsedPropsCount: debug.parsedPropsCount ?? result.parsedProps?.length ?? result.props?.length ?? 0,
     message: debug.message || result.warnings?.[0] || "",
     health: resolveUnderdogHealth(result),
-    partialDegradation: DEGRADED_STATUSES.has(String(result.status || "")) || !result.props?.length,
+    partialDegradation: !result.props?.length && !result.parsedProps?.length,
+    responseShape: debug.responseShape || null,
+    underdogParser: debug.underdogParser || null,
   };
 }
 
 function normalizeProviderResult(result, durationMs) {
-  const hasProps = Boolean(result?.props?.length || result?.parsedProps?.length);
-  const degraded = DEGRADED_STATUSES.has(String(result?.status || "")) || !hasProps;
-  const health = resolveUnderdogHealth(result);
-  const diagnostics = buildUnderdogDiagnostics(result, durationMs);
+  const parsedProps = result?.parsedProps?.length ? result.parsedProps : result?.props || [];
+  const hasProps = parsedProps.length > 0;
+  const status = String(result?.status || "");
+  const hardFailed = HARD_FAIL_STATUSES.has(status) && !hasProps;
+  const health = resolveUnderdogHealth({ ...result, props: parsedProps, parsedProps });
+  const diagnostics = buildUnderdogDiagnostics({ ...result, props: parsedProps, parsedProps }, durationMs);
 
-  if (degraded && !result?.props?.length) {
+  if (hardFailed) {
     return {
       ...result,
       source: "Underdog",
       status: "Unavailable",
       props: [],
+      parsedProps: [],
       warnings: result.warnings?.length ? result.warnings : [UNDERDOG_SOFT_MESSAGE],
       lineSourceBadge: result.lineSourceBadge || (health === "CACHED" ? "CACHED" : "STALE"),
       health,
@@ -65,9 +71,12 @@ function normalizeProviderResult(result, durationMs) {
 
   return {
     ...result,
+    props: parsedProps,
+    parsedProps,
     health,
     diagnostics,
-    partialDegradation: false,
+    partialDegradation: !hasProps,
+    status: hasProps ? status === "Cached" ? "Cached" : "Connected" : status || "Empty",
   };
 }
 
@@ -115,7 +124,9 @@ export function applyUnderdogProviderToDebug(debugInfo = {}, providerResult = {}
   const diag = providerResult.diagnostics || {};
   debugInfo.sources.Underdog = {
     ...debugInfo.sources.Underdog,
-    status: providerResult.partialDegradation ? "Unavailable" : debugInfo.sources.Underdog?.status || providerResult.status,
+    status: providerResult.partialDegradation && !providerResult.props?.length
+      ? "Degraded"
+      : debugInfo.sources.Underdog?.status || providerResult.status,
     apiStatus: diag.apiStatus || providerResult.status,
     lineSourceBadge: providerResult.lineSourceBadge || providerResult.health || diag.health,
     message: diag.message || debugInfo.sources.Underdog?.message || "",
@@ -123,6 +134,7 @@ export function applyUnderdogProviderToDebug(debugInfo = {}, providerResult = {}
     providerDiagnostics: diag,
     underdogParser: diag.underdogParser || providerResult.debug?.underdogParser || debugInfo.sources.Underdog?.underdogParser,
     rawUnderdogSamples: providerResult.debug?.rawUnderdogSamples || debugInfo.sources.Underdog?.rawUnderdogSamples || [],
+    responseShape: providerResult.debug?.responseShape || diag.responseShape || null,
     rawPropsLoaded: finiteOr(
       debugInfo.sources.Underdog?.rawPropsLoaded ?? diag.rawPropsLoaded ?? providerResult.debug?.rawPropsLoaded,
       0
