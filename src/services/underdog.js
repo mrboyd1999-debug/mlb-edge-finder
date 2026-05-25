@@ -52,8 +52,8 @@ import { filterResolvedSportProps } from "../utils/underdogSportDetection.js";
 import { recordProviderResponse } from "../utils/rawResponseDebug.js";
 
 const UNDERDOG_ENDPOINTS = [
-  "/api/underdog",
   "/api/underdog/beta/v5/over_under_lines",
+  "/api/underdog",
   "/api/underdog/beta/v3/over_under_lines",
 ];
 const UNDERDOG_CACHE_KEY = "dfs-underdog-last-good-payload";

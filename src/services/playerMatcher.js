@@ -2,8 +2,7 @@ import { cachedFetch } from "./fetchUtil.js";
 import { readSmartCacheIfFresh, writeSmartCache, CACHE_TTL } from "./smartCache.js";
 import { normalizePlayerName, playerNameTokens, playerNamesMatch } from "../utils/playerNames.js";
 import { logMatchedPlayer, logNormalizedName } from "./mlbPipelineDebug.js";
-
-const MLB_SEARCH_URL = "https://statsapi.mlb.com/api/v1/people/search";
+import { buildMlbStatsApiUrl, logMlbStatsApiCall, mlbStatsApiPathLabel } from "./mlbStatsApiUrl.js";
 
 function logMatcher(stage, payload = {}) {
   if (typeof console !== "undefined") console.info(`[MLB Data] ${stage}`, payload);
@@ -154,36 +153,53 @@ export async function searchMlbPlayers(query = "") {
     return cached.payload.people;
   }
 
-  const searchUrl = new URL(MLB_SEARCH_URL);
-  searchUrl.searchParams.set("names", text);
-  const url = searchUrl.toString();
-  console.info("[Manual Prop Matcher] API URL:", url);
+  const searchUrl = buildMlbStatsApiUrl("/v1/people/search", { names: text });
+  const urlLabel = mlbStatsApiPathLabel(searchUrl);
+  logMlbStatsApiCall({ stage: "request", url: searchUrl, status: null });
+  console.info("[Manual Prop Matcher] API URL:", urlLabel);
 
   let response;
+  let preview = "";
   try {
-    response = await cachedFetch(searchUrl);
+    response = await cachedFetch(searchUrl, {}, { source: "MLB Stats", ttlMs: CACHE_TTL.STATS_MS });
+    preview = (await response.clone().text()).slice(0, 300);
   } catch (error) {
+    logMlbStatsApiCall({
+      stage: "error",
+      url: searchUrl,
+      status: null,
+      error: error?.message || String(error),
+    });
     console.warn("[Manual Prop Matcher] fetch error", {
-      url,
+      url: urlLabel,
       message: error?.message || String(error),
     });
     throw error;
   }
 
+  logMlbStatsApiCall({
+    stage: "response",
+    url: searchUrl,
+    status: response.status,
+    preview,
+  });
   console.info("[Manual Prop Matcher] response status:", response.status);
   if (!response.ok) {
-    let bodyText = "";
-    try {
-      bodyText = await response.clone().text();
-    } catch {
-      bodyText = "";
-    }
-    console.warn("[Manual Prop Matcher] failed response body:", bodyText.slice(0, 500));
+    console.warn("[Manual Prop Matcher] failed response body:", preview.slice(0, 500));
     throw new Error(`MLB player search failed (${response.status})`);
   }
 
   const payload = await response.json();
   const people = payload.people || [];
+  logMlbStatsApiCall({
+    stage: "parsed",
+    url: searchUrl,
+    status: response.status,
+    preview,
+    playersReturned: people.length,
+    matchedPlayer: people[0]?.fullName || null,
+    playerId: people[0]?.id || null,
+  });
   writeSmartCache("mlb-player-search-list", cacheKey, { people }, { source: "mlb-stats-api" });
   return people;
 }
@@ -271,6 +287,14 @@ export async function matchSportsbookPlayerToMlb(sportsbookName = "", { minConfi
     confidence: result.confidence,
     reason: result.reason,
     mlbId: result.player.id,
+  });
+  logMlbStatsApiCall({
+    stage: "matched",
+    url: buildMlbStatsApiUrl("/v1/people/search", { names: incoming }),
+    status: 200,
+    matchedPlayer: result.player.fullName,
+    playerId: result.player.id,
+    playersReturned: lastCandidatesCount,
   });
   console.info("[Manual Prop Matcher] matched player result:", {
     matchedPlayer: result.player.fullName,

@@ -35,14 +35,15 @@ import {
   resolveRecommendedSide,
 } from "../modules/propSideEngine.js";
 import {
+  calibrateRealisticConfidence,
+  computeVolatilityAdjustedEdge,
+} from "../utils/mlbConfidenceEngine.js";
+import {
   getMlbPipelineStatus,
   recordMlbProjectionResult,
   recordMlbStatsFetch,
 } from "./mlbPipelineStatus.js";
-
-const MLB_SEARCH_URL = "https://statsapi.mlb.com/api/v1/people/search";
-const MLB_SCHEDULE_URL = "https://statsapi.mlb.com/api/v1/schedule";
-const MLB_TEAMS_URL = "https://statsapi.mlb.com/api/v1/teams";
+import { buildMlbStatsApiUrl, logMlbStatsApiCall, mlbStatsApiPathLabel } from "./mlbStatsApiUrl.js";
 
 const profileInflight = new Map();
 const opponentInflight = new Map();
@@ -265,10 +266,11 @@ export async function getWeatherData({ team = "", opponent = "", date = new Date
   const cached = readSmartCacheIfFresh("mlb-weather", cacheKey, CACHE_TTL.STATS_MS);
   if (cached?.payload !== undefined) return cached.payload;
 
-  const url = new URL(MLB_SCHEDULE_URL);
-  url.searchParams.set("sportId", "1");
-  url.searchParams.set("date", dateText);
-  url.searchParams.set("hydrate", "team,venue,weather");
+  const url = buildMlbStatsApiUrl("/v1/schedule", {
+    sportId: "1",
+    date: dateText,
+    hydrate: "team,venue,weather",
+  });
 
   const response = await cachedFetch(url);
   if (!response.ok) {
@@ -336,17 +338,31 @@ export async function fetchMlbGameLogs(playerId, { seasons = mlbSeasonYears(), g
 
   const allSplits = [];
   for (const season of seasons) {
-    const statsUrl = new URL(`https://statsapi.mlb.com/api/v1/people/${playerId}/stats`);
-    statsUrl.searchParams.set("stats", "gameLog");
-    statsUrl.searchParams.set("group", group);
-    statsUrl.searchParams.set("season", String(season));
+    const statsUrl = buildMlbStatsApiUrl(`/v1/people/${playerId}/stats`, {
+      stats: "gameLog",
+      group,
+      season,
+    });
     let response;
     try {
-      response = await cachedFetch(statsUrl);
+      response = await cachedFetch(statsUrl, {}, { source: "MLB Stats", ttlMs: CACHE_TTL.STATS_MS });
     } catch (error) {
       logFetchError("game logs", { playerId, season, message: error.message });
+      logMlbStatsApiCall({
+        stage: "error",
+        url: statsUrl,
+        status: null,
+        error: error.message,
+      });
       continue;
     }
+    const preview = (await response.clone().text()).slice(0, 300);
+    logMlbStatsApiCall({
+      stage: "response",
+      url: statsUrl,
+      status: response.status,
+      preview,
+    });
     if (!response.ok) {
       logFetchError("game logs", { playerId, season, status: response.status, url: String(statsUrl) });
       logMlbData("logs.failed", { playerId, season, status: response.status, reason: "StatsAPI gameLog failed" });
@@ -394,10 +410,11 @@ export async function fetchMlbProbablePitchers({ date = new Date(), team = "", o
   const cached = readSmartCacheIfFresh("mlb-probables", cacheKey, CACHE_TTL.STATS_MS);
   if (cached?.payload) return cached.payload;
 
-  const url = new URL(MLB_SCHEDULE_URL);
-  url.searchParams.set("sportId", "1");
-  url.searchParams.set("date", dateText);
-  url.searchParams.set("hydrate", "probablePitcher,team");
+  const url = buildMlbStatsApiUrl("/v1/schedule", {
+    sportId: "1",
+    date: dateText,
+    hydrate: "probablePitcher,team",
+  });
 
   const response = await cachedFetch(url);
   if (!response.ok) {
@@ -456,10 +473,11 @@ export async function fetchMlbOpponentMatchup(opponentName = "") {
     const cached = readSmartCacheIfFresh("mlb-opponent", needle, CACHE_TTL.STATS_MS);
     if (cached?.payload) return cached.payload;
 
-    const teamsUrl = new URL(MLB_TEAMS_URL);
-    teamsUrl.searchParams.set("sportId", "1");
-    teamsUrl.searchParams.set("season", String(new Date().getFullYear()));
-    const teamsResponse = await cachedFetch(teamsUrl);
+    const teamsUrl = buildMlbStatsApiUrl("/v1/teams", {
+      sportId: "1",
+      season: new Date().getFullYear(),
+    });
+    const teamsResponse = await cachedFetch(teamsUrl, {}, { source: "MLB Stats", ttlMs: CACHE_TTL.STATS_MS });
     if (!teamsResponse.ok) {
       logMlbData("opponent.failed", { opponent: opponentName, status: teamsResponse.status });
       return null;
@@ -476,11 +494,12 @@ export async function fetchMlbOpponentMatchup(opponentName = "") {
       return null;
     }
 
-    const statsUrl = new URL(`https://statsapi.mlb.com/api/v1/teams/${team.id}/stats`);
-    statsUrl.searchParams.set("stats", "season");
-    statsUrl.searchParams.set("group", "hitting,pitching");
-    statsUrl.searchParams.set("season", String(new Date().getFullYear()));
-    const statsResponse = await cachedFetch(statsUrl);
+    const statsUrl = buildMlbStatsApiUrl(`/v1/teams/${team.id}/stats`, {
+      stats: "season",
+      group: "hitting,pitching",
+      season: new Date().getFullYear(),
+    });
+    const statsResponse = await cachedFetch(statsUrl, {}, { source: "MLB Stats", ttlMs: CACHE_TTL.STATS_MS });
     if (!statsResponse.ok) return null;
 
     const statsPayload = await statsResponse.json();
@@ -528,7 +547,7 @@ export async function fetchMlbPlayerBundleById(playerId, playerName = "", meta =
     const splits = await fetchMlbGameLogs(numericId);
     recordMlbStatsFetch({
       ok: splits.length > 0,
-      url: `https://statsapi.mlb.com/api/v1/people/${numericId}/stats?stats=gameLog`,
+      url: mlbStatsApiPathLabel(buildMlbStatsApiUrl(`/v1/people/${numericId}/stats`, { stats: "gameLog" })),
       statusCode: 200,
       matchedPlayer: playerName || meta.fullName || null,
       playerId: numericId,
@@ -571,7 +590,7 @@ export async function fetchMlbPlayerBundle(playerName = "") {
     const splits = await fetchMlbGameLogs(player.id);
     recordMlbStatsFetch({
       ok: splits.length > 0,
-      url: `${MLB_SEARCH_URL}?names=${encodeURIComponent(playerName)}`,
+      url: mlbStatsApiPathLabel(buildMlbStatsApiUrl("/v1/people/search", { names: playerName })),
       statusCode: 200,
       matchedPlayer: player.fullName || playerName,
       playerId: player.id,
@@ -642,7 +661,7 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
   try {
     match = await matchSportsbookPlayerToMlb(prop.playerName, { team: prop.team || "" });
   } catch (error) {
-    recordMlbStatsFetch({ ok: false, error: error.message, url: MLB_SEARCH_URL });
+    recordMlbStatsFetch({ ok: false, error: error.message, url: mlbStatsApiPathLabel(buildMlbStatsApiUrl("/v1/people/search")) });
     failTrace(trace, MLB_FAILURE.MLB_API_FAILED, error.message, MLB_STAGE.NORMALIZED);
     recordPropDebug(prop, trace);
     return { profile: null, bundle: null, verified: false, reason: trace.failureReason, pipelineTrace: trace };
@@ -652,7 +671,7 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
     recordMlbStatsFetch({
       ok: false,
       error: match?.reason || "No StatsAPI player match",
-      url: `${MLB_SEARCH_URL}?names=${encodeURIComponent(prop.playerName)}`,
+      url: mlbStatsApiPathLabel(buildMlbStatsApiUrl("/v1/people/search", { names: prop.playerName })),
       playersReturned: match?.candidatesCount ?? 0,
     });
     failTrace(
@@ -680,7 +699,7 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
 
   recordMlbStatsFetch({
     ok: true,
-    url: `${MLB_SEARCH_URL}?names=${encodeURIComponent(prop.playerName)}`,
+    url: mlbStatsApiPathLabel(buildMlbStatsApiUrl("/v1/people/search", { names: prop.playerName })),
     statusCode: match.apiStatusCode ?? 200,
     playersReturned: match.candidatesCount ?? null,
     matchedPlayer: match.player.fullName,
@@ -1186,14 +1205,16 @@ export function calculateEdge(projection, line, side = null) {
   };
 }
 
-export function calculateConfidence({ edge, line, volatility, marketKey, payoutType = "standard" }) {
+export function calculateConfidence({ edge, line, volatility, marketKey, payoutType = "standard", prop = {} }) {
   const absEdge = Math.abs(Number(edge) || 0);
-  return confidenceFromEdge(absEdge, {
+  const adjusted = computeVolatilityAdjustedEdge(absEdge, volatility);
+  const raw = confidenceFromEdge(adjusted, {
     volatility,
     payoutType,
     marketKey,
     isVerified: true,
   });
+  return calibrateRealisticConfidence(raw, { ...prop, edge: adjusted, volatilityAdjustedEdge: adjusted }, adjusted);
 }
 
 export function calculateVolatility(statType = "") {

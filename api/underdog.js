@@ -12,16 +12,18 @@ export default async function handler(req, res) {
       process.env.UNDERDOG_PROXY_URL;
     const apifyToken = process.env.APIFY_TOKEN;
     const apifyActor = process.env.UNDERDOG_APIFY_ACTOR;
-    const url = providerUrl || apifyActorUrl(apifyActor, apifyToken) || "https://api.underdogfantasy.com/beta/v3/over_under_lines";
+    const url = providerUrl || apifyActorUrl(apifyActor, apifyToken) || "https://api.underdogfantasy.com/beta/v5/over_under_lines";
 
     const response = await fetch(url, { headers: underdogHeaders() });
     const text = await response.text();
     const parsed = parseJsonOrError(text, "Underdog");
 
     console.info("[Underdog API] upstream", {
+      url,
       status: response.status,
       contentType: response.headers.get("content-type") || "",
       ok: response.ok,
+      preview: text.slice(0, 300),
     });
 
     if (!response.ok || !parsed.ok) {

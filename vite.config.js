@@ -56,6 +56,7 @@ function dfsApiProxy() {
               routes: {
                 prizepicks: "/api/prizepicks",
                 underdog: "/api/underdog",
+                mlbStats: "/api/mlb/v1/people/search",
                 sportsdataio: "/api/sportsdataio/mlb-status",
               },
               timestamp: new Date().toISOString(),
@@ -70,6 +71,11 @@ function dfsApiProxy() {
 
           if (pathname.startsWith("/api/underdog")) {
             await proxyUpstream(req, res, UNDERDOG_TARGET, rewriteUnderdogPath, underdogHeaders(), "Underdog");
+            return;
+          }
+
+          if (pathname.startsWith("/api/mlb")) {
+            await proxyUpstream(req, res, "https://statsapi.mlb.com", rewriteMlbStatsPath, mlbStatsHeaders(), "MLB Stats");
             return;
           }
 
@@ -125,6 +131,7 @@ function isApiRoute(pathname) {
     pathname === "/api/health" ||
     pathname.startsWith("/api/prizepicks") ||
     pathname.startsWith("/api/underdog") ||
+    pathname.startsWith("/api/mlb") ||
     pathname.startsWith("/api/sportsbookOdds") ||
     pathname.startsWith("/api/sportsdataio") ||
     pathname.startsWith("/api/sportsdata") ||
@@ -396,7 +403,14 @@ function rewriteUnderdogPath(path) {
     const route = sub.startsWith("/") ? sub : `/${sub}`;
     return `${route}${parsed.search}`;
   }
-  return `/beta/v3/over_under_lines${parsed.search}`;
+  return `/beta/v5/over_under_lines${parsed.search}`;
+}
+
+function rewriteMlbStatsPath(path) {
+  const parsed = new URL(path, "http://localhost");
+  const sub = parsed.pathname.replace(/^\/api\/mlb\/?/, "");
+  const route = sub.startsWith("/") ? sub : `/${sub || ""}`;
+  return `/api${route}${parsed.search}`;
 }
 
 function rewriteSportsbookPath(path) {
@@ -437,11 +451,21 @@ function prizePicksHeaders() {
 
 function underdogHeaders() {
   return {
-    accept: "application/json",
+    accept: "application/json, text/plain, */*",
+    "accept-language": "en-US,en;q=0.9",
     origin: "https://underdogfantasy.com",
     referer: "https://underdogfantasy.com/",
+    "x-requested-with": "XMLHttpRequest",
     "user-agent":
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36",
+  };
+}
+
+function mlbStatsHeaders() {
+  return {
+    accept: "application/json",
+    "user-agent":
+      "Mozilla/5.0 (compatible; MLBPICK/1.0; +https://github.com/mrboyd1999-debug/mlb-edge-finder)",
   };
 }
 

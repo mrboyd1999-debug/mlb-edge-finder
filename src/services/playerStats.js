@@ -15,6 +15,7 @@ import {
   fetchMlbPlayerBundle,
   filterMlbSplitsForStatType,
 } from "./mlbDataService.js";
+import { buildMlbStatsApiUrl } from "./mlbStatsApiUrl.js";
 import { statProfileKey, findStatProfile } from "../utils/playerNames.js";
 
 export { statProfileKey, findStatProfile };
@@ -826,10 +827,11 @@ async function buildMlbOpponentMap(props = []) {
 }
 
 async function fetchMlbOpponentContext(opponentName) {
-  const teamsUrl = new URL("https://statsapi.mlb.com/api/v1/teams");
-  teamsUrl.searchParams.set("sportId", "1");
-  teamsUrl.searchParams.set("season", String(new Date().getFullYear()));
-  const teamsResponse = await cachedFetch(teamsUrl);
+  const teamsUrl = buildMlbStatsApiUrl("/v1/teams", {
+    sportId: "1",
+    season: new Date().getFullYear(),
+  });
+  const teamsResponse = await cachedFetch(teamsUrl, {}, { source: "MLB Stats" });
   if (!teamsResponse.ok) return null;
   const teamsPayload = await teamsResponse.json();
   const needle = normalize(opponentName);
@@ -840,11 +842,12 @@ async function fetchMlbOpponentContext(opponentName) {
   });
   if (!team?.id) return null;
 
-  const statsUrl = new URL(`https://statsapi.mlb.com/api/v1/teams/${team.id}/stats`);
-  statsUrl.searchParams.set("stats", "season");
-  statsUrl.searchParams.set("group", "hitting,pitching");
-  statsUrl.searchParams.set("season", String(new Date().getFullYear()));
-  const statsResponse = await cachedFetch(statsUrl);
+  const statsUrl = buildMlbStatsApiUrl(`/v1/teams/${team.id}/stats`, {
+    stats: "season",
+    group: "hitting,pitching",
+    season: new Date().getFullYear(),
+  });
+  const statsResponse = await cachedFetch(statsUrl, {}, { source: "MLB Stats" });
   if (!statsResponse.ok) return null;
   const statsPayload = await statsResponse.json();
   const hitting = (statsPayload.stats || []).find((bucket) => bucket.group?.displayName === "hitting");

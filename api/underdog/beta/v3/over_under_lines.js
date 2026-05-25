@@ -31,6 +31,10 @@ async function proxyUnderdog(req, res, version) {
     source: "Underdog",
     props: Array.isArray(result.data) ? result.data : result.data?.over_under_lines || result.data?.data || [],
     data: result.data,
+    over_under_lines: Array.isArray(result.data) ? result.data : result.data?.over_under_lines || [],
+    players: Array.isArray(result.data) ? [] : result.data?.players || [],
+    games: Array.isArray(result.data) ? [] : result.data?.games || result.data?.matches || [],
+    appearances: Array.isArray(result.data) ? [] : result.data?.appearances || [],
   });
 }
 
