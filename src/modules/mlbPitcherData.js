@@ -65,6 +65,14 @@ export function statValueFromRow(row = {}, marketKey = "") {
 export function extractPitcherStartRows(profile = {}) {
   const rows = profile.gradingRows || profile.splits || [];
   const starts = rows.filter(isPitcherStartRow);
+  if (starts.length >= 3) return starts;
+  const pitchingRows = rows.filter((row) => {
+    const stat = row?.stat || row;
+    const ks = finiteNumber(stat.strikeOuts ?? stat.strikeouts);
+    const ip = inningsFromStat(stat);
+    return ks != null && ip != null && ip >= 1;
+  });
+  if (pitchingRows.length >= 3) return pitchingRows;
   return starts.length ? starts : rows.slice(0, 10);
 }
 
@@ -121,6 +129,8 @@ export function isProbableStarter(startRows = []) {
 
 export function isMlbVerifiedSource(profile = {}) {
   if (profile.sparse || profile.fallback) return false;
+  if ((profile.statSources || []).some((src) => /mlb/i.test(String(src)))) return true;
+  if (profile.hasGameLogs && String(profile.source || "").includes("StatsAPI")) return true;
   const source = String(profile.source || "");
   const sources = (profile.statSources || []).map((item) => String(item)).join(" ");
   return /mlb|statsapi/i.test(source) || /mlb|statsapi/i.test(sources);
@@ -206,12 +216,13 @@ export function hasVerifiedPitcherGameLogs(data = {}) {
 
 /** Strict verified check for Pitcher Strikeouts — requires MLB game logs. */
 export function hasVerifiedStrikeoutGameLogs(data = {}, profile = {}) {
+  const sampleCount = data.statValues?.length || data.startCount || 0;
   return Boolean(
     data.verifiedSource &&
       data.hasGameLogs &&
       data.last5Average != null &&
       data.seasonAverage != null &&
-      data.startCount >= 3 &&
+      sampleCount >= 3 &&
       !profile.sparse &&
       !profile.fallback
   );

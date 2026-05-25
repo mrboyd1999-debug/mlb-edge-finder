@@ -141,6 +141,7 @@ import {
   hasVerifiedStats,
 } from "./services/statEnrichment.js";
 import { applyMlbProjectionToProp, isMlbVerifiedEngineMarket } from "./modules/mlbProjectionService.js";
+import { logMlbData } from "./services/mlbDataService.js";
 import { LIVE_BOARD_LOADING_STAGES, LIVE_BOARD_UNAVAILABLE_MESSAGE } from "./utils/liveBoardLoading.js";
 import { applySportMarketConfidenceCaps } from "./services/sportMarketConfidence.js";
 import { attachElitePickExplanation } from "./services/pickExplanation.js";
@@ -3969,6 +3970,19 @@ function scoreDFSProp(prop, context) {
     isVerifiedProjection = mlbVerifiedModel.isVerifiedProjection;
     dataStatus = mlbVerifiedModel.dataStatus || dataStatus;
     projectionConfidence = mlbVerifiedModel.confidence ?? projectionConfidence;
+    logMlbData("live.analyze", {
+      player: prop.playerName,
+      stat: prop.statType,
+      line,
+      matchedLogs: enriched?.sampleSize ?? enriched?.splits?.length ?? 0,
+      projection: mlbVerifiedModel.projection,
+      rawEdge: mlbVerifiedModel.rawEdge,
+      edge: mlbVerifiedModel.edge,
+      recommendation: mlbVerifiedModel.modelPick,
+      confidence: mlbVerifiedModel.confidence,
+      verified: mlbVerifiedModel.isVerifiedProjection,
+      reason: mlbVerifiedModel.projectionUnavailable ? mlbVerifiedModel.statusMessage : null,
+    });
   }
 
   if (!Number.isFinite(projection) || projection <= 0) {

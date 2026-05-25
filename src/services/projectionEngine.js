@@ -434,3 +434,11 @@ export function propPayoutLabel(prop = {}) {
   if (oddsType.includes("demon")) return "Demon";
   return "standard";
 }
+
+export {
+  buildPitcherStrikeoutProjection,
+  buildHitterProjection,
+  calculateEdge,
+  calculateConfidence,
+  calculateVolatility,
+} from "./mlbDataService.js";

@@ -8,7 +8,8 @@ import {
   sortManualPropsByRank,
 } from "./manualPropScoring.js";
 import { withPlayerImageUrl } from "./playerImageFields.js";
-import { fetchPlayerStats, findStatProfile } from "../services/playerStats.js";
+import { buildMlbStatProfileFromLogs } from "../services/playerStats.js";
+import { buildMlbPropDataPackage, logMlbData } from "../services/mlbDataService.js";
 
 export const MANUAL_SOURCES = ["PrizePicks", "Underdog"];
 
@@ -138,9 +139,13 @@ export async function fetchManualPropProfile(form = {}) {
     ...form,
     ...validated.manualProp,
   });
-  const { stats, warnings } = await fetchPlayerStats({ props: [built] });
-  const profile = findStatProfile(stats, built) || null;
-  return { profile, built, warnings: warnings || [] };
+  const data = await buildMlbPropDataPackage(built, {
+    buildProfile: (bundle, statType, line) => buildMlbStatProfileFromLogs(bundle, statType, line),
+  });
+  if (!data.profile) {
+    logMlbData("manual.profile.miss", { player: built.playerName, reason: data.reason });
+  }
+  return { profile: data.profile, built, warnings: data.reason && !data.profile ? [data.reason] : [] };
 }
 
 export async function analyzeManualProp(form = {}, scoreFn = null) {

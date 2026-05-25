@@ -10,13 +10,11 @@ import {
 import { MLB_ONLY_MODE, shouldRunNonMlbStatFetch } from "../utils/mlbOnlyMode.js";
 import { canonicalStatType } from "../utils/marketNormalization.js";
 import { enrichMlbProfilesFromSportsData } from "./mlbSportsDataEnrichment.js";
+import { fetchMlbDataForProps, fetchMlbPlayerBundle } from "./mlbDataService.js";
 import { statProfileKey, findStatProfile } from "../utils/playerNames.js";
 
 export { statProfileKey, findStatProfile };
 
-const MLB_SEARCH_URL = "https://statsapi.mlb.com/api/v1/people/search";
-const mlbProfileInflight = new Map();
-const MLB_PLAYER_FETCH_LIMIT = 60;
 const WNBA_PLAYER_FETCH_LIMIT = 50;
 const SOCCER_PLAYER_FETCH_LIMIT = 40;
 const API_FOOTBALL_KEY = import.meta.env?.VITE_API_FOOTBALL_KEY || "";
@@ -80,57 +78,41 @@ async function fetchMlbStats(props) {
   const supportedProps = props.filter((prop) => isSupportedMlbStat(prop.statType));
   if (!supportedProps.length) return { stats: new Map(), warnings: [] };
 
-  const players = uniquePlayerNames(supportedProps).slice(0, MLB_PLAYER_FETCH_LIMIT);
-  const [settled, opponentMap] = await Promise.all([
-    Promise.allSettled(players.map((playerName) => fetchMlbProfile(playerName))),
-    buildMlbOpponentMap(supportedProps),
-  ]);
-  const profiles = new Map();
-  const stats = new Map();
+  const fetched = await fetchMlbDataForProps(supportedProps, {
+    buildProfile: (bundle, statType, line) => profileForMlbProp(bundle, statType, line),
+  });
 
-  settled.forEach((result) => {
-    if (result.status === "fulfilled" && result.value?.playerName) {
-      profiles.set(normalizePlayerName(result.value.playerName), result.value);
-    }
+  const stats = fetched.stats || new Map();
+  const profiles = new Map();
+  stats.forEach((profile) => {
+    if (profile?.playerName) profiles.set(normalizePlayerName(profile.playerName), profile);
   });
 
   const sportsDataEnrichment = await enrichMlbProfilesFromSportsData(profiles, supportedProps);
   const enrichedProfiles = sportsDataEnrichment.profiles || profiles;
 
   supportedProps.forEach((prop) => {
-    const profile = enrichedProfiles.get(normalizePlayerName(prop.playerName));
-    let nextProfile = profile
-      ? profileForMlbProp(profile, prop.statType, prop.line)
-      : sparseProfileForProp(prop, "MLB player logs unavailable");
-    const opponentCtx = opponentMap.get(normalize(prop.opponent));
-    if (opponentCtx) {
-      nextProfile = {
-        ...nextProfile,
-        opponentAllowed: opponentCtx.allowed,
-        opponentRank: opponentCtx.rank,
-        opponentPitcherWhip: opponentCtx.whip,
-        opponentPitcherHrAllowed: opponentCtx.homeRunsAllowed,
-        opponentPitcherSbAllowed: opponentCtx.stolenBasesAllowed,
-        catcherPopTimeProxy: opponentCtx.catcherPopTimeProxy,
-        matchupNote: opponentCtx.note,
-        opponentContext: opponentCtx,
-        statSources: uniqueSources([...(nextProfile.statSources || []), SOURCE_LABELS.mlb]),
-        hasMatchup: true,
-      };
+    const key = statProfileKey(prop);
+    const existing = stats.get(key);
+    const enriched = enrichedProfiles.get(normalizePlayerName(prop.playerName));
+    if (existing && enriched) {
+      stats.set(key, {
+        ...existing,
+        ...enriched,
+        opponentContext: existing.opponentContext || enriched.opponentContext,
+        statSources: uniqueSources([...(existing.statSources || []), ...(enriched.statSources || [])]),
+      });
     }
-    nextProfile.roleContext = mlbRoleContext(profile?.splits || [], prop.statType);
-    if (nextProfile.roleContext) nextProfile.hasRoleContext = true;
-    storeStatProfile(stats, prop, { ...nextProfile, sport: "MLB", statType: prop.statType });
   });
 
-  const failed = settled.some((result) => result.status === "rejected");
   return {
     stats,
-    warnings: unique([
-      ...(failed ? ["Some MLB player stats failed; missing players left without verified stats."] : []),
-      ...(sportsDataEnrichment.warnings || []),
-    ]).filter(Boolean),
+    warnings: unique([...(fetched.warnings || []), ...(sportsDataEnrichment.warnings || [])]).filter(Boolean),
   };
+}
+
+export function buildMlbStatProfileFromLogs(bundle, statType, line) {
+  return profileForMlbProp(bundle, statType, line);
 }
 
 async function fetchNbaStats(props) {
@@ -220,59 +202,7 @@ async function fetchSoccerStats(props) {
 }
 
 async function fetchMlbProfile(playerName) {
-  const cacheKey = String(playerName || "").trim().toLowerCase();
-  if (!cacheKey) return null;
-
-  const cached = readSmartCacheIfFresh("mlb-stats", cacheKey, CACHE_TTL.STATS_MS);
-  if (cached?.payload) return cached.payload;
-
-  if (mlbProfileInflight.has(cacheKey)) {
-    return mlbProfileInflight.get(cacheKey);
-  }
-
-  const task = fetchMlbProfileLive(playerName, cacheKey).finally(() => {
-    mlbProfileInflight.delete(cacheKey);
-  });
-  mlbProfileInflight.set(cacheKey, task);
-  return task;
-}
-
-async function fetchMlbProfileLive(playerName, cacheKey) {
-  const searchUrl = new URL(MLB_SEARCH_URL);
-  searchUrl.searchParams.set("names", playerName);
-
-  const searchResponse = await cachedFetch(searchUrl);
-  if (!searchResponse.ok) throw new Error("Could not load MLB player stats.");
-
-  const searchPayload = await searchResponse.json();
-  const player = searchPayload.people?.[0];
-  if (!player?.id) return null;
-
-  const year = new Date().getFullYear();
-  const statsUrl = new URL(`https://statsapi.mlb.com/api/v1/people/${player.id}/stats`);
-  statsUrl.searchParams.set("stats", "gameLog");
-  statsUrl.searchParams.set("group", "pitching,hitting");
-  statsUrl.searchParams.set("season", String(year));
-
-  const statsResponse = await cachedFetch(statsUrl);
-  if (!statsResponse.ok) throw new Error("Could not load MLB player stats.");
-
-  const statsPayload = await statsResponse.json();
-  const splits = (statsPayload.stats || []).flatMap((bucket) => bucket.splits || []);
-  const latest = splits
-    .map((split) => ({ ...split, playedAt: new Date(split.date || split.game?.gameDate).getTime() }))
-    .filter((split) => Number.isFinite(split.playedAt))
-    .sort((a, b) => b.playedAt - a.playedAt);
-
-  const profile = {
-    playerName: player.fullName || playerName,
-    playerImage: player.id ? `https://img.mlbstatic.com/mlb-photos/image/upload/w_213,q_100/v1/people/${player.id}/headshot/67/current` : "",
-    mlbId: player.id || null,
-    playerId: player.id || null,
-    splits: latest,
-  };
-  writeSmartCache("mlb-stats", cacheKey, profile, { source: "mlb-stats-api" });
-  return profile;
+  return fetchMlbPlayerBundle(playerName);
 }
 
 async function fetchEspnWnbaProfile(playerName) {
