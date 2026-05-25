@@ -141,8 +141,9 @@ import {
   hasVerifiedStats,
 } from "./services/statEnrichment.js";
 import { applyMlbProjectionToProp, isMlbVerifiedEngineMarket } from "./modules/mlbProjectionService.js";
-import { logMlbData, traceLiveBoardMlbProp, getMlbPipelineStatus } from "./services/mlbDataService.js";
+import { logMlbData, traceLiveBoardMlbProp, getMlbPipelineStatus, subscribeMlbPipelineStatus } from "./services/mlbDataService.js";
 import { mergeDfsSourceStatusFromApiHealth } from "./services/mlbPipelineStatus.js";
+import { NO_VERIFIED_GRADE_STATUS } from "./utils/manualPropScoring.js";
 import { buildCardPipelineDebug } from "./services/mlbPropPipelineTrace.js";
 import { normalizeSportsbookName } from "./services/playerMatcher.js";
 import { LIVE_BOARD_LOADING_STAGES, LIVE_BOARD_UNAVAILABLE_MESSAGE } from "./utils/liveBoardLoading.js";
@@ -1779,7 +1780,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     { label: "stats", run: () => fetchPlayerStats({ props: workingNormalProps }) },
     { label: "news", run: () => fetchInjuryNews({ props: workingNormalProps }) },
   ];
-  const backgroundCapMs = Math.min(enrichmentTimeoutMs, 6000);
+  const backgroundCapMs = Math.min(enrichmentTimeoutMs, MLB_ONLY_MODE ? 12000 : 6000);
   const settledBackground = await Promise.race([
     Promise.allSettled(
       backgroundJobs.map((job) =>
@@ -2209,11 +2210,14 @@ export default function DFSPropsApp() {
   const lastRefreshAtRef = useRef(0);
   const lastAutoRefreshRef = useRef(0);
   const scoringContextRef = useRef(null);
+  const [mlbPipelineStatusTick, setMlbPipelineStatusTick] = useState(0);
+
+  useEffect(() => subscribeMlbPipelineStatus(() => setMlbPipelineStatusTick((tick) => tick + 1)), []);
 
   const mlbPipelineStatus = useMemo(() => {
     mergeDfsSourceStatusFromApiHealth(apiHealth);
     return getMlbPipelineStatus();
-  }, [apiHealth, manualAnalyzerProps, lastUpdated]);
+  }, [apiHealth, manualAnalyzerProps, lastUpdated, mlbPipelineStatusTick]);
 
   useEffect(() => {
     const trimmedHistory = trimHistoryToLimit(readHistory());
@@ -3328,7 +3332,9 @@ export default function DFSPropsApp() {
         ].slice(0, 100)
       );
       setLearningSaveNotice(
-        `Analyzed ${finalAnalyzed.playerName} — confidence ${Math.round(Number(finalAnalyzed.confidenceScore ?? finalAnalyzed.confidence ?? 0))}.`
+        finalAnalyzed.projectionUnavailable || finalAnalyzed.unverifiedGradeBlocked
+          ? `${finalAnalyzed.playerName}: ${finalAnalyzed.statusMessage || NO_VERIFIED_GRADE_STATUS}`
+          : `Analyzed ${finalAnalyzed.playerName} — confidence ${Math.round(Number(finalAnalyzed.confidenceScore ?? finalAnalyzed.confidence ?? 0))}.`
       );
       return finalAnalyzed;
     } catch (error) {
@@ -3649,6 +3655,7 @@ export default function DFSPropsApp() {
         upcomingSlateCount={debugInfo.upcomingSlateCount ?? pipelineAudit.upcomingSlate ?? 0}
         slateExcludedCount={debugInfo.slateExcludedCount ?? pipelineAudit.slateExcluded ?? 0}
         pregameWindowHours={debugInfo.pregameWindowHours ?? filterPrefs.pregameWindowHours ?? DEFAULT_PREGAME_WINDOW_HOURS}
+        mlbPipelineStatus={mlbPipelineStatus}
       />
       </SectionErrorBoundary>
       </div>
@@ -4043,6 +4050,37 @@ function scoreDFSProp(prop, context) {
       })
     : null;
 
+  const profileIsSparse = Boolean(enriched?.sparse || enriched?.fallback);
+  let mlbGradeBlocked = false;
+  let mlbGradeBlockReason = "";
+  if (isMlbProp) {
+    if (!mlbVerifiedMarket) {
+      mlbGradeBlocked = true;
+      mlbGradeBlockReason = `Market "${prop.statType}" not in verified MLB projection engine.`;
+    } else if (
+      !mlbVerifiedModel?.isVerifiedProjection ||
+      mlbVerifiedModel?.projectionUnavailable ||
+      projectionSource === "missing" ||
+      isFallbackProjection
+    ) {
+      mlbGradeBlocked = true;
+      mlbGradeBlockReason =
+        mlbVerifiedModel?.statusMessage ||
+        mlbPipelineTrace?.failureReason ||
+        NO_VERIFIED_GRADE_STATUS;
+    } else if (!verifiedStats || profileIsSparse) {
+      mlbGradeBlocked = true;
+      mlbGradeBlockReason = NO_VERIFIED_GRADE_STATUS;
+    }
+  }
+
+  if (mlbGradeBlocked) {
+    projection = null;
+    projectionSource = "missing";
+    isVerifiedProjection = false;
+    isFallbackProjection = false;
+  }
+
   if (!Number.isFinite(projection) || projection <= 0) {
     projection = null;
     projectionSource = "missing";
@@ -4072,7 +4110,7 @@ function scoreDFSProp(prop, context) {
     edgeResult = { edge: 0, bestPick: "", rawEdge: 0, sportsbookEdge: null, dfsEdge: null, edgeLine: line };
   }
 
-  if (!edgeResult.bestPick && !edgeResult.edge) {
+  if (!mlbGradeBlocked && !edgeResult.bestPick && !edgeResult.edge) {
     const edgeResolved = resolvePickEdge({
       prop,
       projection: projectedValue,
@@ -4100,13 +4138,16 @@ function scoreDFSProp(prop, context) {
     projectionSource = "missing";
   }
   const hasProjection = Number.isFinite(projection) && projection > 0;
-  const bestPick = mlbVerifiedModel?.recommendedSide || edgeResult.bestPick || "";
+  const bestPick = mlbGradeBlocked ? "" : mlbVerifiedModel?.recommendedSide || edgeResult.bestPick || "";
   let edge = mlbVerifiedModel?.edge ?? edgeResult.edge ?? 0;
-  if (!mlbVerifiedModel && edge <= 0 && hasProjection && Number.isFinite(line)) {
+  if (!mlbGradeBlocked && !mlbVerifiedModel && edge <= 0 && hasProjection && Number.isFinite(line)) {
     const fallbackDiff = Math.abs(projection - line);
     if (fallbackDiff >= 0.01) {
       edge = round(fallbackDiff);
     }
+  }
+  if (mlbGradeBlocked) {
+    edge = 0;
   }
   if (!hasProjection) {
     edge = 0;
@@ -4265,6 +4306,9 @@ function scoreDFSProp(prop, context) {
   );
   confidenceScore = sportCapResult.score;
   const sportCapReason = sportCapResult.capReason || "";
+  if (mlbGradeBlocked) {
+    confidenceScore = null;
+  }
   const strongData = confidenceResult.strongData;
   const verifiedHistory = confidenceResult.verifiedHistory;
   const statsMissingExplanation = buildStatsMissingExplanation(research, enriched);
@@ -4455,12 +4499,15 @@ function scoreDFSProp(prop, context) {
     dataStatus: dataStatus || statModel.dataStatus || null,
     projectionConfidence: projectionConfidence ?? statModel.projectionConfidence ?? null,
     isVerifiedProjection,
-    modelPick: mlbVerifiedModel?.modelPick || (bestPick ? String(bestPick).toUpperCase() : null),
-    passPlay: Boolean(mlbVerifiedModel?.passPlay),
-    projectionUnavailable: Boolean(mlbVerifiedModel?.projectionUnavailable),
+    modelPick: mlbGradeBlocked ? null : mlbVerifiedModel?.modelPick || (bestPick ? String(bestPick).toUpperCase() : null),
+    passPlay: Boolean(mlbVerifiedModel?.passPlay || mlbGradeBlocked),
+    projectionUnavailable: Boolean(mlbVerifiedModel?.projectionUnavailable || mlbGradeBlocked),
+    unverifiedGradeBlocked: mlbGradeBlocked,
     modelReasons: mlbVerifiedModel?.modelReasons || null,
-    displayStatus: mlbVerifiedModel?.displayStatus || null,
-    statusMessage: mlbVerifiedModel?.statusMessage || null,
+    displayStatus: mlbGradeBlocked ? "NO VERIFIED PLAY" : mlbVerifiedModel?.displayStatus || null,
+    statusMessage: mlbGradeBlocked
+      ? mlbGradeBlockReason || NO_VERIFIED_GRADE_STATUS
+      : mlbVerifiedModel?.statusMessage || null,
     whyThisPick: mlbVerifiedModel?.whyThisPick || qualificationReason,
     analyticsReason: mlbVerifiedModel?.analyticsReason || reasoningSummary,
     edgePercent: mlbVerifiedModel?.edgePercent ?? prop.edgePercent ?? null,

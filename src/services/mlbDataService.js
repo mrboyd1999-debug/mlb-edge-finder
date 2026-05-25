@@ -2,6 +2,7 @@ import { cachedFetch } from "./fetchUtil.js";
 import { readSmartCacheIfFresh, writeSmartCache, CACHE_TTL } from "./smartCache.js";
 import { SOURCE_LABELS } from "./statEnrichment.js";
 import { normalizePlayerName, statProfileKey } from "../utils/playerNames.js";
+import { mlbTeamsMatch } from "../utils/mlbTeamMatch.js";
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
 import {
   logIncomingProp,
@@ -47,8 +48,23 @@ const profileInflight = new Map();
 const opponentInflight = new Map();
 
 export const MLB_DATA_FETCH_LIMIT = 120;
+const MLB_PROP_PACKAGE_CONCURRENCY = 8;
 
-export { getMlbPipelineStatus } from "./mlbPipelineStatus.js";
+async function mapWithConcurrency(items = [], mapper, limit = 4) {
+  if (!items.length) return [];
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+export { getMlbPipelineStatus, subscribeMlbPipelineStatus } from "./mlbPipelineStatus.js";
 
 export function logMlbData(stage, payload = {}) {
   if (typeof console === "undefined") return;
@@ -582,10 +598,10 @@ export async function fetchMlbPlayerBundle(playerName = "") {
 }
 
 function validateTeamMatch(propTeam = "", matchedTeam = "") {
-  const a = normalizeTeamKey(propTeam);
-  const b = normalizeTeamKey(matchedTeam);
+  const a = String(propTeam || "").trim();
+  const b = String(matchedTeam || "").trim();
   if (!a || !b) return { ok: true };
-  if (a === b || b.includes(a) || a.includes(b)) return { ok: true };
+  if (mlbTeamsMatch(a, b)) return { ok: true };
   return { ok: false, reason: `Team mismatch: sportsbook ${propTeam} vs MLB ${matchedTeam}` };
 }
 
@@ -865,12 +881,6 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
     weather: weather?.note ?? null,
   });
 
-  recordMlbProjectionResult({
-    ok: true,
-    player: prop.playerName,
-    statType: prop.statType,
-    projection: profile.last5Average ?? profile.seasonAverage ?? null,
-  });
   console.info("[MLB Pipeline] projection inputs ready:", {
     player: prop.playerName,
     statType: prop.statType,
@@ -911,20 +921,24 @@ export async function fetchMlbDataForProps(props = [], { buildProfile = null } =
     })
   );
 
-  for (const prop of props) {
-    try {
-      const data = await buildMlbPropDataPackage(prop, { buildProfile });
-      if (data.profile) {
-        const key = statProfileKey(prop);
-        stats.set(key, { ...data.profile, sport: "MLB", statType: prop.statType });
-      } else {
-        warnings.push(`${prop.playerName}: ${data.reason}`);
+  await mapWithConcurrency(
+    props,
+    async (prop) => {
+      try {
+        const data = await buildMlbPropDataPackage(prop, { buildProfile });
+        if (data.profile) {
+          const key = statProfileKey(prop);
+          stats.set(key, { ...data.profile, sport: "MLB", statType: prop.statType });
+        } else {
+          warnings.push(`${prop.playerName}: ${data.reason}`);
+        }
+      } catch (error) {
+        warnings.push(`${prop.playerName}: ${error.message}`);
+        logMlbData("batch.propFailed", { player: prop.playerName, reason: error.message });
       }
-    } catch (error) {
-      warnings.push(`${prop.playerName}: ${error.message}`);
-      logMlbData("batch.propFailed", { player: prop.playerName, reason: error.message });
-    }
-  }
+    },
+    MLB_PROP_PACKAGE_CONCURRENCY
+  );
 
   logMlbData("batch.done", { profiles: stats.size, warnings: warnings.length });
   return { stats, warnings: [...new Set(warnings.filter(Boolean))] };

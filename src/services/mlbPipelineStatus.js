@@ -28,9 +28,28 @@ const DEFAULT_STATUS = {
 };
 
 let pipelineStatus = structuredClone(DEFAULT_STATUS);
+const listeners = new Set();
 
 function cloneStatus() {
   return structuredClone(pipelineStatus);
+}
+
+function notifyPipelineStatusListeners() {
+  const snapshot = cloneStatus();
+  listeners.forEach((listener) => {
+    try {
+      listener(snapshot);
+    } catch (error) {
+      console.warn("[MLB Pipeline Status] listener failed", error);
+    }
+  });
+}
+
+export function subscribeMlbPipelineStatus(listener) {
+  if (typeof listener !== "function") return () => {};
+  listeners.add(listener);
+  listener(cloneStatus());
+  return () => listeners.delete(listener);
 }
 
 export function getMlbPipelineStatus() {
@@ -61,6 +80,7 @@ export function recordMlbStatsFetch({
     pipelineStatus.mlbStatsApi.status = "Failed";
     pipelineStatus.mlbStatsApi.lastError = error || "MLB Stats API request failed";
   }
+  notifyPipelineStatusListeners();
 }
 
 export function recordMlbProjectionResult({
@@ -87,6 +107,7 @@ export function recordMlbProjectionResult({
       pipelineStatus.projectionApi.lastProjection = projection;
     }
   }
+  notifyPipelineStatusListeners();
 }
 
 export function recordDfsSourceStatus(source = "", { ok = false, error = "" } = {}) {
@@ -100,6 +121,7 @@ export function recordDfsSourceStatus(source = "", { ok = false, error = "" } = 
   } else {
     pipelineStatus.dfsSources[key].lastError = error || "Fetch failed";
   }
+  notifyPipelineStatusListeners();
 }
 
 export function mergeDfsSourceStatusFromApiHealth(apiHealth = {}) {

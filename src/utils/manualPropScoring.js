@@ -13,6 +13,7 @@ import {
   isMlbHitterPhase2Market,
   DATA_STATUS,
 } from "../modules/mlbProjectionEngine.js";
+import { buildMlbPropProjection, isMlbVerifiedEngineMarket } from "../modules/mlbProjectionService.js";
 import { scorePitcherManualProp } from "../modules/scoringEngine.js";
 import {
   isFallbackDataStatus,
@@ -733,6 +734,42 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
     projectionLabel = real.projectionLabel;
     projectionSource = real.projectionSource;
     isFallbackProjection = real.isFallbackProjection;
+  }
+
+  if (
+    sportKey === "MLB" &&
+    isMlbVerifiedEngineMarket(statType) &&
+    mergedProfile &&
+    !projectionIsVerified({
+      projectedValue: fairLine,
+      isFallbackProjection,
+      dataStatus,
+      projectionSource,
+    })
+  ) {
+    const model = buildMlbPropProjection(
+      {
+        sport,
+        statType,
+        line,
+        playerName: input.playerName,
+        opponent: input.opponent,
+        team: input.team,
+        source,
+        payoutType,
+      },
+      mergedProfile,
+      projectionContext
+    );
+    if (model?.isVerifiedProjection && Number.isFinite(model.projection) && model.projection > 0) {
+      fairLine = model.projection;
+      projectionBreakdown = model.projectionBreakdown || [];
+      projectionLabel = model.projectionLabel;
+      projectionSource = model.projectionSource;
+      isFallbackProjection = model.isFallbackProjection;
+      dataStatus = model.dataStatus;
+      projectionConfidence = model.projectionConfidence ?? model.confidence;
+    }
   }
 
   const verified = projectionIsVerified({

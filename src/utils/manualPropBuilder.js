@@ -11,6 +11,8 @@ import {
 import { withPlayerImageUrl } from "./playerImageFields.js";
 import { buildMlbStatProfileFromLogs } from "../services/playerStats.js";
 import { buildMlbPropDataPackage, logMlbData } from "../services/mlbDataService.js";
+import { recordMlbProjectionResult } from "../services/mlbPipelineStatus.js";
+import { applyMlbProjectionToProp } from "../modules/mlbProjectionService.js";
 import {
   buildCardPipelineDebug,
   getFetchPropTrace,
@@ -328,6 +330,40 @@ export async function analyzeManualProp(form = {}, scoreFn = null) {
       liveScored = scoreFn(prop, profile);
     } catch (error) {
       console.warn("[Manual Analyzer] live scoring failed, using dynamic manual scoring", error);
+    }
+  }
+
+  if (profile && !profile.sparse && !profile.fallback && built) {
+    const mlbApplied = applyMlbProjectionToProp(built, profile, {
+      opponentContext: profile.opponentContext,
+      impliedGameTotal: profile.impliedGameTotal,
+      weatherNote: profile.weatherNote,
+      opponentStarterNote: profile.opponentStarterNote,
+    });
+    recordMlbProjectionResult({
+      ok: Boolean(mlbApplied.isVerifiedProjection && Number.isFinite(mlbApplied.projection)),
+      player: built.playerName,
+      statType: built.statType,
+      projection: mlbApplied.projection,
+      error: mlbApplied.projectionUnavailable ? mlbApplied.statusMessage || NO_VERIFIED_GRADE_STATUS : "",
+    });
+    console.info("[Manual Analyzer] projection value used:", {
+      player: built.playerName,
+      statType: built.statType,
+      line: built.line,
+      projection: mlbApplied.projection,
+      source: mlbApplied.projectionSource,
+      verified: mlbApplied.isVerifiedProjection,
+    });
+    if (mlbApplied.isVerifiedProjection) {
+      liveScored = { ...(liveScored || {}), ...mlbApplied };
+    } else if (!liveScored?.projectionSource || liveScored.projectionSource === "missing") {
+      liveScored = {
+        ...(liveScored || {}),
+        ...mlbApplied,
+        projectionUnavailable: true,
+        unverifiedGradeBlocked: true,
+      };
     }
   }
 

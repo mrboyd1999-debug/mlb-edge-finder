@@ -75,6 +75,8 @@ function formatCountLine(row = {}) {
   return `raw ${counts.rawCount} · parsed ${counts.parsedCount} · usable ${counts.usableCount}`;
 }
 
+import MlbPipelineStatusPanel from "./MlbPipelineStatusPanel.jsx";
+
 export default function SourceStatusBar({
   sourceStatus = {},
   sourceHealth = {},
@@ -86,6 +88,7 @@ export default function SourceStatusBar({
   upcomingSlateCount = 0,
   slateExcludedCount = 0,
   pregameWindowHours = 24,
+  mlbPipelineStatus = null,
 }) {
   const cacheCounts = summarizeSourceCounts(apiHealth.cache || {});
   const boardHealth = resolveSourceHealthState({
@@ -223,6 +226,7 @@ export default function SourceStatusBar({
                 );
               })}
             </div>
+            <MlbPipelineStatusPanel pipelineStatus={mlbPipelineStatus} apiHealth={apiHealth} compact />
           </section>
         </div>
       </details>
