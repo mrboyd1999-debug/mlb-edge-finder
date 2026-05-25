@@ -14,6 +14,7 @@ import { withPlayerImageUrl } from "./playerImageFields.js";
 import { fullMarketDisplayLabel } from "./marketNormalization.js";
 import { calibrateRealisticConfidence, confidenceBandDisplay, resolveBandScore } from "./mlbConfidenceEngine.js";
 import { buildAnalyticsReason } from "./propReasonEngine.js";
+import { isVerifiedRecommendableProp } from "../modules/propSideEngine.js";
 
 const BASE_CONFIDENCE = 50;
 const MIN_TOP_PICK_CONFIDENCE = 65;
@@ -531,8 +532,12 @@ function pickTop2FromPool(pool = []) {
   return selected;
 }
 
+function filterRecommendableBoardProps(props = []) {
+  return (props || []).filter(isVerifiedRecommendableProp);
+}
+
 export function selectTop2Picks(props = []) {
-  const valid = sortPropsForDisplay((props || []).filter(isValidDisplayProp));
+  const valid = sortPropsForDisplay(filterRecommendableBoardProps(props).filter(isValidDisplayProp));
   if (!valid.length) return [];
 
   const elitePool = valid.filter(
@@ -569,7 +574,7 @@ export function selectNearMissProps(props = []) {
 
 export function selectBestValueProps(props = []) {
   return sortPropsForDisplay(
-    (props || []).filter((prop) => {
+    filterRecommendableBoardProps(props).filter((prop) => {
       if (!isValidDisplayProp(prop) || isResearchProp(prop) || prop.displayResearchOnly) return false;
       return (
         finiteOr(prop.confidence, 0) >= 65 &&
@@ -586,7 +591,7 @@ export function selectResearchOnlyProps(props = []) {
 
 export function selectReadyToBetProps(props = []) {
   return sortPropsForDisplay(
-    (props || []).filter((prop) => isValidDisplayProp(prop) && !isResearchProp(prop))
+    filterRecommendableBoardProps(props).filter((prop) => isValidDisplayProp(prop) && !isResearchProp(prop))
   ).map((prop) => ({
     ...prop,
     displayResearchOnly: false,
@@ -619,13 +624,13 @@ export function markDisplayFallbackProps(props = []) {
 }
 
 export function selectDemonProps(props = [], limit = CURATED_DEMON_LIMIT) {
-  const { demons } = resolveGoblinDemonBoards(props, { goblinLimit: 0, demonLimit: limit });
+  const { demons } = resolveGoblinDemonBoards(filterRecommendableBoardProps(props), { goblinLimit: 0, demonLimit: limit });
   if (demons.length) return demons;
   return [];
 }
 
 export function selectGoblinProps(props = [], limit = CURATED_GOBLIN_LIMIT) {
-  const { goblins } = resolveGoblinDemonBoards(props, { goblinLimit: limit, demonLimit: 0 });
+  const { goblins } = resolveGoblinDemonBoards(filterRecommendableBoardProps(props), { goblinLimit: limit, demonLimit: 0 });
   if (goblins.length) return goblins;
   return [];
 }

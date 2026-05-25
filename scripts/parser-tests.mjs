@@ -115,6 +115,7 @@ import {
   getManualStatVolatility,
   rankManualPropScore,
   computeDirectionalEdge,
+  projectionVsLineLabel,
 } from "../src/utils/manualPropScoring.js";
 import { projectPitcherStrikeouts, DATA_STATUS } from "../src/modules/mlbProjectionEngine.js";
 import { VERIFIED_PROJECTION_LABEL } from "../src/modules/projectionBreakdown.js";
@@ -1144,6 +1145,9 @@ const noProfileHit = buildOfflineManualAnalyzedProp({
 assert.equal(noProfileHit.projectionUnavailable, true);
 assert.equal(noProfileHit.impliedHitChance, null);
 assert.equal(noProfileHit.hitChanceLabel, "Insufficient verified data");
+assert.equal(noProfileHit.displayStatus, "NO VERIFIED PLAY");
+assert.equal(noProfileHit.bestPick, null);
+assert.ok(projectionVsLineLabel({ line: 6.5, projectionUnavailable: true }).includes("--"));
 
 const kBugProfile = {
   last5Average: 5.5,
@@ -1217,7 +1221,13 @@ const analyzedNoScoreFn = await analyzeManualProp({
   source: "PrizePicks",
   payoutType: "standard",
 });
-assert.ok(analyzedNoScoreFn.riskLevel === "Low" || analyzedNoScoreFn.riskLevel === "Medium" || analyzedNoScoreFn.riskLevel === "High");
+if (analyzedNoScoreFn.projectionUnavailable) {
+  assert.equal(analyzedNoScoreFn.displayStatus, "NO VERIFIED PLAY");
+  assert.equal(analyzedNoScoreFn.bestPick, null);
+} else {
+  assert.ok(analyzedNoScoreFn.riskLevel === "Low" || analyzedNoScoreFn.riskLevel === "Medium" || analyzedNoScoreFn.riskLevel === "High");
+  assert.ok(analyzedNoScoreFn.bestPick === "over" || analyzedNoScoreFn.bestPick === "under");
+}
 assert.ok(analyzedNoScoreFn.whyThisPick.length > 12);
 
 console.log("Parser smoke tests passed.");

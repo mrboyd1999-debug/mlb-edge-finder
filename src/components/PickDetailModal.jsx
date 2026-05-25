@@ -26,8 +26,11 @@ import {
 import { buildHistoricalPerformance } from "../utils/historicalPropAnalytics.js";
 import { isManualAnalyzerProp } from "../utils/manualPropBuilder.js";
 import {
+  AWAITING_PROJECTION_STATUS,
+  hasValidProjection,
   leanBadgeStyle,
   manualRiskBadgeStyle,
+  NO_VERIFIED_PLAY_STATUS,
   normalizeManualPick,
   payoutBadgeStyle,
   payoutDisplayLabel,
@@ -77,8 +80,16 @@ function FlagRow({ flags = [], tone = "positive" }) {
 
 export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveManualStats, onSavePick }) {
   const manualProp = isManualAnalyzerProp(prop);
-  const pickSide = normalizeManualPick(prop.bestPick || prop.side || prop.pick);
-  const lean = pickSide === "over" ? "Over" : pickSide === "under" ? "Under" : formatLeanSide(prop.bestPick || prop.side || "Watch");
+  const hasProjection = hasValidProjection(prop);
+  const noVerifiedPlay = manualProp && (!hasProjection || prop.projectionUnavailable);
+  const pickSide = noVerifiedPlay ? "" : normalizeManualPick(prop.bestPick || prop.side || prop.pick);
+  const lean = noVerifiedPlay
+    ? null
+    : pickSide === "over"
+      ? "Over"
+      : pickSide === "under"
+        ? "Under"
+        : formatLeanSide(prop.bestPick || prop.side || "Watch");
   const ready = prop.isDisplayPlayable !== false && (Boolean(prop.isQualificationAccepted) || isReadyToBet(prop));
   const bandLabel = confidenceBandDisplay(resolveBandScore(prop));
   const badge = manualProp
@@ -182,16 +193,28 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
 
         <div style={{ ...styles.tagRow, marginBottom: manualProp ? "4px" : "6px", gap: "3px" }}>
           {manualProp ? (
+            noVerifiedPlay ? (
+              <>
+                <span style={{ ...styles.scoreBadge, border: "1px solid #475569", background: "#1e293b", color: "#94a3b8", fontSize: "9px", padding: "1px 5px" }}>
+                  {prop.displayStatus || NO_VERIFIED_PLAY_STATUS}
+                </span>
+                <span style={{ ...styles.scoreBadge, ...payoutBadgeStyle(prop), fontSize: "9px", padding: "1px 5px" }}>
+                  {payoutLabel}
+                </span>
+              </>
+            ) : (
             <>
               {lean === "Over" || lean === "Under" ? (
                 <span style={{ ...styles.scoreBadge, ...leanBadgeStyle(lean), fontSize: "9px", padding: "1px 5px" }}>
                   {lean.toUpperCase()}
                 </span>
               ) : null}
-              <span style={{ ...styles.scoreBadge, ...manualRiskBadgeStyle(prop.riskLevel), fontSize: "9px", padding: "1px 5px" }}>
-                {riskShortLabel(prop.riskLevel)} RISK
-              </span>
-              {prop.confidenceScore != null ? (
+              {prop.riskLevel ? (
+                <span style={{ ...styles.scoreBadge, ...manualRiskBadgeStyle(prop.riskLevel), fontSize: "9px", padding: "1px 5px" }}>
+                  {riskShortLabel(prop.riskLevel)} RISK
+                </span>
+              ) : null}
+              {prop.confidenceScore != null && prop.confidenceScore > 0 ? (
                 <span style={{ ...styles.scoreBadge, border: "1px solid #166534", background: "#052e16", color: "#86efac", fontSize: "9px", padding: "1px 5px" }}>
                   {prop.confidenceScore}%
                 </span>
@@ -205,6 +228,7 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
                 </span>
               ) : null}
             </>
+            )
           ) : (
             <>
               <span style={ready ? styles.segmentActive : styles.segment}>{bandLabel}</span>
@@ -228,13 +252,22 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
         ) : null}
 
         <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: manualProp ? "3px" : "4px", marginBottom: manualProp ? "4px" : "6px" }}>
+          {manualProp && noVerifiedPlay ? (
+            <>
+              <MetricIf label="Status" value={prop.displayStatus || NO_VERIFIED_PLAY_STATUS} strong />
+              <MetricIf label="Line" value={formatNumber(prop.line)} strong />
+              <MetricIf label="Projection" value="Unavailable" strong />
+              <MetricIf label="Proj vs Line" value={projVsLine} strong />
+            </>
+          ) : (
+            <>
           <MetricIf label="Confidence" value={prop.confidenceScore != null && prop.confidenceScore > 0 ? `${prop.confidenceScore}%` : null} strong />
           <MetricIf
             label="Hit Chance"
             value={
               prop.impliedHitChance != null
                 ? `${prop.impliedHitChance}%`
-                : prop.hitChanceLabel || (manualProp && prop.projectionUnavailable ? "Insufficient verified data" : null)
+                : prop.hitChanceLabel || null
             }
             strong
           />
@@ -246,21 +279,22 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
               <MetricIf
                 label="Projection"
                 value={
-                  prop.projectionUnavailable
-                    ? "Unavailable"
-                    : prop.projectedValue != null
-                      ? formatNumber(prop.projectedValue)
-                      : prop.projection != null
-                        ? formatNumber(prop.projection)
-                        : null
+                  prop.projectedValue != null
+                    ? formatNumber(prop.projectedValue)
+                    : prop.projection != null
+                      ? formatNumber(prop.projection)
+                      : null
                 }
                 strong
               />
             </>
           ) : null}
           <MetricIf label="Prop" value={prop.statType} />
-          <MetricIf label="Risk" value={prop.riskLevel} />
-          <MetricIf label="Volatility" value={prop.volatilityLabel || null} />
+          {manualProp && !noVerifiedPlay ? <MetricIf label="Risk" value={prop.riskLevel} /> : null}
+          {!manualProp ? <MetricIf label="Risk" value={prop.riskLevel} /> : null}
+          {!noVerifiedPlay ? <MetricIf label="Volatility" value={prop.volatilityLabel || null} /> : null}
+            </>
+          )}
           {!manualProp ? (
             <>
               <MetricIf
@@ -278,12 +312,20 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
 
         <div style={{ ...styles.explanationBlock, padding: manualProp ? "5px 6px" : "6px 8px", marginBottom: "3px" }}>
           <strong style={{ fontSize: "11px" }}>{manualProp ? "Grade summary" : "Why this pick"}</strong>
+          {manualProp && noVerifiedPlay ? (
+            <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "11px", lineHeight: 1.35, color: "#94a3b8" }}>
+              {prop.statusMessage || AWAITING_PROJECTION_STATUS}
+            </p>
+          ) : (
+            <>
           {manualProp && (prop.dataStatus || prop.projectionLabel) ? (
             <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "10px", color: prop.isFallbackProjection ? "#fcd34d" : "#86efac" }}>
               {prop.isVerifiedProjection ? "Verified MLB projection" : prop.dataStatus || prop.projectionLabel}
             </p>
           ) : null}
           <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "11px", lineHeight: 1.35 }}>{whyText}</p>
+            </>
+          )}
           {!manualProp ? (
             <p style={{ ...styles.compactFlags, margin: "3px 0 0", color: "#94a3b8", fontSize: "10px" }}>{riskExplanation(prop)}</p>
           ) : null}

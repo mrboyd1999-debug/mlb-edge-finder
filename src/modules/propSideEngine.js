@@ -13,6 +13,51 @@ export const EDGE_NEUTRAL_THRESHOLD = 0.05;
 export const MIN_PLAY_EDGE = 0.35;
 export const MIN_PLAY_CONFIDENCE = 58;
 export const INSUFFICIENT_DATA_LABEL = "Insufficient verified data";
+export const NO_VERIFIED_PLAY_STATUS = "NO VERIFIED PLAY";
+export const AWAITING_PROJECTION_STATUS = "Awaiting projection data";
+
+/** True when a numeric projection exists and is positive. */
+export function hasValidProjection(prop = {}) {
+  if (prop.projectionUnavailable) return false;
+  const projection = prop.projectedValue ?? prop.projection;
+  if (projection == null || projection === undefined) return false;
+  const numeric = Number(projection);
+  return Number.isFinite(numeric) && numeric > 0;
+}
+
+export function hasSportsbookLine(prop = {}) {
+  const line = Number(prop.line);
+  return Number.isFinite(line) && line > 0;
+}
+
+export function hasCalculatedEdge(prop = {}) {
+  const edge = Number(prop.edge);
+  return Number.isFinite(edge) && edge > 0;
+}
+
+/** Gate for curated boards and recommendations. */
+export function isVerifiedRecommendableProp(prop = {}) {
+  if (!hasValidProjection(prop)) return false;
+  if (!hasSportsbookLine(prop)) return false;
+  if (!hasCalculatedEdge(prop)) return false;
+  if (prop.isFallbackProjection) return false;
+  if (prop.projectionUnavailable || prop.noEdge) return false;
+
+  if (prop.isManualAnalyzer || prop.manualAnalyzer) {
+    return Boolean(prop.isVerifiedProjection);
+  }
+
+  if (prop.isVerifiedProjection || prop.hasVerifiedStats || prop.manualEnriched) return true;
+  if (prop.projectionSource === "player-stats-model") return true;
+  return false;
+}
+
+export function propRequiresVerifiedPlayStatus(prop = {}) {
+  if (prop.isManualAnalyzer || prop.manualAnalyzer) {
+    return !hasValidProjection(prop) || prop.projectionUnavailable;
+  }
+  return !isVerifiedRecommendableProp(prop);
+}
 
 export function normalizePropSide(side = "") {
   const key = String(side || "").toLowerCase();

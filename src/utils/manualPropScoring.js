@@ -22,11 +22,22 @@ import {
   computeRawEdge,
   confidenceFromEdge,
   hitChanceFromVerifiedEdge,
+  AWAITING_PROJECTION_STATUS,
+  hasValidProjection,
   INSUFFICIENT_DATA_LABEL,
+  isVerifiedRecommendableProp,
   meetsPlayQualityThresholds,
+  NO_VERIFIED_PLAY_STATUS,
   resolveRecommendedSide,
   sideConsistencyCheck,
   validateSideAgainstProjection,
+} from "../modules/propSideEngine.js";
+
+export {
+  hasValidProjection,
+  isVerifiedRecommendableProp,
+  NO_VERIFIED_PLAY_STATUS,
+  AWAITING_PROJECTION_STATUS,
 } from "../modules/propSideEngine.js";
 
 function clamp(value, min, max) {
@@ -49,6 +60,7 @@ function projectionIsVerified({ projectedValue, isFallbackProjection, dataStatus
 }
 
 export function isManualPropPlayable(prop = {}) {
+  if (!isVerifiedRecommendableProp(prop)) return false;
   if (prop.projectionUnavailable || prop.noEdge) return false;
   if (prop.isFallbackProjection) return false;
   return meetsPlayQualityThresholds({
@@ -169,7 +181,7 @@ export function normalizeManualPick(side = "") {
   const key = normalize(side);
   if (key === "over" || key === "more" || key === "higher") return "over";
   if (key === "under" || key === "less" || key === "lower") return "under";
-  return "over";
+  return "";
 }
 
 export function getManualStatVolatility(sport = "MLB", statType = "") {
@@ -319,9 +331,15 @@ export function manualMetricFadeStyle(edge) {
 }
 
 export function projectionVsLineLabel(prop = {}) {
-  const projection = Number(prop.projectedValue ?? prop.projection);
   const line = Number(prop.line);
-  if (!Number.isFinite(projection) || !Number.isFinite(line)) return null;
+  if (!Number.isFinite(line)) return null;
+  if (!hasValidProjection(prop)) {
+    return `-- vs ${formatNumber(line)}`;
+  }
+  const projection = Number(prop.projectedValue ?? prop.projection);
+  if (!Number.isFinite(projection)) {
+    return `-- vs ${formatNumber(line)}`;
+  }
   return `${formatNumber(projection)} vs ${formatNumber(line)}`;
 }
 
@@ -635,19 +653,21 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
       bestPick: null,
       side: null,
       pick: null,
-      lean: "Avoid",
-      confidence: 0,
-      confidenceScore: 0,
-      calibratedConfidence: 0,
-      edge: 0,
+      lean: null,
+      confidence: null,
+      confidenceScore: null,
+      calibratedConfidence: null,
+      edge: null,
       edgePercent: null,
       impliedHitChance: null,
       hitChanceLabel: INSUFFICIENT_DATA_LABEL,
-      riskLevel: "High",
+      riskLevel: null,
       playTag: null,
       isWeakManualPick: true,
       isDisplayPlayable: false,
       noEdge: true,
+      displayStatus: NO_VERIFIED_PLAY_STATUS,
+      statusMessage: AWAITING_PROJECTION_STATUS,
       userPick,
       whyThisPick,
       qualificationReason: whyThisPick,
@@ -661,14 +681,14 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
       isVerifiedProjection: false,
       dataStatus: dataStatus || DATA_STATUS.FALLBACK,
       projectionConfidence: null,
-      manualVolatilityTier: volatility.tier,
-      manualVolatilityScore: volatility.score,
-      volatilityLabel,
-      volatility: round(1.5 + volatility.score * 2.5, 2),
+      manualVolatilityTier: null,
+      manualVolatilityScore: null,
+      volatilityLabel: null,
+      volatility: null,
       manualDynamicAnalysis: true,
       scoringModeLabel: "Projection unavailable",
-      dataQualityScore: 0,
-      bettingLabel: "Awaiting data",
+      dataQualityScore: null,
+      bettingLabel: NO_VERIFIED_PLAY_STATUS,
       sideEngineDebug: buildSideEngineDebug({
         projectionSource: projectionSource || "missing",
         dataStatus: dataStatus || DATA_STATUS.FALLBACK,
@@ -698,18 +718,20 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
       bestPick: null,
       side: null,
       pick: null,
-      lean: "Avoid",
-      confidence: 0,
-      confidenceScore: 0,
-      calibratedConfidence: 0,
-      edge: 0,
+      lean: null,
+      confidence: null,
+      confidenceScore: null,
+      calibratedConfidence: null,
+      edge: null,
       edgePercent: null,
       impliedHitChance: null,
       hitChanceLabel: INSUFFICIENT_DATA_LABEL,
-      riskLevel: classifyManualRisk({ payoutType, volatility, edge: 0, linePct }),
+      riskLevel: null,
       playTag: null,
       isWeakManualPick: true,
       isDisplayPlayable: false,
+      displayStatus: NO_VERIFIED_PLAY_STATUS,
+      statusMessage: "No edge — projection equals line",
       userPick,
       whyThisPick,
       qualificationReason: whyThisPick,
@@ -891,6 +913,8 @@ export function mergeManualPropScoring(builtProp = {}, manualScore = {}, liveSco
     dataStatus: manualScore.dataStatus || liveScored?.dataStatus || null,
     projectionConfidence: manualScore.projectionConfidence ?? liveScored?.projectionConfidence ?? null,
     hitChanceLabel: manualScore.hitChanceLabel || (manualScore.impliedHitChance == null ? INSUFFICIENT_DATA_LABEL : null),
+    displayStatus: manualScore.displayStatus || (manualScore.projectionUnavailable ? NO_VERIFIED_PLAY_STATUS : null),
+    statusMessage: manualScore.statusMessage || (manualScore.projectionUnavailable ? AWAITING_PROJECTION_STATUS : null),
     sideEngineDebug: manualScore.sideEngineDebug || null,
     analyzedAt: new Date().toISOString(),
   };

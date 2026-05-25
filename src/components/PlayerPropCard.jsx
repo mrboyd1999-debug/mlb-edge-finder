@@ -10,10 +10,13 @@ import { dynamicAcceptanceTier, getVolatilityLabel } from "../services/propQuali
 import { riskAccentStyle } from "../utils/displayPropScoring.js";
 import { isManualAnalyzerProp } from "../utils/manualPropBuilder.js";
 import {
+  AWAITING_PROJECTION_STATUS,
+  hasValidProjection,
   leanBadgeStyle,
   manualMetricFadeStyle,
   manualRiskBadgeStyle,
   manualWeakPickStyle,
+  NO_VERIFIED_PLAY_STATUS,
   normalizeManualPick,
   payoutBadgeStyle,
   payoutDisplayLabel,
@@ -78,13 +81,25 @@ function bettingLabelStyle(label) {
   };
 }
 
+function noVerifiedPlayBadgeStyle() {
+  return { border: "1px solid #475569", background: "#1e293b", color: "#94a3b8" };
+}
+
 function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, cardStyle, savedResult }) {
   const isManual = isManualAnalyzerProp(prop);
+  const hasProjection = hasValidProjection(prop);
+  const noVerifiedPlay = isManual && (!hasProjection || prop.projectionUnavailable);
   const tier = confidenceTier(prop);
-  const pickSide = normalizeManualPick(prop.bestPick || prop.side || prop.pick);
-  const lean = pickSide === "over" ? "Over" : pickSide === "under" ? "Under" : formatLeanSide(prop.bestPick || prop.side || "Watch");
-  const weakPick = isManual && (prop.projectionUnavailable || prop.noEdge || prop.isWeakManualPick);
-  const metricFade = manualMetricFadeStyle(prop.edge);
+  const pickSide = noVerifiedPlay ? "" : normalizeManualPick(prop.bestPick || prop.side || prop.pick);
+  const lean = noVerifiedPlay
+    ? null
+    : pickSide === "over"
+      ? "Over"
+      : pickSide === "under"
+        ? "Under"
+        : formatLeanSide(prop.bestPick || prop.side || "Watch");
+  const weakPick = isManual && (noVerifiedPlay || prop.noEdge || prop.isWeakManualPick);
+  const metricFade = noVerifiedPlay ? {} : manualMetricFadeStyle(prop.edge);
   const payoutLabel = payoutDisplayLabel(prop);
   const projVsLine = projectionVsLineLabel(prop);
   const researchOnly = Boolean(prop.displayResearchOnly) || /research only/i.test(String(prop.bettingLabel || ""));
@@ -136,22 +151,30 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
   const openingLine = prop.lineMovement?.openingLine ?? null;
   const currentLineSnap = prop.lineMovement?.currentLine ?? prop.line ?? null;
   const confDisplay =
-    prop.calibratedConfidence != null && prop.calibratedConfidence !== prop.confidenceScore
-      ? prop.calibratedConfidence
-      : prop.confidenceScore ?? prop.confidence ?? null;
-  const edgeDisplay = Number.isFinite(Number(prop.edge)) ? formatNumber(prop.edge) : null;
-  const hitChanceDisplay = Number.isFinite(Number(prop.impliedHitChance))
-    ? `${Math.round(Number(prop.impliedHitChance))}%`
-    : prop.hitChanceLabel || (isManual && prop.projectionUnavailable ? "Insufficient verified data" : null);
-  const projectionDisplay = prop.projectionUnavailable
-    ? "Unavailable"
+    noVerifiedPlay
+      ? null
+      : prop.calibratedConfidence != null && prop.calibratedConfidence !== prop.confidenceScore
+        ? prop.calibratedConfidence
+        : prop.confidenceScore ?? prop.confidence ?? null;
+  const confDisplayPositive = confDisplay != null && Number(confDisplay) > 0 ? confDisplay : null;
+  const edgeDisplay =
+    noVerifiedPlay || !Number.isFinite(Number(prop.edge)) || Number(prop.edge) <= 0
+      ? null
+      : formatNumber(prop.edge);
+  const hitChanceDisplay = noVerifiedPlay
+    ? null
+    : Number.isFinite(Number(prop.impliedHitChance))
+      ? `${Math.round(Number(prop.impliedHitChance))}%`
+      : null;
+  const projectionDisplay = noVerifiedPlay
+    ? null
     : prop.projectedValue != null
       ? formatNumber(prop.projectedValue)
       : prop.projection != null
         ? formatNumber(prop.projection)
         : null;
-  const volatilityDisplay = prop.volatilityLabel || null;
-  const riskShort = riskShortLabel(prop.riskLevel);
+  const volatilityDisplay = noVerifiedPlay ? null : prop.volatilityLabel || null;
+  const riskShort = noVerifiedPlay ? null : riskShortLabel(prop.riskLevel);
   const showDynamicTier = dynamicTier && String(dynamicTier).toUpperCase() !== "RESEARCH";
   const riskAccent = riskAccentStyle(prop.riskLevel);
   const fallbackBadge = prop.displayFallback || prop.fallbackLabel;
@@ -247,6 +270,29 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
       <div className="prop-card-meta-row prop-card-meta-primary" style={styles.compactMetaRow}>
         {compact ? (
           isManual ? (
+            noVerifiedPlay ? (
+              <>
+                <span className="prop-card-stat-highlight prop-card-prop-line-row" style={{ ...styles.compactMetaItem, flex: "1 1 100%" }}>
+                  <strong>
+                    {displayMarketLabel(prop)} · Line {formatNumber(prop.line)}
+                    {prop.source || prop.platform ? ` · ${prop.source || prop.platform}` : ""}
+                  </strong>
+                </span>
+                <div className="prop-card-primary-metrics" style={styles.manualPrimaryMetricsRow}>
+                  <span style={{ ...styles.scoreBadge, ...noVerifiedPlayBadgeStyle() }}>
+                    {prop.displayStatus || NO_VERIFIED_PLAY_STATUS}
+                  </span>
+                </div>
+                <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, marginTop: "2px", color: "#94a3b8" }}>
+                  {prop.statusMessage || AWAITING_PROJECTION_STATUS}
+                </p>
+                {projVsLine ? (
+                  <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, color: "#64748b" }}>
+                    {projVsLine}
+                  </p>
+                ) : null}
+              </>
+            ) : (
             <>
               <span className="prop-card-stat-highlight prop-card-prop-line-row" style={{ ...styles.compactMetaItem, flex: "1 1 100%" }}>
                 <strong>
@@ -260,7 +306,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
                     PROJ {projectionDisplay}
                   </span>
                 ) : null}
-                {edgeDisplay != null && Number(prop.edge) > 0 ? (
+                {edgeDisplay != null ? (
                   <span
                     style={{
                       ...styles.scoreBadge,
@@ -273,22 +319,20 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
                     EDGE +{edgeDisplay}
                   </span>
                 ) : null}
-                {confDisplay != null && Number(confDisplay) > 0 ? (
+                {confDisplayPositive != null ? (
                   <span style={{ ...styles.scoreBadge, ...metricFade, borderColor: "#166534", color: "#86efac", background: "#052e16" }}>
-                    CONF {confDisplay}%
+                    CONF {confDisplayPositive}%
                   </span>
                 ) : null}
                 {hitChanceDisplay ? (
                   <span style={{ ...styles.scoreBadge, ...metricFade, borderColor: "#155e75", color: "#a5f3fc", background: "#083344" }}>
-                    {String(hitChanceDisplay).includes("%") ? `HIT ${hitChanceDisplay}` : hitChanceDisplay}
+                    HIT {hitChanceDisplay}
                   </span>
                 ) : null}
               </div>
               <div className="prop-card-badge-row" style={styles.badgeRow}>
                 {lean === "Over" || lean === "Under" ? (
                   <span style={{ ...styles.scoreBadge, ...leanBadgeStyle(lean) }}>{lean.toUpperCase()}</span>
-                ) : prop.projectionUnavailable || prop.noEdge ? (
-                  <span style={{ ...styles.scoreBadge, borderColor: "#475569", color: "#cbd5e1", background: "#1e293b" }}>AVOID</span>
                 ) : null}
                 <span style={{ ...styles.scoreBadge, ...payoutBadgeStyle(prop) }}>{payoutLabel}</span>
               </div>
@@ -296,12 +340,13 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
                 <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, marginTop: "2px" }}>
                   {prop.whyThisPick || prop.qualificationReason}
                 </p>
-              ) : volatilityDisplay ? (
+              ) : projVsLine ? (
                 <p className="prop-card-volatility-secondary" style={styles.manualVolatilityLine}>
-                  {volatilityDisplay}
+                  {projVsLine}
                 </p>
               ) : null}
             </>
+            )
           ) : (
           <>
             <span className="prop-card-stat-highlight prop-card-prop-line-row" style={{ ...styles.compactMetaItem, flex: "1 1 100%" }}>

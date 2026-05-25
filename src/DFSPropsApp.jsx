@@ -227,6 +227,7 @@ import {
   selectTop2FromDisplayProps,
 } from "./utils/allDisplayProps.js";
 import { enrichDisplayPropsPipeline, selectAcceptedDisplayProps, selectDemonProps, selectGoblinProps, matchesMarketQuickFilter } from "./utils/displayPropScoring.js";
+import { isVerifiedRecommendableProp } from "./modules/propSideEngine.js";
 import {
   buildPipelineStageReport,
   buildUsablePropsPool,
@@ -2698,6 +2699,7 @@ export default function DFSPropsApp() {
     );
     return merged.filter(
       (prop) =>
+        isVerifiedRecommendableProp(prop) &&
         matchesPlatformFilter(prop, platform) &&
         matchesStatTypeFilter(prop, statType) &&
         matchesDateFilter(prop, dateFilter) &&
@@ -5188,7 +5190,7 @@ function defaultStreakOptions(prop) {
 }
 
 function buildStreakSportCategoryBoards(props, history) {
-  const scopedProps = filterActiveSportProps(props);
+  const scopedProps = filterActiveSportProps(props).filter(isVerifiedRecommendableProp);
   const enriched = strongestSideOnly(scopedProps)
     .map((prop) => enrichStreakCandidate(prop, history))
     .sort((a, b) => streakLifeScore(b, "safest", history) - streakLifeScore(a, "safest", history));
