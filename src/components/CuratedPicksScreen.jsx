@@ -5,9 +5,12 @@ import LiveStatusHeader from "./LiveStatusHeader.jsx";
 import PipelineDebugBar from "./PipelineDebugBar.jsx";
 import { styles } from "../theme/styles.js";
 
+import { liveBoardLoadingMessage, LIVE_BOARD_UNAVAILABLE_MESSAGE } from "../utils/liveBoardLoading.js";
+
 function CuratedPicksScreen({
   sections = [],
   loading = false,
+  loadingStage = "FETCH",
   onOpen,
   waitingForProjections = false,
   usedFallback = false,
@@ -35,7 +38,7 @@ function CuratedPicksScreen({
         </p>
       ) : null}
       {loading ? (
-        <div style={styles.emptyStateCompact}>Loading MLB props…</div>
+        <div style={styles.emptyStateCompact}>{liveBoardLoadingMessage(loadingStage)}</div>
       ) : !hasSections ? (
         <div style={styles.emptyStateCompact}>
           {loadedPropCount > 0
@@ -43,8 +46,8 @@ function CuratedPicksScreen({
             : fetchFailureReasons?.length
               ? fetchFailureReasons.join(" · ")
               : waitingForProjections
-                ? "Loading projections…"
-                : "No live MLB props available"}
+                ? liveBoardLoadingMessage("PROJECT")
+                : LIVE_BOARD_UNAVAILABLE_MESSAGE}
         </div>
       ) : (
         sections.map((section) => (

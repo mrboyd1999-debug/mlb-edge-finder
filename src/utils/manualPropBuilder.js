@@ -252,4 +252,4 @@ export function selectManualTopPicks(props = [], limit = 2) {
   return selectManualTopPicksByRank(props, limit);
 }
 
-export { selectMlbVerifiedBestBets } from "../modules/mlbBestBets.js";
+export { selectMlbVerifiedBestBets, selectMlbStrongLeans } from "../modules/mlbBestBets.js";

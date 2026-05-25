@@ -360,7 +360,9 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
               </div>
               <div className="prop-card-badge-row" style={styles.badgeRow}>
                 {lean === "Over" || lean === "Under" ? (
-                  <span style={{ ...styles.scoreBadge, ...leanBadgeStyle(lean) }}>{lean.toUpperCase()}</span>
+                  <span style={{ ...styles.scoreBadge, ...leanBadgeStyle(lean) }}>
+                    {isManual ? `Model Pick ${lean.toUpperCase()}` : lean.toUpperCase()}
+                  </span>
                 ) : null}
                 <span style={{ ...styles.scoreBadge, ...payoutBadgeStyle(prop) }}>{payoutLabel}</span>
               </div>

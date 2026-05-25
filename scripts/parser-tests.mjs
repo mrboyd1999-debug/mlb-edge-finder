@@ -1203,8 +1203,8 @@ const kProjection = projectPitcherStrikeouts(
 );
 assert.ok(kProjection.projectedValue > 0);
 assert.equal(kProjection.projectionLabel, VERIFIED_PROJECTION_LABEL);
-assert.ok(kProjection.projectionBreakdown.some((row) => row.label === "Last 5 Avg Ks"));
-assert.ok(kProjection.projectionBreakdown.some((row) => row.label === "Season Avg Ks"));
+assert.ok(kProjection.projectionBreakdown.some((row) => /recent form|last 5/i.test(row.label)));
+assert.ok(kProjection.projectionBreakdown.some((row) => /opponent k|innings trend/i.test(row.label)));
 assert.ok(kProjection.projectionBreakdown.some((row) => row.label === "Projected Innings"));
 assert.equal(computePitcherEdge(6.2, 6.5, "over"), 0.3);
 assert.equal(computePitcherEdge(6.8, 6.5, "over"), 0.3);

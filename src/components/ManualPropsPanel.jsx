@@ -9,6 +9,7 @@ import {
   MLB_STAT_SUGGESTIONS,
   selectManualTopPicks,
   selectMlbVerifiedBestBets,
+  selectMlbStrongLeans,
   sortManualPropsByConfidence,
   validateManualPropFields,
 } from "../utils/manualPropBuilder.js";
@@ -43,6 +44,7 @@ function ManualPropsPanel({
 
   const rankedProps = useMemo(() => sortManualPropsByConfidence(props), [props]);
   const topPicks = useMemo(() => selectMlbVerifiedBestBets(props, 2), [props]);
+  const strongLeans = useMemo(() => selectMlbStrongLeans(props, 6), [props]);
   const sportOptions = useMemo(() => {
     const sports = new Set(["MLB", ...rankedProps.map((prop) => prop.sport).filter(Boolean)]);
     return Array.from(sports);
@@ -61,7 +63,6 @@ function ManualPropsPanel({
       opponent: prop.opponent || "",
       statType: prop.statType || "",
       line: prop.line != null ? String(prop.line) : "",
-      side: prop.side || prop.bestPick || prop.pick || "",
       source: prop.source || prop.platform || "PrizePicks",
       payoutType: prop.oddsType || prop.payoutRole || prop.payoutType || "standard",
     });
@@ -290,14 +291,29 @@ function ManualPropsPanel({
         <section style={styles.section} aria-label="Manual top picks">
           <div style={styles.sectionHeading}>
             <div>
-              <h2 style={styles.sectionTitleSmall}>Top 2 MLB Best Bets</h2>
+              <h2 style={styles.sectionTitleSmall}>Best MLB Plays</h2>
               <p className="section-subcopy" style={styles.streakCopy}>
-                Highest verified edge MLB plays only.
+                Top 2 verified model picks.
               </p>
             </div>
             <p style={styles.countPill}>{topPicks.length} picks</p>
           </div>
           <div style={styles.manualTopPickGrid}>{topPicks.map((prop, index) => renderCard(prop, index))}</div>
+        </section>
+      ) : null}
+
+      {strongLeans.length ? (
+        <section style={styles.section} aria-label="Manual strong leans">
+          <div style={styles.sectionHeading}>
+            <div>
+              <h2 style={styles.sectionTitleSmall}>Strong Leans</h2>
+              <p className="section-subcopy" style={styles.streakCopy}>
+                Next 6 verified model sides ranked by confidence and edge.
+              </p>
+            </div>
+            <p style={styles.countPill}>{strongLeans.length} leans</p>
+          </div>
+          <div style={styles.manualTopPickGrid}>{strongLeans.map((prop, index) => renderCard(prop, index))}</div>
         </section>
       ) : null}
 

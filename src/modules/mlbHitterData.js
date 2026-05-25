@@ -178,6 +178,7 @@ export function buildMlbHitterDataPackage(prop = {}, profile = {}, context = {})
     parkFactorNote: profile.parkFactorNote || "",
     handednessMatchup: profile.handednessMatchup || "",
     battingOrderNote: profile.battingOrderNote || "",
+    opponentStarterNote: profile.opponentStarterNote || context.opponentStarterNote || opponent.opponentStarterNote || null,
     isolatedPower: finiteNumber(profile.isolatedPower),
     hardHitProxy: finiteNumber(profile.barrelRateEstimate),
     strikeoutRateProxy: finiteNumber(profile.recentStrikeoutRate),

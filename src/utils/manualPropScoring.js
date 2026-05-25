@@ -970,6 +970,22 @@ export function mergeManualPropScoring(builtProp = {}, manualScore = {}, liveSco
     hitChanceLabel: manualScore.hitChanceLabel || (manualScore.impliedHitChance == null ? INSUFFICIENT_DATA_LABEL : null),
     displayStatus: manualScore.displayStatus || (manualScore.projectionUnavailable ? NO_VERIFIED_PLAY_STATUS : null),
     statusMessage: manualScore.statusMessage || (manualScore.projectionUnavailable ? AWAITING_PROJECTION_STATUS : null),
+    modelPick:
+      manualScore.projectionUnavailable
+        ? NO_VERIFIED_PLAY_STATUS
+        : manualScore.passPlay || manualScore.displayStatus === PASS_STATUS
+          ? PASS_STATUS
+          : recommended
+            ? recommended.toUpperCase()
+            : null,
+    modelSide:
+      manualScore.projectionUnavailable
+        ? null
+        : manualScore.passPlay
+          ? PASS_STATUS
+          : recommended
+            ? recommended.toUpperCase()
+            : null,
     sideEngineDebug: manualScore.sideEngineDebug || null,
     analyzedAt: new Date().toISOString(),
   };
@@ -977,12 +993,13 @@ export function mergeManualPropScoring(builtProp = {}, manualScore = {}, liveSco
 
 export function rankManualPropScore(prop = {}) {
   if (!isManualPropPlayable(prop)) return -1_000_000;
-  const edgePct = Math.max(Number(prop.edgePercent ?? 0), 0);
-  const edge = Math.max(Number(prop.edge ?? 0), 0);
   const conf = Number(prop.confidenceScore ?? prop.confidence ?? 0);
-  const hitChance = Number(prop.impliedHitChance ?? prop.hitChance ?? 0);
+  const edge = Math.abs(Number(prop.edge ?? 0));
+  const edgePct = Math.max(Number(prop.edgePercent ?? 0), 0);
   const vol = Number(prop.manualVolatilityScore ?? 0.5);
-  return edgePct * 2.4 + edge * 11 + conf * 1.15 + hitChance * 0.85 - vol * 24;
+  const completeness = Number(prop.dataCompleteness ?? prop.dataQualityScore ?? 50);
+  const consistency = Number(prop.consistencyScore ?? (1 - vol) * 100);
+  return conf * 100 + edge * 40 + edgePct * 2 + completeness * 0.5 + consistency * 0.4 - vol * 30;
 }
 
 function manualPropsCorrelated(a = {}, b = {}) {

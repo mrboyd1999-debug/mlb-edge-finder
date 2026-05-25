@@ -349,6 +349,9 @@ function profileForMlbProp(profile, statType, line) {
       hitStreak: hitStreakFromSplits(splits),
       battingOrderNote: battingOrderNoteFromSplits(splits),
       parkFactorNote: parkFactorNoteFromSplits(splits),
+      homeAwaySplit: homeAwaySplitFromSplits(splits, statType),
+      probableStarterConfirmed: probableStarterFromSplits(splits, statType),
+      weatherNote: profile.weatherNote || null,
       recentStolenBaseRate: recentStolenBaseRateFromSplits(splits),
       stolenBaseMatchupNote: stolenBaseMatchupNoteFromSplits(splits),
       battingAverage: battingAverageFromSplits(splits),
@@ -660,6 +663,45 @@ function battingOrderNoteFromSplits(splits = []) {
   if (avg <= 4.2) return "Top-third batting order spot";
   if (avg <= 6.2) return "Heart-of-order cleanup spot";
   return "Lower-order batting spot";
+}
+
+function homeAwaySplitFromSplits(splits = [], statType = "") {
+  const home = [];
+  const away = [];
+  splits.slice(0, 12).forEach((split) => {
+    const isHome =
+      split.isHome === true ||
+      split.home === true ||
+      String(split.game?.homeAway || split.homeAway || "").toLowerCase() === "home";
+    const values = valuesFromMlbSplits([split], statType);
+    const value = values[0];
+    if (!Number.isFinite(value)) return;
+    if (isHome) home.push(value);
+    else away.push(value);
+  });
+  if (home.length < 2 || away.length < 2) return null;
+  const homeAvg = average(home);
+  const awayAvg = average(away);
+  if (homeAvg == null || awayAvg == null) return null;
+  const delta = round(homeAvg - awayAvg, 2);
+  if (Math.abs(delta) < 0.15) return "Neutral home/away split";
+  return delta > 0 ? `Home split stronger (+${Math.abs(delta)})` : `Away split stronger (+${Math.abs(delta)})`;
+}
+
+function probableStarterFromSplits(splits = [], statType = "") {
+  const pitcherMarket = /strikeout|pitcher|earned run|hits allowed|outs recorded|pitching/i.test(String(statType || ""));
+  if (!pitcherMarket) return null;
+  const recent = splits.slice(0, 5);
+  const starts = recent.filter((split) => {
+    const stat = split.stat || split;
+    if (finiteNumber(stat.gamesStarted) === 1) return true;
+    const ipText = String(stat.inningsPitched || "");
+    if (!ipText) return false;
+    const [whole, partial = "0"] = ipText.split(".");
+    const ip = Number(whole) + (Number(partial) / 3 || 0);
+    return Number.isFinite(ip) && ip >= 3;
+  });
+  return starts.length >= 3;
 }
 
 function parkFactorNoteFromSplits(splits = []) {

@@ -167,23 +167,36 @@ export function projectPitcherStrikeouts(prop = {}, profile = {}, context = {}) 
 
   const last5 = data.last5Average;
   const season = data.seasonAverage;
-  const { adjustment: oppAdj, oppRate } = computeOpponentKAdjustment(data);
-  const core = data.last5Average * 0.54 + data.seasonAverage * 0.46;
+  const { adjustment: oppAdj, oppRate, core } = computeOpponentKAdjustment(data);
 
   const pitchRate =
-    data.projectedPitchCount != null ? round(core * (data.projectedPitchCount / 92), 2) : core;
-  const ipRate = data.projectedInnings != null ? round(core * (data.projectedInnings / 5.5), 2) : core;
+    data.projectedPitchCount != null && core != null ? round(core * (data.projectedPitchCount / 92), 2) : core;
+  const ipRate = data.projectedInnings != null && core != null ? round(core * (data.projectedInnings / 5.5), 2) : core;
+
+  const vegasTotal = finiteNumber(context.impliedGameTotal ?? profile.impliedGameTotal ?? profile.impliedTeamTotal);
+  const vegasRate =
+    core != null && vegasTotal != null ? round(core + (vegasTotal - 8.5) * 0.08, 2) : core;
+
+  const weatherNote = profile.weatherNote || context.weatherNote || data.weatherNote || "";
+  const parkNote = profile.parkFactorNote || data.parkFactorNote || "";
+  let parkWeatherAdj = 0;
+  if (/wind out|blowing out|hot|carry/i.test(weatherNote)) parkWeatherAdj += 0.08;
+  else if (/wind in|cold|dome/i.test(weatherNote)) parkWeatherAdj -= 0.06;
+  if (/hitter-friendly|offensive/i.test(parkNote)) parkWeatherAdj += 0.05;
+  else if (/pitcher-friendly/i.test(parkNote)) parkWeatherAdj -= 0.05;
+  const parkWeatherRate = core != null ? round(core + parkWeatherAdj, 2) : core;
 
   const components = [
-    { label: "Last 5 Avg Ks", value: last5, weight: 0.35 },
-    { label: "Season Avg Ks", value: season, weight: 0.3 },
-    { label: "Opponent K Adjustment", value: oppRate ?? core, weight: 0.15, display: oppAdj != null ? `${oppAdj >= 0 ? "+" : ""}${oppAdj}` : undefined },
-    { label: "Pitch count factor", value: pitchRate, weight: 0.1, hidden: true },
-    { label: "Innings factor", value: ipRate, weight: 0.1, hidden: true },
+    { label: "Recent form (L5)", value: last5, weight: 0.35 },
+    { label: "Opponent K rate", value: oppRate ?? last5, weight: 0.25, display: oppAdj != null ? `${oppAdj >= 0 ? "+" : ""}${oppAdj}` : undefined },
+    { label: "Innings trend", value: ipRate ?? last5, weight: 0.15 },
+    { label: "Pitch count trend", value: pitchRate ?? last5, weight: 0.1 },
+    { label: "Vegas / game env", value: vegasRate ?? last5, weight: 0.1, display: vegasTotal != null ? `O/U ${formatNumber(vegasTotal)}` : undefined },
+    { label: "Park / weather", value: parkWeatherRate ?? last5, weight: 0.05, display: parkNote || weatherNote || undefined },
   ];
 
   components.forEach((part) => {
-    if (part.value == null || part.hidden) return;
+    if (part.value == null) return;
     breakdown.push(
       buildBreakdownRow(part.label, part.value, {
         weight: part.weight,
@@ -220,40 +233,28 @@ export function projectPitcherStrikeouts(prop = {}, profile = {}, context = {}) 
     );
   }
 
+  if (data.probableStarterConfirmed) {
+    breakdown.push(
+      buildBreakdownRow("Probable starter", "Confirmed", {
+        display: "Verified starter role",
+        contribution: 0,
+      })
+    );
+  }
+
+  if (data.homeAwaySplit) {
+    breakdown.push(
+      buildBreakdownRow("Home/Away split", data.homeAwaySplit, {
+        display: data.homeAwaySplit,
+        contribution: 0,
+      })
+    );
+  }
+
   data.opponentKAdjustment = oppAdj;
 
   let projection = weightedPitcherProjection(components);
   if (data.handednessBoost) projection = round(projection + data.handednessBoost, 1);
-
-  const vegasTotal = finiteNumber(context.impliedGameTotal ?? profile.impliedGameTotal ?? profile.impliedTeamTotal);
-  if (vegasTotal != null) {
-    const vegasAdj = round((vegasTotal - 8.5) * 0.08, 2);
-    breakdown.push(
-      buildBreakdownRow("Vegas total", vegasTotal, {
-        display: `O/U ${formatNumber(vegasTotal)}`,
-        contribution: vegasAdj,
-      })
-    );
-    projection = round(projection + vegasAdj, 1);
-  }
-
-  const weatherNote = profile.weatherNote || context.weatherNote || "";
-  if (weatherNote) {
-    const weatherAdj = /wind out|blowing out|hot|carry/i.test(weatherNote)
-      ? 0.15
-      : /wind in|cold|dome/i.test(weatherNote)
-        ? -0.12
-        : 0;
-    if (weatherAdj !== 0) {
-      breakdown.push(
-        buildBreakdownRow("Weather", weatherNote, {
-          display: weatherNote,
-          contribution: weatherAdj,
-        })
-      );
-      projection = round(projection + weatherAdj, 1);
-    }
-  }
 
   const dataStatus = resolveDataStatus({
     hasGameLogs: true,
@@ -432,12 +433,28 @@ function projectVerifiedHitterMarket(prop = {}, profile = {}, context = {}, mark
   const recent = data.last10Average ?? data.last5Average;
   const last5 = data.last5Average;
   const season = data.seasonAverage;
-  const core = last5 * 0.54 + season * 0.46;
+  const core = last5 != null && season != null ? last5 * 0.54 + season * 0.46 : last5 ?? season;
+
+  const matchupAdj = opponentPitcherAdjustment(data.opponentPitcherWhip);
+  const matchupRate = core != null ? round(core + matchupAdj, 2) : null;
+  const handAdj = handednessHitterAdjustment(data.handednessMatchup);
+  const handednessRate = core != null ? round(core + handAdj, 2) : null;
+  const orderAdj = battingOrderAdjustment(data.battingOrderNote);
+  const orderRate = core != null ? round(core + orderAdj, 2) : null;
+  const parkAdj = parkFactorAdjustment(data.parkFactorNote);
+  const weatherAdj = weatherAdjustment(data.weatherNote);
+  const parkWeatherRate = core != null ? round(core + parkAdj + weatherAdj, 2) : null;
+  const vegasAdj = vegasAdjustment(data.impliedGameTotal);
+  const vegasRate = core != null ? round(core + vegasAdj, 2) : null;
 
   const components = [
-    { label: "Last 10 avg", value: recent, weight: 0.28 },
-    { label: "Last 5 avg", value: last5, weight: 0.32 },
-    { label: "Season avg", value: season, weight: 0.2 },
+    { label: "Recent form (L10)", value: recent, weight: 0.35 },
+    { label: "Season baseline", value: season, weight: 0.2 },
+    { label: "Pitcher matchup", value: matchupRate ?? recent, weight: 0.15, display: data.opponentPitcherWhip != null ? `WHIP ${formatNumber(data.opponentPitcherWhip)}` : undefined },
+    { label: "Handedness split", value: handednessRate ?? recent, weight: 0.1, display: data.handednessMatchup || undefined },
+    { label: "Batting order", value: orderRate ?? recent, weight: 0.1, display: data.battingOrderNote || undefined },
+    { label: "Park / weather", value: parkWeatherRate ?? recent, weight: 0.05, display: data.parkFactorNote || data.weatherNote || undefined },
+    { label: "Vegas / game env", value: vegasRate ?? recent, weight: 0.05, display: data.impliedGameTotal != null ? `O/U ${formatNumber(data.impliedGameTotal)}` : undefined },
   ];
 
   components.forEach((part) => {
@@ -446,87 +463,33 @@ function projectVerifiedHitterMarket(prop = {}, profile = {}, context = {}, mark
       buildBreakdownRow(part.label, part.value, {
         weight: part.weight,
         contribution: round(part.value * part.weight, 2),
+        display: part.display,
       })
     );
   });
 
   let projection = weightedHitterProjection(components) ?? core;
 
-  const matchupAdj = opponentPitcherAdjustment(data.opponentPitcherWhip);
-  if (matchupAdj !== 0) {
-    breakdown.push(
-      buildBreakdownRow("Pitcher matchup", data.opponentPitcherWhip, {
-        display: data.opponentPitcherWhip != null ? `WHIP ${formatNumber(data.opponentPitcherWhip)}` : "Pitcher context",
-        contribution: matchupAdj,
-      })
-    );
-    projection = round(projection + matchupAdj, 1);
+  if (marketKey === "totalBases") {
+    const isoAdj = isoPowerAdjustment(data.isolatedPower, marketKey);
+    if (isoAdj !== 0) {
+      breakdown.push(
+        buildBreakdownRow("ISO power", data.isolatedPower, {
+          display: data.isolatedPower != null ? formatNumber(data.isolatedPower) : "Power context",
+          contribution: isoAdj,
+        })
+      );
+      projection = round(projection + isoAdj, 1);
+    }
   }
 
-  const handAdj = handednessHitterAdjustment(data.handednessMatchup);
-  if (handAdj !== 0 && data.handednessMatchup) {
+  if (data.opponentStarterNote) {
     breakdown.push(
-      buildBreakdownRow("Handedness split", data.handednessMatchup, {
-        display: data.handednessMatchup,
-        contribution: handAdj,
+      buildBreakdownRow("Opponent starter", data.opponentStarterNote, {
+        display: data.opponentStarterNote,
+        contribution: 0,
       })
     );
-    projection = round(projection + handAdj, 1);
-  }
-
-  const orderAdj = battingOrderAdjustment(data.battingOrderNote);
-  if (orderAdj !== 0 && data.battingOrderNote) {
-    breakdown.push(
-      buildBreakdownRow("Batting order", data.battingOrderNote, {
-        display: data.battingOrderNote,
-        contribution: orderAdj,
-      })
-    );
-    projection = round(projection + orderAdj, 1);
-  }
-
-  const parkAdj = parkFactorAdjustment(data.parkFactorNote);
-  if (parkAdj !== 0 && data.parkFactorNote) {
-    breakdown.push(
-      buildBreakdownRow("Park factor", data.parkFactorNote, {
-        display: data.parkFactorNote,
-        contribution: parkAdj,
-      })
-    );
-    projection = round(projection + parkAdj, 1);
-  }
-
-  const vegasAdj = vegasAdjustment(data.impliedGameTotal);
-  if (vegasAdj !== 0 && data.impliedGameTotal != null) {
-    breakdown.push(
-      buildBreakdownRow("Vegas total", data.impliedGameTotal, {
-        display: `O/U ${formatNumber(data.impliedGameTotal)}`,
-        contribution: vegasAdj,
-      })
-    );
-    projection = round(projection + vegasAdj, 1);
-  }
-
-  const weatherAdj = weatherAdjustment(data.weatherNote);
-  if (weatherAdj !== 0 && data.weatherNote) {
-    breakdown.push(
-      buildBreakdownRow("Weather", data.weatherNote, {
-        display: data.weatherNote,
-        contribution: weatherAdj,
-      })
-    );
-    projection = round(projection + weatherAdj, 1);
-  }
-
-  const isoAdj = isoPowerAdjustment(data.isolatedPower, marketKey);
-  if (isoAdj !== 0 && data.isolatedPower != null) {
-    breakdown.push(
-      buildBreakdownRow("ISO power", data.isolatedPower, {
-        display: formatNumber(data.isolatedPower),
-        contribution: isoAdj,
-      })
-    );
-    projection = round(projection + isoAdj, 1);
   }
 
   if (data.consistencyScore != null) {

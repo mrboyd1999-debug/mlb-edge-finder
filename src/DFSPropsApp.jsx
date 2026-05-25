@@ -140,7 +140,8 @@ import {
   enrichPlayerProfile,
   hasVerifiedStats,
 } from "./services/statEnrichment.js";
-import { shouldRouteMlbHitterToResearch } from "./services/mlbHitterConfidence.js";
+import { applyMlbProjectionToProp, isMlbVerifiedEngineMarket } from "./modules/mlbProjectionService.js";
+import { LIVE_BOARD_LOADING_STAGES, LIVE_BOARD_UNAVAILABLE_MESSAGE } from "./utils/liveBoardLoading.js";
 import { applySportMarketConfidenceCaps } from "./services/sportMarketConfidence.js";
 import { attachElitePickExplanation } from "./services/pickExplanation.js";
 import {
@@ -1197,7 +1198,11 @@ function enrichmentBackgroundFallback(label) {
   return { news: new Map(), warnings, timedOut: true };
 }
 
-async function fetchDFSProps({ platform = "both", sport = "all", statType = "all", onCoreReady } = {}) {
+async function fetchDFSProps({ platform = "both", sport = "all", statType = "all", onCoreReady, onProgress } = {}) {
+  const reportProgress = (stage) => {
+    if (typeof onProgress === "function") onProgress(stage);
+  };
+  reportProgress("FETCH");
   initRawResponseDebug();
   const fetchSport = getActiveFetchSport(sport);
   console.info("[DFS Source Audit] fetchDFSProps requested", {
@@ -1762,6 +1767,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     workingActiveProps = allDisplayProps;
   }
 
+  reportProgress("MATCH");
   const backgroundJobs = [
     { label: "sportsbook", run: () => fetchSportsbookComparison({ props: workingNormalProps }) },
     { label: "stats", run: () => fetchPlayerStats({ props: workingNormalProps }) },
@@ -1876,6 +1882,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   const historyRows = readHistory();
   scoringContext.historyRows = historyRows;
   const historyWeights = buildHistoryAccuracyWeights(historyRows);
+  reportProgress("PROJECT");
   const scoredProps = [];
   const scoreCache = new Map();
   for (let index = 0; index < workingNormalProps.length; index += 75) {
@@ -2096,6 +2103,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   });
   dumpDebugGlobals("fetchDFSProps");
 
+  reportProgress("RANK");
   return {
     props: uiPayload.props,
     allDisplayProps,
@@ -2171,6 +2179,7 @@ export default function DFSPropsApp() {
   const [degradedWarnings, setDegradedWarnings] = useState([]);
   const [sourceHealth, setSourceHealth] = useState({});
   const [loading, setLoading] = useState(true);
+  const [loadingStage, setLoadingStage] = useState("FETCH");
   const [error, setError] = useState("");
   const [history, setHistory] = useState(() => trimHistoryToLimit(readHistory()));
   const [parlayHistory, setParlayHistory] = useState(() => trimHistoryToLimit(readParlayHistory()));
@@ -2331,7 +2340,10 @@ export default function DFSPropsApp() {
       }
 
       loadInFlightRef.current = true;
-      if (!autoRefresh) setLoading(true);
+      if (!autoRefresh) {
+        setLoading(true);
+        setLoadingStage("FETCH");
+      }
       setError("");
       setLearningSaveNotice("");
       const fetchStartedAt = Date.now();
@@ -2359,6 +2371,7 @@ export default function DFSPropsApp() {
               platform: "both",
               sport: MLB_ONLY_MODE ? "MLB" : "all",
               statType: "all",
+              onProgress: (stage) => setLoadingStage(stage),
               onCoreReady: (coreBoard) => {
                 const hasProps =
                   coreBoard.allDisplayProps?.length || coreBoard.props?.length || coreBoard.usableProps?.length;
@@ -3629,6 +3642,7 @@ export default function DFSPropsApp() {
             loadedPropCount={topMlbPlayBoard.loadedPropCount || allDisplayProps.length}
             showDebugPanels={debugPanelsVisible}
             loading={loading}
+            loadingStage={loadingStage}
             onOpen={setSelectedEvaluation}
             onSectionError={handleSectionRenderError}
           />
@@ -3892,19 +3906,14 @@ function ParlayLegCard({ prop, onOpen, compactMode = true }) {
 }
 
 function boardEmptyMessage({ loading, sport = "all", sourceStatus = {}, platform = "all", criticalWarnings = [] }) {
-  if (loading) return "Loading active PrizePicks and Underdog lines.";
+  if (loading) return LIVE_BOARD_LOADING_STAGES.FETCH;
   const sportLabel = sport === "all" ? "any sport" : sport;
   const htmlIssue = criticalWarnings.some((warning) => /html|non-json|javascript/i.test(warning));
   const ppFailed = sourceStatus.PrizePicks === "Failed";
   const udFailed = sourceStatus.Underdog === "Failed";
 
-  if (htmlIssue) return "API returned non-JSON/HTML response. Check proxy routes and run dev with API proxy enabled.";
-  if (ppFailed && platform !== "underdog") return `PrizePicks data failed to load${sport !== "all" ? ` for ${sportLabel}` : ""}. See warnings above for status/content-type details.`;
-  if (udFailed && platform === "underdog") return `Underdog data failed to load${sport !== "all" ? ` for ${sportLabel}` : ""}. See warnings above.`;
-  if (ppFailed || udFailed) {
-    const failed = [ppFailed ? "PrizePicks" : null, udFailed ? "Underdog" : null].filter(Boolean).join(" + ");
-    return `${failed} data failed to load. Refresh or check the API proxy.`;
-  }
+  if (htmlIssue) return LIVE_BOARD_UNAVAILABLE_MESSAGE;
+  if (ppFailed && udFailed) return LIVE_BOARD_UNAVAILABLE_MESSAGE;
   if (sport !== "all") return `No active ${sport} props scheduled today for ${platform === "all" ? "these platforms" : platform}.`;
   return "No active scheduled props found.";
 }
@@ -3933,22 +3942,40 @@ function scoreDFSProp(prop, context) {
     ? statModel.projectionSource
     : projectionResult.source;
   const projectionReasoning = statModel.projectionReasoning || [];
-  const projectionBreakdown = statModel.projectionBreakdown || [];
-  const projectionLabel = statModel.projectionLabel || (statModel.isFallbackProjection ? "Projection unavailable" : "Stat-based projection");
-  const isFallbackProjection = Boolean(statModel.isFallbackProjection);
-  const dataStatus = statModel.dataStatus || null;
-  const projectionConfidence = statModel.projectionConfidence ?? null;
-  const isVerifiedProjection = Boolean(statModel.isVerifiedProjection);
-  if (!Number.isFinite(projection) && verifiedStats) {
-    if (Number.isFinite(enriched?.last5Average)) {
-      projection = enriched.last5Average;
-      projectionSource = "player-stats-estimate";
-    } else if (Number.isFinite(enriched?.seasonAverage)) {
-      projection = enriched.seasonAverage;
-      projectionSource = "player-stats-estimate";
-    }
+  let projectionBreakdown = statModel.projectionBreakdown || [];
+  let projectionLabel = statModel.projectionLabel || (statModel.isFallbackProjection ? "Projection unavailable" : "Stat-based projection");
+  let isFallbackProjection = Boolean(statModel.isFallbackProjection);
+  let dataStatus = statModel.dataStatus || null;
+  let projectionConfidence = statModel.projectionConfidence ?? null;
+  let isVerifiedProjection = Boolean(statModel.isVerifiedProjection);
+
+  let mlbVerifiedModel = null;
+  if (String(prop.sport || "").toUpperCase() === "MLB" && isMlbVerifiedEngineMarket(prop.statType)) {
+    mlbVerifiedModel = applyMlbProjectionToProp(
+      { ...prop, line },
+      enriched,
+      {
+        opponentContext: enriched?.opponentContext,
+        impliedGameTotal: enriched?.impliedGameTotal,
+        weatherNote: enriched?.weatherNote,
+        opponentStarterNote: enriched?.opponentStarterNote,
+      }
+    );
+    projection = mlbVerifiedModel.projection;
+    projectionSource = mlbVerifiedModel.projectionSource;
+    projectionBreakdown = mlbVerifiedModel.projectionBreakdown || projectionBreakdown;
+    projectionLabel = mlbVerifiedModel.projectionLabel || projectionLabel;
+    isFallbackProjection = mlbVerifiedModel.isFallbackProjection;
+    isVerifiedProjection = mlbVerifiedModel.isVerifiedProjection;
+    dataStatus = mlbVerifiedModel.dataStatus || dataStatus;
+    projectionConfidence = mlbVerifiedModel.confidence ?? projectionConfidence;
   }
-  if (!verifiedStats && !manualStats) {
+
+  if (!Number.isFinite(projection) || projection <= 0) {
+    projection = null;
+    projectionSource = "missing";
+  }
+  if (!verifiedStats && !manualStats && !mlbVerifiedModel?.isVerifiedProjection) {
     projection = Number.isFinite(projection) && projectionSource !== "line-neutral" ? projection : null;
     if (!Number.isFinite(projection)) projectionSource = "missing";
   }
@@ -3959,6 +3986,19 @@ function scoreDFSProp(prop, context) {
     dfsLine: line,
     sportsbookLine: Number.isFinite(sportsbookLine) && sportsbookLine > 0 ? sportsbookLine : null,
   });
+
+  if (mlbVerifiedModel?.isVerifiedProjection && !mlbVerifiedModel.passPlay && mlbVerifiedModel.recommendedSide) {
+    edgeResult = {
+      edge: mlbVerifiedModel.edge || 0,
+      bestPick: mlbVerifiedModel.recommendedSide,
+      rawEdge: mlbVerifiedModel.rawEdge || 0,
+      sportsbookEdge: null,
+      dfsEdge: mlbVerifiedModel.edge || 0,
+      edgeLine: line,
+    };
+  } else if (mlbVerifiedModel?.projectionUnavailable || mlbVerifiedModel?.passPlay) {
+    edgeResult = { edge: 0, bestPick: "", rawEdge: 0, sportsbookEdge: null, dfsEdge: null, edgeLine: line };
+  }
 
   if (!edgeResult.bestPick && !edgeResult.edge) {
     const edgeResolved = resolvePickEdge({
@@ -3988,9 +4028,9 @@ function scoreDFSProp(prop, context) {
     projectionSource = "missing";
   }
   const hasProjection = Number.isFinite(projection) && projection > 0;
-  const bestPick = edgeResult.bestPick || "";
-  let edge = edgeResult.edge || 0;
-  if (edge <= 0 && hasProjection && Number.isFinite(line)) {
+  const bestPick = mlbVerifiedModel?.recommendedSide || edgeResult.bestPick || "";
+  let edge = mlbVerifiedModel?.edge ?? edgeResult.edge ?? 0;
+  if (!mlbVerifiedModel && edge <= 0 && hasProjection && Number.isFinite(line)) {
     const fallbackDiff = Math.abs(projection - line);
     if (fallbackDiff >= 0.01) {
       edge = round(fallbackDiff);
@@ -4340,9 +4380,21 @@ function scoreDFSProp(prop, context) {
     projectionBreakdown,
     projectionLabel,
     isFallbackProjection,
-    dataStatus: statModel.dataStatus || null,
-    projectionConfidence: statModel.projectionConfidence ?? null,
+    dataStatus: dataStatus || statModel.dataStatus || null,
+    projectionConfidence: projectionConfidence ?? statModel.projectionConfidence ?? null,
     isVerifiedProjection,
+    modelPick: mlbVerifiedModel?.modelPick || (bestPick ? String(bestPick).toUpperCase() : null),
+    passPlay: Boolean(mlbVerifiedModel?.passPlay),
+    projectionUnavailable: Boolean(mlbVerifiedModel?.projectionUnavailable),
+    modelReasons: mlbVerifiedModel?.modelReasons || null,
+    displayStatus: mlbVerifiedModel?.displayStatus || null,
+    statusMessage: mlbVerifiedModel?.statusMessage || null,
+    whyThisPick: mlbVerifiedModel?.whyThisPick || qualificationReason,
+    analyticsReason: mlbVerifiedModel?.analyticsReason || reasoningSummary,
+    edgePercent: mlbVerifiedModel?.edgePercent ?? prop.edgePercent ?? null,
+    manualVolatilityScore: mlbVerifiedModel?.volatility?.score ?? null,
+    volatilityLabel: mlbVerifiedModel?.volatilityLabel || null,
+    riskLevel: mlbVerifiedModel?.risk || riskLevel,
     statProfileSource: enriched?.source || "",
     statEnrichmentSources: enriched?.statSources || [],
     fallbackProfile: profileIsFallback,

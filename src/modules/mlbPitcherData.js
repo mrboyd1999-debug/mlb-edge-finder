@@ -95,6 +95,30 @@ export function handednessBoostFromNote(note = "") {
   return 0;
 }
 
+export function homeAwaySplitFromStartRows(rows = [], marketKey = "") {
+  const home = [];
+  const away = [];
+  rows.slice(0, 10).forEach((row) => {
+    const isHome = row.isHome === true || row.home === true || String(row.game?.homeAway || "").toLowerCase() === "home";
+    const value = statValueFromRow(row, marketKey);
+    if (!Number.isFinite(value)) return;
+    if (isHome) home.push(value);
+    else away.push(value);
+  });
+  if (home.length < 2 || away.length < 2) return null;
+  const homeAvg = average(home);
+  const awayAvg = average(away);
+  if (homeAvg == null || awayAvg == null) return null;
+  const delta = round(homeAvg - awayAvg, 2);
+  if (Math.abs(delta) < 0.15) return "Neutral home/away split";
+  return delta > 0 ? `Home split stronger (+${Math.abs(delta)})` : `Away split stronger (+${Math.abs(delta)})`;
+}
+
+export function isProbableStarter(startRows = []) {
+  const recentStarts = startRows.slice(0, 5).filter(isPitcherStartRow);
+  return recentStarts.length >= 3;
+}
+
 export function isMlbVerifiedSource(profile = {}) {
   if (profile.sparse || profile.fallback) return false;
   const source = String(profile.source || "");
@@ -127,6 +151,10 @@ export function buildMlbPitcherDataPackage(prop = {}, profile = {}, context = {}
   const opponent = context.opponentContext || profile.opponentContext || {};
   const handednessMatchup = profile.handednessMatchup || "";
   const handednessBoost = handednessBoostFromNote(handednessMatchup);
+  const homeAwaySplit = profile.homeAwaySplit || homeAwaySplitFromStartRows(startRows, marketKey);
+  const probableStarterConfirmed = profile.probableStarterConfirmed ?? isProbableStarter(startRows);
+  const parkFactorNote = profile.parkFactorNote || "";
+  const weatherNote = profile.weatherNote || context.weatherNote || "";
 
   const hasGameLogs = Boolean(
     profile.hasGameLogs || statValues.length >= 3 || (startRows.length >= 3 && isMlbVerifiedSource(profile))
@@ -157,6 +185,10 @@ export function buildMlbPitcherDataPackage(prop = {}, profile = {}, context = {}
     opponentStrikeoutRate: finiteNumber(opponent.strikeoutsPerGame),
     handednessMatchup,
     handednessBoost,
+    homeAwaySplit,
+    probableStarterConfirmed,
+    parkFactorNote,
+    weatherNote,
     hasGameLogs,
     hasCoreRates,
     hasOpponent,

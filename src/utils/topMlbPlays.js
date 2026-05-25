@@ -17,7 +17,8 @@ import {
 } from "./mlbRankableProp.js";
 import { sortTopMlbPlays } from "./topMlbPlaysRanking.js";
 import { resolveCuratedGoblinDemonBoards } from "./goblinDemonPairs.js";
-import { buildDemoMlbProps, DEMO_FALLBACK_LABEL } from "./mlbDemoFallback.js";
+import { filterMlbRecommendableProps, MLB_BEST_PLAYS_LIMIT, MLB_STRONG_LEANS_LIMIT, selectMlbStrongLeans, selectMlbVerifiedBestBets, sortMlbVerifiedProps } from "../modules/mlbBestBets.js";
+import { LIVE_BOARD_UNAVAILABLE_MESSAGE } from "./liveBoardLoading.js";
 import { preparePropsForRanking } from "./mlbPropPrep.js";
 import { buildPipelineDebugSnapshot, logPipelineStage } from "./mlbPipelineDebug.js";
 import { filterDemonCandidates, filterGoblinCandidates } from "./goblinDemonClassifier.js";
@@ -27,7 +28,8 @@ import { applyCrossSectionPlayerCap } from "./sectionPlayerDedupe.js";
 import { buildLiveFetchFailureSummary } from "./liveFetchAudit.js";
 
 export const TOP_MLB_PLAYS_LIMIT = 20;
-export const SECTION_BEST_PLAYS = 4;
+export const SECTION_BEST_PLAYS = MLB_BEST_PLAYS_LIMIT;
+export const SECTION_STRONG_LEANS = MLB_STRONG_LEANS_LIMIT;
 export const SECTION_STREAK = 2;
 export const SECTION_GOBLINS = 6;
 export const SECTION_DEMONS = 6;
@@ -55,11 +57,6 @@ function mergeInputProps(displayProps = [], rawProps = [], parsedUnderdogProps =
 
 function countLiveVerifiedProps(props = []) {
   return (props || []).filter((prop) => !prop.isDemoData && isVerifiedSportsbookProp(prop)).length;
-}
-
-function shouldUseDemoFallback(liveVerifiedCount = 0, options = {}) {
-  if (liveVerifiedCount > 0) return false;
-  return Boolean(options.fetchTimedOut || options.liveFetchFailed || options.allSourcesEmpty);
 }
 
 function buildTopMlbPlayPool(displayProps = [], rawProps = [], parsedUnderdogProps = [], { relaxed = false } = {}) {
@@ -278,33 +275,19 @@ export function resolveTopMlbPlaySections(
   }
 
   if (!ranked.length && displayProps.length) {
-    const baseFeedPool = displayProps.filter(isVerifiedSportsbookProp).slice(0, 150);
-    ranked = rankPool(baseFeedPool, { relaxed: true, liveLine: true });
+    const verifiedPool = filterMlbRecommendableProps(displayProps.map((prop) => enrichPropWithSideEvaluation(prop)));
+    ranked = sortMlbVerifiedProps(verifiedPool).map((prop, idx) =>
+      annotateTopPlay(prop, idx + 1, { allowRelaxed: false, allowLiveLine: false })
+    ).filter(Boolean);
     if (ranked.length) {
-      usedFallback = true;
-      fallbackLabel = "Base Feed Projection";
+      usedFallback = false;
+      fallbackLabel = "";
     }
-    logPipelineStage("rank.baseFeed", { pool: baseFeedPool.length, ranked: ranked.length });
-  }
-
-  const sportsDataProps = mergedInput.filter(isSportsDataProjectionProp);
-  if (!ranked.length && sportsDataProps.length) {
-    ranked = rankPool(sportsDataProps, { relaxed: true });
-    usedFallback = true;
-    fallbackLabel = "SportsDataIO projection lines";
-    logPipelineStage("rank.sportsdata", { pool: sportsDataProps.length, ranked: ranked.length });
-  }
-
-  if (!ranked.length && shouldUseDemoFallback(liveVerifiedCount, options) && !sportsDataProps.length) {
-    ranked = buildDemoMlbProps(12);
-    usedFallback = true;
-    isDemoBoard = true;
-    fallbackLabel = DEMO_FALLBACK_LABEL;
-    logPipelineStage("rank.demo", { count: ranked.length, reason: fetchFailureReasons.join("; ") || "no live props" });
+    logPipelineStage("rank.verifiedOnly", { pool: verifiedPool.length, ranked: ranked.length });
   }
 
   const unifiedRanked = normalizeUnifiedProps(ranked, enrichForBoard);
-  ranked = unifiedRanked;
+  ranked = unifiedRanked.filter((prop) => !prop.isDemoData);
 
   const payoutBoards = resolveCuratedGoblinDemonBoards(displayProps, rawProps, {
     goblinLimit: SECTION_GOBLINS,
@@ -338,7 +321,9 @@ export function resolveTopMlbPlaySections(
     allowDemo: isDemoBoard,
   });
 
-  const bestPlays = ranked.slice(0, SECTION_BEST_PLAYS);
+  const verifiedRanked = filterMlbRecommendableProps(ranked);
+  const bestPlays = selectMlbVerifiedBestBets(verifiedRanked.length ? verifiedRanked : ranked, SECTION_BEST_PLAYS);
+  const strongLeans = selectMlbStrongLeans(verifiedRanked.length ? verifiedRanked : ranked, SECTION_STRONG_LEANS);
   const streakPlays = fillMinimum(
     ranked.filter((p) => p.recommendedSide === "UNDER").slice(0, SECTION_STREAK),
     ranked,
@@ -361,9 +346,15 @@ export function resolveTopMlbPlaySections(
   let sections = [
     {
       id: "best-plays",
-      title: "Best Plays",
-      eyebrow: isDemoBoard ? fallbackLabel : "Top verified MLB edges",
+      title: "Best MLB Plays",
+      eyebrow: "Top verified MLB edges",
       picks: bestPlays,
+    },
+    {
+      id: "strong-leans",
+      title: "Strong Leans",
+      eyebrow: "Verified model sides",
+      picks: strongLeans,
     },
     { id: "streak-plays", title: "Streak Plays", eyebrow: "Strongest unders", picks: streakPlays },
     { id: "goblins", title: "Goblins", eyebrow: "Safer payout lines", picks: goblins },
@@ -403,9 +394,14 @@ export function resolveTopMlbPlaySections(
 
   return {
     waitingForProjections: false,
-    usedFallback: usedFallback || isDemoBoard,
+    usedFallback,
     fallbackLabel: usedFallback ? fallbackLabel : "",
-    fetchFailureReasons,
+    fetchFailureReasons:
+      fetchFailureReasons.length || ranked.length
+        ? fetchFailureReasons
+        : liveVerifiedCount === 0
+          ? [LIVE_BOARD_UNAVAILABLE_MESSAGE]
+          : fetchFailureReasons,
     isLive: liveVerifiedCount > 0 && !isDemoBoard,
     pipelineDebug,
     sections: nonEmptySections.length ? nonEmptySections : sections,
