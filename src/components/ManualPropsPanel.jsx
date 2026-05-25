@@ -115,27 +115,46 @@ function ManualPropsPanel({
     handleAnalyzeManualProp();
   }
 
-  const renderCard = (prop, index) => (
-    <div key={prop.id || index} style={{ display: "grid", gap: "4px" }}>
-      <PlayerPropCard prop={prop} onOpen={onOpenProp} rank={index + 1} compact={compactMode} />
-      <div style={styles.manualPropMetaRow}>
-        <span style={styles.manualPropReason}>
-          {shortReason(prop) || prop.qualificationReason || prop.whyThisPick || MANUAL_OFFLINE_REASON}
-        </span>
-        <div style={styles.manualPropActions}>
-          <button type="button" style={styles.secondaryButtonSmall} onClick={() => handleEditProp(prop)}>
-            Edit
-          </button>
-          <button type="button" style={styles.secondaryButtonSmall} onClick={() => onSavePick?.(prop)}>
-            Save
-          </button>
-          <button type="button" style={styles.dangerButtonSmall} onClick={() => onRemoveProp?.(prop.id)}>
-            Remove
-          </button>
+  const renderCard = (prop, index) => {
+    try {
+      if (!prop || typeof prop !== "object") {
+        throw new Error("Invalid manual prop payload");
+      }
+      return (
+        <div key={prop.id || index} style={{ display: "grid", gap: "4px" }}>
+          <PlayerPropCard prop={prop} onOpen={onOpenProp} rank={index + 1} compact={compactMode} />
+          <div style={styles.manualPropMetaRow}>
+            <span style={styles.manualPropReason}>
+              {shortReason(prop) || prop.qualificationReason || prop.whyThisPick || MANUAL_OFFLINE_REASON}
+            </span>
+            <div style={styles.manualPropActions}>
+              <button type="button" style={styles.secondaryButtonSmall} onClick={() => handleEditProp(prop)}>
+                Edit
+              </button>
+              <button type="button" style={styles.secondaryButtonSmall} onClick={() => onSavePick?.(prop)}>
+                Save
+              </button>
+              <button type="button" style={styles.dangerButtonSmall} onClick={() => onRemoveProp?.(prop.id)}>
+                Remove
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
-  );
+      );
+    } catch (err) {
+      console.error("Manual analyzer failed:", err);
+      return (
+        <div
+          key={prop?.id || `manual-prop-error-${index}`}
+          style={{ ...styles.compactPanel, borderColor: "#991b1b", padding: "10px" }}
+          role="alert"
+        >
+          <strong style={{ color: "#fca5a5" }}>Manual prop card failed</strong>
+          <p style={{ ...styles.compactFlags, margin: "4px 0 0" }}>{err?.message || "Render error"}</p>
+        </div>
+      );
+    }
+  };
 
   return (
     <div className="manual-props-panel" style={styles.manualPropsPanel}>

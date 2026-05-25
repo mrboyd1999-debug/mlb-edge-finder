@@ -9,6 +9,7 @@ import { isReadyToBet } from "../services/pickScoring.js";
 import { dynamicAcceptanceTier, getVolatilityLabel } from "../services/propQualityGates.js";
 import { riskAccentStyle } from "../utils/displayPropScoring.js";
 import MlbPipelineFailureBlock from "./MlbPipelineFailureBlock.jsx";
+import { isManualAnalyzerProp } from "../utils/manualPropBuilder.js";
 import { shouldShowMlbPipelineFailure } from "../utils/mlbPipelineFailureDisplay.js";
 import {
   AWAITING_PROJECTION_STATUS,

@@ -61,7 +61,14 @@ export const DEFAULT_MANUAL_FORM = {
 };
 
 export function isManualAnalyzerProp(prop = {}) {
-  return Boolean(prop?.isManualAnalyzer || prop?.manualAnalyzer);
+  if (!prop) return false;
+  return Boolean(
+    prop.isManualAnalyzer ||
+      prop.manualAnalyzer ||
+      prop.manual === true ||
+      prop.mode === "manual" ||
+      prop.analyzerSource
+  );
 }
 
 export function validateManualForm(form = {}) {
@@ -334,6 +341,8 @@ export function buildManualPropFromInput(form = {}) {
       lineSourceBadge: "MANUAL",
       isManualAnalyzer: true,
       manualAnalyzer: true,
+      manual: true,
+      mode: "manual",
       analyzerSource: true,
       sportsbookVerified: true,
       verifiedBadge: "MANUAL",
