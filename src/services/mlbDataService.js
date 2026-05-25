@@ -19,9 +19,12 @@ import {
   completeTrace,
   createPropTrace,
   failTrace,
+  getFetchPropTrace,
   markStage,
+  mergeLiveAndFetchTraces,
   MLB_FAILURE,
   MLB_STAGE,
+  storeFetchPropTrace,
 } from "./mlbPropPipelineTrace.js";
 import { recordPropDebug } from "./mlbPipelineDebug.js";
 import {
@@ -568,6 +571,7 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
     matchedPlayer: match.player.fullName,
     playerId: match.player.id,
     matchConfidence: match.confidence,
+    apiStatusCode: match.apiStatusCode ?? 200,
   });
 
   let bundle;
@@ -602,6 +606,7 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
   markStage(trace, MLB_STAGE.LOGS_FETCHED, {
     logs: bundle.splits.slice(0, 3),
     logsCount: bundle.splits.length,
+    apiStatusCode: 200,
   });
 
   let pitcherStats = null;
@@ -726,7 +731,14 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
     last5: profile.last5Average,
     season: profile.seasonAverage,
     sampleSize: profile.sampleSize,
+    logsCount: relevantSplits.length,
+    playerId: trace.playerId || profile.mlbId || bundle.mlbId,
+    apiStatusCode: 200,
   });
+  trace.logsCount = profile.sampleSize ?? relevantSplits.length;
+  trace.playerId = trace.playerId || profile.mlbId || bundle.mlbId;
+  trace.apiStatusCode = 200;
+  storeFetchPropTrace(prop, trace);
 
   logMlbData("prop.profile", {
     player: prop.playerName,
@@ -894,17 +906,19 @@ export function traceLiveBoardMlbProp(prop = {}, profile = {}, model = {}, conte
     failTrace(
       trace,
       profile ? MLB_FAILURE.MISSING_STAT_VALUES : MLB_FAILURE.EMPTY_GAME_LOGS,
-      profile?.source || "No stats profile found in live board context",
+      profile?.source || profile?.sparseReason || "No stats profile found in live board context",
       MLB_STAGE.NORMALIZED
     );
-    recordPropDebug(prop, trace);
-    return trace;
+    const merged = mergeLiveAndFetchTraces(trace, getFetchPropTrace(prop), profile || {});
+    recordPropDebug(prop, merged);
+    return merged;
   }
 
   trace.matchedPlayer = profile.playerName || prop.playerName;
   trace.playerId = profile.mlbId || profile.playerId || null;
   trace.logsCount = profile.sampleSize ?? profile.splits?.length ?? 0;
   trace.logs = (profile.splits || profile.gradingRows || []).slice(0, 3);
+  trace.apiStatusCode = profile.apiStatusCode ?? 200;
   trace.pitcherStats = {
     last5: profile.last5Average,
     season: profile.seasonAverage,
@@ -913,9 +927,11 @@ export function traceLiveBoardMlbProp(prop = {}, profile = {}, model = {}, conte
   trace.opponentStats = profile.opponentContext || context.opponentContext || null;
   markStage(trace, MLB_STAGE.PROFILE_BUILT, {
     matchedPlayer: trace.matchedPlayer,
+    playerId: trace.playerId,
     logsCount: trace.logsCount,
     last5: profile.last5Average,
     season: profile.seasonAverage,
+    apiStatusCode: trace.apiStatusCode,
   });
 
   trace.projection = model.projection ?? null;
@@ -927,7 +943,7 @@ export function traceLiveBoardMlbProp(prop = {}, profile = {}, model = {}, conte
     failTrace(
       trace,
       MLB_FAILURE.PROJECTION_BUILD_FAILED,
-      model.statusMessage || "Verified projection not produced from live board profile",
+      model.statusMessage || model.dataStatus || "Verified projection not produced from live board profile",
       MLB_STAGE.PROFILE_BUILT
     );
     recordPropDebug(prop, trace);
@@ -948,6 +964,7 @@ export function traceLiveBoardMlbProp(prop = {}, profile = {}, model = {}, conte
     edge: trace.edge,
     confidence: trace.confidence,
     recommendation: trace.recommendation,
+    apiStatusCode: trace.apiStatusCode ?? 200,
   });
   recordPropDebug(prop, trace);
   return trace;

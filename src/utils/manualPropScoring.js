@@ -970,6 +970,9 @@ export function mergeManualPropScoring(builtProp = {}, manualScore = {}, liveSco
     hitChanceLabel: manualScore.hitChanceLabel || (manualScore.impliedHitChance == null ? INSUFFICIENT_DATA_LABEL : null),
     displayStatus: manualScore.displayStatus || (manualScore.projectionUnavailable ? NO_VERIFIED_PLAY_STATUS : null),
     statusMessage: manualScore.statusMessage || (manualScore.projectionUnavailable ? AWAITING_PROJECTION_STATUS : null),
+    pipelineDebugLine: liveScored?.pipelineDebugLine || manualScore.pipelineDebugLine || null,
+    pipelineFailureCode: liveScored?.pipelineFailureCode || manualScore.pipelineFailureCode || null,
+    mlbPipelineTrace: liveScored?.mlbPipelineTrace || manualScore.mlbPipelineTrace || null,
     modelPick:
       manualScore.projectionUnavailable
         ? NO_VERIFIED_PLAY_STATUS

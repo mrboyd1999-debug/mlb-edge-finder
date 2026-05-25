@@ -10,7 +10,7 @@ import { resolveSourceHealthState, resolveFetchHealthBadge, summarizeSourceCount
 import { enrichLineMovementWithTags } from "./services/lineMovementTrust.js";
 import { fetchSportsbookComparison } from "./services/sportsbookOdds";
 import { fetchOddsApiDisplayProps } from "./services/oddsApiPlayerProps.js";
-import { fetchPlayerStats, findStatProfile } from "./services/playerStats";
+import { fetchPlayerStats, findStatProfile, statProfileKey } from "./services/playerStats";
 import { PRIZEPICKS_HTML_BANNER } from "./services/prizepicks";
 import { fetchInjuryNews } from "./services/injuryNews";
 import { clearApiCache, getRefreshCooldownMs, isDevEnvironment } from "./services/fetchUtil";
@@ -142,6 +142,8 @@ import {
 } from "./services/statEnrichment.js";
 import { applyMlbProjectionToProp, isMlbVerifiedEngineMarket } from "./modules/mlbProjectionService.js";
 import { logMlbData, traceLiveBoardMlbProp } from "./services/mlbDataService.js";
+import { buildCardPipelineDebug } from "./services/mlbPropPipelineTrace.js";
+import { normalizeSportsbookName } from "./services/playerMatcher.js";
 import { LIVE_BOARD_LOADING_STAGES, LIVE_BOARD_UNAVAILABLE_MESSAGE } from "./utils/liveBoardLoading.js";
 import { applySportMarketConfidenceCaps } from "./services/sportMarketConfidence.js";
 import { attachElitePickExplanation } from "./services/pickExplanation.js";
@@ -2573,11 +2575,16 @@ export default function DFSPropsApp() {
     }
   }, [appView]);
 
-  const scoreManualAnalyzerProp = useCallback((prop) => {
+  const scoreManualAnalyzerProp = useCallback((prop, profileOverride = null) => {
     const base = scoringContextRef.current || {};
     const asMap = (value) => (value instanceof Map ? value : new Map());
+    const stats = asMap(base.stats);
+    if (profileOverride && !profileOverride.sparse && !profileOverride.fallback) {
+      const key = statProfileKey(prop);
+      stats.set(key, { ...profileOverride, sport: prop.sport || "MLB", statType: prop.statType });
+    }
     const context = {
-      stats: asMap(base.stats),
+      stats,
       news: asMap(base.news),
       lineComparisonMap: asMap(base.lineComparisonMap),
       sportsbookComparisonMap: asMap(base.sportsbookComparisonMap),
@@ -3951,7 +3958,10 @@ function scoreDFSProp(prop, context) {
   let isVerifiedProjection = Boolean(statModel.isVerifiedProjection);
 
   let mlbVerifiedModel = null;
-  if (String(prop.sport || "").toUpperCase() === "MLB" && isMlbVerifiedEngineMarket(prop.statType)) {
+  let mlbPipelineTrace = null;
+  const isMlbProp = String(prop.sport || "").toUpperCase() === "MLB";
+  const mlbVerifiedMarket = isMlbVerifiedEngineMarket(prop.statType);
+  if (isMlbProp && mlbVerifiedMarket) {
     mlbVerifiedModel = applyMlbProjectionToProp(
       { ...prop, line },
       enriched,
@@ -3970,7 +3980,7 @@ function scoreDFSProp(prop, context) {
     isVerifiedProjection = mlbVerifiedModel.isVerifiedProjection;
     dataStatus = mlbVerifiedModel.dataStatus || dataStatus;
     projectionConfidence = mlbVerifiedModel.confidence ?? projectionConfidence;
-    traceLiveBoardMlbProp(
+    mlbPipelineTrace = traceLiveBoardMlbProp(
       { ...prop, line },
       enriched,
       mlbVerifiedModel,
@@ -3993,8 +4003,26 @@ function scoreDFSProp(prop, context) {
       confidence: mlbVerifiedModel.confidence,
       verified: mlbVerifiedModel.isVerifiedProjection,
       reason: mlbVerifiedModel.projectionUnavailable ? mlbVerifiedModel.statusMessage : null,
+      pipelineCode: mlbPipelineTrace?.failureCode,
     });
+  } else if (isMlbProp) {
+    mlbPipelineTrace = {
+      failureCode: null,
+      failureReason: mlbVerifiedMarket ? null : `Market "${prop.statType}" not in verified MLB engine`,
+      normalizedName: null,
+      lastSuccessfulStage: null,
+    };
   }
+
+  const mlbPipelineDebug = isMlbProp
+    ? buildCardPipelineDebug(mlbPipelineTrace || {}, {
+        projectionNotCalled: !mlbVerifiedMarket,
+        normalizedName: mlbPipelineTrace?.normalizedName || normalizeSportsbookName(prop.playerName),
+        failureReason:
+          mlbPipelineTrace?.failureReason ||
+          (!mlbVerifiedMarket ? `Market "${prop.statType}" not in verified MLB engine` : null),
+      })
+    : null;
 
   if (!Number.isFinite(projection) || projection <= 0) {
     projection = null;
@@ -4519,6 +4547,9 @@ function scoreDFSProp(prop, context) {
       lineMovement: movement,
     }),
     payoutLabel: propPayoutLabel(prop),
+    pipelineFailureCode: mlbPipelineDebug?.pipelineFailureCode || null,
+    pipelineDebugLine: mlbPipelineDebug?.pipelineDebugLine || null,
+    mlbPipelineTrace: mlbPipelineDebug?.mlbPipelineTrace || mlbPipelineTrace || null,
   }, { historyRows: context.historyRows || [] });
     return isEliteTopPickEligible(decision) ? attachElitePickExplanation(decision) : decision;
   })();

@@ -287,7 +287,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
                   </span>
                 </div>
                 <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, marginTop: "2px", color: "#94a3b8" }}>
-                  {prop.statusMessage || AWAITING_PROJECTION_STATUS}
+                  {prop.pipelineDebugLine || prop.statusMessage || AWAITING_PROJECTION_STATUS}
                 </p>
                 {projVsLine ? (
                   <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, color: "#64748b" }}>

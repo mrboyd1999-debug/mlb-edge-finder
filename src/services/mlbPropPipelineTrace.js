@@ -1,4 +1,16 @@
 /** Structured MLB prop pipeline trace — failure codes, stages, debug store. */
+import { statProfileKey } from "../utils/playerNames.js";
+
+/** User-facing card codes (exactly one per prop). */
+export const MLB_CARD_CODE = {
+  PLAYER_NOT_MATCHED: "PLAYER_NOT_MATCHED",
+  API_KEY_MISSING: "API_KEY_MISSING",
+  API_FETCH_FAILED: "API_FETCH_FAILED",
+  EMPTY_GAME_LOGS: "EMPTY_GAME_LOGS",
+  INVALID_RESPONSE_SCHEMA: "INVALID_RESPONSE_SCHEMA",
+  PROJECTION_NOT_CALLED: "PROJECTION_NOT_CALLED",
+  PROJECTION_SUCCESS: "PROJECTION_SUCCESS",
+};
 
 export const MLB_FAILURE = {
   INVALID_LINE: "INVALID_LINE",
@@ -27,6 +39,89 @@ export const MLB_STAGE = {
 
 const MAX_TRACES = 60;
 const traceStore = [];
+const fetchTraceByKey = new Map();
+
+export function storeFetchPropTrace(prop = {}, trace = {}) {
+  if (!prop || !trace) return;
+  const key = statProfileKey(prop);
+  if (!key) return;
+  fetchTraceByKey.set(key, { ...trace, recordedAt: new Date().toISOString() });
+  if (typeof window !== "undefined") {
+    window.__MLB_PROP_FETCH_TRACES__ = Object.fromEntries(fetchTraceByKey);
+  }
+}
+
+export function getFetchPropTrace(prop = {}) {
+  return fetchTraceByKey.get(statProfileKey(prop)) || null;
+}
+
+export function toCardPipelineCode(internalCode = "", { projectionNotCalled = false, failureReason = "" } = {}) {
+  if (projectionNotCalled) return MLB_CARD_CODE.PROJECTION_NOT_CALLED;
+  const reason = String(failureReason || "").toLowerCase();
+  if (/api[_\s-]?key|not configured|missing key/.test(reason)) return MLB_CARD_CODE.API_KEY_MISSING;
+  if (internalCode === MLB_FAILURE.SUCCESS) return MLB_CARD_CODE.PROJECTION_SUCCESS;
+  if (internalCode === MLB_FAILURE.PLAYER_NOT_MATCHED) return MLB_CARD_CODE.PLAYER_NOT_MATCHED;
+  if (internalCode === MLB_FAILURE.MLB_API_FAILED) return MLB_CARD_CODE.API_FETCH_FAILED;
+  if (
+    internalCode === MLB_FAILURE.EMPTY_GAME_LOGS ||
+    internalCode === MLB_FAILURE.INSUFFICIENT_MARKET_LOGS ||
+    internalCode === MLB_FAILURE.MISSING_STAT_VALUES
+  ) {
+    return MLB_CARD_CODE.EMPTY_GAME_LOGS;
+  }
+  if (internalCode === MLB_FAILURE.INVALID_RESPONSE_SCHEMA || internalCode === MLB_FAILURE.INVALID_LINE) {
+    return MLB_CARD_CODE.INVALID_RESPONSE_SCHEMA;
+  }
+  if (internalCode === MLB_FAILURE.PROJECTION_BUILD_FAILED || internalCode === MLB_FAILURE.EDGE_CALCULATION_FAILED) {
+    return MLB_CARD_CODE.EMPTY_GAME_LOGS;
+  }
+  return MLB_CARD_CODE.EMPTY_GAME_LOGS;
+}
+
+export function buildCardPipelineDebug(trace = {}, options = {}) {
+  const merged = {
+    ...trace,
+    normalizedName: trace.normalizedName ?? options.normalizedName ?? null,
+    playerId: trace.playerId ?? options.playerId ?? null,
+    logsCount: trace.logsCount ?? options.logsCount ?? 0,
+    apiStatusCode: trace.apiStatusCode ?? options.apiStatusCode ?? null,
+    lastSuccessfulStage: trace.lastSuccessfulStage ?? options.lastSuccessfulStage ?? null,
+    failureReason: trace.failureReason ?? options.failureReason ?? null,
+    failureCode: trace.failureCode ?? options.failureCode ?? null,
+  };
+  const cardCode = toCardPipelineCode(merged.failureCode, {
+    projectionNotCalled: options.projectionNotCalled,
+    failureReason: merged.failureReason,
+  });
+  const normalized = merged.normalizedName || "—";
+  const playerId = merged.playerId ?? "—";
+  const logs = merged.logsCount ?? 0;
+  const apiStatus = merged.apiStatusCode ?? "—";
+  const stage = merged.lastSuccessfulStage || "—";
+  const reason = merged.failureReason || (cardCode === MLB_CARD_CODE.PROJECTION_SUCCESS ? "verified projection ready" : "—");
+  return {
+    pipelineFailureCode: cardCode,
+    pipelineDebugLine: `${cardCode} | ${normalized} | id: ${playerId} | logs: ${logs} | api: ${apiStatus} | stage: ${stage} | ${reason}`,
+    mlbPipelineTrace: merged,
+  };
+}
+
+export function mergeLiveAndFetchTraces(liveTrace = {}, fetchTrace = null, profile = {}) {
+  if (!fetchTrace) return liveTrace;
+  const merged = { ...fetchTrace, ...liveTrace };
+  merged.normalizedName = liveTrace.normalizedName || fetchTrace.normalizedName;
+  merged.playerId = liveTrace.playerId ?? fetchTrace.playerId ?? profile.mlbId ?? profile.playerId ?? null;
+  merged.matchedPlayer = liveTrace.matchedPlayer || fetchTrace.matchedPlayer || profile.playerName;
+  merged.logsCount = liveTrace.logsCount || fetchTrace.logsCount || profile.sampleSize || 0;
+  merged.apiStatusCode = liveTrace.apiStatusCode ?? fetchTrace.apiStatusCode ?? null;
+  if ((profile.sparse || profile.fallback) && Number(fetchTrace.logsCount) >= 3 && fetchTrace.playerId) {
+    merged.failureCode = MLB_FAILURE.MISSING_STAT_VALUES;
+    merged.failureReason = "Stats fetched in batch but live board profile missing (lookup/key mismatch)";
+    merged.lastSuccessfulStage = fetchTrace.lastSuccessfulStage || MLB_STAGE.PROFILE_BUILT;
+    merged.success = false;
+  }
+  return merged;
+}
 
 export function createPropTrace(prop = {}) {
   return {
@@ -43,6 +138,7 @@ export function createPropTrace(prop = {}) {
     matchedPlayer: null,
     playerId: null,
     matchConfidence: null,
+    apiStatusCode: null,
     logs: null,
     logsCount: 0,
     pitcherStats: null,
@@ -137,5 +233,6 @@ export function logPropDebugGroup(prop = {}, trace = {}) {
 export function finalizePropTrace(prop = {}, trace = {}) {
   logPropDebugGroup(prop, trace);
   pushPropTrace(trace);
+  storeFetchPropTrace(prop, trace);
   return trace;
 }

@@ -10,6 +10,8 @@ import {
 import { withPlayerImageUrl } from "./playerImageFields.js";
 import { buildMlbStatProfileFromLogs } from "../services/playerStats.js";
 import { buildMlbPropDataPackage, logMlbData } from "../services/mlbDataService.js";
+import { buildCardPipelineDebug, getFetchPropTrace } from "../services/mlbPropPipelineTrace.js";
+import { normalizeSportsbookName } from "../services/playerMatcher.js";
 
 export const MANUAL_SOURCES = ["PrizePicks", "Underdog"];
 
@@ -145,7 +147,28 @@ export async function fetchManualPropProfile(form = {}) {
   if (!data.profile) {
     logMlbData("manual.profile.miss", { player: built.playerName, reason: data.reason });
   }
-  return { profile: data.profile, built, warnings: data.reason && !data.profile ? [data.reason] : [] };
+  return {
+    profile: data.profile,
+    built,
+    pipelineTrace: data.pipelineTrace || null,
+    warnings: data.reason && !data.profile ? [data.reason] : [],
+  };
+}
+
+function attachPipelineDebug(prop = {}, { liveScored = null, pipelineTrace = null, built = null } = {}) {
+  if (prop.pipelineDebugLine) return prop;
+  const trace = liveScored?.mlbPipelineTrace || pipelineTrace || getFetchPropTrace(built || prop) || null;
+  if (!trace) return prop;
+  const debug = buildCardPipelineDebug(trace, {
+    normalizedName: trace.normalizedName || normalizeSportsbookName(prop.playerName),
+    failureReason: trace.failureReason || prop.dataFetchReason || null,
+  });
+  return {
+    ...prop,
+    pipelineFailureCode: debug.pipelineFailureCode,
+    pipelineDebugLine: debug.pipelineDebugLine,
+    mlbPipelineTrace: debug.mlbPipelineTrace,
+  };
 }
 
 export async function analyzeManualProp(form = {}, scoreFn = null) {
@@ -154,10 +177,12 @@ export async function analyzeManualProp(form = {}, scoreFn = null) {
 
   let profile = null;
   let built = null;
+  let pipelineTrace = null;
   try {
     const fetched = await fetchManualPropProfile(form);
     profile = fetched.profile;
     built = fetched.built;
+    pipelineTrace = fetched.pipelineTrace;
   } catch (error) {
     console.warn("[Manual Analyzer] stat fetch failed", error);
   }
@@ -169,13 +194,16 @@ export async function analyzeManualProp(form = {}, scoreFn = null) {
         ...form,
         ...validated.manualProp,
       });
-      liveScored = scoreFn(prop);
+      liveScored = scoreFn(prop, profile);
     } catch (error) {
       console.warn("[Manual Analyzer] live scoring failed, using dynamic manual scoring", error);
     }
   }
 
-  return buildOfflineManualAnalyzedProp(form, liveScored?.playerName ? liveScored : null, profile);
+  return attachPipelineDebug(
+    buildOfflineManualAnalyzedProp(form, liveScored?.playerName ? liveScored : null, profile),
+    { liveScored, pipelineTrace, built }
+  );
 }
 
 export function normalizeSide(value = "") {
