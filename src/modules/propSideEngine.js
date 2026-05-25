@@ -15,6 +15,7 @@ export const MIN_PLAY_CONFIDENCE = 58;
 export const INSUFFICIENT_DATA_LABEL = "Insufficient verified data";
 export const NO_VERIFIED_PLAY_STATUS = "NO VERIFIED PLAY";
 export const AWAITING_PROJECTION_STATUS = "Awaiting projection data";
+export const PASS_STATUS = "PASS";
 
 /** True when a numeric projection exists and is positive. */
 export function hasValidProjection(prop = {}) {
@@ -127,6 +128,9 @@ export function confidenceFromEdge(absEdge, {
   payoutType = "standard",
   marketKey = "",
   isVerified = true,
+  consistencyScore = null,
+  matchupQuality = null,
+  lineMovementFavorable = null,
 } = {}) {
   if (!isVerified || !Number.isFinite(absEdge)) return 0;
 
@@ -140,6 +144,17 @@ export function confidenceFromEdge(absEdge, {
   if (volatility?.tier === "LOW") score += 5;
   else if (volatility?.tier === "HIGH") score -= 8;
 
+  if (Number.isFinite(consistencyScore)) {
+    if (consistencyScore >= 0.85) score += 4;
+    else if (consistencyScore <= 0.5) score -= 5;
+  }
+
+  if (matchupQuality === "strong") score += 3;
+  else if (matchupQuality === "weak") score -= 3;
+
+  if (lineMovementFavorable === true) score += 2;
+  else if (lineMovementFavorable === false) score -= 3;
+
   const payout = String(payoutType || "standard").toLowerCase();
   if (payout === "goblin") {
     score += 3;
@@ -151,6 +166,13 @@ export function confidenceFromEdge(absEdge, {
   }
   if (marketKey === "strikeouts" && absEdge >= 0.7) score += 3;
   return Math.round(clamp(score, 58, 72));
+}
+
+export function shouldPassPlay({ edge, confidence, isVerified = true }) {
+  if (!isVerified) return true;
+  if (!Number.isFinite(Number(edge)) || Number(edge) < MIN_PLAY_EDGE) return true;
+  if (!Number.isFinite(Number(confidence)) || Number(confidence) < MIN_PLAY_CONFIDENCE) return true;
+  return false;
 }
 
 export function hitChanceFromVerifiedEdge({

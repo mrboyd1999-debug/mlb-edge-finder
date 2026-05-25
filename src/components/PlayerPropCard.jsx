@@ -18,6 +18,7 @@ import {
   manualWeakPickStyle,
   NO_VERIFIED_PLAY_STATUS,
   normalizeManualPick,
+  PASS_STATUS,
   payoutBadgeStyle,
   payoutDisplayLabel,
   projectionVsLineLabel,
@@ -88,17 +89,19 @@ function noVerifiedPlayBadgeStyle() {
 function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, cardStyle, savedResult }) {
   const isManual = isManualAnalyzerProp(prop);
   const hasProjection = hasValidProjection(prop);
+  const passPlay = isManual && (prop.passPlay || prop.displayStatus === PASS_STATUS || prop.bettingLabel === PASS_STATUS);
   const noVerifiedPlay = isManual && (!hasProjection || prop.projectionUnavailable);
+  const showEngineSide = isManual && hasProjection && !noVerifiedPlay && !passPlay;
   const tier = confidenceTier(prop);
-  const pickSide = noVerifiedPlay ? "" : normalizeManualPick(prop.bestPick || prop.side || prop.pick);
-  const lean = noVerifiedPlay
-    ? null
-    : pickSide === "over"
+  const pickSide = showEngineSide ? normalizeManualPick(prop.bestPick || prop.side || prop.pick) : "";
+  const lean = showEngineSide
+    ? pickSide === "over"
       ? "Over"
       : pickSide === "under"
         ? "Under"
-        : formatLeanSide(prop.bestPick || prop.side || "Watch");
-  const weakPick = isManual && (noVerifiedPlay || prop.noEdge || prop.isWeakManualPick);
+        : formatLeanSide(prop.bestPick || prop.side || "Watch")
+    : null;
+  const weakPick = isManual && (noVerifiedPlay || passPlay || prop.noEdge || prop.isWeakManualPick);
   const metricFade = noVerifiedPlay ? {} : manualMetricFadeStyle(prop.edge);
   const payoutLabel = payoutDisplayLabel(prop);
   const projVsLine = projectionVsLineLabel(prop);
@@ -151,7 +154,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
   const openingLine = prop.lineMovement?.openingLine ?? null;
   const currentLineSnap = prop.lineMovement?.currentLine ?? prop.line ?? null;
   const confDisplay =
-    noVerifiedPlay
+    noVerifiedPlay || passPlay
       ? null
       : prop.calibratedConfidence != null && prop.calibratedConfidence !== prop.confidenceScore
         ? prop.calibratedConfidence
@@ -285,6 +288,31 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
                 </div>
                 <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, marginTop: "2px", color: "#94a3b8" }}>
                   {prop.statusMessage || AWAITING_PROJECTION_STATUS}
+                </p>
+                {projVsLine ? (
+                  <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, color: "#64748b" }}>
+                    {projVsLine}
+                  </p>
+                ) : null}
+              </>
+            ) : passPlay ? (
+              <>
+                <span className="prop-card-stat-highlight prop-card-prop-line-row" style={{ ...styles.compactMetaItem, flex: "1 1 100%" }}>
+                  <strong>
+                    {displayMarketLabel(prop)} · Line {formatNumber(prop.line)}
+                    {prop.source || prop.platform ? ` · ${prop.source || prop.platform}` : ""}
+                  </strong>
+                </span>
+                <div className="prop-card-primary-metrics" style={styles.manualPrimaryMetricsRow}>
+                  <span style={{ ...styles.scoreBadge, ...noVerifiedPlayBadgeStyle() }}>{PASS_STATUS}</span>
+                  {projectionDisplay ? (
+                    <span style={{ ...styles.scoreBadge, borderColor: "#475569", color: "#cbd5e1", background: "#111827" }}>
+                      PROJ {projectionDisplay}
+                    </span>
+                  ) : null}
+                </div>
+                <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, marginTop: "2px", color: "#94a3b8" }}>
+                  {prop.statusMessage || prop.whyThisPick || "Edge too weak — engine recommends PASS."}
                 </p>
                 {projVsLine ? (
                   <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, color: "#64748b" }}>

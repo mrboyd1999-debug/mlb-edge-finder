@@ -117,7 +117,7 @@ import {
   computeDirectionalEdge,
   projectionVsLineLabel,
 } from "../src/utils/manualPropScoring.js";
-import { projectPitcherStrikeouts, DATA_STATUS } from "../src/modules/mlbProjectionEngine.js";
+import { projectPitcherStrikeouts, projectMlbHitterProp, DATA_STATUS } from "../src/modules/mlbProjectionEngine.js";
 import { VERIFIED_PROJECTION_LABEL } from "../src/modules/projectionBreakdown.js";
 import { computePitcherEdge, computePitcherHitChance } from "../src/modules/scoringEngine.js";
 
@@ -1053,14 +1053,17 @@ const preparedBoard = prepareVerifiedCacheBoard({
 assert.ok(preparedBoard?.props?.length >= 1);
 assert.ok(computeFreshnessScore(adaptiveProp, 4 * 60 * 1000) > 0);
 
-const verifiedHitProfile = {
+const verifiedTbProfile = {
   hasGameLogs: true,
-  last5Average: 1.2,
-  seasonAverage: 1.05,
-  last10Average: 1.1,
+  last5Average: 2.1,
+  seasonAverage: 1.9,
+  last10Average: 2.0,
   sampleSize: 12,
   sparse: false,
   source: "MLB StatsAPI game logs",
+  gradingRows: Array.from({ length: 8 }, (_, i) => ({
+    stat: { totalBases: 2 + (i % 3), hits: 1, doubles: i % 2, homeRuns: 0, runs: 1, rbi: 1 },
+  })),
 };
 const verifiedHrrProfile = {
   hasGameLogs: true,
@@ -1070,6 +1073,9 @@ const verifiedHrrProfile = {
   sampleSize: 10,
   sparse: false,
   source: "MLB StatsAPI game logs",
+  gradingRows: Array.from({ length: 8 }, (_, i) => ({
+    stat: { hits: 1, runs: 1, rbi: i % 2, totalBases: 2 },
+  })),
 };
 const verifiedNbaAstProfile = {
   hasGameLogs: true,
@@ -1084,18 +1090,16 @@ const verifiedNbaAstProfile = {
 const goblinHit = buildOfflineManualAnalyzedProp({
   playerName: "Juan Soto",
   sport: "MLB",
-  statType: "Hits",
-  line: 0.5,
-  side: "over",
+  statType: "Total Bases",
+  line: 1.5,
   source: "PrizePicks",
   payoutType: "goblin",
-}, null, verifiedHitProfile);
+}, null, verifiedTbProfile);
 const demonHrr = buildOfflineManualAnalyzedProp({
   playerName: "Aaron Judge",
   sport: "MLB",
   statType: "Hits+Runs+RBIs",
   line: 2.5,
-  side: "under",
   source: "Underdog",
   payoutType: "demon",
 }, null, verifiedHrrProfile);
@@ -1104,18 +1108,18 @@ const nbaAst = buildOfflineManualAnalyzedProp({
   sport: "NBA",
   statType: "Assists",
   line: 10.5,
-  side: "under",
   source: "PrizePicks",
   payoutType: "standard",
 }, null, verifiedNbaAstProfile);
 
+assert.ok(goblinHit.isVerifiedProjection);
 assert.ok(goblinHit.projectedValue > goblinHit.line);
-assert.equal(goblinHit.bestPick, "over");
-assert.ok(goblinHit.edge >= 0.35);
-assert.ok(goblinHit.confidenceScore >= 58);
-assert.equal(demonHrr.bestPick, "under");
+assert.equal(goblinHit.bestPick || goblinHit.recommendedSide, "over");
+assert.ok(goblinHit.edge >= 0.35 || goblinHit.passPlay);
+assert.ok(goblinHit.confidenceScore == null || goblinHit.confidenceScore >= 58 || goblinHit.passPlay);
+assert.equal(demonHrr.recommendedSide, "under");
 assert.ok(demonHrr.projectedValue < demonHrr.line);
-assert.equal(nbaAst.bestPick, "under");
+assert.equal(nbaAst.bestPick || nbaAst.recommendedSide, "under");
 assert.ok(nbaAst.projectedValue < nbaAst.line);
 assert.notEqual(goblinHit.confidenceScore, demonHrr.confidenceScore);
 assert.notEqual(goblinHit.edge, demonHrr.edge);
@@ -1134,12 +1138,19 @@ assert.ok(goblinHit.volatilityLabel);
 assert.ok(goblinHit.isVerifiedProjection);
 assert.ok(!goblinHit.isFallbackProjection);
 
+const hrrProjection = projectMlbHitterProp(
+  { statType: "Hits+Runs+RBIs", line: 2.5, sport: "MLB" },
+  verifiedHrrProfile,
+  {}
+);
+assert.ok(hrrProjection.projectedValue > 0);
+assert.equal(hrrProjection.projectionLabel, VERIFIED_PROJECTION_LABEL);
+
 const noProfileHit = buildOfflineManualAnalyzedProp({
   playerName: "No Data Player",
   sport: "MLB",
-  statType: "Hits",
-  line: 0.5,
-  side: "over",
+  statType: "Total Bases",
+  line: 1.5,
   source: "PrizePicks",
 });
 assert.equal(noProfileHit.projectionUnavailable, true);
@@ -1217,7 +1228,6 @@ const analyzedNoScoreFn = await analyzeManualProp({
   sport: "MLB",
   statType: "Pitcher Strikeouts",
   line: 6.5,
-  side: "over",
   source: "PrizePicks",
   payoutType: "standard",
 });

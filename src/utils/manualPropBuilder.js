@@ -7,6 +7,7 @@ import {
   selectManualTopPicksByRank,
   sortManualPropsByRank,
 } from "./manualPropScoring.js";
+import { withPlayerImageUrl } from "./playerImageFields.js";
 import { fetchPlayerStats, findStatProfile } from "../services/playerStats.js";
 
 export const MANUAL_SOURCES = ["PrizePicks", "Underdog"];
@@ -24,8 +25,10 @@ export const MANUAL_SIDE_OPTIONS = [
 
 export const MLB_STAT_SUGGESTIONS = [
   "Pitcher Strikeouts",
+  "Pitching Outs",
   "Hits+Runs+RBIs",
   "Total Bases",
+  "Fantasy Score",
   "Hits Allowed",
   "Earned Runs Allowed",
   "Singles",
@@ -36,7 +39,6 @@ export const MLB_STAT_SUGGESTIONS = [
   "Hits",
   "RBIs",
   "Runs",
-  "Fantasy Score",
 ];
 
 export const DEFAULT_MANUAL_FORM = {
@@ -46,7 +48,6 @@ export const DEFAULT_MANUAL_FORM = {
   opponent: "",
   statType: "",
   line: "",
-  side: "over",
   source: "PrizePicks",
   payoutType: "standard",
 };
@@ -59,9 +60,8 @@ export function validateManualForm(form = {}) {
   return validateManualPropFields(form).error;
 }
 
-/** Normalize form into manualProp with numeric line and pick/side. */
+/** Normalize form into manualProp with numeric line. Side is engine-determined. */
 export function normalizeManualFormInput(form = {}) {
-  const pick = normalizeSide(form.side || form.pick);
   const numericLine = Number(form.line);
   return {
     playerName: String(form.playerName || "").trim(),
@@ -70,8 +70,6 @@ export function normalizeManualFormInput(form = {}) {
     opponent: String(form.opponent || "").trim(),
     statType: String(form.statType || "").trim(),
     line: numericLine,
-    side: pick,
-    pick,
     source: form.source === "Underdog" ? "Underdog" : "PrizePicks",
     payoutType: form.payoutType || "standard",
   };
@@ -85,7 +83,6 @@ export function validateManualPropFields(form = {}) {
   if (!manualProp.sport) missing.push("sport");
   if (!manualProp.statType) missing.push("statType");
   if (!Number.isFinite(manualProp.line) || manualProp.line <= 0) missing.push("line");
-  if (!manualProp.pick) missing.push("pick");
   if (!manualProp.source) missing.push("source");
   if (missing.length) {
     return {
@@ -109,16 +106,24 @@ export function buildOfflineManualAnalyzedProp(form = {}, liveScored = null, pro
     ...manualProp,
     team: manualProp.team || "",
     opponent: manualProp.opponent || "",
-    side: manualProp.pick,
   });
+  const imageFields = profile
+    ? withPlayerImageUrl({
+        ...built,
+        playerImage: profile.playerImage,
+        playerImageUrl: profile.playerImage,
+        mlbId: profile.mlbId || profile.playerId,
+        playerId: profile.playerId || profile.mlbId,
+      })
+    : built;
   const manualScore = scoreManualPropInput(manualProp, liveScored, profile);
   return mergeManualPropScoring(
     {
-      ...built,
+      ...imageFields,
       player: built.playerName,
       team: manualProp.team || "",
       opponent: manualProp.opponent || "",
-      projectionLabel: manualScore.projectionLabel || liveScored?.projectionLabel || "Estimated fallback projection",
+      projectionLabel: manualScore.projectionLabel || liveScored?.projectionLabel || "Projection unavailable",
       manualOfflineAnalysis: manualScore.isFallbackProjection ?? (!liveScored?.projectionSource || liveScored?.projectionSource === "missing"),
     },
     manualScore,
@@ -132,7 +137,6 @@ export async function fetchManualPropProfile(form = {}) {
   const built = buildManualPropFromInput({
     ...form,
     ...validated.manualProp,
-    side: validated.manualProp.pick,
   });
   const { stats, warnings } = await fetchPlayerStats({ props: [built] });
   const profile = findStatProfile(stats, built) || null;
@@ -159,7 +163,6 @@ export async function analyzeManualProp(form = {}, scoreFn = null) {
       const prop = built || buildManualPropFromInput({
         ...form,
         ...validated.manualProp,
-        side: validated.manualProp.pick,
       });
       liveScored = scoreFn(prop);
     } catch (error) {
@@ -189,14 +192,12 @@ function payoutFields(payoutType = "standard") {
 }
 
 export function makeManualPropId(form = {}) {
-  const side = normalizeSide(form.side);
   return [
     "manual",
     normalize(form.source),
     normalize(form.playerName),
     normalize(form.statType),
     Number(form.line),
-    side,
     normalize(form.payoutType || "standard"),
   ].join("|");
 }
@@ -209,7 +210,6 @@ export function buildManualPropFromInput(form = {}) {
     String(form.sport || "MLB").trim() ||
     "MLB";
   const line = Number(form.line);
-  const side = normalizeSide(form.side);
   const platform = form.source === "Underdog" ? "Underdog" : "PrizePicks";
   const payout = payoutFields(form.payoutType);
   const id = `${makeManualPropId(form)}|${Date.now()}`;
@@ -227,9 +227,6 @@ export function buildManualPropFromInput(form = {}) {
       market: statType,
       propType: statType,
       line,
-      side,
-      pick: side,
-      bestPick: side,
       platform,
       source: platform,
       lineSourceBadge: "MANUAL",
@@ -254,3 +251,5 @@ export function sortManualPropsByConfidence(props = []) {
 export function selectManualTopPicks(props = [], limit = 2) {
   return selectManualTopPicksByRank(props, limit);
 }
+
+export { selectMlbVerifiedBestBets } from "../modules/mlbBestBets.js";

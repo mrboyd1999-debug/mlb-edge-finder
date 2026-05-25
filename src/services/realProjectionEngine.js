@@ -1,9 +1,12 @@
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
 import { formatNumber } from "../utils/formatters.js";
 import {
+  hasMlbPitcherStatInputs,
   isMlbPitcherMarket,
   projectMlbPitcherProp,
-  hasMlbPitcherStatInputs,
+  hasMlbHitterStatInputs,
+  isMlbHitterPhase2Market,
+  projectMlbHitterProp as projectVerifiedMlbHitterProp,
 } from "../modules/mlbProjectionEngine.js";
 
 function clamp(value, min, max) {
@@ -363,6 +366,11 @@ export function buildRealProjection(prop = {}, profile = {}, context = {}) {
   if (sport === "MLB" && isMlbPitcherMarket(prop.statType) && hasMlbPitcherStatInputs(profile)) {
     const pitcher = projectMlbPitcherProp(prop, profile, context);
     if (pitcher?.projectedValue != null) return pitcher;
+  }
+
+  if (sport === "MLB" && isMlbHitterPhase2Market(prop.statType) && hasMlbHitterStatInputs(profile)) {
+    const hitter = projectVerifiedMlbHitterProp(prop, profile, context);
+    if (hitter?.projectedValue != null) return hitter;
   }
 
   if (sport === "MLB") {

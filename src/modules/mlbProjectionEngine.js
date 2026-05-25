@@ -10,6 +10,20 @@ import {
   MLB_PITCHER_MARKET_KEYS,
 } from "./mlbPitcherData.js";
 import {
+  battingOrderAdjustment,
+  buildMlbHitterDataPackage,
+  handednessHitterAdjustment,
+  hasMlbHitterStatInputs,
+  hasVerifiedHitterGameLogs,
+  isMlbHitterPhase2Market,
+  isoPowerAdjustment,
+  MLB_HITTER_PHASE2_MARKETS,
+  opponentPitcherAdjustment,
+  parkFactorAdjustment,
+  vegasAdjustment,
+  weatherAdjustment,
+} from "./mlbHitterData.js";
+import {
   appendDataStatusRow,
   appendFinalProjectionRow,
   buildBreakdownRow,
@@ -210,6 +224,36 @@ export function projectPitcherStrikeouts(prop = {}, profile = {}, context = {}) 
   let projection = weightedPitcherProjection(components);
   if (data.handednessBoost) projection = round(projection + data.handednessBoost, 1);
 
+  const vegasTotal = finiteNumber(context.impliedGameTotal ?? profile.impliedGameTotal ?? profile.impliedTeamTotal);
+  if (vegasTotal != null) {
+    const vegasAdj = round((vegasTotal - 8.5) * 0.08, 2);
+    breakdown.push(
+      buildBreakdownRow("Vegas total", vegasTotal, {
+        display: `O/U ${formatNumber(vegasTotal)}`,
+        contribution: vegasAdj,
+      })
+    );
+    projection = round(projection + vegasAdj, 1);
+  }
+
+  const weatherNote = profile.weatherNote || context.weatherNote || "";
+  if (weatherNote) {
+    const weatherAdj = /wind out|blowing out|hot|carry/i.test(weatherNote)
+      ? 0.15
+      : /wind in|cold|dome/i.test(weatherNote)
+        ? -0.12
+        : 0;
+    if (weatherAdj !== 0) {
+      breakdown.push(
+        buildBreakdownRow("Weather", weatherNote, {
+          display: weatherNote,
+          contribution: weatherAdj,
+        })
+      );
+      projection = round(projection + weatherAdj, 1);
+    }
+  }
+
   const dataStatus = resolveDataStatus({
     hasGameLogs: true,
     hasCoreRates: true,
@@ -360,6 +404,169 @@ export function projectEarnedRunsAllowed(prop = {}, profile = {}, context = {}) 
   return finalizePitcherProjection({ projection, breakdown, dataStatus, data, marketKey: "earnedRuns" });
 }
 
+function finalizeHitterProjection({ projection, breakdown, dataStatus, data, marketKey, profile = {} }) {
+  return finalizePitcherProjection({ projection, breakdown, dataStatus, data, marketKey, profile });
+}
+
+function weightedHitterProjection(components = []) {
+  return weightedPitcherProjection(components);
+}
+
+function projectVerifiedHitterMarket(prop = {}, profile = {}, context = {}, marketKey = "") {
+  const data = buildMlbHitterDataPackage(prop, profile, context);
+  const breakdown = [];
+  const verified = hasVerifiedHitterGameLogs(data, profile);
+
+  if (!verified) {
+    return finalizeHitterProjection({
+      projection: null,
+      breakdown: buildFallbackBreakdown(null, "No verified MLB hitter game logs (need 5+ games)"),
+      dataStatus: DATA_STATUS.FALLBACK,
+      data,
+      marketKey,
+      profile,
+    });
+  }
+
+  const recent = data.last10Average ?? data.last5Average;
+  const last5 = data.last5Average;
+  const season = data.seasonAverage;
+  const core = last5 * 0.54 + season * 0.46;
+
+  const components = [
+    { label: "Last 10 avg", value: recent, weight: 0.28 },
+    { label: "Last 5 avg", value: last5, weight: 0.32 },
+    { label: "Season avg", value: season, weight: 0.2 },
+  ];
+
+  components.forEach((part) => {
+    if (part.value == null) return;
+    breakdown.push(
+      buildBreakdownRow(part.label, part.value, {
+        weight: part.weight,
+        contribution: round(part.value * part.weight, 2),
+      })
+    );
+  });
+
+  let projection = weightedHitterProjection(components) ?? core;
+
+  const matchupAdj = opponentPitcherAdjustment(data.opponentPitcherWhip);
+  if (matchupAdj !== 0) {
+    breakdown.push(
+      buildBreakdownRow("Pitcher matchup", data.opponentPitcherWhip, {
+        display: data.opponentPitcherWhip != null ? `WHIP ${formatNumber(data.opponentPitcherWhip)}` : "Pitcher context",
+        contribution: matchupAdj,
+      })
+    );
+    projection = round(projection + matchupAdj, 1);
+  }
+
+  const handAdj = handednessHitterAdjustment(data.handednessMatchup);
+  if (handAdj !== 0 && data.handednessMatchup) {
+    breakdown.push(
+      buildBreakdownRow("Handedness split", data.handednessMatchup, {
+        display: data.handednessMatchup,
+        contribution: handAdj,
+      })
+    );
+    projection = round(projection + handAdj, 1);
+  }
+
+  const orderAdj = battingOrderAdjustment(data.battingOrderNote);
+  if (orderAdj !== 0 && data.battingOrderNote) {
+    breakdown.push(
+      buildBreakdownRow("Batting order", data.battingOrderNote, {
+        display: data.battingOrderNote,
+        contribution: orderAdj,
+      })
+    );
+    projection = round(projection + orderAdj, 1);
+  }
+
+  const parkAdj = parkFactorAdjustment(data.parkFactorNote);
+  if (parkAdj !== 0 && data.parkFactorNote) {
+    breakdown.push(
+      buildBreakdownRow("Park factor", data.parkFactorNote, {
+        display: data.parkFactorNote,
+        contribution: parkAdj,
+      })
+    );
+    projection = round(projection + parkAdj, 1);
+  }
+
+  const vegasAdj = vegasAdjustment(data.impliedGameTotal);
+  if (vegasAdj !== 0 && data.impliedGameTotal != null) {
+    breakdown.push(
+      buildBreakdownRow("Vegas total", data.impliedGameTotal, {
+        display: `O/U ${formatNumber(data.impliedGameTotal)}`,
+        contribution: vegasAdj,
+      })
+    );
+    projection = round(projection + vegasAdj, 1);
+  }
+
+  const weatherAdj = weatherAdjustment(data.weatherNote);
+  if (weatherAdj !== 0 && data.weatherNote) {
+    breakdown.push(
+      buildBreakdownRow("Weather", data.weatherNote, {
+        display: data.weatherNote,
+        contribution: weatherAdj,
+      })
+    );
+    projection = round(projection + weatherAdj, 1);
+  }
+
+  const isoAdj = isoPowerAdjustment(data.isolatedPower, marketKey);
+  if (isoAdj !== 0 && data.isolatedPower != null) {
+    breakdown.push(
+      buildBreakdownRow("ISO power", data.isolatedPower, {
+        display: formatNumber(data.isolatedPower),
+        contribution: isoAdj,
+      })
+    );
+    projection = round(projection + isoAdj, 1);
+  }
+
+  if (data.consistencyScore != null) {
+    breakdown.push(
+      buildBreakdownRow("Consistency", round(data.consistencyScore * 100, 0), {
+        display: `${Math.round(data.consistencyScore * 100)}% stable`,
+        contribution: 0,
+      })
+    );
+  }
+
+  const dataStatus = resolveDataStatus({
+    hasGameLogs: true,
+    hasCoreRates: true,
+    hasOpponent: data.hasOpponent,
+    hasWorkload: Boolean(data.battingOrderNote || data.handednessMatchup),
+  });
+
+  return finalizeHitterProjection({ projection, breakdown, dataStatus, data, marketKey, profile });
+}
+
+export function projectHitterFantasyScore(prop = {}, profile = {}, context = {}) {
+  return projectVerifiedHitterMarket(prop, profile, context, "fantasyScore");
+}
+
+export function projectHitterHrr(prop = {}, profile = {}, context = {}) {
+  return projectVerifiedHitterMarket(prop, profile, context, "hrr");
+}
+
+export function projectHitterTotalBases(prop = {}, profile = {}, context = {}) {
+  return projectVerifiedHitterMarket(prop, profile, context, "totalBases");
+}
+
+export function projectMlbHitterProp(prop = {}, profile = {}, context = {}) {
+  const key = canonicalMarketKey(prop.statType);
+  if (key === "fantasyScore") return projectHitterFantasyScore(prop, profile, context);
+  if (key === "hrr") return projectHitterHrr(prop, profile, context);
+  if (key === "totalBases") return projectHitterTotalBases(prop, profile, context);
+  return null;
+}
+
 export function projectMlbPitcherProp(prop = {}, profile = {}, context = {}) {
   const key = canonicalMarketKey(prop.statType);
   if (key === "strikeouts") return projectPitcherStrikeouts(prop, profile, context);
@@ -378,8 +585,27 @@ export function hasMlbPitcherStatInputs(profile = {}) {
   );
 }
 
-export { isMlbPitcherMarket, MLB_PITCHER_MARKET_KEYS, buildMlbPitcherDataPackage, hasVerifiedPitcherGameLogs, hasVerifiedStrikeoutGameLogs, isStrikeoutMarket };
+export {
+  isMlbPitcherMarket,
+  MLB_PITCHER_MARKET_KEYS,
+  buildMlbPitcherDataPackage,
+  hasVerifiedPitcherGameLogs,
+  hasVerifiedStrikeoutGameLogs,
+  isStrikeoutMarket,
+} from "./mlbPitcherData.js";
+export {
+  isMlbHitterPhase2Market,
+  MLB_HITTER_PHASE2_MARKETS,
+  hasMlbHitterStatInputs,
+  buildMlbHitterDataPackage,
+  hasVerifiedHitterGameLogs,
+} from "./mlbHitterData.js";
 export { DATA_STATUS, dataStatusLabel } from "./projectionBreakdown.js";
+
+export const MLB_HITTER_ENGINE = {
+  markets: MLB_HITTER_PHASE2_MARKETS,
+  project: projectMlbHitterProp,
+};
 
 export const MLB_PITCHER_ENGINE = {
   markets: MLB_PITCHER_MARKET_KEYS,

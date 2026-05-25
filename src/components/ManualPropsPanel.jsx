@@ -5,10 +5,10 @@ import {
   DEFAULT_MANUAL_FORM,
   MANUAL_OFFLINE_REASON,
   MANUAL_PAYOUT_TYPES,
-  MANUAL_SIDE_OPTIONS,
   MANUAL_SOURCES,
   MLB_STAT_SUGGESTIONS,
   selectManualTopPicks,
+  selectMlbVerifiedBestBets,
   sortManualPropsByConfidence,
   validateManualPropFields,
 } from "../utils/manualPropBuilder.js";
@@ -42,7 +42,7 @@ function ManualPropsPanel({
   const [analyzing, setAnalyzing] = useState(false);
 
   const rankedProps = useMemo(() => sortManualPropsByConfidence(props), [props]);
-  const topPicks = useMemo(() => selectManualTopPicks(props, 2), [props]);
+  const topPicks = useMemo(() => selectMlbVerifiedBestBets(props, 2), [props]);
   const sportOptions = useMemo(() => {
     const sports = new Set(["MLB", ...rankedProps.map((prop) => prop.sport).filter(Boolean)]);
     return Array.from(sports);
@@ -61,7 +61,7 @@ function ManualPropsPanel({
       opponent: prop.opponent || "",
       statType: prop.statType || "",
       line: prop.line != null ? String(prop.line) : "",
-      side: prop.side || prop.bestPick || prop.pick || "over",
+      side: prop.side || prop.bestPick || prop.pick || "",
       source: prop.source || prop.platform || "PrizePicks",
       payoutType: prop.oddsType || prop.payoutRole || prop.payoutType || "standard",
     });
@@ -143,7 +143,7 @@ function ManualPropsPanel({
           <div>
             <h2 style={styles.sectionTitleSmall}>Manual Prop Analyzer</h2>
             <p className="section-subcopy" style={styles.streakCopy}>
-              Enter PrizePicks or Underdog lines for instant mobile-friendly grades.
+              Enter PrizePicks or Underdog lines — the engine picks OVER or UNDER from verified projections.
             </p>
           </div>
           <p style={styles.countPill}>{rankedProps.length} analyzed</p>
@@ -212,15 +212,6 @@ function ManualPropsPanel({
                 onChange={(event) => updateField("line", event.target.value)}
                 placeholder="5.5"
               />
-            </Field>
-            <Field label="Pick">
-              <select style={styles.select} value={form.side} onChange={(event) => updateField("side", event.target.value)}>
-                {MANUAL_SIDE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
             </Field>
             <Field label="Source">
               <select style={styles.select} value={form.source} onChange={(event) => updateField("source", event.target.value)}>
@@ -299,9 +290,9 @@ function ManualPropsPanel({
         <section style={styles.section} aria-label="Manual top picks">
           <div style={styles.sectionHeading}>
             <div>
-              <h2 style={styles.sectionTitleSmall}>Top 2 Manual Picks</h2>
+              <h2 style={styles.sectionTitleSmall}>Top 2 MLB Best Bets</h2>
               <p className="section-subcopy" style={styles.streakCopy}>
-                Best confidence, edge, and hit chance with low volatility.
+                Highest verified edge MLB plays only.
               </p>
             </div>
             <p style={styles.countPill}>{topPicks.length} picks</p>
