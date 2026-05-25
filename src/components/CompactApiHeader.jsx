@@ -1,7 +1,7 @@
 import { memo, useMemo } from "react";
 import { getOddsApiKey, getSportsDataApiKey } from "../services/runtimeSettings.js";
 import { formatCooldownRemaining } from "../services/sourceRateLimit.js";
-import { CONNECTION_TIERS } from "../services/sourceHealth.js";
+import { CONNECTION_TIERS, resolveProviderPanelRow } from "../services/sourceHealth.js";
 
 function badgeClass(tier = "") {
   const key = String(tier || "").toLowerCase();
@@ -12,18 +12,8 @@ function badgeClass(tier = "") {
 }
 
 function sourceTier(apiHealth = {}, key = "") {
-  const row = apiHealth?.[key];
-  if (!row) return CONNECTION_TIERS.PENDING;
-  if (row.connectionTier) return row.connectionTier;
-  const usable = Number(row.usableCount) || 0;
-  const parsed = Number(row.parsedCount) || 0;
-  if (usable > 0 || parsed > 0) {
-    return /cached|warning/i.test(String(row.statusLabel || "")) ? CONNECTION_TIERS.WARNING : CONNECTION_TIERS.CONNECTED;
-  }
-  const status = String(row.status || "").toLowerCase();
-  if (status === "connected" || status === "full" || status === "live") return CONNECTION_TIERS.CONNECTED;
-  if (/failed|unavailable|offline/i.test(status)) return CONNECTION_TIERS.FAILED;
-  return CONNECTION_TIERS.PENDING;
+  const row = resolveProviderPanelRow(apiHealth?.[key]);
+  return row.connectionTier || CONNECTION_TIERS.PENDING;
 }
 
 function CompactApiHeader({

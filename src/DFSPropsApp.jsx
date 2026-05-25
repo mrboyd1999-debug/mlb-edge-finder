@@ -1029,7 +1029,8 @@ function applySourceResult({
       usablePropsCount: usableCount,
       message: result.debug?.message || detailWarnings.join(" | "),
       lastSuccessfulFetchAt: result.lastSuccessfulFetchAt || "",
-      lineSourceBadge: props.length ? health.badge : HEALTH_STATES.FAILED,
+      lineSourceBadge:
+        connectionTier === CONNECTION_TIERS.FAILED ? HEALTH_STATES.FAILED : health.badge,
       underdogParser: result.debug?.underdogParser || null,
       rawUnderdogSamples: result.debug?.rawUnderdogSamples || [],
       responseShape: result.debug?.responseShape || null,
@@ -1071,7 +1072,8 @@ function applySourceResult({
       usablePropsCount: usableCount,
       message: health.message || result.debug?.message || detailWarnings.join(" | "),
       lastSuccessfulFetchAt: result.lastSuccessfulFetchAt || "",
-      lineSourceBadge: props.length ? health.badge : HEALTH_STATES.FAILED,
+      lineSourceBadge:
+        connectionTier === CONNECTION_TIERS.FAILED ? HEALTH_STATES.FAILED : health.badge,
       statusLabel: health.message,
     };
     return usableCount > 0 || props.length > 0;
@@ -2556,12 +2558,24 @@ export default function DFSPropsApp() {
           setError(errMsg || NO_VERIFIED_AFTER_COOLDOWN_MESSAGE);
           setCriticalWarnings(filterCriticalUiMessages([errMsg], [], {}));
           setCacheStatus("");
-          setApiHealth({
-            PrizePicks: { status: "Failed", lastFetchAt: "", lineSourceBadge: "" },
-            Underdog: { status: "Unavailable", lastFetchAt: "", lineSourceBadge: "" },
-            OddsAPI: { status: "Failed", lastFetchAt: "", lineSourceBadge: "" },
-            cache: { status: "error", lastFetchAt: "" },
-          });
+          setApiHealth((current) => ({
+            PrizePicks: {
+              ...(current?.PrizePicks || {}),
+              connectionTier: Number(current?.PrizePicks?.usableCount) > 0 ? CONNECTION_TIERS.CONNECTED : CONNECTION_TIERS.FAILED,
+              status: Number(current?.PrizePicks?.usableCount) > 0 ? CONNECTION_TIERS.CONNECTED : CONNECTION_TIERS.FAILED,
+            },
+            Underdog: {
+              ...(current?.Underdog || {}),
+              connectionTier: Number(current?.Underdog?.usableCount) > 0 ? CONNECTION_TIERS.CONNECTED : CONNECTION_TIERS.FAILED,
+              status: Number(current?.Underdog?.usableCount) > 0 ? CONNECTION_TIERS.CONNECTED : CONNECTION_TIERS.FAILED,
+            },
+            OddsAPI: {
+              ...(current?.OddsAPI || {}),
+              connectionTier: CONNECTION_TIERS.FAILED,
+              status: CONNECTION_TIERS.FAILED,
+            },
+            cache: { status: "error", lastFetchAt: current?.cache?.lastFetchAt || "" },
+          }));
           console.warn("[DFS Refresh] failed with no cache fallback", {
             durationMs: Date.now() - fetchStartedAt,
             error: errMsg,
@@ -3090,12 +3104,18 @@ export default function DFSPropsApp() {
       return { kind: "rate_limited", text: "Rate limited — showing cached lines when available." };
     }
     const badges = [
-      apiHealth?.PrizePicks?.lineSourceBadge,
-      apiHealth?.Underdog?.lineSourceBadge,
-      apiHealth?.OddsAPI?.lineSourceBadge,
+      apiHealth?.PrizePicks?.connectionTier,
+      apiHealth?.Underdog?.connectionTier,
+      apiHealth?.OddsAPI?.connectionTier,
       sourceStatus?.PrizePicks,
       sourceStatus?.Underdog,
     ].map((value) => String(value || "").toUpperCase());
+    const hasLiveProps =
+      Number(apiHealth?.PrizePicks?.usableCount) > 0 ||
+      Number(apiHealth?.Underdog?.usableCount) > 0 ||
+      Number(apiHealth?.PrizePicks?.parsedCount) > 0 ||
+      Number(apiHealth?.Underdog?.parsedCount) > 0;
+    if (hasLiveProps) return null;
     if (badges.some((value) => value === "FAILED" || value === "OFFLINE")) {
       return { kind: "error", text: NO_VERIFIED_PROPS_MESSAGE };
     }

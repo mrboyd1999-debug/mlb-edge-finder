@@ -130,7 +130,9 @@ export function formatIngestionMetrics(row = {}) {
   const parsed = finiteCount(row.parsedCount ?? row.propsAfterParsing);
   const usable = finiteCount(row.usableCount ?? row.usablePropsCount);
   const filtered = finiteCount(row.filteredCount ?? Math.max(0, parsed - usable));
-  const cached = finiteCount(row.cachedCount ?? (row.lineSourceBadge === HEALTH_STATES.CACHED ? usable : 0));
+  const cached = finiteCount(
+    row.cachedCount ?? (row.lineSourceBadge === HEALTH_STATES.CACHED || /cached/i.test(String(row.statusLabel || "")) ? usable || parsed : 0)
+  );
   return {
     rawCount: raw,
     parsedCount: parsed,
@@ -138,6 +140,31 @@ export function formatIngestionMetrics(row = {}) {
     filteredCount: filtered,
     cachedCount: cached,
     summary: `raw ${raw} · parsed ${parsed} · usable ${usable} · filtered ${filtered}${cached > 0 ? ` · cached ${cached}` : ""}`,
+  };
+}
+
+/** Merge pipeline + apiHealth rows; prop counts always override stale Failed flags. */
+export function resolveProviderPanelRow(apiRow = {}, pipelineRow = {}) {
+  const row = { ...pipelineRow, ...apiRow };
+  const metrics = formatIngestionMetrics(row);
+  const cached =
+    metrics.cachedCount > 0 ||
+    /cached/i.test(String(row.statusLabel || row.lineSourceBadge || row.status || ""));
+  const connection = resolveProviderConnectionStatus({
+    usableCount: metrics.usableCount,
+    parsedCount: metrics.parsedCount,
+    rawCount: metrics.rawCount,
+    cachedCount: metrics.cachedCount,
+    cached,
+    fallback: Boolean(row.fallback),
+    fetchFailed: /failed|unavailable|offline/i.test(String(row.status || "")) && metrics.usableCount === 0 && metrics.parsedCount === 0,
+  });
+  return {
+    ...row,
+    ...metrics,
+    connectionTier: connection.tier,
+    status: connection.tier,
+    ingestionSummary: row.ingestionSummary || metrics.summary,
   };
 }
 

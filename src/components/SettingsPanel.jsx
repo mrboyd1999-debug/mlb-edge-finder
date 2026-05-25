@@ -248,9 +248,12 @@ export default function SettingsPanel({
                     const raw = row.rawCount ?? row.rawPropsLoaded ?? 0;
                     const parsed = row.parsedCount ?? row.propsAfterParsing ?? 0;
                     const usable = row.usableCount ?? row.boardCount ?? 0;
+                    const filtered = row.filteredCount ?? Math.max(0, Number(parsed) - Number(usable));
+                    const cached = row.cachedCount ?? 0;
                     return (
                       <p key={name} style={styles.compactFlags}>
-                        {name}: raw {raw} · parsed {parsed} · usable {usable}
+                        {name}: raw {raw} · parsed {parsed} · usable {usable} · filtered {filtered}
+                        {cached > 0 ? ` · cached ${cached}` : ""}
                         {row.statusLabel ? ` · ${row.statusLabel}` : ""}
                       </p>
                     );

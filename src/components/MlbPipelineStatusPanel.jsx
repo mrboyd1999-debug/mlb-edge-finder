@@ -1,7 +1,8 @@
 import { memo } from "react";
 import { formatDateTime } from "../utils/formatters.js";
 import { styles } from "../theme/styles.js";
-import { healthStateStyle } from "../services/sourceHealth.js";
+import { healthStateStyle, resolveProviderPanelRow, CONNECTION_TIERS } from "../services/sourceHealth.js";
+import { formatProviderStatusLabel } from "../utils/livePropUsability.js";
 
 const ROW_STYLE = {
   display: "grid",
@@ -13,8 +14,18 @@ const ROW_STYLE = {
 };
 
 function resolveDisplayStatus(row = {}) {
-  const tier = row.connectionTier || row.status || "Pending";
-  const label = row.statusLabel || tier;
+  const tier = row.connectionTier || row.status || CONNECTION_TIERS.PENDING;
+  const label =
+    row.statusLabel ||
+    formatProviderStatusLabel({
+      badge: row.lineSourceBadge,
+      status: tier,
+      usableCount: row.usableCount,
+      rawCount: row.rawCount,
+      parsedCount: row.parsedCount,
+      cached: tier === CONNECTION_TIERS.WARNING,
+      connectionTier: tier,
+    });
   return { tier, label };
 }
 
@@ -39,7 +50,7 @@ function StatusRow({ label, row = {}, lastSuccessAt, lastError, details = [], ex
           {row.ingestionSummary}
         </p>
       ) : null}
-      {lastError && tier === "Failed" ? (
+      {lastError && tier === CONNECTION_TIERS.FAILED ? (
         <p style={{ ...styles.compactFlags, margin: 0, color: "#fca5a5" }}>{lastError}</p>
       ) : null}
       {details.map((line) => (
@@ -54,8 +65,8 @@ function StatusRow({ label, row = {}, lastSuccessAt, lastError, details = [], ex
 function MlbPipelineStatusPanel({ pipelineStatus = null, apiHealth = null, compact = false }) {
   const stats = pipelineStatus?.mlbStatsApi || {};
   const projection = pipelineStatus?.projectionApi || {};
-  const pp = { ...(apiHealth?.PrizePicks || {}), ...(pipelineStatus?.dfsSources?.PrizePicks || {}) };
-  const ud = { ...(apiHealth?.Underdog || {}), ...(pipelineStatus?.dfsSources?.Underdog || {}) };
+  const pp = resolveProviderPanelRow(apiHealth?.PrizePicks, pipelineStatus?.dfsSources?.PrizePicks);
+  const ud = resolveProviderPanelRow(apiHealth?.Underdog, pipelineStatus?.dfsSources?.Underdog);
 
   const statsDetails = [
     stats.lastUrl ? `URL: ${stats.lastUrl}` : "",
@@ -68,6 +79,13 @@ function MlbPipelineStatusPanel({ pipelineStatus = null, apiHealth = null, compa
     projection.lastPlayer && projection.lastStat ? `Last: ${projection.lastPlayer} · ${projection.lastStat}` : "",
     projection.lastProjection != null ? `Projection used: ${projection.lastProjection}` : "",
   ].filter(Boolean);
+
+  const projectionTier =
+    projection.lastProjectionGeneratedAt || projection.lastSuccessAt
+      ? CONNECTION_TIERS.CONNECTED
+      : projection.status === "Failed"
+        ? CONNECTION_TIERS.FAILED
+        : projection.status || CONNECTION_TIERS.PENDING;
 
   return (
     <div className="mlb-pipeline-status-panel" style={{ display: "grid", gap: compact ? "6px" : "8px", marginTop: compact ? "8px" : "10px" }}>
@@ -93,7 +111,11 @@ function MlbPipelineStatusPanel({ pipelineStatus = null, apiHealth = null, compa
       />
       <StatusRow
         label={stats.label || "MLB Stats API"}
-        row={{ status: stats.status, connectionTier: stats.status, statusLabel: stats.status }}
+        row={{
+          status: stats.status,
+          connectionTier: stats.status === "Connected" ? CONNECTION_TIERS.CONNECTED : stats.status,
+          statusLabel: stats.status,
+        }}
         lastSuccessAt={stats.lastSuccessAt}
         lastError={stats.lastError}
         details={statsDetails}
@@ -101,9 +123,9 @@ function MlbPipelineStatusPanel({ pipelineStatus = null, apiHealth = null, compa
       <StatusRow
         label={projection.label || "MLB Projection Engine"}
         row={{
-          status: projection.status,
-          connectionTier: projection.status,
-          statusLabel: projection.status,
+          status: projectionTier,
+          connectionTier: projectionTier,
+          statusLabel: projectionTier === CONNECTION_TIERS.CONNECTED ? "Connected" : projection.status || "Pending",
         }}
         lastSuccessAt={projection.lastSuccessAt}
         lastError={projection.lastError}
