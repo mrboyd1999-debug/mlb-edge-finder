@@ -20,6 +20,7 @@ export function isMlbProp(prop = {}) {
 
 export function resolveMlbPipelineFailureView(prop = {}) {
   if (!isMlbProp(prop)) return { show: false };
+  if (prop.manualFallbackMode) return { show: false };
 
   const trace = prop.mlbPipelineTrace || {};
   let failureReason =

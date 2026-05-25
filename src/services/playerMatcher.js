@@ -90,6 +90,23 @@ export function scoreMlbPlayerMatch(sportsbookName = "", candidate = {}) {
 export function pickBestMlbMatch(sportsbookName = "", people = []) {
   if (!people.length) return null;
 
+  const normalizedQuery = normalizeSportsbookName(sportsbookName);
+  const exact = people
+    .map((person) => {
+      const fullName = person.fullName || `${person.firstName || ""} ${person.lastName || ""}`.trim();
+      return { person, fullName };
+    })
+    .find(({ fullName }) => normalizePlayerName(fullName) === normalizedQuery);
+
+  if (exact) {
+    return {
+      person: exact.person,
+      fullName: exact.fullName,
+      confidence: 100,
+      reason: "exact normalized match",
+    };
+  }
+
   const scored = people
     .map((person) => {
       const fullName = person.fullName || `${person.firstName || ""} ${person.lastName || ""}`.trim();
@@ -132,12 +149,38 @@ export async function searchMlbPlayers(query = "") {
 
   const cacheKey = normalizePlayerName(text);
   const cached = readSmartCacheIfFresh("mlb-player-search-list", cacheKey, CACHE_TTL.STATS_MS);
-  if (cached?.payload?.people) return cached.payload.people;
+  if (cached?.payload?.people) {
+    console.info("[Manual Prop Matcher] cache hit", { query: text, count: cached.payload.people.length });
+    return cached.payload.people;
+  }
 
   const searchUrl = new URL(MLB_SEARCH_URL);
   searchUrl.searchParams.set("names", text);
-  const response = await cachedFetch(searchUrl);
-  if (!response.ok) throw new Error(`MLB player search failed (${response.status})`);
+  const url = searchUrl.toString();
+  console.info("[Manual Prop Matcher] API URL:", url);
+
+  let response;
+  try {
+    response = await cachedFetch(searchUrl);
+  } catch (error) {
+    console.warn("[Manual Prop Matcher] fetch error", {
+      url,
+      message: error?.message || String(error),
+    });
+    throw error;
+  }
+
+  console.info("[Manual Prop Matcher] response status:", response.status);
+  if (!response.ok) {
+    let bodyText = "";
+    try {
+      bodyText = await response.clone().text();
+    } catch {
+      bodyText = "";
+    }
+    console.warn("[Manual Prop Matcher] failed response body:", bodyText.slice(0, 500));
+    throw new Error(`MLB player search failed (${response.status})`);
+  }
 
   const payload = await response.json();
   const people = payload.people || [];
@@ -152,10 +195,12 @@ export async function matchSportsbookPlayerToMlb(sportsbookName = "", { minConfi
   const incoming = String(sportsbookName || "").trim();
   const normalizedName = normalizeSportsbookName(incoming);
   logNormalizedName(incoming, normalizedName);
+  console.info("[Manual Prop Matcher] normalized player name:", normalizedName);
 
   if (!incoming) {
     logMatchedPlayer(null, 0, "empty incoming name");
     logPlayerMatch({ incomingName: incoming, matchedName: null, confidence: 0, reason: "empty incoming name" });
+    console.info("[Manual Prop Matcher] matched player result:", null);
     return { player: null, confidence: 0, reason: "empty incoming name" };
   }
 
@@ -188,6 +233,12 @@ export async function matchSportsbookPlayerToMlb(sportsbookName = "", { minConfi
     const result = { player: null, confidence: best?.confidence || 0, reason: best?.reason || "no confident MLB match" };
     logMatchedPlayer(null, result.confidence, result.reason);
     logPlayerMatch({ incomingName: incoming, matchedName: null, confidence: result.confidence, reason: result.reason });
+    console.info("[Manual Prop Matcher] matched player result:", {
+      matchedPlayer: null,
+      playerId: null,
+      confidence: result.confidence,
+      reason: result.reason,
+    });
     return result;
   }
 
@@ -210,6 +261,12 @@ export async function matchSportsbookPlayerToMlb(sportsbookName = "", { minConfi
     confidence: result.confidence,
     reason: result.reason,
     mlbId: result.player.id,
+  });
+  console.info("[Manual Prop Matcher] matched player result:", {
+    matchedPlayer: result.player.fullName,
+    playerId: result.player.id,
+    confidence: result.confidence,
+    reason: result.reason,
   });
   return result;
 }

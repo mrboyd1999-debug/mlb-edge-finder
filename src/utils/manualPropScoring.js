@@ -19,6 +19,7 @@ import {
   isVerifiedProjectionStatus,
   PROJECTION_UNAVAILABLE_LABEL,
   VERIFIED_PROJECTION_LABEL,
+  buildBreakdownRow,
 } from "../modules/projectionBreakdown.js";
 import {
   buildSideEngineDebug,
@@ -46,6 +47,9 @@ export {
   AWAITING_PROJECTION_STATUS,
   PASS_STATUS,
 } from "../modules/propSideEngine.js";
+
+export const MANUAL_FALLBACK_MODE_STATUS = "Fallback mode";
+export const MANUAL_FALLBACK_ESTIMATE_STATUS = "Fallback estimate — not verified";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -543,6 +547,120 @@ export function generateManualExplanation(ctx = {}) {
   return parts.slice(0, 2).join(" ");
 }
 
+function estimateManualFallbackEdge({ line, baseline, volatility }) {
+  const mean = Number(baseline?.mean);
+  const std = Math.max(Number(baseline?.std) || 1, 0.05);
+  const distance = Number.isFinite(mean) ? Math.abs(Number(line) - mean) : 0;
+  return round(clamp(distance * 0.12 + (volatility?.score ?? 0.5) * 0.35 + 0.25, 0.25, 0.85), 2);
+}
+
+function resolveManualFallbackSide({ line, baseline, linePct }) {
+  const mean = Number(baseline?.mean);
+  const std = Math.max(Number(baseline?.std) || 1, 0.05);
+  if (Number.isFinite(mean)) {
+    if (Number(line) > mean + std * 0.15) return "under";
+    if (Number(line) < mean - std * 0.15) return "over";
+  }
+  return linePct >= 0.5 ? "under" : "over";
+}
+
+function buildManualFallbackScore(input = {}, context = {}) {
+  const sport = input.sport || "MLB";
+  const statType = input.statType || "";
+  const line = Number(input.line);
+  const payoutType = normalizePayout(input.payoutType || input.oddsType || input.payoutRole);
+  const source = input.source === "Underdog" ? "Underdog" : "PrizePicks";
+  const volatility = context.volatility || getManualStatVolatility(sport, statType);
+  const baseline = context.baseline || getManualStatBaseline(sport, statType);
+  const linePct = context.linePct ?? linePercentile(line, baseline);
+  const statLabel = marketDisplayLabel(statType) || statType;
+  const volatilityLabel = volatility.label || volatilityLabelFromTier(volatility.tier);
+  const recommendedSide = resolveManualFallbackSide({ line, baseline, linePct });
+  const edgeEstimate = estimateManualFallbackEdge({ line, baseline, volatility });
+  const fairLine =
+    recommendedSide === "over"
+      ? round(line + edgeEstimate, 2)
+      : round(Math.max(0.1, line - edgeEstimate), 2);
+  const edge = computeDirectionalEdgeForSide(fairLine, line, recommendedSide);
+  const rawEdge = computeRawEdge(fairLine, line);
+  const confidence = Math.round(clamp(50 + Math.min(Math.abs(rawEdge ?? 0) * 5, 10), 50, 60));
+  const edgePercent = computeManualEdgePercent(edge, line, fairLine);
+  const whyThisPick = generateManualExplanation({
+    pick: recommendedSide,
+    statLabel,
+    line,
+    payoutType,
+    volatility,
+    edge,
+    linePct,
+    sport: normalizeSportKey(sport),
+    projection: fairLine,
+  });
+  const apiWarning = context.apiWarning || "MLB Stats API unavailable — using line-based fallback estimate.";
+  const statusMessage = `${MANUAL_FALLBACK_ESTIMATE_STATUS}. ${apiWarning}`;
+
+  return {
+    projectionUnavailable: false,
+    manualFallbackMode: true,
+    bestPick: recommendedSide,
+    side: recommendedSide,
+    pick: recommendedSide,
+    lean: recommendedSide === "over" ? "Over" : "Under",
+    recommendedSide,
+    confidence,
+    confidenceScore: confidence,
+    calibratedConfidence: confidence,
+    edge,
+    edgePercent,
+    impliedHitChance: null,
+    hitChanceLabel: INSUFFICIENT_DATA_LABEL,
+    riskLevel: classifyManualRisk({ payoutType, volatility, edge, linePct }),
+    playTag: null,
+    isWeakManualPick: true,
+    isDisplayPlayable: false,
+    passPlay: false,
+    noEdge: false,
+    displayStatus: MANUAL_FALLBACK_MODE_STATUS,
+    statusMessage,
+    manualApiWarning: apiWarning,
+    whyThisPick,
+    qualificationReason: whyThisPick,
+    premiumWhySummary: whyThisPick,
+    projectedValue: fairLine,
+    projection: fairLine,
+    projectionBreakdown: [
+      buildBreakdownRow("Fallback edge estimate", edgeEstimate, { display: `±${formatNumber(edgeEstimate)}` }),
+      buildBreakdownRow("Stat baseline mean", baseline.mean, { display: formatNumber(baseline.mean) }),
+    ],
+    projectionLabel: MANUAL_FALLBACK_ESTIMATE_STATUS,
+    projectionSource: "manual-fallback",
+    isFallbackProjection: true,
+    isVerifiedProjection: false,
+    dataStatus: "Estimated fallback projection",
+    projectionConfidence: confidence,
+    manualVolatilityTier: volatility.tier,
+    manualVolatilityScore: volatility.score,
+    volatilityLabel,
+    volatility: round(1.5 + volatility.score * 2.5, 2),
+    manualDynamicAnalysis: true,
+    scoringModeLabel: MANUAL_FALLBACK_MODE_STATUS,
+    dataQualityScore: 42,
+    bettingLabel: MANUAL_FALLBACK_MODE_STATUS,
+    sideEngineDebug: buildSideEngineDebug({
+      projection: fairLine,
+      line,
+      side: recommendedSide,
+      projectionSource: "manual-fallback",
+      dataStatus: "Estimated fallback projection",
+      rawEdge,
+      recommendedSide,
+      aligned: true,
+      volatility,
+      sportsbookLine: line,
+    }),
+  };
+}
+
 export function scoreManualPropInput(input = {}, liveScored = null, profile = null) {
   const sport = input.sport || "MLB";
   const statType = input.statType || "";
@@ -675,62 +793,12 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
   });
 
   if (!verified) {
-    const whyThisPick = generateManualExplanation({
-      statLabel,
-      line,
-      payoutType,
+    return buildManualFallbackScore(input, {
       volatility,
-      sport: sportKey,
-      projectionUnavailable: true,
+      baseline,
+      linePct,
+      apiWarning: liveScored?.manualApiWarning || liveScored?.dataFetchReason || null,
     });
-    return {
-      projectionUnavailable: true,
-      bestPick: null,
-      side: null,
-      pick: null,
-      lean: null,
-      confidence: null,
-      confidenceScore: null,
-      calibratedConfidence: null,
-      edge: null,
-      edgePercent: null,
-      impliedHitChance: null,
-      hitChanceLabel: INSUFFICIENT_DATA_LABEL,
-      riskLevel: null,
-      playTag: null,
-      isWeakManualPick: true,
-      isDisplayPlayable: false,
-      noEdge: true,
-      displayStatus: NO_VERIFIED_PLAY_STATUS,
-      statusMessage: AWAITING_PROJECTION_STATUS,
-      userPick,
-      whyThisPick,
-      qualificationReason: whyThisPick,
-      premiumWhySummary: whyThisPick,
-      projectedValue: null,
-      projection: null,
-      projectionBreakdown,
-      projectionLabel: PROJECTION_UNAVAILABLE_LABEL,
-      projectionSource: projectionSource || "missing",
-      isFallbackProjection: true,
-      isVerifiedProjection: false,
-      dataStatus: dataStatus || DATA_STATUS.UNAVAILABLE,
-      projectionConfidence: null,
-      manualVolatilityTier: null,
-      manualVolatilityScore: null,
-      volatilityLabel: null,
-      volatility: null,
-      manualDynamicAnalysis: true,
-      scoringModeLabel: PROJECTION_UNAVAILABLE_LABEL,
-      dataQualityScore: null,
-      bettingLabel: NO_VERIFIED_PLAY_STATUS,
-      sideEngineDebug: buildSideEngineDebug({
-        projectionUnavailable: true,
-        projectionSource: projectionSource || "missing",
-        dataStatus: dataStatus || DATA_STATUS.UNAVAILABLE,
-        sportsbookLine: line,
-      }),
-    };
   }
 
   const recommendedSide = resolveRecommendedSide(fairLine, line);
@@ -944,6 +1012,7 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
 
 export function mergeManualPropScoring(builtProp = {}, manualScore = {}, liveScored = null) {
   const recommended = manualScore.bestPick || null;
+  const fallbackMode = Boolean(manualScore.manualFallbackMode);
   const scoringModeLabel = manualScore.scoringModeLabel || manualScoringModeLabel(liveScored, manualScore.isFallbackProjection);
   const playable = Boolean(manualScore.isDisplayPlayable) && isManualPropPlayable({ ...builtProp, ...manualScore });
   return {
@@ -966,26 +1035,33 @@ export function mergeManualPropScoring(builtProp = {}, manualScore = {}, liveSco
     dataStatus: manualScore.dataStatus || liveScored?.dataStatus || null,
     projectionConfidence: manualScore.projectionConfidence ?? liveScored?.projectionConfidence ?? null,
     hitChanceLabel: manualScore.hitChanceLabel || (manualScore.impliedHitChance == null ? INSUFFICIENT_DATA_LABEL : null),
-    displayStatus: manualScore.displayStatus || (manualScore.projectionUnavailable ? NO_VERIFIED_PLAY_STATUS : null),
-    pipelineDebugLine: liveScored?.pipelineDebugLine || manualScore.pipelineDebugLine || null,
-    pipelineFailureCode: liveScored?.pipelineFailureCode || manualScore.pipelineFailureCode || null,
-    mlbPipelineTrace: liveScored?.mlbPipelineTrace || manualScore.mlbPipelineTrace || null,
-    statusMessage:
-      liveScored?.pipelineFailureCode ||
-      manualScore.pipelineFailureCode ||
-      (manualScore.projectionUnavailable ? AWAITING_PROJECTION_STATUS : null),
-    projectionLabel:
-      liveScored?.pipelineFailureCode ||
-      manualScore.pipelineFailureCode ||
-      manualScore.projectionLabel ||
-      liveScored?.projectionLabel ||
-      "Projection unavailable",
-    scoringModeLabel:
-      liveScored?.pipelineFailureCode ||
-      manualScore.pipelineFailureCode ||
-      manualScore.scoringModeLabel ||
-      liveScored?.scoringModeLabel ||
-      "Projection unavailable",
+    displayStatus:
+      manualScore.displayStatus ||
+      (manualScore.projectionUnavailable ? NO_VERIFIED_PLAY_STATUS : fallbackMode ? MANUAL_FALLBACK_MODE_STATUS : null),
+    pipelineDebugLine: fallbackMode ? manualScore.statusMessage : liveScored?.pipelineDebugLine || manualScore.pipelineDebugLine || null,
+    pipelineFailureCode: fallbackMode ? null : liveScored?.pipelineFailureCode || manualScore.pipelineFailureCode || null,
+    mlbPipelineTrace: fallbackMode
+      ? manualScore.mlbPipelineTrace || liveScored?.mlbPipelineTrace || null
+      : liveScored?.mlbPipelineTrace || manualScore.mlbPipelineTrace || null,
+    statusMessage: fallbackMode
+      ? manualScore.statusMessage
+      : liveScored?.pipelineFailureCode ||
+        manualScore.pipelineFailureCode ||
+        (manualScore.projectionUnavailable ? AWAITING_PROJECTION_STATUS : null),
+    projectionLabel: fallbackMode
+      ? manualScore.projectionLabel
+      : liveScored?.pipelineFailureCode ||
+        manualScore.pipelineFailureCode ||
+        manualScore.projectionLabel ||
+        liveScored?.projectionLabel ||
+        "Projection unavailable",
+    scoringModeLabel: fallbackMode
+      ? manualScore.scoringModeLabel || MANUAL_FALLBACK_MODE_STATUS
+      : liveScored?.pipelineFailureCode ||
+        manualScore.pipelineFailureCode ||
+        manualScore.scoringModeLabel ||
+        liveScored?.scoringModeLabel ||
+        "Projection unavailable",
     modelPick:
       manualScore.projectionUnavailable
         ? NO_VERIFIED_PLAY_STATUS

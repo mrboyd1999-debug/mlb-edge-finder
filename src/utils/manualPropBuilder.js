@@ -6,6 +6,7 @@ import {
   scoreManualPropInput,
   selectManualTopPicksByRank,
   sortManualPropsByRank,
+  MANUAL_FALLBACK_ESTIMATE_STATUS,
 } from "./manualPropScoring.js";
 import { withPlayerImageUrl } from "./playerImageFields.js";
 import { buildMlbStatProfileFromLogs } from "../services/playerStats.js";
@@ -153,18 +154,52 @@ export async function fetchManualPropProfile(form = {}) {
     ...form,
     ...validated.manualProp,
   });
-  const data = await buildMlbPropDataPackage(built, {
-    buildProfile: (bundle, statType, line) => buildMlbStatProfileFromLogs(bundle, statType, line),
-  });
-  if (!data.profile) {
-    logMlbData("manual.profile.miss", { player: built.playerName, reason: data.reason });
+  const normalizedName = normalizeSportsbookName(built.playerName);
+  console.info("[Manual Analyzer] normalized player name:", normalizedName);
+
+  try {
+    const data = await buildMlbPropDataPackage(built, {
+      buildProfile: (bundle, statType, line) => buildMlbStatProfileFromLogs(bundle, statType, line),
+    });
+    if (data.profile) {
+      console.info("[Manual Analyzer] matched player result:", {
+        matchedPlayer: data.pipelineTrace?.matchedPlayer ?? null,
+        playerId: data.pipelineTrace?.playerId ?? null,
+        logsCount: data.pipelineTrace?.logsCount ?? 0,
+      });
+    } else {
+      console.warn("[Manual Analyzer] profile unavailable", {
+        reason: data.reason,
+        failureCode: data.pipelineTrace?.failureCode,
+        matchedPlayer: data.pipelineTrace?.matchedPlayer ?? null,
+        playerId: data.pipelineTrace?.playerId ?? null,
+      });
+    }
+    if (!data.profile) {
+      logMlbData("manual.profile.miss", { player: built.playerName, reason: data.reason });
+    }
+    return {
+      profile: data.profile,
+      built,
+      pipelineTrace: data.pipelineTrace || null,
+      warnings: data.reason && !data.profile ? [data.reason] : [],
+    };
+  } catch (error) {
+    console.warn("[Manual Analyzer] stat fetch failed", {
+      message: error?.message || String(error),
+      normalizedName,
+    });
+    return {
+      profile: null,
+      built,
+      pipelineTrace: {
+        normalizedName,
+        failureCode: MLB_FAILURE.MLB_API_FAILED,
+        failureReason: error?.message || "Load failed",
+      },
+      warnings: [error?.message || "Load failed"],
+    };
   }
-  return {
-    profile: data.profile,
-    built,
-    pipelineTrace: data.pipelineTrace || null,
-    warnings: data.reason && !data.profile ? [data.reason] : [],
-  };
 }
 
 function pickAuthoritativePipelineTrace({ liveScored = null, pipelineTrace = null, built = null, prop = null } = {}) {
@@ -189,6 +224,24 @@ function attachPipelineDebug(prop = {}, { liveScored = null, pipelineTrace = nul
   if (!isMlb) return prop;
 
   const trace = pickAuthoritativePipelineTrace({ liveScored, pipelineTrace, built, prop });
+
+  if (prop.manualFallbackMode) {
+    const apiWarning = trace?.failureReason || prop.manualApiWarning || null;
+    console.info("[Manual Analyzer] fallback mode", {
+      player: prop.playerName,
+      normalizedName: trace?.normalizedName || normalizeSportsbookName(prop.playerName),
+      apiWarning,
+      lean: prop.bestPick || prop.side,
+      projection: prop.projectedValue ?? prop.projection,
+    });
+    return {
+      ...prop,
+      manualApiWarning: apiWarning || prop.manualApiWarning || null,
+      mlbPipelineTrace: prop.mlbPipelineTrace || trace || null,
+      pipelineFailureCode: null,
+    };
+  }
+
   const projectionUnavailable = Boolean(prop.projectionUnavailable || liveScored?.projectionUnavailable);
   const projection = Number(prop.projectedValue ?? prop.projection ?? liveScored?.projection);
   const hasProjection = Number.isFinite(projection) && projection > 0;
@@ -254,13 +307,16 @@ export async function analyzeManualProp(form = {}, scoreFn = null) {
   let profile = null;
   let built = null;
   let pipelineTrace = null;
+  let apiWarning = null;
   try {
     const fetched = await fetchManualPropProfile(form);
     profile = fetched.profile;
     built = fetched.built;
     pipelineTrace = fetched.pipelineTrace;
+    apiWarning = fetched.warnings?.[0] || pipelineTrace?.failureReason || null;
   } catch (error) {
     console.warn("[Manual Analyzer] stat fetch failed", error);
+    apiWarning = error?.message || "Load failed";
   }
 
   let liveScored = null;
@@ -276,10 +332,13 @@ export async function analyzeManualProp(form = {}, scoreFn = null) {
     }
   }
 
-  return attachPipelineDebug(
-    buildOfflineManualAnalyzedProp(form, liveScored?.playerName ? liveScored : null, profile),
-    { liveScored, pipelineTrace, built }
-  );
+  const analyzed = buildOfflineManualAnalyzedProp(form, liveScored?.playerName ? liveScored : null, profile);
+  if (apiWarning && analyzed.manualFallbackMode) {
+    analyzed.manualApiWarning = apiWarning;
+    analyzed.statusMessage = `${MANUAL_FALLBACK_ESTIMATE_STATUS}. ${apiWarning}`;
+  }
+
+  return attachPipelineDebug(analyzed, { liveScored, pipelineTrace, built });
 }
 
 export function normalizeSide(value = "") {
@@ -311,6 +370,17 @@ export function makeManualPropId(form = {}) {
   ].join("|");
 }
 
+/** Dedupe key: player + stat + line + source (ignores payout and timestamp). */
+export function manualPropIdentityKey(form = {}) {
+  const source = form.source === "Underdog" ? "Underdog" : form.source === "PrizePicks" ? "PrizePicks" : form.source || form.platform || "PrizePicks";
+  return [
+    normalize(source),
+    normalizeSportsbookName(form.playerName),
+    normalize(form.statType),
+    Number(form.line),
+  ].join("|");
+}
+
 export function buildManualPropFromInput(form = {}) {
   const playerName = String(form.playerName || "").trim();
   const statType = String(form.statType || "").trim();
@@ -321,7 +391,7 @@ export function buildManualPropFromInput(form = {}) {
   const line = Number(form.line);
   const platform = form.source === "Underdog" ? "Underdog" : "PrizePicks";
   const payout = payoutFields(form.payoutType);
-  const id = `${makeManualPropId(form)}|${Date.now()}`;
+  const id = form.id || form.editingId || makeManualPropId(form);
 
   const raw = normalizePropShape(
     {

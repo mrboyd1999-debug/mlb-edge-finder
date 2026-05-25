@@ -276,6 +276,8 @@ import ManualPropsPanel from "./components/ManualPropsPanel.jsx";
 import {
   analyzeManualProp,
   isManualAnalyzerProp,
+  manualPropIdentityKey,
+  makeManualPropId,
   normalizeManualFormInput,
 } from "./utils/manualPropBuilder.js";
 import MobileScrollFab from "./components/MobileScrollFab.jsx";
@@ -3308,9 +3310,16 @@ export default function DFSPropsApp() {
     const editingId = form.editingId || null;
     try {
       const analyzed = await analyzeManualProp(form, scoreManualAnalyzerProp);
-      const finalAnalyzed = editingId ? { ...analyzed, id: editingId } : analyzed;
+      const stableId = editingId || makeManualPropId(form);
+      const identityKey = manualPropIdentityKey(form);
+      const finalAnalyzed = { ...analyzed, id: stableId };
       persistManualAnalyzerProps((current) =>
-        [finalAnalyzed, ...current.filter((row) => row.id !== finalAnalyzed.id)].slice(0, 100)
+        [
+          finalAnalyzed,
+          ...current.filter(
+            (row) => row.id !== finalAnalyzed.id && manualPropIdentityKey(row) !== identityKey
+          ),
+        ].slice(0, 100)
       );
       setLearningSaveNotice(
         `Analyzed ${finalAnalyzed.playerName} — confidence ${Math.round(Number(finalAnalyzed.confidenceScore ?? finalAnalyzed.confidence ?? 0))}.`
@@ -3347,9 +3356,10 @@ export default function DFSPropsApp() {
               side: prop.side || prop.bestPick || prop.pick,
               source: prop.source || prop.platform,
               payoutType: prop.oddsType || prop.payoutRole || "standard",
+              id: prop.id,
             },
             scoreManualAnalyzerProp
-          )
+          ).then((analyzed) => ({ ...analyzed, id: prop.id }))
         )
       );
       persistManualAnalyzerProps(rescored);
