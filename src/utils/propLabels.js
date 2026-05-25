@@ -40,6 +40,7 @@ export function confidenceTier(prop) {
   return confidenceTierLabel(score, prop.riskLevel || "", {
     strongData: prop.strongData,
     verifiedHistory: prop.verifiedHistory,
+    strongPlayTag: prop.playTag,
   });
 }
 

@@ -39,6 +39,12 @@ import {
   sideConsistencyCheck,
   validateSideAgainstProjection,
 } from "../modules/propSideEngine.js";
+import {
+  calibrateRealisticConfidence,
+  computeGradingDataQuality,
+  computeVolatilityAdjustedEdge,
+  resolveStrongPlayTag,
+} from "./mlbConfidenceEngine.js";
 
 export {
   hasValidProjection,
@@ -320,12 +326,12 @@ export function strongPlayBadgeStyle() {
   return { border: "1px solid #16a34a", background: "#14532d", color: "#bbf7d0" };
 }
 
-export function resolveManualPlayTag({ edge, confidence, volatility } = {}) {
-  const numericEdge = Number(edge);
-  const numericConf = Number(confidence);
-  const tier = String(volatility?.tier || "MEDIUM").toUpperCase();
-  if (numericEdge > 1.0 && numericConf > 70 && tier !== "HIGH") return "Strong Play";
-  return null;
+export function resolveManualPlayTag(prop = {}) {
+  if (typeof prop !== "object" || prop === null) return null;
+  if ("edge" in prop && "confidence" in prop && !("isVerifiedProjection" in prop) && !("sampleSize" in prop)) {
+    return null;
+  }
+  return resolveStrongPlayTag(prop);
 }
 
 export function manualWeakPickStyle(edge) {
@@ -790,6 +796,7 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
   const recommendedSide = resolveRecommendedSide(fairLine, line);
   const rawEdge = computeRawEdge(fairLine, line);
   const absEdge = rawEdge != null ? Math.abs(rawEdge) : 0;
+  const volatilityAdjustedEdge = computeVolatilityAdjustedEdge(absEdge, volatility);
   const sideValidation = validateSideAgainstProjection(recommendedSide, fairLine, line);
 
   if (!recommendedSide) {
@@ -860,6 +867,30 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
   }
 
   const edge = computeDirectionalEdgeForSide(fairLine, line, recommendedSide);
+  const gradingDataQuality = computeGradingDataQuality(
+    {
+      ...input,
+      statType,
+      sport: sportKey,
+      sampleSize: mergedProfile?.sampleSize,
+      isVerifiedProjection: true,
+      hasVerifiedStats: Boolean(mergedProfile && !mergedProfile.sparse && !mergedProfile.fallback),
+      matchupNote: mergedProfile?.matchupNote,
+      hasMatchup: Boolean(mergedProfile?.matchupNote || mergedProfile?.handednessMatchup),
+      matchupRating: mergedProfile?.handednessMatchup && /tough|mismatch/i.test(String(mergedProfile.handednessMatchup))
+        ? "Tough"
+        : mergedProfile?.handednessMatchup && /favorable|platoon/i.test(String(mergedProfile.handednessMatchup))
+          ? "Favorable"
+          : null,
+      weatherNote: mergedProfile?.weatherNote,
+      roleContext: mergedProfile?.roleContext,
+      pitchCountTrend: mergedProfile?.pitchCountTrend,
+      last5Average: mergedProfile?.last5Average,
+      seasonAverage: mergedProfile?.seasonAverage,
+      strikeoutTrend: mergedProfile?.strikeoutTrend,
+    },
+    mergedProfile
+  );
   let confidence;
   let impliedHitChance;
 
@@ -873,6 +904,7 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
       volatility,
       projectionConfidence: projectionConfidence ?? 60,
       dataStatus: dataStatus || DATA_STATUS.VERIFIED,
+      adjustedAbsEdge: volatilityAdjustedEdge,
     });
     confidence = pitcherScore.confidence;
     impliedHitChance = pitcherScore.impliedHitChance;
@@ -884,7 +916,7 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
         : mergedProfile?.handednessMatchup && /tough|mismatch/i.test(String(mergedProfile.handednessMatchup))
           ? "weak"
           : null;
-    confidence = confidenceFromEdge(absEdge, {
+    confidence = confidenceFromEdge(volatilityAdjustedEdge, {
       volatility,
       payoutType,
       marketKey,
@@ -904,7 +936,30 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
     });
   }
 
-  const passPlay = shouldPassPlay({ edge, confidence, isVerified: true });
+  confidence = calibrateRealisticConfidence(
+    confidence,
+    {
+      ...input,
+      sport: sportKey,
+      statType,
+      sampleSize: mergedProfile?.sampleSize,
+      isVerifiedProjection: true,
+      hasVerifiedStats: Boolean(mergedProfile && !mergedProfile.sparse && !mergedProfile.fallback),
+      volatilityAdjustedEdge,
+      edge: volatilityAdjustedEdge,
+      matchupNote: mergedProfile?.matchupNote,
+      roleContext: mergedProfile?.roleContext,
+      pitchCountTrend: mergedProfile?.pitchCountTrend,
+      weatherNote: mergedProfile?.weatherNote,
+      last5Average: mergedProfile?.last5Average,
+      seasonAverage: mergedProfile?.seasonAverage,
+      strikeoutTrend: mergedProfile?.strikeoutTrend,
+      gradingDataQuality,
+    },
+    volatilityAdjustedEdge
+  );
+
+  const passPlay = shouldPassPlay({ edge: volatilityAdjustedEdge, confidence, isVerified: true });
   const riskLevel = classifyManualRisk({ payoutType, volatility, edge, linePct });
   const edgePercent = computeManualEdgePercent(edge, line, fairLine);
   const whyThisPick = passPlay
@@ -921,7 +976,34 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
         sport: sportKey,
         projection: fairLine,
       });
-  const playTag = passPlay ? null : resolveManualPlayTag({ edge, confidence, volatility });
+  const playTag = passPlay
+    ? null
+    : resolveManualPlayTag({
+        isVerifiedProjection: true,
+        hasVerifiedStats: Boolean(mergedProfile && !mergedProfile.sparse && !mergedProfile.fallback),
+        projection: fairLine,
+        projectedValue: fairLine,
+        sampleSize: mergedProfile?.sampleSize,
+        edge,
+        volatilityAdjustedEdge,
+        confidence,
+        confidenceScore: confidence,
+        volatility,
+        volatilityTier: volatility.tier,
+        gradingDataQuality,
+        matchupNote: mergedProfile?.matchupNote,
+        hasMatchup: Boolean(mergedProfile?.matchupNote || mergedProfile?.handednessMatchup),
+        matchupRating: mergedProfile?.handednessMatchup && /tough|mismatch/i.test(String(mergedProfile.handednessMatchup))
+          ? "Tough"
+          : mergedProfile?.handednessMatchup && /favorable|platoon/i.test(String(mergedProfile.handednessMatchup))
+            ? "Favorable"
+            : null,
+        weatherNote: mergedProfile?.weatherNote,
+        roleContext: mergedProfile?.roleContext,
+        pitchCountTrend: mergedProfile?.pitchCountTrend,
+        last5Average: mergedProfile?.last5Average,
+        seasonAverage: mergedProfile?.seasonAverage,
+      });
   const isDisplayPlayable =
     !passPlay &&
     meetsPlayQualityThresholds({
@@ -962,6 +1044,8 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
     confidenceScore: passPlay ? null : confidence,
     calibratedConfidence: passPlay ? null : confidence,
     edge: passPlay ? null : edge,
+    rawEdge: passPlay ? null : rawEdge,
+    volatilityAdjustedEdge: passPlay ? null : volatilityAdjustedEdge,
     edgePercent: passPlay ? null : edgePercent,
     impliedHitChance: passPlay ? null : impliedHitChance,
     hitChanceLabel: passPlay ? null : impliedHitChance == null ? INSUFFICIENT_DATA_LABEL : null,
@@ -991,7 +1075,8 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
     volatility: passPlay ? null : round(1.5 + volatility.score * 2.5, 2),
     manualDynamicAnalysis: true,
     scoringModeLabel: manualScoringModeLabel(liveScored, false),
-    dataQualityScore: Math.round(48 + (1 - volatility.score) * 22 + Math.max(edge, 0) * 6),
+    dataQualityScore: gradingDataQuality,
+    gradingDataQuality,
     bettingLabel: passPlay ? PASS_STATUS : playTag || (isDisplayPlayable ? "Playable" : PASS_STATUS),
     sideEngineDebug: { ...sideEngineDebug, passPlay, recommendedSide },
   };

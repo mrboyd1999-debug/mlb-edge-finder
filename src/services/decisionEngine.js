@@ -13,6 +13,7 @@ import { isDemonProp, isGoblinProp } from "../utils/propLabels.js";
 import { getPropVolatilityTier, meetsVolatilityTierRequirements, PROP_VOLATILITY_TIERS } from "./marketConfidenceModels.js";
 import { getMlbMinEdgeForTier, isMlbQualityTierS, MLB_ONLY_MODE } from "../utils/mlbOnlyMode.js";
 import { applyPropCalibrationBundle } from "../utils/propCalibration.js";
+import { calibrateRealisticConfidence } from "../utils/mlbConfidenceEngine.js";
 
 export { CONFIDENCE_THRESHOLDS };
 
@@ -81,6 +82,16 @@ export function calculateProjectionConfidence(prop = {}, options = {}) {
 
   if (options.statCap != null) score = Math.min(score, options.statCap);
   if (options.sportCap != null) score = Math.min(score, options.sportCap);
+
+  const isMlb = String(prop.sport || "").toUpperCase() === "MLB";
+  if (isMlb && hasLine) {
+    const calibrated = calibrateRealisticConfidence(
+      score,
+      { ...prop, edge: prop.volatilityAdjustedEdge ?? prop.edge },
+      prop.volatilityAdjustedEdge ?? prop.edge
+    );
+    if (Number.isFinite(calibrated)) score = calibrated;
+  }
 
   const explanation = [
     ...(base.explanation || []),

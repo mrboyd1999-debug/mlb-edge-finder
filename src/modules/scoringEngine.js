@@ -47,6 +47,7 @@ export function computePitcherConfidence({
   line,
   marketKey = "",
   edge = 0,
+  adjustedAbsEdge = null,
   volatility = { tier: "MEDIUM", score: 0.5 },
   payoutType = "standard",
   isFallback = false,
@@ -54,7 +55,8 @@ export function computePitcherConfidence({
   if (isFallback) return 0;
   const rawEdge = computeRawEdge(projection, line);
   if (rawEdge == null) return 0;
-  let score = confidenceFromEdge(Math.abs(rawEdge), {
+  const absEdge = Number.isFinite(adjustedAbsEdge) ? adjustedAbsEdge : Math.abs(rawEdge);
+  let score = confidenceFromEdge(absEdge, {
     volatility,
     payoutType,
     marketKey,
@@ -73,6 +75,7 @@ export function scorePitcherManualProp({
   volatility,
   projectionConfidence = 60,
   dataStatus = DATA_STATUS.UNAVAILABLE,
+  adjustedAbsEdge = null,
 }) {
   const marketKey = canonicalMarketKey(statType);
   const isFallback = isFallbackDataStatus(dataStatus);
@@ -85,6 +88,7 @@ export function scorePitcherManualProp({
     line,
     marketKey,
     edge,
+    adjustedAbsEdge,
     volatility,
     payoutType,
     isFallback,

@@ -191,15 +191,16 @@ export function computeDisplayEdgeValue(prop = {}) {
 }
 
 export function confidenceTierLabel(confidence = BASE_CONFIDENCE) {
-  if (confidence >= 80) return "STRONG";
-  if (confidence >= 70) return "PLAYABLE";
-  if (confidence >= 60) return "LEAN";
+  if (confidence >= 68) return "ELITE";
+  if (confidence >= 62) return "STRONG";
+  if (confidence >= 56) return "SOLID";
+  if (confidence >= 50) return "LEAN";
   return "RESEARCH ONLY";
 }
 
 export function computeDisplayRiskLevel(confidence = BASE_CONFIDENCE) {
-  if (confidence >= 80) return "LOW";
-  if (confidence >= 60) return "MEDIUM";
+  if (confidence >= 68) return "LOW";
+  if (confidence >= 56) return "MEDIUM";
   return "HIGH";
 }
 

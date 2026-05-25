@@ -157,38 +157,38 @@ export function confidenceFromEdge(absEdge, {
 } = {}) {
   if (!isVerified || !Number.isFinite(absEdge)) return 0;
 
-  let score = 42 + absEdge * 15;
-  if (absEdge >= 1.5) score += 10;
-  else if (absEdge >= 1.0) score += 6;
-  else if (absEdge >= 0.7) score += 4;
-  else if (absEdge >= 0.4) score += 2;
-  else if (absEdge < 0.2) score -= 10;
+  let score = 44 + absEdge * 9;
+  if (absEdge >= 1.5) score += 5;
+  else if (absEdge >= 1.0) score += 3;
+  else if (absEdge >= 0.7) score += 2;
+  else if (absEdge >= 0.4) score += 1;
+  else if (absEdge < 0.2) score -= 8;
 
-  if (volatility?.tier === "LOW") score += 5;
-  else if (volatility?.tier === "HIGH") score -= 8;
+  if (volatility?.tier === "LOW") score += 3;
+  else if (volatility?.tier === "HIGH") score -= 10;
 
   if (Number.isFinite(consistencyScore)) {
-    if (consistencyScore >= 0.85) score += 4;
-    else if (consistencyScore <= 0.5) score -= 5;
+    if (consistencyScore >= 0.85) score += 2;
+    else if (consistencyScore <= 0.5) score -= 6;
   }
 
-  if (matchupQuality === "strong") score += 3;
-  else if (matchupQuality === "weak") score -= 3;
+  if (matchupQuality === "strong") score += 2;
+  else if (matchupQuality === "weak") score -= 4;
 
-  if (lineMovementFavorable === true) score += 2;
-  else if (lineMovementFavorable === false) score -= 3;
+  if (lineMovementFavorable === true) score += 1;
+  else if (lineMovementFavorable === false) score -= 4;
 
   const payout = String(payoutType || "standard").toLowerCase();
   if (payout === "goblin") {
-    score += 3;
-    return Math.round(clamp(score, 72, 85));
+    score += 2;
+    return Math.round(clamp(score, 58, 68));
   }
   if (payout === "demon") {
-    score -= 4;
-    return Math.round(clamp(score, 45, 60));
+    score -= 5;
+    return Math.round(clamp(score, 45, 58));
   }
-  if (marketKey === "strikeouts" && absEdge >= 0.7) score += 3;
-  return Math.round(clamp(score, 58, 72));
+  if (marketKey === "strikeouts" && absEdge >= 0.7) score += 1;
+  return Math.round(clamp(score, 50, 65));
 }
 
 export function shouldPassPlay({ edge, confidence, isVerified = true }) {

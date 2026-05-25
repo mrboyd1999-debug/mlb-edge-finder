@@ -15,6 +15,10 @@ import {
   resolveRecommendedSide,
   shouldPassPlay,
 } from "./propSideEngine.js";
+import {
+  calibrateRealisticConfidence,
+  computeVolatilityAdjustedEdge,
+} from "../utils/mlbConfidenceEngine.js";
 
 const MLB_VOLATILITY = {
   strikeouts: { tier: "LOW", score: 0.38, label: "Low variance" },
@@ -123,7 +127,8 @@ export function buildMlbPropProjection(prop = {}, profile = {}, context = {}) {
   const rawEdge = computeRawEdge(projection, line);
   const recommendedSide = resolveRecommendedSide(projection, line);
   const edge = recommendedSide ? computeDirectionalEdgeForSide(projection, line, recommendedSide) : 0;
-  const confidence = confidenceFromEdge(Math.abs(rawEdge ?? 0), {
+  const volatilityAdjustedEdge = computeVolatilityAdjustedEdge(Math.abs(rawEdge ?? 0), volatility);
+  let confidence = confidenceFromEdge(volatilityAdjustedEdge, {
     volatility,
     payoutType,
     marketKey,
@@ -131,7 +136,12 @@ export function buildMlbPropProjection(prop = {}, profile = {}, context = {}) {
     consistencyScore: profile.consistencyScore ?? engineResult?.pitcherInputs?.consistencyScore ?? null,
     matchupQuality: profile.handednessMatchup ? "neutral" : null,
   });
-  const passPlay = shouldPassPlay({ edge, confidence, isVerified: true });
+  confidence = calibrateRealisticConfidence(
+    confidence,
+    { ...prop, ...profile, edge: volatilityAdjustedEdge, volatilityAdjustedEdge, sampleSize: profile.sampleSize },
+    volatilityAdjustedEdge
+  );
+  const passPlay = shouldPassPlay({ edge: volatilityAdjustedEdge, confidence, isVerified: true });
   const risk = classifyRisk({ edge, volatility, payoutType });
   const modelSide = passPlay ? PASS_STATUS : recommendedSide?.toUpperCase() || null;
   const modelPickLabel = passPlay ? PASS_STATUS : recommendedSide ? recommendedSide.toUpperCase() : null;
@@ -152,6 +162,7 @@ export function buildMlbPropProjection(prop = {}, profile = {}, context = {}) {
     line: Number.isFinite(line) ? line : null,
     rawEdge,
     edge,
+    volatilityAdjustedEdge,
     edgePercent: Number.isFinite(line) && line > 0 ? round((Math.abs(edge) / line) * 100, 1) : null,
     recommendedSide: passPlay ? null : recommendedSide,
     modelSide,

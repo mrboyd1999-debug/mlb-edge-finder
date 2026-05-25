@@ -165,11 +165,13 @@ export function computeStreakConfidence(inputs) {
 
 export function confidenceTierLabel(score, riskLevel = "", opts = {}) {
   if (riskLevel === "Low Data Confidence" || riskLevel === "Invalid Data") return "Research Only";
-  const strongOk = opts.strongData && opts.verifiedHistory && score >= 85;
-  if (strongOk || score >= 85) return "Strong Play";
-  if (score >= 75) return "Playable";
-  if (score >= 65) return "Lean";
-  return "Research Only";
+  if (opts.strongPlayTag === "Strong Play") return "Strong Play";
+  const c = Number(score);
+  if (!Number.isFinite(c) || c < 50) return "Research Only";
+  if (c <= 55) return "Lean";
+  if (c <= 61) return "Solid";
+  if (c <= 67) return "Strong";
+  return "Elite";
 }
 
 /**
@@ -180,7 +182,13 @@ export function computeEdgeScore(prop = {}) {
   const signal = prop.modelSignal || {};
   const line = Number(prop.line ?? signal.line);
   const projection = Number(prop.projection ?? signal.projection);
-  const edge = Number(prop.edge ?? signal.edge ?? (Number.isFinite(projection) && Number.isFinite(line) ? Math.abs(projection - line) : 0));
+  const edge = Number(
+    prop.volatilityAdjustedEdge ??
+      prop.edge ??
+      signal.volatilityAdjustedEdge ??
+      signal.edge ??
+      (Number.isFinite(projection) && Number.isFinite(line) ? Math.abs(projection - line) : 0)
+  );
   const lineScale = Math.max(1, Math.abs(line) || 1);
   const modelProbability = Number(prop.modelProbability ?? signal.modelProbability);
   const probabilityEdge = Number(prop.probabilityEdge ?? signal.probabilityEdge);

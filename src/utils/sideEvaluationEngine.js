@@ -14,9 +14,11 @@ import { resolvePlayerRole } from "./propPlayerRole.js";
 import { computeEdgeBasedConfidence } from "./mlbEdgeConfidence.js";
 import { computeLiveConfidence } from "./liveConfidenceEngine.js";
 
-export const TIER_STRONG = 80;
-export const TIER_PLAYABLE = 70;
-export const TIER_LEAN = 60;
+export const TIER_ELITE = 68;
+export const TIER_STRONG = 62;
+export const TIER_SOLID = 56;
+export const TIER_LEAN = 50;
+export const TIER_PLAYABLE = TIER_SOLID;
 export const PASS_CONFIDENCE_GAP = 5;
 
 const UNDER_PREFERENCE_BOOST = 10;
@@ -67,8 +69,9 @@ export function isUnderPreferredMarket(prop = {}) {
 
 export function confidenceTierFromScore(score = 0) {
   const conf = finiteOr(score, 0);
-  if (conf >= TIER_STRONG) return "Strong Play";
-  if (conf >= TIER_PLAYABLE) return "Playable";
+  if (conf >= TIER_ELITE) return "Elite";
+  if (conf >= TIER_STRONG) return "Strong";
+  if (conf >= TIER_SOLID) return "Solid";
   if (conf >= TIER_LEAN) return "Lean";
   return "Research Only";
 }

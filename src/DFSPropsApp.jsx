@@ -144,6 +144,11 @@ import { applyMlbProjectionToProp, isMlbVerifiedEngineMarket } from "./modules/m
 import { logMlbData, traceLiveBoardMlbProp, getMlbPipelineStatus, subscribeMlbPipelineStatus } from "./services/mlbDataService.js";
 import { mergeDfsSourceStatusFromApiHealth } from "./services/mlbPipelineStatus.js";
 import { NO_VERIFIED_GRADE_STATUS } from "./utils/manualPropScoring.js";
+import {
+  computeGradingDataQuality,
+  computeVolatilityAdjustedEdge,
+  resolveStrongPlayTag,
+} from "./utils/mlbConfidenceEngine.js";
 import { buildCardPipelineDebug } from "./services/mlbPropPipelineTrace.js";
 import { normalizeSportsbookName } from "./services/playerMatcher.js";
 import { LIVE_BOARD_LOADING_STAGES, LIVE_BOARD_UNAVAILABLE_MESSAGE } from "./utils/liveBoardLoading.js";
@@ -4218,6 +4223,37 @@ function scoreDFSProp(prop, context) {
   const marketResearchOnly = Boolean(
     prop.marketResearchOnly || prop.marketSupportTier === 2 || prop.noveltyMarket || hitterResearchOnly
   );
+  const volatilityForEdge = {
+    tier:
+      enriched?.volatilityLabel ||
+      (Number.isFinite(volatility) && volatility >= 3 ? "HIGH" : Number.isFinite(volatility) && volatility <= 1.5 ? "LOW" : "MEDIUM"),
+    score: Number.isFinite(enriched?.manualVolatilityScore)
+      ? enriched.manualVolatilityScore
+      : Number.isFinite(volatility)
+        ? clamp(volatility / 4, 0.2, 0.9)
+        : 0.5,
+  };
+  const volatilityAdjustedEdge = computeVolatilityAdjustedEdge(absoluteEdge, volatilityForEdge);
+  const gradingDataQuality = computeGradingDataQuality(
+    {
+      ...prop,
+      sampleSize,
+      isVerifiedProjection,
+      hasVerifiedStats: verifiedStats,
+      matchupRating,
+      matchupNote: enriched?.matchupNote,
+      hasMatchup: Boolean(enriched?.matchupNote || enriched?.handednessMatchup),
+      weatherNote: enriched?.weatherNote || prop.weatherNote,
+      roleContext: enriched?.roleContext,
+      pitchCountTrend: enriched?.pitchCountTrend,
+      last5Average: enriched?.last5Average,
+      seasonAverage: enriched?.seasonAverage,
+      strikeoutTrend: enriched?.strikeoutTrend,
+      sportsbookComparison,
+      lineComparison,
+    },
+    enriched
+  );
   const confidenceResult = calculateProjectionConfidence(
     {
       ...prop,
@@ -4227,7 +4263,9 @@ function scoreDFSProp(prop, context) {
       projection,
       projectionSource,
       line,
-      edge: round(edge),
+      edge: round(volatilityAdjustedEdge),
+      volatilityAdjustedEdge: round(volatilityAdjustedEdge),
+      rawEdge: round(absoluteEdge),
       bestPick,
       last5Average: enriched?.last5Average,
       last10Average: enriched?.last10Average,
@@ -4266,6 +4304,7 @@ function scoreDFSProp(prop, context) {
       paceRating: enriched?.paceRating,
       impliedRuns: enriched?.impliedRuns ?? enriched?.totalImpliedRuns,
       dataQualityScore,
+      gradingDataQuality,
       dataCompleteness,
       hasVerifiedStats: verifiedStats,
       lineComparison,
@@ -4294,7 +4333,7 @@ function scoreDFSProp(prop, context) {
   const confidenceBreakdown = confidenceResult.explanation;
   const manualConfidenceAdjustment = clamp(Number(manualStats?.confidenceAdjustment || 0), -15, 15);
   if (Number.isFinite(manualConfidenceAdjustment) && manualConfidenceAdjustment !== 0) {
-    confidenceScore = Math.round(clamp(confidenceScore + manualConfidenceAdjustment, 25, 92));
+    confidenceScore = Math.round(clamp(confidenceScore + manualConfidenceAdjustment, 25, 70));
   }
   if (marketResearchOnly && absoluteEdge < 1.5) {
     confidenceScore = Math.min(confidenceScore, 55);
@@ -4320,6 +4359,7 @@ function scoreDFSProp(prop, context) {
     ...prop,
     projection,
     edge: absoluteEdge,
+    volatilityAdjustedEdge,
     lineComparison,
     sportsbookComparison,
     sportsbookDiscrepancy,
@@ -4474,6 +4514,33 @@ function scoreDFSProp(prop, context) {
     riskLevel,
   });
 
+  const playTag =
+    mlbGradeBlocked || !isVerifiedProjection
+      ? null
+      : resolveStrongPlayTag({
+          ...prop,
+          projection,
+          projectedValue,
+          isVerifiedProjection,
+          hasVerifiedStats: verifiedStats,
+          sampleSize,
+          edge,
+          volatilityAdjustedEdge,
+          confidenceScore,
+          confidence: confidenceScore,
+          volatility,
+          volatilityTier: volatilityForEdge.tier,
+          gradingDataQuality,
+          matchupRating,
+          matchupNote: enriched?.matchupNote,
+          hasMatchup: Boolean(enriched?.matchupNote || enriched?.handednessMatchup),
+          weatherNote: enriched?.weatherNote || prop.weatherNote,
+          roleContext: enriched?.roleContext,
+          pitchCountTrend: enriched?.pitchCountTrend,
+          last5Average: enriched?.last5Average,
+          seasonAverage: enriched?.seasonAverage,
+        });
+
   return (() => {
     const decision = enrichPropDecision(
     {
@@ -4522,6 +4589,10 @@ function scoreDFSProp(prop, context) {
     manualEnriched: Boolean(enriched?.manualEnriched || manualStats),
     confidenceScore,
     confidence: confidenceScore,
+    gradingDataQuality,
+    playTag,
+    volatilityAdjustedEdge: round(volatilityAdjustedEdge),
+    rawEdge: round(absoluteEdge),
     calibratedConfidence: confidenceResult.calibratedConfidence,
     calibrationAdjustment: confidenceResult.calibrationAdjustment,
     calibrationNote: confidenceResult.calibrationNote,

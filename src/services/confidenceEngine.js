@@ -577,10 +577,31 @@ function applyMlbConfidencePenalties(score, prop = {}) {
   if (Number.isFinite(start) && start <= Date.now()) {
     items.push({ amount: 10, label: "started game" });
   }
+  if (sampleSize > 0 && sampleSize < 8) {
+    items.push({ amount: 4, label: "limited MLB sample depth" });
+  }
+  if (/rookie|debut|call[- ]?up|first start/i.test(String(prop.roleContext || prop.battingOrderNote || ""))) {
+    items.push({ amount: 5, label: "rookie/new starter" });
+  }
+  const ip = finiteNumber(prop.projectedInnings);
+  if (String(prop.statType || "").toLowerCase().includes("strikeout") && !Number.isFinite(ip)) {
+    items.push({ amount: 4, label: "uncertain innings projection" });
+  }
+  if (/uncertain|variable|delay|postpon|wind gust|shifting/i.test(String(prop.weatherNote || ""))) {
+    items.push({ amount: 3, label: "weather uncertainty" });
+  }
+  const l5 = finiteNumber(prop.last5Average);
+  const season = finiteNumber(prop.seasonAverage);
+  if (Number.isFinite(l5) && Number.isFinite(season) && season > 0 && Math.abs(l5 - season) / season >= 0.28) {
+    items.push({ amount: 4, label: "inconsistent recent form" });
+  }
+  if (prop.matchupRating === "Tough" && getPropVolatilityTier(prop) === "HIGH") {
+    items.push({ amount: 5, label: "volatile tough matchup" });
+  }
 
   let totalDeduction = items.reduce((sum, item) => sum + item.amount, 0);
   if (items.length >= 3) totalDeduction = Math.round(totalDeduction * 0.78);
-  totalDeduction = Math.min(22, totalDeduction);
+  totalDeduction = Math.min(28, totalDeduction);
 
   return { score: score - totalDeduction, penalties: items.map((item) => item.label) };
 }
@@ -618,6 +639,17 @@ function applyConfidenceCaps(score, prop = {}, options = {}) {
   if (options.sportCap != null) {
     capped = Math.min(capped, options.sportCap);
     if (options.sportCapReason) capReason = capReason || options.sportCapReason;
+  }
+  if (isMlb) {
+    const sample = finiteNumber(prop.sampleSize) || 0;
+    const edge = Math.abs(Number(prop.volatilityAdjustedEdge ?? prop.edge ?? 0));
+    const eliteEligible =
+      edge >= 2 &&
+      sample >= 8 &&
+      Boolean(prop.hasVerifiedStats || prop.isVerifiedProjection) &&
+      getPropVolatilityTier(prop) !== "HIGH";
+    capped = Math.min(capped, eliteEligible ? 70 : 65);
+    if (!eliteEligible && capped > 65) capReason = capReason || "Standard MLB confidence cap.";
   }
 
   return { score: Math.round(clamp(capped, 0, 100)), capReason };
@@ -694,7 +726,7 @@ function calculateMlbWeightedScore(prop = {}) {
   });
   const qualityWeight = getMlbQualityTierWeight(prop);
   weighted *= qualityWeight;
-  const boosted = clamp(Math.round(36 + weighted * 0.58), 38, 96);
+  const boosted = clamp(Math.round(36 + weighted * 0.52), 38, 68);
   const explanation = Object.entries(components).map(([key, comp]) => ({
     key,
     label: comp.label,
