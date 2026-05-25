@@ -1,5 +1,5 @@
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
-import { DATA_STATUS } from "./projectionBreakdown.js";
+import { DATA_STATUS, isFallbackDataStatus, PROJECTION_UNAVAILABLE_LABEL } from "./projectionBreakdown.js";
 import { isMlbPitcherMarket } from "./mlbPitcherData.js";
 import {
   computeDirectionalEdgeForSide,
@@ -72,10 +72,10 @@ export function scorePitcherManualProp({
   payoutType = "standard",
   volatility,
   projectionConfidence = 60,
-  dataStatus = DATA_STATUS.FALLBACK,
+  dataStatus = DATA_STATUS.UNAVAILABLE,
 }) {
   const marketKey = canonicalMarketKey(statType);
-  const isFallback = dataStatus === DATA_STATUS.FALLBACK;
+  const isFallback = isFallbackDataStatus(dataStatus);
   const recommendedSide = resolveRecommendedSide(projection, line);
   const edge = recommendedSide
     ? computeDirectionalEdgeForSide(projection, line, recommendedSide)

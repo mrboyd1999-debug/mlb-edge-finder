@@ -2,7 +2,7 @@ import { MLB_ONLY_MODE, guardMlbOnlyProp } from "../utils/mlbOnlyMode.js";
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
 import { isTennisSportLabel } from "../utils/marketClassification.js";
 import { buildRealProjection, hasRealStatInputs } from "./realProjectionEngine.js";
-import { hasMlbPitcherStatInputs } from "../modules/mlbProjectionEngine.js";
+import { PROJECTION_UNAVAILABLE_LABEL } from "../modules/projectionBreakdown.js";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -457,7 +457,7 @@ export function projectPlayerProp(prop = {}, context = {}) {
     volatilityAdjustment: 0,
     projectionReasoning: result.reasoning,
     projectionBreakdown: result.projectionBreakdown || [],
-    projectionLabel: result.projectionLabel || (hasStats ? "Stat-based projection" : "Estimated fallback projection"),
+    projectionLabel: result.projectionLabel || (hasStats ? "Stat-based projection" : PROJECTION_UNAVAILABLE_LABEL),
     isFallbackProjection: Boolean(result.isFallbackProjection),
     modelInputs: {
       last5Average: profile.last5Average,

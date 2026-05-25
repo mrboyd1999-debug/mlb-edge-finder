@@ -3,10 +3,15 @@ import { formatNumber } from "../utils/formatters.js";
 export const DATA_STATUS = {
   VERIFIED: "Verified MLB data",
   PARTIAL: "Partial MLB data",
-  FALLBACK: "Estimated fallback projection",
+  UNAVAILABLE: "Missing verified projection data",
 };
 
 export const VERIFIED_PROJECTION_LABEL = "Verified MLB projection";
+export const PROJECTION_UNAVAILABLE_LABEL = "Projection unavailable";
+export const AWAITING_VERIFIED_MLB_DATA = "Awaiting verified MLB data";
+export const EDGE_FORMULA_DISABLED = "Disabled until projection exists";
+export const EDGE_CALCULATION_UNAVAILABLE = "Edge calculation unavailable";
+export const PROJECTION_SOURCE_MISSING = "Missing";
 
 function round(value, digits = 2) {
   const factor = 10 ** digits;
@@ -48,21 +53,25 @@ export function appendDataStatusRow(breakdown, dataStatus) {
 export function resolveDataStatus({ hasGameLogs, hasCoreRates, hasOpponent, hasWorkload }) {
   if (hasGameLogs && hasCoreRates && hasOpponent && hasWorkload) return DATA_STATUS.VERIFIED;
   if (hasGameLogs && hasCoreRates) return DATA_STATUS.PARTIAL;
-  return DATA_STATUS.FALLBACK;
+  return DATA_STATUS.UNAVAILABLE;
 }
 
-export function dataStatusLabel(dataStatus = DATA_STATUS.FALLBACK) {
+export function dataStatusLabel(dataStatus = DATA_STATUS.UNAVAILABLE) {
   if (dataStatus === DATA_STATUS.VERIFIED) return DATA_STATUS.VERIFIED;
   if (dataStatus === DATA_STATUS.PARTIAL) return DATA_STATUS.PARTIAL;
-  return DATA_STATUS.FALLBACK;
+  return DATA_STATUS.UNAVAILABLE;
+}
+
+export function isUnavailableDataStatus(dataStatus) {
+  return dataStatus === DATA_STATUS.UNAVAILABLE || dataStatus === "Estimated fallback projection";
 }
 
 export function isFallbackDataStatus(dataStatus) {
-  return dataStatus === DATA_STATUS.FALLBACK;
+  return isUnavailableDataStatus(dataStatus);
 }
 
 export function projectionLabelFromDataStatus(dataStatus) {
-  if (dataStatus === DATA_STATUS.FALLBACK) return DATA_STATUS.FALLBACK;
+  if (isUnavailableDataStatus(dataStatus)) return PROJECTION_UNAVAILABLE_LABEL;
   return VERIFIED_PROJECTION_LABEL;
 }
 
@@ -73,13 +82,15 @@ export function isVerifiedProjectionStatus(dataStatus) {
 export function projectionConfidenceFromDataStatus(dataStatus, sampleSize = 0) {
   if (dataStatus === DATA_STATUS.VERIFIED) return Math.min(88, 72 + Math.min(sampleSize, 10) * 1.2);
   if (dataStatus === DATA_STATUS.PARTIAL) return Math.min(72, 58 + Math.min(sampleSize, 8));
-  return 48;
+  return null;
 }
 
-export function buildFallbackBreakdown(fairLine, note = "No verified game logs") {
+export function buildUnavailableProjectionBreakdown(note = "Insufficient verified MLB game logs") {
   return [
-    buildBreakdownRow("Baseline estimate", fairLine, { display: formatNumber(fairLine), contribution: fairLine }),
     buildBreakdownRow("Note", note, { display: note, contribution: 0 }),
-    buildBreakdownRow("Data status", DATA_STATUS.FALLBACK, { display: DATA_STATUS.FALLBACK, contribution: 0 }),
+    buildBreakdownRow("Data status", DATA_STATUS.UNAVAILABLE, { display: DATA_STATUS.UNAVAILABLE, contribution: 0 }),
   ];
 }
+
+/** @deprecated Use buildUnavailableProjectionBreakdown */
+export const buildFallbackBreakdown = buildUnavailableProjectionBreakdown;

@@ -3934,7 +3934,7 @@ function scoreDFSProp(prop, context) {
     : projectionResult.source;
   const projectionReasoning = statModel.projectionReasoning || [];
   const projectionBreakdown = statModel.projectionBreakdown || [];
-  const projectionLabel = statModel.projectionLabel || (statModel.isFallbackProjection ? "Estimated fallback projection" : "Stat-based projection");
+  const projectionLabel = statModel.projectionLabel || (statModel.isFallbackProjection ? "Projection unavailable" : "Stat-based projection");
   const isFallbackProjection = Boolean(statModel.isFallbackProjection);
   const dataStatus = statModel.dataStatus || null;
   const projectionConfidence = statModel.projectionConfidence ?? null;

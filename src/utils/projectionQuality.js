@@ -297,7 +297,7 @@ export function annotateProjectionFields(prop = {}) {
       quality === PROJECTION_QUALITY.VERIFIED
         ? "Verified Projection"
         : quality === PROJECTION_QUALITY.ESTIMATED
-          ? "Estimated Projection"
+          ? "Awaiting verified projection"
           : "No projection data available",
     noProjectionData: noProjection,
     hideFromRankedSections: noProjection || edge <= 0,

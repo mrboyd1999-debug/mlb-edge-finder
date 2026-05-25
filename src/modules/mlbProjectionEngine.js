@@ -27,13 +27,14 @@ import {
   appendDataStatusRow,
   appendFinalProjectionRow,
   buildBreakdownRow,
-  buildFallbackBreakdown,
+  buildUnavailableProjectionBreakdown,
   DATA_STATUS,
   dataStatusLabel,
   isFallbackDataStatus,
   isVerifiedProjectionStatus,
   projectionConfidenceFromDataStatus,
   projectionLabelFromDataStatus,
+  PROJECTION_UNAVAILABLE_LABEL,
   resolveDataStatus,
   VERIFIED_PROJECTION_LABEL,
 } from "./projectionBreakdown.js";
@@ -103,10 +104,10 @@ function finalizePitcherProjection({ projection, breakdown, dataStatus, data, ma
       projectedValue: null,
       projectionBreakdown: breakdown,
       projectionSource: "missing",
-      projectionLabel: DATA_STATUS.FALLBACK,
-      dataStatus: DATA_STATUS.FALLBACK,
+      projectionLabel: PROJECTION_UNAVAILABLE_LABEL,
+      dataStatus: DATA_STATUS.UNAVAILABLE,
       isFallbackProjection: true,
-      projectionConfidence: 48,
+      projectionConfidence: null,
       reasoning: ["Insufficient verified MLB pitcher data for this market."],
       pitcherInputs: data,
     };
@@ -121,7 +122,7 @@ function finalizePitcherProjection({ projection, breakdown, dataStatus, data, ma
     projectedValue: round(projection, 1),
     projectionBreakdown: breakdown,
     projectionSource: isFallback ? "manual-fallback" : "player-stats-model",
-    projectionLabel: isVerified ? VERIFIED_PROJECTION_LABEL : DATA_STATUS.FALLBACK,
+    projectionLabel: isVerified ? VERIFIED_PROJECTION_LABEL : PROJECTION_UNAVAILABLE_LABEL,
     dataStatus,
     isFallbackProjection: isFallback,
     isVerifiedProjection: isVerified,
@@ -156,8 +157,8 @@ export function projectPitcherStrikeouts(prop = {}, profile = {}, context = {}) 
   if (!verified) {
     return finalizePitcherProjection({
       projection: null,
-      breakdown: buildFallbackBreakdown(null, "No verified MLB starter game logs"),
-      dataStatus: DATA_STATUS.FALLBACK,
+      breakdown: buildUnavailableProjectionBreakdown(null, "No verified MLB starter game logs"),
+      dataStatus: DATA_STATUS.UNAVAILABLE,
       data,
       marketKey: "strikeouts",
       profile,
@@ -272,8 +273,8 @@ export function projectPitchingOuts(prop = {}, profile = {}, context = {}) {
   if (ip == null && last5 == null && season == null) {
     return finalizePitcherProjection({
       projection: null,
-      breakdown: buildFallbackBreakdown(null),
-      dataStatus: DATA_STATUS.FALLBACK,
+      breakdown: buildUnavailableProjectionBreakdown(null),
+      dataStatus: DATA_STATUS.UNAVAILABLE,
       data,
       marketKey: "outs",
     });
@@ -324,8 +325,8 @@ export function projectHitsAllowed(prop = {}, profile = {}, context = {}) {
   if (last5 == null && season == null) {
     return finalizePitcherProjection({
       projection: null,
-      breakdown: buildFallbackBreakdown(null),
-      dataStatus: DATA_STATUS.FALLBACK,
+      breakdown: buildUnavailableProjectionBreakdown(null),
+      dataStatus: DATA_STATUS.UNAVAILABLE,
       data,
       marketKey: "hitsAllowed",
     });
@@ -368,8 +369,8 @@ export function projectEarnedRunsAllowed(prop = {}, profile = {}, context = {}) 
   if (last5 == null && season == null) {
     return finalizePitcherProjection({
       projection: null,
-      breakdown: buildFallbackBreakdown(null),
-      dataStatus: DATA_STATUS.FALLBACK,
+      breakdown: buildUnavailableProjectionBreakdown(null),
+      dataStatus: DATA_STATUS.UNAVAILABLE,
       data,
       marketKey: "earnedRuns",
     });
@@ -420,8 +421,8 @@ function projectVerifiedHitterMarket(prop = {}, profile = {}, context = {}, mark
   if (!verified) {
     return finalizeHitterProjection({
       projection: null,
-      breakdown: buildFallbackBreakdown(null, "No verified MLB hitter game logs (need 5+ games)"),
-      dataStatus: DATA_STATUS.FALLBACK,
+      breakdown: buildUnavailableProjectionBreakdown(null, "No verified MLB hitter game logs (need 5+ games)"),
+      dataStatus: DATA_STATUS.UNAVAILABLE,
       data,
       marketKey,
       profile,

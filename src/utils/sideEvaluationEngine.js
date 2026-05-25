@@ -319,7 +319,7 @@ export function enrichPropWithSideEvaluation(prop = {}) {
     projectionLabel: evaluation.pass
       ? "Projection unavailable"
       : evaluation.estimatedProjection
-        ? "Estimated projection"
+        ? "Awaiting verified projection"
         : prop.projectionLabel || "Verified Projection",
     recommendedSide: evaluation.recommendedSide,
     side: sidePick || prop.side || "",

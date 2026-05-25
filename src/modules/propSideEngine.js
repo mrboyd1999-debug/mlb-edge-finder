@@ -1,4 +1,11 @@
-import { DATA_STATUS } from "./projectionBreakdown.js";
+import {
+  AWAITING_VERIFIED_MLB_DATA,
+  DATA_STATUS,
+  EDGE_CALCULATION_UNAVAILABLE,
+  EDGE_FORMULA_DISABLED,
+  isFallbackDataStatus,
+  PROJECTION_SOURCE_MISSING,
+} from "./projectionBreakdown.js";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -227,11 +234,40 @@ export function buildSideEngineDebug({
   recentAverage,
   matchupNote,
   sportsbookLine,
+  projectionUnavailable = false,
 } = {}) {
+  const unavailable =
+    projectionUnavailable ||
+    !Number.isFinite(Number(projection)) ||
+    isFallbackDataStatus(dataStatus) ||
+    projectionSource === "missing";
+
+  if (unavailable) {
+    return {
+      projectionUnavailable: true,
+      projectionSource: PROJECTION_SOURCE_MISSING,
+      dataStatus: AWAITING_VERIFIED_MLB_DATA,
+      edgeFormula: EDGE_FORMULA_DISABLED,
+      edgeCalculation: EDGE_CALCULATION_UNAVAILABLE,
+      rawEdge: null,
+      recommendedSide: null,
+      userSide: normalizePropSide(side),
+      sideAligned: null,
+      projection: null,
+      line,
+      sportsbookLine: sportsbookLine ?? line,
+      recentAverage: null,
+      matchupNote: null,
+      volatilityTier: null,
+    };
+  }
+
   return {
-    projectionSource: projectionSource || "unavailable",
-    dataStatus: dataStatus || DATA_STATUS.FALLBACK,
+    projectionUnavailable: false,
+    projectionSource: projectionSource || "player-stats-model",
+    dataStatus: dataStatus || DATA_STATUS.VERIFIED,
     edgeFormula: "rawEdge = projection - line; over edge = rawEdge, under edge = -rawEdge",
+    edgeCalculation: null,
     rawEdge,
     recommendedSide,
     userSide: normalizePropSide(side),

@@ -1,5 +1,6 @@
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
 import { formatNumber } from "../utils/formatters.js";
+import { PROJECTION_UNAVAILABLE_LABEL } from "../modules/projectionBreakdown.js";
 import {
   hasMlbPitcherStatInputs,
   isMlbPitcherMarket,
@@ -89,7 +90,7 @@ function finalizeProjection(projection, breakdown, { hasRealData, sport, marketK
       projectedValue: null,
       projectionBreakdown: breakdown,
       projectionSource: "missing",
-      projectionLabel: "Estimated fallback projection",
+      projectionLabel: PROJECTION_UNAVAILABLE_LABEL,
       isFallbackProjection: true,
       reasoning: ["Insufficient verified stat inputs for a model projection."],
     };
@@ -99,7 +100,7 @@ function finalizeProjection(projection, breakdown, { hasRealData, sport, marketK
     projectedValue: round(projection, 1),
     projectionBreakdown: breakdown,
     projectionSource: hasRealData ? "player-stats-model" : "player-stats-estimate",
-    projectionLabel: hasRealData ? "Stat-based projection" : "Estimated fallback projection",
+    projectionLabel: hasRealData ? "Stat-based projection" : PROJECTION_UNAVAILABLE_LABEL,
     isFallbackProjection: !hasRealData,
     reasoning: breakdown.map((row) => `${row.label}: ${row.display}${row.weight ? ` (${Math.round(row.weight * 100)}%)` : ""}`),
   };

@@ -318,8 +318,8 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
             </p>
           ) : (
             <>
-          {manualProp && (prop.dataStatus || prop.projectionLabel) ? (
-            <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "10px", color: prop.isFallbackProjection ? "#fcd34d" : "#86efac" }}>
+          {manualProp && (prop.dataStatus || prop.projectionLabel) && !noVerifiedPlay ? (
+            <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "10px", color: "#86efac" }}>
               {prop.isVerifiedProjection ? "Verified MLB projection" : prop.dataStatus || prop.projectionLabel}
             </p>
           ) : null}
@@ -335,8 +335,8 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
           <div style={{ ...styles.explanationBlock, padding: "5px 6px", marginBottom: "4px" }}>
             <strong style={{ fontSize: "11px" }}>Projection breakdown</strong>
             {prop.projectionLabel || prop.dataStatus ? (
-              <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "10px", color: prop.isFallbackProjection ? "#fcd34d" : "#86efac" }}>
-                {prop.dataStatus || prop.projectionLabel}
+              <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "10px", color: noVerifiedPlay ? "#94a3b8" : "#86efac" }}>
+                {noVerifiedPlay ? prop.statusMessage || AWAITING_PROJECTION_STATUS : prop.dataStatus || prop.projectionLabel}
               </p>
             ) : null}
             <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "3px", marginTop: "4px" }}>
@@ -357,7 +357,7 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
                 <MetricIf
                   label="Data status"
                   value={prop.dataStatus || prop.projectionBreakdown.find((row) => row.label === "Data status")?.display}
-                  strong={!prop.isFallbackProjection}
+                  strong={!noVerifiedPlay}
                 />
               ) : null}
             </div>
@@ -377,13 +377,19 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
                 <MetricIf label="Projection source" value={prop.sideEngineDebug.projectionSource} />
                 <MetricIf label="Data status" value={prop.sideEngineDebug.dataStatus} />
                 <MetricIf label="Edge formula" value={prop.sideEngineDebug.edgeFormula} />
-                <MetricIf label="Raw edge" value={prop.sideEngineDebug.rawEdge != null ? formatSignedNumber(prop.sideEngineDebug.rawEdge) : null} />
-                <MetricIf label="Recommended side" value={prop.sideEngineDebug.recommendedSide?.toUpperCase()} />
-                <MetricIf label="Side aligned" value={prop.sideEngineDebug.sideAligned == null ? null : prop.sideEngineDebug.sideAligned ? "Yes" : "No"} />
-                <MetricIf label="Recent average" value={prop.sideEngineDebug.recentAverage != null ? formatNumber(prop.sideEngineDebug.recentAverage) : null} />
-                <MetricIf label="Matchup adjustment" value={prop.sideEngineDebug.matchupNote} />
+                {prop.sideEngineDebug.projectionUnavailable ? (
+                  <MetricIf label="Edge calculation" value={prop.sideEngineDebug.edgeCalculation || "Edge calculation unavailable"} />
+                ) : (
+                  <>
+                    <MetricIf label="Raw edge" value={prop.sideEngineDebug.rawEdge != null ? formatSignedNumber(prop.sideEngineDebug.rawEdge) : null} />
+                    <MetricIf label="Recommended side" value={prop.sideEngineDebug.recommendedSide?.toUpperCase()} />
+                    <MetricIf label="Side aligned" value={prop.sideEngineDebug.sideAligned == null ? null : prop.sideEngineDebug.sideAligned ? "Yes" : "No"} />
+                    <MetricIf label="Recent average" value={prop.sideEngineDebug.recentAverage != null ? formatNumber(prop.sideEngineDebug.recentAverage) : null} />
+                    <MetricIf label="Matchup adjustment" value={prop.sideEngineDebug.matchupNote} />
+                    <MetricIf label="Volatility tier" value={prop.sideEngineDebug.volatilityTier} />
+                  </>
+                )}
                 <MetricIf label="Sportsbook line" value={prop.sideEngineDebug.sportsbookLine != null ? formatNumber(prop.sideEngineDebug.sportsbookLine) : null} />
-                <MetricIf label="Volatility tier" value={prop.sideEngineDebug.volatilityTier} />
               </div>
             </div>
           </details>
@@ -426,7 +432,7 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
                 <MetricIf label="Line" value={formatNumber(prop.line)} />
                 <MetricIf label="Projection" value={prop.projectedValue != null ? formatNumber(prop.projectedValue) : prop.projection != null ? formatNumber(prop.projection) : null} />
                 <MetricIf label="Edge %" value={prop.edgePercent != null ? `${prop.edgePercent}%` : null} />
-                <MetricIf label="Grade source" value={prop.scoringModeLabel || "Estimated grade"} />
+                <MetricIf label="Grade source" value={prop.scoringModeLabel || "Projection unavailable"} />
               </div>
             ) : null}
             {!manualProp ? (

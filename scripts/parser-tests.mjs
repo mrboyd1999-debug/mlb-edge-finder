@@ -118,6 +118,7 @@ import {
   projectionVsLineLabel,
 } from "../src/utils/manualPropScoring.js";
 import { projectPitcherStrikeouts, projectMlbHitterProp, DATA_STATUS } from "../src/modules/mlbProjectionEngine.js";
+import { PROJECTION_UNAVAILABLE_LABEL, PROJECTION_SOURCE_MISSING, AWAITING_VERIFIED_MLB_DATA, EDGE_FORMULA_DISABLED, EDGE_CALCULATION_UNAVAILABLE } from "../src/modules/projectionBreakdown.js";
 import { VERIFIED_PROJECTION_LABEL } from "../src/modules/projectionBreakdown.js";
 import { computePitcherEdge, computePitcherHitChance } from "../src/modules/scoringEngine.js";
 
@@ -1214,7 +1215,8 @@ const unverifiedK = projectPitcherStrikeouts(
   { sparse: true, last5Average: 6.3 }
 );
 assert.equal(unverifiedK.projectedValue, null);
-assert.equal(unverifiedK.projectionLabel, DATA_STATUS.FALLBACK);
+assert.equal(unverifiedK.projectionLabel, PROJECTION_UNAVAILABLE_LABEL);
+assert.equal(unverifiedK.dataStatus, DATA_STATUS.UNAVAILABLE);
 
 const topTwo = selectManualTopPicks([demonHrr, goblinHit, nbaAst, noProfileHit], 2);
 assert.ok(topTwo.length <= 2);
@@ -1234,6 +1236,11 @@ const analyzedNoScoreFn = await analyzeManualProp({
 if (analyzedNoScoreFn.projectionUnavailable) {
   assert.equal(analyzedNoScoreFn.displayStatus, "NO VERIFIED PLAY");
   assert.equal(analyzedNoScoreFn.bestPick, null);
+  assert.equal(analyzedNoScoreFn.sideEngineDebug?.projectionSource, PROJECTION_SOURCE_MISSING);
+  assert.equal(analyzedNoScoreFn.sideEngineDebug?.dataStatus, AWAITING_VERIFIED_MLB_DATA);
+  assert.equal(analyzedNoScoreFn.sideEngineDebug?.edgeFormula, EDGE_FORMULA_DISABLED);
+  assert.equal(analyzedNoScoreFn.sideEngineDebug?.edgeCalculation, EDGE_CALCULATION_UNAVAILABLE);
+  assert.equal(analyzedNoScoreFn.sideEngineDebug?.rawEdge, null);
 } else {
   assert.ok(analyzedNoScoreFn.riskLevel === "Low" || analyzedNoScoreFn.riskLevel === "Medium" || analyzedNoScoreFn.riskLevel === "High");
   assert.ok(analyzedNoScoreFn.bestPick === "over" || analyzedNoScoreFn.bestPick === "under");

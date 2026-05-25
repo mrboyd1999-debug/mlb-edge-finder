@@ -17,6 +17,7 @@ import { scorePitcherManualProp } from "../modules/scoringEngine.js";
 import {
   isFallbackDataStatus,
   isVerifiedProjectionStatus,
+  PROJECTION_UNAVAILABLE_LABEL,
   VERIFIED_PROJECTION_LABEL,
 } from "../modules/projectionBreakdown.js";
 import {
@@ -256,7 +257,7 @@ export function computeImpliedHitChance({
 }
 
 export function manualScoringModeLabel(liveScored = null, isFallback = false) {
-  if (isFallback) return "Estimated grade";
+  if (isFallback || liveScored?.projectionUnavailable) return PROJECTION_UNAVAILABLE_LABEL;
   if (liveScored?.isVerifiedProjection || liveScored?.projectionLabel === VERIFIED_PROJECTION_LABEL) {
     return "Verified MLB projection";
   }
@@ -264,7 +265,7 @@ export function manualScoringModeLabel(liveScored = null, isFallback = false) {
   if (source && source !== "missing" && source !== "manual-dynamic" && source !== "manual-fallback" && source !== "manual-offline") {
     return "Live projection";
   }
-  return "Estimated grade";
+  return PROJECTION_UNAVAILABLE_LABEL;
 }
 
 export function leanBadgeStyle(lean = "") {
@@ -709,23 +710,24 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
       projectedValue: null,
       projection: null,
       projectionBreakdown,
-      projectionLabel: "Projection unavailable",
+      projectionLabel: PROJECTION_UNAVAILABLE_LABEL,
       projectionSource: projectionSource || "missing",
       isFallbackProjection: true,
       isVerifiedProjection: false,
-      dataStatus: dataStatus || DATA_STATUS.FALLBACK,
+      dataStatus: dataStatus || DATA_STATUS.UNAVAILABLE,
       projectionConfidence: null,
       manualVolatilityTier: null,
       manualVolatilityScore: null,
       volatilityLabel: null,
       volatility: null,
       manualDynamicAnalysis: true,
-      scoringModeLabel: "Projection unavailable",
+      scoringModeLabel: PROJECTION_UNAVAILABLE_LABEL,
       dataQualityScore: null,
       bettingLabel: NO_VERIFIED_PLAY_STATUS,
       sideEngineDebug: buildSideEngineDebug({
+        projectionUnavailable: true,
         projectionSource: projectionSource || "missing",
-        dataStatus: dataStatus || DATA_STATUS.FALLBACK,
+        dataStatus: dataStatus || DATA_STATUS.UNAVAILABLE,
         sportsbookLine: line,
       }),
     };
