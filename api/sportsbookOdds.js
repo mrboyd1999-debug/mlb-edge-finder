@@ -1,7 +1,7 @@
+import { cleanApiKey } from "./lib/cleanApiKey.js";
+
 function sanitizeOddsApiKey(key = "") {
-  return String(key || "")
-    .trim()
-    .replace(/\s+/g, "");
+  return cleanApiKey(key);
 }
 
 function redactOddsApiUrl(url = "") {
@@ -105,6 +105,11 @@ export default async function handler(req, res) {
       });
     }
 
+    const remaining = upstream.headers.get("x-requests-remaining");
+    const used = upstream.headers.get("x-requests-used");
+    if (remaining != null) res.setHeader("x-requests-remaining", remaining);
+    if (used != null) res.setHeader("x-requests-used", used);
+
     return res.status(200).json(data);
   } catch (error) {
     return res.status(200).json({
@@ -120,4 +125,5 @@ function setCorsHeaders(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Expose-Headers", "x-requests-remaining, x-requests-used");
 }

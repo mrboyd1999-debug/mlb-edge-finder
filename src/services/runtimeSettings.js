@@ -1,6 +1,7 @@
 /** Runtime API keys and proxy URLs — env vars + localStorage (dev overrides). */
 
 import { clearSourceAuthBlock, SOURCE_IDS } from "./sourceRateLimit.js";
+import { cleanApiKey } from "../utils/cleanApiKey.js";
 
 /** User-facing keys shown in Settings — live feeds (PP/UD) use built-in routes, not user keys. */
 export const USER_SETTING_DEFS = [
@@ -108,7 +109,9 @@ export function writeRuntimeSettings(settings = {}) {
   RUNTIME_SETTING_KEYS.forEach((key) => {
     const def = getSettingDef(key);
     let value = String(settings[key] || "").trim();
-    if (key === "VITE_ODDS_API_KEY") value = value.replace(/\s+/g, "");
+    if (key === "VITE_ODDS_API_KEY" || key === "VITE_SPORTSDATA_API_KEY") {
+      value = cleanApiKey(value);
+    }
     try {
       if (value) window.localStorage.setItem(key, value);
       else window.localStorage.removeItem(key);
@@ -181,14 +184,11 @@ export function getProxyUrl(platform = "") {
 }
 
 export function getOddsApiKey() {
-  const value = getEffectiveSetting("VITE_ODDS_API_KEY");
-  return String(value || "")
-    .trim()
-    .replace(/\s+/g, "");
+  return cleanApiKey(getEffectiveSetting("VITE_ODDS_API_KEY"));
 }
 
 export function getSportsDataApiKey() {
-  return getEffectiveSetting("VITE_SPORTSDATA_API_KEY");
+  return cleanApiKey(getEffectiveSetting("VITE_SPORTSDATA_API_KEY"));
 }
 
 export function getStatmuseApiKey() {
@@ -196,7 +196,9 @@ export function getStatmuseApiKey() {
 }
 
 export function userSettingsDraftMatchesSaved(draft = {}, saved = {}) {
-  return USER_SETTING_KEYS.every((key) => String(draft[key] || "").trim() === String(saved[key] || "").trim());
+  return USER_SETTING_KEYS.every(
+    (key) => cleanApiKey(draft[key]) === cleanApiKey(saved[key])
+  );
 }
 
 export function settingsDraftMatchesSaved(draft = {}, saved = {}) {

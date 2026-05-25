@@ -8,7 +8,14 @@ import {
   writeRuntimeSettings,
   writeSettingsMeta,
 } from "../services/runtimeSettings.js";
-import { testOddsAPI, testSportsDataIO, mergeConnectionReportWithFeeds } from "../services/apiConnectionTest.js";
+import {
+  testOddsAPI,
+  testSportsDataIO,
+  mergeConnectionReportWithFeeds,
+  formatOddsTestNotice,
+  formatSportsDataTestNotice,
+} from "../services/apiConnectionTest.js";
+import { cleanApiKey, getOddsKeyLengthWarning } from "../utils/cleanApiKey.js";
 
 function mergeProviderResult(current, report, providerName) {
   const otherResults = (current?.results || []).filter(
@@ -22,6 +29,14 @@ function mergeProviderResult(current, report, providerName) {
     },
     {}
   );
+}
+
+function cleanUserDraft(rawDraft = {}) {
+  return {
+    ...rawDraft,
+    VITE_ODDS_API_KEY: cleanApiKey(rawDraft.VITE_ODDS_API_KEY),
+    VITE_SPORTSDATA_API_KEY: cleanApiKey(rawDraft.VITE_SPORTSDATA_API_KEY),
+  };
 }
 
 export default function SettingsPanel({
@@ -47,33 +62,35 @@ export default function SettingsPanel({
   const isSaved = userSettingsDraftMatchesSaved(draft, saved);
 
   function persistDraft() {
-    const merged = { ...readRuntimeSettings(), ...draft };
+    const cleaned = cleanUserDraft(draft);
+    setDraft(cleaned);
+    const merged = { ...readRuntimeSettings(), ...cleaned };
     writeRuntimeSettings(merged);
     const nextSaved = readRuntimeSettings();
     setSaved(nextSaved);
     onClearCaches?.();
     onSaved?.(nextSaved);
-    return nextSaved;
+    return { nextSaved, cleaned };
   }
 
-  function updateConnectionReport(report) {
-    setConnectionReport(report);
-    writeSettingsMeta({
-      ...readSettingsMeta(),
-      lastTestedAt: report.testedAt,
-      lastConnectionReport: report.results,
-    });
+  function buildSaveNotice(cleaned = {}) {
+    const parts = ["API keys saved."];
+    if (cleaned.VITE_ODDS_API_KEY) parts.push(`Odds key: ${cleaned.VITE_ODDS_API_KEY.length} chars`);
+    if (cleaned.VITE_SPORTSDATA_API_KEY) parts.push(`SportsDataIO key: ${cleaned.VITE_SPORTSDATA_API_KEY.length} chars`);
+    const oddsWarning = getOddsKeyLengthWarning(cleaned.VITE_ODDS_API_KEY);
+    if (oddsWarning) parts.push(oddsWarning);
+    return parts.join(" ");
   }
 
   async function handleSave() {
-    persistDraft();
-    setNotice("API keys saved.");
+    const { cleaned } = persistDraft();
+    setNotice(buildSaveNotice(cleaned));
   }
 
   async function handleTestOdds() {
     setTestingOdds(true);
     try {
-      persistDraft();
+      const { cleaned } = persistDraft();
       const report = await testOddsAPI();
       setConnectionReport((current) => {
         const merged = mergeProviderResult(current, report, "Odds API");
@@ -85,11 +102,7 @@ export default function SettingsPanel({
         return merged;
       });
       const oddsRow = (report.results || [])[0];
-      setNotice(
-        oddsRow?.settingsLine === "Connected"
-          ? "Odds API connected."
-          : `Odds API: ${oddsRow?.settingsLine || "test complete"}.`
-      );
+      setNotice(formatOddsTestNotice(oddsRow) || buildSaveNotice(cleaned));
     } catch (error) {
       setNotice(error?.message || "Odds API test failed.");
     } finally {
@@ -100,7 +113,7 @@ export default function SettingsPanel({
   async function handleTestSportsData() {
     setTestingSportsData(true);
     try {
-      persistDraft();
+      const { cleaned } = persistDraft();
       const report = await testSportsDataIO();
       setConnectionReport((current) => {
         const merged = mergeProviderResult(current, report, "SportsDataIO");
@@ -112,11 +125,7 @@ export default function SettingsPanel({
         return merged;
       });
       const sdRow = (report.results || [])[0];
-      setNotice(
-        sdRow?.settingsLine === "Connected" || sdRow?.settingsLine === "Connected via Proxy"
-          ? "SportsDataIO connected."
-          : `SportsDataIO: ${sdRow?.settingsLine || "test complete"}.`
-      );
+      setNotice(formatSportsDataTestNotice(sdRow) || buildSaveNotice(cleaned));
     } catch (error) {
       setNotice(error?.message || "SportsDataIO test failed.");
     } finally {
@@ -151,8 +160,11 @@ export default function SettingsPanel({
 
   const oddsDef = USER_SETTING_DEFS.find((def) => def.key === "VITE_ODDS_API_KEY");
   const sdDef = USER_SETTING_DEFS.find((def) => def.key === "VITE_SPORTSDATA_API_KEY");
+  const cleanedOddsDraft = cleanApiKey(draft[oddsDef.key]);
+  const cleanedSdDraft = cleanApiKey(draft[sdDef.key]);
   const oddsSaved = Boolean(saved[oddsDef.key]?.trim());
   const sdSaved = Boolean(saved[sdDef.key]?.trim());
+  const oddsKeyWarning = getOddsKeyLengthWarning(cleanedOddsDraft);
 
   return (
     <details id="section-settings" ref={panelRef} className="settings-panel compact-settings-details">
@@ -168,7 +180,9 @@ export default function SettingsPanel({
           <label className="settings-api-row__field" style={styles.selectLabel}>
             <span className="settings-api-row__head">
               <span>{oddsDef.label}</span>
-              {oddsSaved ? <span className="settings-api-row__saved">Saved</span> : null}
+              {oddsSaved ? (
+                <span className="settings-api-row__saved">Saved · {saved[oddsDef.key].length} chars</span>
+              ) : null}
             </span>
             <input
               style={styles.textInput}
@@ -178,6 +192,7 @@ export default function SettingsPanel({
               onChange={(event) => setDraft((current) => ({ ...current, [oddsDef.key]: event.target.value }))}
               placeholder={oddsDef.placeholder}
             />
+            {oddsKeyWarning ? <span className="settings-api-row__warning">{oddsKeyWarning}</span> : null}
           </label>
           <button type="button" style={styles.secondaryButton} onClick={handleTestOdds} disabled={testingOdds}>
             {testingOdds ? "Testing…" : "Test Odds API"}
@@ -188,7 +203,9 @@ export default function SettingsPanel({
           <label className="settings-api-row__field" style={styles.selectLabel}>
             <span className="settings-api-row__head">
               <span>{sdDef.label}</span>
-              {sdSaved ? <span className="settings-api-row__saved">Saved</span> : null}
+              {sdSaved ? (
+                <span className="settings-api-row__saved">Saved · {saved[sdDef.key].length} chars</span>
+              ) : null}
             </span>
             <input
               style={styles.textInput}

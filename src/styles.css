@@ -1075,6 +1075,12 @@ body,
   font-weight: 700;
 }
 
+.settings-api-row__warning {
+  font-size: 11px;
+  color: #fcd34d;
+  line-height: 1.35;
+}
+
 .settings-api-actions {
   display: flex;
   flex-wrap: wrap;

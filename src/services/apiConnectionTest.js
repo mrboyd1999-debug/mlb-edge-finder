@@ -1,7 +1,6 @@
 import { getOddsApiKey, getProxyUrl, getSportsDataApiKey, getStatmuseApiKey } from "../config/apiConfig.js";
 import {
   buildOddsApiProxyUrl,
-  getOddsApiKeyDebugInfo,
   logOddsApiExchange,
   ODDS_API_INVALID_KEY_MESSAGE,
   parseOddsApiAuthFailure,
@@ -14,11 +13,15 @@ import {
   isTimeoutPreview,
 } from "../utils/apiTimeout.js";
 import {
-  probeSportsDataMlbStatusProxy,
-  SPORTSDATA_CONNECTED_VIA_PROXY,
-  SPORTSDATA_MLB_STATUS_ROUTE,
+  probeSportsDataMlbPlayersProxy,
+  SPORTSDATA_MLB_PLAYERS_ROUTE,
 } from "./sportsDataService.js";
-import { getSourceState, isSourceInCooldown, recordSourceAuthFailure, SOURCE_IDS } from "./sourceRateLimit.js";
+import {
+  getOddsKeyLengthWarning,
+  getSportsDataAuthWarning,
+  getSportsDataMlbAccessMessage,
+} from "../utils/cleanApiKey.js";
+import { getSourceState, isSourceInCooldown, SOURCE_IDS } from "./sourceRateLimit.js";
 import { readCachedBoard, readVerifiedCacheBoard } from "./pickStore.js";
 import { buildFeedHealthContext, mergeConnectionReportWithFeeds } from "./providerHealth.js";
 
@@ -234,126 +237,252 @@ async function testUnderdog() {
   };
 }
 
-async function testOddsApi() {
+function formatResponseBody(text = "", payload = null, max = 400) {
+  if (typeof payload === "string" && payload.trim()) {
+    return payload.trim().slice(0, max);
+  }
+  if (payload && typeof payload === "object") {
+    if (payload.message) return String(payload.message).slice(0, max);
+    if (payload.preview) return String(payload.preview).slice(0, max);
+    if (payload.error && payload.message) return String(payload.message).slice(0, max);
+  }
+  return String(text || "")
+    .trim()
+    .slice(0, max)
+    .replace(/\s+/g, " ");
+}
+
+async function probeOddsApiForTest() {
   const key = getOddsApiKey();
-  const keyDebug = getOddsApiKeyDebugInfo();
+  const keyLength = key.length;
+  const keyLengthWarning = getOddsKeyLengthWarning(key);
+
   if (!key) {
+    return {
+      ok: false,
+      status: CONNECTION_STATUS.NOT_CONFIGURED,
+      httpStatus: 0,
+      responseBody: "No VITE_ODDS_API_KEY configured",
+      keyLength: 0,
+      keyLengthWarning: "",
+      unauthorized: false,
+      remainingRequests: null,
+      route: "https://api.the-odds-api.com/v4/sports/?apiKey=[REDACTED]",
+      durationMs: 0,
+      payload: null,
+    };
+  }
+
+  const url = buildOddsApiProxyUrl("/v4/sports/");
+  const route = url.pathname + url.search;
+  const startedAt = Date.now();
+  const probeTimeoutMs = getApiTimeoutMs({ enrichment: true });
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), probeTimeoutMs);
+
+  try {
+    const response = await fetch(route, { cache: "no-store", signal: controller.signal });
+    const text = await response.text();
+    const remainingRequests =
+      response.headers.get("x-requests-remaining") || response.headers.get("X-Requests-Remaining");
+    const trimmed = text.trim();
+    let payload = null;
+    try {
+      payload = trimmed ? JSON.parse(trimmed) : null;
+    } catch {
+      payload = null;
+    }
+
+    const upstreamStatus = Number(payload?.upstreamStatus ?? payload?.responseCode ?? response.status ?? 0);
+    const httpStatus = upstreamStatus || response.status;
+    const responseBody = formatResponseBody(text, payload);
+    const sportsListOk = response.ok && Array.isArray(payload) && payload.length > 0;
+    const unauthorized = httpStatus === 401 || httpStatus === 403 || Boolean(payload?.error && /invalid|unauthorized|subscription/i.test(responseBody));
+
+    console.info("[Odds API Test] Request URL:", redactOddsApiUrl(route));
+    console.info("[Odds API Test] Key length:", keyLength);
+    console.info("[Odds API Test] HTTP status:", httpStatus);
+    console.info("[Odds API Test] Response body:", responseBody);
+    if (remainingRequests != null) console.info("[Odds API Test] Requests remaining:", remainingRequests);
+
+    logOddsApiExchange({
+      url: route,
+      status: httpStatus,
+      text,
+      data: payload,
+      label: "Odds API key test",
+    });
+
+    return {
+      ok: sportsListOk,
+      status: sportsListOk ? CONNECTION_STATUS.LIVE : CONNECTION_STATUS.FAILED,
+      httpStatus,
+      responseBody,
+      keyLength,
+      keyLengthWarning,
+      unauthorized,
+      remainingRequests: remainingRequests != null ? Number(remainingRequests) : null,
+      route: "https://api.the-odds-api.com/v4/sports/?apiKey=[REDACTED]",
+      durationMs: Date.now() - startedAt,
+      payload,
+      sportsCount: sportsListOk ? payload.length : 0,
+      preview: responseBody,
+    };
+  } catch (error) {
+    const timedOut = isAbortOrTimeoutError(error);
+    const message = timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : error?.message || "Failed to fetch";
+    return {
+      ok: false,
+      status: CONNECTION_STATUS.FAILED,
+      httpStatus: timedOut ? "timeout" : "?",
+      responseBody: message,
+      keyLength,
+      keyLengthWarning,
+      unauthorized: false,
+      remainingRequests: null,
+      route: "https://api.the-odds-api.com/v4/sports/?apiKey=[REDACTED]",
+      durationMs: Date.now() - startedAt,
+      payload: null,
+      timedOut,
+      preview: message,
+    };
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+async function testOddsApi() {
+  const probe = await probeOddsApiForTest();
+  const state = getSourceState(SOURCE_IDS.ODDS_API);
+
+  if (!getOddsApiKey()) {
     return {
       provider: "Odds API",
       status: CONNECTION_STATUS.NOT_CONFIGURED,
       message: CONNECTION_MESSAGES.NOT_CONFIGURED,
-      route: "/api/sportsbookOdds?path=/v4/sports",
-      preview: "No VITE_ODDS_API_KEY configured",
-      durationMs: 0,
+      route: probe.route,
+      preview: probe.responseBody,
+      durationMs: probe.durationMs,
       keyConfigured: false,
       keyLength: 0,
+      settingsLine: "Not configured",
+      showError: false,
     };
   }
-  const url = buildOddsApiProxyUrl("/v4/sports");
-  const route = url.pathname + url.search;
-  console.info("[Odds API Test] Request URL:", redactOddsApiUrl(route));
-  console.info("[Odds API Test] Odds key length:", keyDebug.keyLength);
-  const result = await probeFetch(route);
-  console.info("[Odds API Test] Response status:", result.status);
-  console.info("[Odds API Test] Response body:", result.preview);
-  const sportsListOk = result.ok && Array.isArray(result.payload) && result.payload.length > 0;
-  if (sportsListOk) {
-    const state = getSourceState(SOURCE_IDS.ODDS_API);
+
+  if (probe.ok) {
     return {
       provider: "Odds API",
-      route,
+      route: probe.route,
       keyConfigured: true,
-      keyLength: keyDebug.keyLength,
+      keyLength: probe.keyLength,
+      keyLengthWarning: probe.keyLengthWarning,
+      httpStatus: probe.httpStatus,
+      responseBody: probe.responseBody,
+      remainingRequests: probe.remainingRequests,
       status: CONNECTION_STATUS.LIVE,
       message: CONNECTION_MESSAGES.CONNECTED,
       settingsLine: "Connected",
       settingsStatus: "Connected",
       sportsListOk: true,
-      sportsCount: result.payload.length,
-      ...result,
+      sportsCount: probe.sportsCount,
+      ...probe,
       lastSuccessfulFetchAt: state.lastSuccessfulFetchAt || new Date().toISOString(),
       requestCount: state.requestCount || 0,
-      lastError: "",
+      lastError: probe.keyLengthWarning || "",
       cooldownRemainingMs: Math.max(0, Number(state.cooldownUntil || 0) - Date.now()),
-      showError: false,
+      showError: Boolean(probe.keyLengthWarning),
+      debugLine:
+        probe.remainingRequests != null
+          ? `${probe.sportsCount} sports · ${probe.remainingRequests} requests remaining`
+          : `${probe.sportsCount} sports`,
     };
   }
-  const classified = classifyLineSourceProbe(result, {
-    requiresKey: true,
-    keyConfigured: true,
-    sourceId: SOURCE_IDS.ODDS_API,
-  });
-  const state = getSourceState(SOURCE_IDS.ODDS_API);
-  if (result.unauthorized) {
-    recordSourceAuthFailure(SOURCE_IDS.ODDS_API, ODDS_API_INVALID_KEY_MESSAGE);
-  }
+
+  const settingsLine = `Failed (HTTP ${probe.httpStatus})`;
+  const detailParts = [settingsLine, probe.responseBody].filter(Boolean);
+  if (probe.keyLengthWarning) detailParts.push(probe.keyLengthWarning);
+
   return {
     provider: "Odds API",
-    route,
+    route: probe.route,
     keyConfigured: true,
-    keyLength: keyDebug.keyLength,
+    keyLength: probe.keyLength,
+    keyLengthWarning: probe.keyLengthWarning,
+    httpStatus: probe.httpStatus,
+    responseBody: probe.responseBody,
+    remainingRequests: probe.remainingRequests,
     sportsListOk: false,
-    ...classified,
-    ...result,
-    settingsLine: classified.settingsLine || (result.unauthorized ? "Invalid Key" : "Failed"),
-    settingsStatus: classified.settingsLine || (result.unauthorized ? "Invalid Key" : "Failed"),
+    status: CONNECTION_STATUS.FAILED,
+    message: detailParts.join(" — "),
+    settingsLine,
+    settingsStatus: settingsLine,
+    ...probe,
     lastSuccessfulFetchAt: state.lastSuccessfulFetchAt || "",
     requestCount: state.requestCount || 0,
-    lastError: result.unauthorized ? ODDS_API_INVALID_KEY_MESSAGE : classified.status === CONNECTION_STATUS.FAILED ? result.preview : "",
+    lastError: detailParts.join(" — "),
     cooldownRemainingMs: Math.max(0, Number(state.cooldownUntil || 0) - Date.now()),
-    showError: Boolean(result.unauthorized || classified.status === CONNECTION_STATUS.FAILED),
+    showError: true,
+    debugLine: detailParts.join(" · "),
   };
 }
 
 
-function redactSportsDataUrl(url = "") {
-  return String(url).replace(/key=[^&]+/gi, "key=[REDACTED]");
-}
-
-function isSportsDataHealthPayload(payload) {
-  if (payload === true || payload === false) return true;
-  if (Array.isArray(payload)) return true;
-  return Boolean(payload && typeof payload === "object");
-}
-
 async function probeSportsDataHealth({ apiKey } = {}) {
   void apiKey;
   const startedAt = Date.now();
-  const probe = await probeSportsDataMlbStatusProxy();
-  const healthOk = Boolean(probe.ok && isSportsDataHealthPayload(probe.payload ?? probe.data));
+  const probe = await probeSportsDataMlbPlayersProxy();
+  const healthOk = Boolean(probe.ok);
 
   return {
     ok: healthOk,
     status: probe.responseCode || (healthOk ? 200 : 502),
-    preview: probe.message || probe.preview || "",
+    preview: probe.preview || probe.message || "",
+    responseBody: probe.preview || probe.message || "",
+    httpStatus: probe.responseCode || (healthOk ? 200 : 502),
     durationMs: Date.now() - startedAt,
     payload: probe.payload ?? probe.data,
+    playerCount: probe.playerCount || 0,
     rateLimited: Boolean(probe.rateLimited),
     unauthorized: Boolean(probe.unauthorized),
     timedOut: Boolean(probe.timedOut),
     corsBlocked: false,
     networkError: !healthOk && !probe.timedOut && !probe.unauthorized,
-    url: SPORTSDATA_MLB_STATUS_ROUTE,
+    url: SPORTSDATA_MLB_PLAYERS_ROUTE,
+    upstreamPath: probe.upstreamPath || "/scores/json/Players",
     usedDirect: false,
     proxied: true,
+    text: probe.text || "",
   };
 }
 
 function classifySportsDataProbe(probe = {}) {
+  const httpStatus = Number(probe.httpStatus ?? probe.status ?? probe.responseCode ?? 0);
+  const responseBody = formatResponseBody(probe.text, probe.preview || probe.responseBody || probe.message);
+  const authWarning = getSportsDataAuthWarning(httpStatus);
+  const mlbAccessMessage = getSportsDataMlbAccessMessage(httpStatus);
+
   if (probe.timedOut) {
     return {
       settingsLine: ENRICHMENT_TIMEOUT_MESSAGE,
       status: CONNECTION_STATUS.FAILED,
       message: ENRICHMENT_TIMEOUT_MESSAGE,
+      httpStatus,
+      responseBody,
       showError: false,
       timedOut: true,
     };
   }
-  if (probe.unauthorized) {
+  if (probe.unauthorized || httpStatus === 401 || httpStatus === 403) {
+    const detail = [authWarning, mlbAccessMessage, responseBody].filter(Boolean).join(" — ");
     return {
-      settingsLine: "Invalid key or subscription",
+      settingsLine: `Failed (HTTP ${httpStatus})`,
       status: CONNECTION_STATUS.FAILED,
-      message: CONNECTION_MESSAGES.INVALID,
+      message: detail,
+      httpStatus,
+      responseBody,
+      authWarning,
+      mlbAccessMessage,
       showError: true,
     };
   }
@@ -362,24 +491,32 @@ function classifySportsDataProbe(probe = {}) {
       settingsLine: "Rate limited",
       status: CONNECTION_STATUS.CACHED,
       message: CONNECTION_MESSAGES.RATE_LIMITED,
+      httpStatus,
+      responseBody,
       showError: false,
     };
   }
   if (probe.ok) {
+    const playerCount = probe.playerCount ?? (Array.isArray(probe.payload) ? probe.payload.length : 0);
     return {
-      settingsLine: SPORTSDATA_CONNECTED_VIA_PROXY,
-      settingsStatus: SPORTSDATA_CONNECTED_VIA_PROXY,
+      settingsLine: "Connected",
+      settingsStatus: "Connected",
       status: CONNECTION_STATUS.LIVE,
-      message: SPORTSDATA_CONNECTED_VIA_PROXY,
+      message: `Connected — ${playerCount} MLB players`,
+      httpStatus: 200,
+      responseBody: `OK — ${playerCount} MLB players returned`,
       showError: false,
-      debugLine: "SportsDataIO MLB status probe succeeded via backend proxy.",
+      debugLine: `MLB Players endpoint · ${playerCount} players`,
       proxied: true,
+      playerCount,
     };
   }
   return {
-    settingsLine: probe.preview || "Failed",
+    settingsLine: httpStatus ? `Failed (HTTP ${httpStatus})` : "Failed",
     status: CONNECTION_STATUS.FAILED,
-    message: probe.preview || CONNECTION_MESSAGES.FAILED,
+    message: [responseBody || probe.preview || CONNECTION_MESSAGES.FAILED, mlbAccessMessage].filter(Boolean).join(" — "),
+    httpStatus,
+    responseBody: responseBody || probe.preview || CONNECTION_MESSAGES.FAILED,
     showError: true,
   };
 }
@@ -391,42 +528,51 @@ async function testSportsDataProvider() {
     console.log("[SportsDataIO Test] Status: skipped — no key saved");
     return {
       provider: "SportsDataIO",
-      route: SPORTSDATA_MLB_STATUS_ROUTE,
+      route: SPORTSDATA_MLB_PLAYERS_ROUTE,
+      upstreamPath: "/scores/json/Players",
       keyConfigured: false,
       status: CONNECTION_STATUS.NOT_CONFIGURED,
       message: CONNECTION_MESSAGES.NOT_CONFIGURED,
       preview: "No SportsDataIO key configured",
       durationMs: 0,
-      settingsLine: "Not Used",
+      settingsLine: "Not configured",
       keySaved: false,
     };
   }
 
   const probe = await probeSportsDataHealth({ apiKey: sportsDataKey });
-  const classified = classifySportsDataProbe(probe);
+  const classified = classifySportsDataProbe({ ...probe, playerCount: probe.playerCount });
   const state = getSourceState(SOURCE_IDS.SPORTSDATA);
 
-  console.log("[SportsDataIO Test] Proxy route:", SPORTSDATA_MLB_STATUS_ROUTE);
-  console.log("[SportsDataIO Test] Response status:", probe.status);
-  console.log("[SportsDataIO Test] Proxied:", probe.proxied);
-  console.log("[SportsDataIO Test] Response text:", redactSportsDataUrl(String(probe.preview || "")));
+  console.log("[SportsDataIO Test] Proxy route:", SPORTSDATA_MLB_PLAYERS_ROUTE);
+  console.log("[SportsDataIO Test] Upstream:", "/scores/json/Players");
+  console.log("[SportsDataIO Test] Response status:", probe.httpStatus ?? probe.status);
+  console.log("[SportsDataIO Test] Response body:", classified.responseBody || probe.preview);
+
+  const detailMessage = classified.message || classified.responseBody || probe.preview || "";
 
   return {
     provider: "SportsDataIO",
-    route: SPORTSDATA_MLB_STATUS_ROUTE,
+    route: SPORTSDATA_MLB_PLAYERS_ROUTE,
+    upstreamPath: "/scores/json/Players",
     keyConfigured: true,
     keySaved: true,
+    keyLength: sportsDataKey.length,
+    httpStatus: classified.httpStatus ?? probe.httpStatus ?? probe.status,
+    responseBody: classified.responseBody || probe.preview || "",
     settingsLine: classified.settingsLine,
     settingsStatus: classified.settingsStatus || classified.settingsLine,
     showError: classified.showError,
-    debugLine: classified.debugLine || "",
+    debugLine: classified.debugLine || detailMessage,
+    authWarning: classified.authWarning || "",
+    mlbAccessMessage: classified.mlbAccessMessage || "",
     status: classified.status,
-    message: classified.message,
+    message: detailMessage,
     proxied: true,
     ...probe,
     lastSuccessfulFetchAt: probe.ok ? new Date().toISOString() : state.lastSuccessfulFetchAt || "",
     requestCount: state.requestCount || 0,
-    lastError: classified.showError ? probe.preview || classified.message : "",
+    lastError: classified.showError ? detailMessage : "",
     cooldownRemainingMs: Math.max(0, Number(state.cooldownUntil || 0) - Date.now()),
   };
 }
@@ -558,6 +704,36 @@ export async function testAllApiConnections(options = {}) {
 }
 
 export { mergeConnectionReportWithFeeds, buildFeedHealthContext } from "./providerHealth.js";
+
+export function formatOddsTestNotice(row = {}) {
+  if (!row || row.settingsLine === "Not configured") return "Add an Odds API key, then test again.";
+  if (row.settingsLine === "Connected") {
+    const parts = ["Odds API connected."];
+    if (row.keyLength) parts.push(`Key length: ${row.keyLength}.`);
+    if (row.remainingRequests != null) parts.push(`Requests remaining: ${row.remainingRequests}.`);
+    if (row.keyLengthWarning) parts.push(row.keyLengthWarning);
+    return parts.join(" ");
+  }
+  const parts = [`Odds API failed (HTTP ${row.httpStatus ?? row.status ?? "?"}).`];
+  if (row.responseBody) parts.push(row.responseBody);
+  if (row.keyLengthWarning) parts.push(row.keyLengthWarning);
+  return parts.join(" ");
+}
+
+export function formatSportsDataTestNotice(row = {}) {
+  if (!row || row.settingsLine === "Not configured") return "Add a SportsDataIO key, then test again.";
+  if (row.settingsLine === "Connected") {
+    const parts = ["SportsDataIO connected."];
+    if (row.keyLength) parts.push(`Key length: ${row.keyLength}.`);
+    if (row.responseBody) parts.push(row.responseBody);
+    return parts.join(" ");
+  }
+  const parts = [`SportsDataIO failed (HTTP ${row.httpStatus ?? row.status ?? "?"}).`];
+  if (row.responseBody) parts.push(row.responseBody);
+  if (row.authWarning) parts.push(row.authWarning);
+  if (row.mlbAccessMessage) parts.push(row.mlbAccessMessage);
+  return parts.join(" ");
+}
 
 export function connectionStatusStyle(status = "") {
   const key = String(status || "").toUpperCase();

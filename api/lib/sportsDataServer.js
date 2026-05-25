@@ -1,5 +1,8 @@
+import { cleanApiKey } from "./cleanApiKey.js";
+
 export const SPORTSDATA_MLB_UPSTREAM = "https://api.sportsdata.io/v3/mlb";
 export const SPORTSDATA_MLB_STATUS_PATH = "/scores/json/AreAnyGamesInProgress";
+export const SPORTSDATA_MLB_PLAYERS_PATH = "/scores/json/Players";
 export const SPORTSDATA_UPSTREAM_TIMEOUT_MS = 30_000;
 
 export function resolveSportsDataApiKeyFromRequest(req) {
@@ -9,20 +12,20 @@ export function resolveSportsDataApiKeyFromRequest(req) {
     headers["X-SportsData-Api-Key"] ||
     headers["x-sportsdata-key"] ||
     "";
-  if (String(headerKey).trim()) return String(headerKey).trim();
+  if (String(headerKey).trim()) return cleanApiKey(headerKey);
 
   const queryKey = req?.query?.key;
-  if (typeof queryKey === "string" && queryKey.trim()) return queryKey.trim();
+  if (typeof queryKey === "string" && queryKey.trim()) return cleanApiKey(queryKey);
 
   try {
     const parsed = new URL(req?.url || "", "http://localhost");
     const fromUrl = parsed.searchParams.get("key");
-    if (fromUrl?.trim()) return fromUrl.trim();
+    if (fromUrl?.trim()) return cleanApiKey(fromUrl);
   } catch {
     // ignore malformed URLs
   }
 
-  return String(process.env.SPORTSDATA_API_KEY || process.env.VITE_SPORTSDATA_API_KEY || "").trim();
+  return cleanApiKey(process.env.SPORTSDATA_API_KEY || process.env.VITE_SPORTSDATA_API_KEY || "");
 }
 
 export function isSportsDataHealthPayload(payload) {
@@ -108,6 +111,22 @@ export async function probeSportsDataMlbStatus(apiKey) {
     success: healthOk,
     status: healthOk ? "connected" : result.status,
     message: healthOk ? "Connected via proxy" : result.message,
+  };
+}
+
+/** MLB subscription probe — uses Players endpoint required for stat enrichment. */
+export async function probeSportsDataMlbPlayers(apiKey) {
+  const result = await fetchSportsDataUpstream(SPORTSDATA_MLB_PLAYERS_PATH, { apiKey: cleanApiKey(apiKey) });
+  const playersOk = result.responseCode === 200 && Array.isArray(result.data);
+  return {
+    ...result,
+    ok: playersOk,
+    success: playersOk,
+    status: playersOk ? "connected" : result.status,
+    message: playersOk
+      ? `Connected — ${result.data.length} MLB players returned`
+      : result.message,
+    playerCount: playersOk ? result.data.length : 0,
   };
 }
 

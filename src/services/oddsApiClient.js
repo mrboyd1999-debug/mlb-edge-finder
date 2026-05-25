@@ -1,11 +1,10 @@
 import { getOddsApiKey as getRuntimeOddsApiKey } from "../config/apiConfig.js";
+import { cleanApiKey } from "../utils/cleanApiKey.js";
 
 export const ODDS_API_INVALID_KEY_MESSAGE = "Invalid Odds API key or subscription access.";
 
 export function sanitizeOddsApiKey(key = "") {
-  return String(key || "")
-    .trim()
-    .replace(/\s+/g, "");
+  return cleanApiKey(key);
 }
 
 export function getTrimmedOddsApiKey() {

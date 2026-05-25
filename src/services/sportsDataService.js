@@ -27,6 +27,7 @@ import {
 
 export const SPORTSDATA_PROXY_HEADER = "X-SportsData-Api-Key";
 export const SPORTSDATA_MLB_STATUS_ROUTE = "/api/sportsdataio/mlb-status";
+export const SPORTSDATA_MLB_PLAYERS_ROUTE = "/api/sportsdataio/scores/json/Players";
 const SPORTSDATA_BASE = "/api/sportsdataio";
 const SPORTSDATA_CACHE_PREFIX = "dfs-sportsdata-cache-v1";
 const SPORTSDATA_CACHE_MAX_MS = 60 * 60 * 1000;
@@ -225,6 +226,94 @@ export async function probeSportsDataMlbStatusProxy() {
     durationMs: envelope?.durationMs || 0,
     keyConfigured: true,
     preview: envelope?.message || result.error || "",
+  };
+}
+
+/** MLB Players probe — validates subscription access for stat enrichment. */
+export async function probeSportsDataMlbPlayersProxy() {
+  const apiKey = getSportsDataApiKey();
+  if (!apiKey) {
+    return {
+      ok: false,
+      success: false,
+      proxied: true,
+      responseCode: 401,
+      status: "not_configured",
+      message: "SportsDataIO key not configured",
+      data: null,
+      keyConfigured: false,
+      route: SPORTSDATA_MLB_PLAYERS_ROUTE,
+      upstreamPath: "/scores/json/Players",
+    };
+  }
+
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), getSportsDataTimeoutMs());
+  let response;
+  let text = "";
+  try {
+    response = await fetch(SPORTSDATA_MLB_PLAYERS_ROUTE, {
+      headers: sportsDataProxyHeaders(),
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    text = await response.text();
+  } catch (error) {
+    const timedOut = error?.name === "AbortError";
+    return {
+      ok: false,
+      success: false,
+      proxied: true,
+      responseCode: timedOut ? 408 : 502,
+      status: timedOut ? "timeout" : "failed",
+      message: timedOut ? "Timed out — using base feed." : error?.message || "Proxy fetch failed",
+      data: null,
+      text: "",
+      preview: error?.message || "",
+      timedOut,
+      unauthorized: false,
+      durationMs: Date.now() - startedAt,
+      keyConfigured: true,
+      route: SPORTSDATA_MLB_PLAYERS_ROUTE,
+      upstreamPath: "/scores/json/Players",
+    };
+  } finally {
+    window.clearTimeout(timer);
+  }
+
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = null;
+  }
+
+  const responseCode = Number(payload?.responseCode ?? response.status ?? 0);
+  const unauthorized = responseCode === 401 || responseCode === 403 || Boolean(payload?.unauthorized);
+  const playersOk = response.ok && Array.isArray(payload);
+  const preview = String(payload?.preview || payload?.message || text || "").slice(0, 400).replace(/\s+/g, " ").trim();
+
+  return {
+    ok: playersOk,
+    success: playersOk,
+    proxied: true,
+    responseCode: playersOk ? 200 : responseCode || response.status,
+    status: playersOk ? "connected" : unauthorized ? "unauthorized" : "failed",
+    message: playersOk
+      ? `Connected — ${payload.length} MLB players`
+      : payload?.message || preview || `HTTP ${responseCode || response.status}`,
+    data: playersOk ? payload : null,
+    payload: playersOk ? payload : null,
+    playerCount: playersOk ? payload.length : 0,
+    text,
+    preview,
+    timedOut: false,
+    unauthorized,
+    durationMs: Date.now() - startedAt,
+    keyConfigured: true,
+    route: SPORTSDATA_MLB_PLAYERS_ROUTE,
+    upstreamPath: "/scores/json/Players",
   };
 }
 
