@@ -1,6 +1,6 @@
 export const SPORTSDATA_MLB_UPSTREAM = "https://api.sportsdata.io/v3/mlb";
 export const SPORTSDATA_MLB_STATUS_PATH = "/scores/json/AreAnyGamesInProgress";
-export const SPORTSDATA_UPSTREAM_TIMEOUT_MS = 8_000;
+export const SPORTSDATA_UPSTREAM_TIMEOUT_MS = 30_000;
 
 export function resolveSportsDataApiKeyFromRequest(req) {
   const headers = req?.headers || {};

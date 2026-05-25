@@ -4,6 +4,10 @@ export const ENRICHMENT_TIMEOUT_MESSAGE = "Timed out — using base feed.";
 export const ENRICHMENT_MAX_RETRIES = 1;
 export const MOBILE_TIMEOUT_MS = 5_000;
 export const DESKTOP_TIMEOUT_MS = 8_000;
+export const LINE_FEED_TIMEOUT_MS = 30_000;
+export const SPORTSDATA_TIMEOUT_MS = 30_000;
+export const LINE_FEED_RETRY_DELAY_MS = 2_000;
+export const LINE_FEED_MAX_RETRIES = 2;
 
 export function isMobileViewport() {
   if (typeof window === "undefined") return false;
@@ -14,6 +18,16 @@ export function isMobileViewport() {
 export function getApiTimeoutMs({ enrichment = false } = {}) {
   void enrichment;
   return isMobileViewport() ? MOBILE_TIMEOUT_MS : DESKTOP_TIMEOUT_MS;
+}
+
+/** PrizePicks / Underdog line feeds — longer timeout for flaky proxies. */
+export function getLineFeedTimeoutMs() {
+  return LINE_FEED_TIMEOUT_MS;
+}
+
+/** SportsDataIO enrichment — background-only, must not block core MLB feed. */
+export function getSportsDataTimeoutMs() {
+  return SPORTSDATA_TIMEOUT_MS;
 }
 
 export function isAbortOrTimeoutError(error) {

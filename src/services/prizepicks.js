@@ -1,5 +1,10 @@
-import { resilientFetch } from "./fetchUtil.js";
-import { getApiTimeoutMs } from "../utils/apiTimeout.js";
+import { lineFeedJsonHeaders, resilientFetch } from "./fetchUtil.js";
+import {
+  getLineFeedTimeoutMs,
+  LINE_FEED_MAX_RETRIES,
+  LINE_FEED_RETRY_DELAY_MS,
+} from "../utils/apiTimeout.js";
+import { safeParseJSON } from "../utils/safeParseJSON.js";
 import { normalizeGameStartTime, startTimeUncertainty } from "../utils/normalizeGameStartTime.js";
 import { inferSportFromText, sportFromPrizePicksLeague } from "../utils/sportMappings.js";
 import { filterApprovedMarketsOnly } from "../utils/approvedMarkets.js";
@@ -44,9 +49,11 @@ import { recordProviderResponse } from "../utils/rawResponseDebug.js";
 
 export const PRIZEPICKS_HTML_BANNER = "API route is serving source/HTML instead of JSON. Check proxy/backend routing.";
 export const PRIZEPICKS_RATE_LIMIT_MESSAGE = "PrizePicks rate limited, using other sources.";
+export const PRIZEPICKS_TEMPORARY_MESSAGE = "PrizePicks temporarily unavailable";
 
 const PRIZEPICKS_ENDPOINTS = ["/api/prizepicks"];
 const PRIZEPICKS_CACHE_KEY = "dfs-prizepicks-last-good-payload";
+const PRIZEPICKS_LEGACY_CACHE_KEY = "pp_cache";
 const PRIZEPICKS_CACHE_MAX_MS = 15 * 60 * 1000;
 const PRIZEPICKS_CLIENT_STALE_MS = 5 * 60 * 1000;
 
@@ -119,7 +126,7 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all" } 
   const fetchInit = {
     cache: "no-store",
     credentials: "omit",
-    headers: { accept: "application/json" },
+    headers: lineFeedJsonHeaders(),
   };
 
   for (const endpoint of prizePicksEndpoints()) {
@@ -147,9 +154,11 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all" } 
       if (parsed.payload?.error && !isFallback) {
         return failedPrizePicksResult({
           endpoint,
-          message: setupWarning || parsed.payload.message || parsed.payload.errorMessage || "PrizePicks unavailable.",
+          message: setupWarning || parsed.payload.message || parsed.payload.errorMessage || PRIZEPICKS_TEMPORARY_MESSAGE,
           attempts,
           htmlError: parsed.htmlError,
+          sport,
+          statType,
         });
       }
 
@@ -233,9 +242,11 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all" } 
 
   return failedPrizePicksResult({
     endpoint: attempts.at(-1)?.url || prizePicksEndpoints()[0],
-    message: "PrizePicks data failed to load.",
+    message: PRIZEPICKS_TEMPORARY_MESSAGE,
     attempts,
     htmlError: attempts.some((item) => item.htmlError),
+    sport,
+    statType,
   });
 }
 
@@ -249,7 +260,9 @@ function buildCachedPrizePicksResult({ sport, statType, attempts, endpoint, reas
   const warning =
     reason === "rate-limit" || reason === "cooldown"
       ? PRIZEPICKS_RATE_LIMIT_MESSAGE
-      : "PrizePicks live fetch failed; showing last cached real lines.";
+      : reason === "fetch-failed"
+        ? PRIZEPICKS_TEMPORARY_MESSAGE
+        : "PrizePicks live fetch failed; showing last cached real lines.";
   return {
     source: "PrizePicks",
     status: "Cached",
@@ -271,6 +284,7 @@ function buildCachedPrizePicksResult({ sport, statType, attempts, endpoint, reas
 }
 
 async function fetchPrizePicksEndpoint(endpoint, init) {
+  const lineFeedTimeoutMs = getLineFeedTimeoutMs();
   const attempt = {
     url: absoluteUrl(endpoint),
     status: null,
@@ -287,8 +301,9 @@ async function fetchPrizePicksEndpoint(endpoint, init) {
     const response = await resilientFetch(endpoint, init, {
       source: "PrizePicks",
       ttlMs: PRIZEPICKS_CLIENT_STALE_MS,
-      timeoutMs: getApiTimeoutMs(),
-      maxRetries: 1,
+      timeoutMs: lineFeedTimeoutMs,
+      maxRetries: LINE_FEED_MAX_RETRIES,
+      retryDelayMs: LINE_FEED_RETRY_DELAY_MS,
       skip429Retry: true,
     });
     attempt.status = response.status;
@@ -348,8 +363,9 @@ async function fetchPrizePicksEndpoint(endpoint, init) {
     try {
       payload = JSON.parse(trimmed);
     } catch (parseError) {
-      attempt.error = `JSON parse failed: ${parseError.message || "invalid JSON"}`;
-      return { ok: false, attempt, htmlError: false, rateLimited: false };
+      console.error("Non-JSON response:", trimmed.slice(0, 300));
+      attempt.error = `PrizePicks returned non-JSON response: ${parseError.message || "invalid JSON"}`;
+      return { ok: false, attempt, htmlError: true, rateLimited: false, nonJson: true };
     }
 
     if (payload?.ok === true && payload?.fallback === true) {
@@ -374,7 +390,9 @@ async function fetchPrizePicksEndpoint(endpoint, init) {
     return { ok: true, attempt, payload, htmlError: false, rateLimited: false };
   } catch (error) {
     const message = error?.message || String(error);
-    attempt.error = /timed out|abort/i.test(message) ? `Request timed out after 15s` : message || "Failed to fetch";
+    attempt.error = /timed out|abort/i.test(message)
+      ? `Request timed out after ${Math.round(lineFeedTimeoutMs / 1000)}s`
+      : message || "Failed to fetch";
     attempt.durationMs = Date.now() - startedAt;
     attempt.networkError = true;
     return { ok: false, attempt, htmlError: false, rateLimited: false, networkError: true };
@@ -405,9 +423,23 @@ function formatAttemptWarnings(attempts = []) {
   return lines;
 }
 
-function failedPrizePicksResult({ endpoint, message, attempts = [], htmlError = false }) {
+function failedPrizePicksResult({ endpoint, message, attempts = [], htmlError = false, sport = "all", statType = "all" }) {
+  const cachedResult = buildCachedPrizePicksResult({
+    sport,
+    statType,
+    attempts,
+    endpoint,
+    reason: "fetch-failed",
+  });
+  if (cachedResult) {
+    const warnings = [PRIZEPICKS_TEMPORARY_MESSAGE, ...(cachedResult.warnings || [])].filter(
+      (item, index, list) => list.indexOf(item) === index
+    );
+    return { ...cachedResult, warnings };
+  }
   const warnings = formatAttemptWarnings(attempts);
   if (message && !warnings.includes(message)) warnings.unshift(message);
+  if (!warnings.includes(PRIZEPICKS_TEMPORARY_MESSAGE)) warnings.unshift(PRIZEPICKS_TEMPORARY_MESSAGE);
   return {
     source: "PrizePicks",
     status: "Failed",
@@ -416,6 +448,7 @@ function failedPrizePicksResult({ endpoint, message, attempts = [], htmlError = 
     warnings,
     debug: buildDebug(endpoint, "Failed", 0, 0, warnings.join(" | "), attempts),
     htmlError,
+    fallback: true,
   };
 }
 
@@ -846,10 +879,9 @@ function normalizeKey(value) {
 
 function writeCachedPayload(payload) {
   try {
-    window.localStorage.setItem(
-      PRIZEPICKS_CACHE_KEY,
-      JSON.stringify({ savedAt: Date.now(), payload })
-    );
+    const entry = { savedAt: Date.now(), payload };
+    window.localStorage.setItem(PRIZEPICKS_CACHE_KEY, JSON.stringify(entry));
+    window.localStorage.setItem(PRIZEPICKS_LEGACY_CACHE_KEY, JSON.stringify(payload));
   } catch {
     // Cache is only an anti-rate-limit convenience.
   }
@@ -857,9 +889,18 @@ function writeCachedPayload(payload) {
 
 function readCachedPayload() {
   try {
-    const cached = JSON.parse(window.localStorage.getItem(PRIZEPICKS_CACHE_KEY) || "null");
-    if (!cached?.payload || Date.now() - cached.savedAt > PRIZEPICKS_CACHE_MAX_MS) return null;
-    return sanitizePrizePicksPayloadForCache(cached.payload);
+    const cached = safeParseJSON(window.localStorage.getItem(PRIZEPICKS_CACHE_KEY), null);
+    if (cached?.payload && Date.now() - cached.savedAt <= PRIZEPICKS_CACHE_MAX_MS) {
+      return sanitizePrizePicksPayloadForCache(cached.payload);
+    }
+  } catch {
+    // fall through to legacy key
+  }
+  try {
+    const legacy = safeParseJSON(window.localStorage.getItem(PRIZEPICKS_LEGACY_CACHE_KEY), null);
+    if (!legacy) return null;
+    const payload = legacy?.payload && typeof legacy.payload === "object" ? legacy.payload : legacy;
+    return sanitizePrizePicksPayloadForCache(payload);
   } catch {
     return null;
   }
@@ -867,10 +908,10 @@ function readCachedPayload() {
 
 function readCachedPayloadSavedAt() {
   try {
-    const cached = JSON.parse(window.localStorage.getItem(PRIZEPICKS_CACHE_KEY) || "null");
-    if (!cached?.savedAt) return "";
-    return new Date(cached.savedAt).toISOString();
+    const cached = safeParseJSON(window.localStorage.getItem(PRIZEPICKS_CACHE_KEY), null);
+    if (cached?.savedAt) return new Date(cached.savedAt).toISOString();
   } catch {
-    return "";
+    // ignore
   }
+  return "";
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchPrizePicksProps, PRIZEPICKS_RATE_LIMIT_MESSAGE } from "./services/prizepicks";
+import { fetchPrizePicksProps, PRIZEPICKS_RATE_LIMIT_MESSAGE, PRIZEPICKS_TEMPORARY_MESSAGE } from "./services/prizepicks";
 import { UNDERDOG_TEMPORARY_MESSAGE } from "./services/underdog";
 import {
   fetchUnderdogProviderProps,
@@ -199,6 +199,7 @@ import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks, resolveSafeMlbStre
 import {
   ENRICHMENT_TIMEOUT_MESSAGE,
   getApiTimeoutMs,
+  getSportsDataTimeoutMs,
   isAbortOrTimeoutError,
   withFetchTimeout,
 } from "./utils/apiTimeout.js";
@@ -1020,7 +1021,14 @@ function applySourceResult({
     } else {
       sourceWarnings.push(...detailWarnings);
       if (label === "PrizePicks") {
-        sourceFailures.push(...(detailWarnings.length ? detailWarnings : ["PrizePicks data failed to load."]));
+        const softFailure = detailWarnings.some((warning) =>
+          /temporarily unavailable|non-json|html instead of json/i.test(String(warning))
+        );
+        if (!softFailure) {
+          sourceFailures.push(...(detailWarnings.length ? detailWarnings : [PRIZEPICKS_TEMPORARY_MESSAGE]));
+        } else if (!sourceWarnings.includes(PRIZEPICKS_TEMPORARY_MESSAGE)) {
+          sourceWarnings.push(PRIZEPICKS_TEMPORARY_MESSAGE);
+        }
       }
       sourceStatus[label] = props.length ? "Degraded" : "Failed";
     }
@@ -1165,7 +1173,14 @@ async function injectSportsDataIfProvidersEmpty({
   debugInfo = {},
 } = {}) {
   if (mergedCount > 0) return null;
-  const generated = await generateMlbPropsFromSportsData({ limit: 48 });
+  const generated = await withFetchTimeout(
+    () => generateMlbPropsFromSportsData({ limit: 48 }),
+    getSportsDataTimeoutMs(),
+    {
+      label: "SportsDataIO immediate fallback",
+      fallback: () => ({ props: [], generatedCount: 0, warnings: [ENRICHMENT_TIMEOUT_MESSAGE] }),
+    }
+  );
   if (!generated.props?.length) return null;
 
   const display = normalizePropsWithSource(
@@ -1470,74 +1485,30 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   });
 
   if (!allDisplayProps.length && rawProps.length) {
-    const sportsData = await withFetchTimeout(
+    void withFetchTimeout(
       () => enrichPropsWithSportsData(rawProps),
-      Math.min(enrichmentTimeoutMs, 4000),
-      { label: "SportsDataIO optional enrich", fallback: () => ({ props: rawProps, warnings: [ENRICHMENT_TIMEOUT_MESSAGE], enrichedCount: 0 }) }
-    );
-    if (sportsData.enrichedCount > 0 || sportsData.props.length) {
-      rawProps.length = 0;
-      rawProps.push(...normalizePropsWithSource(sportsData.props));
-      allDisplayProps = normalizePropsWithSource(
-        enrichDisplayPropsPipeline(
-          rawProps.map((prop) =>
-            normalizeDisplayProp(prop, {
-              selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
-              source: prop.platform || prop.source || "Underdog",
-              status: String(prop.lineSourceBadge || "").toUpperCase() === "CACHED" ? "cached" : "live",
-            })
-          )
-        )
-      );
-      sourceStatus.SportsDataIO = "Connected";
-      debugInfo.sources.SportsDataIO = {
-        ...debugInfo.sources.SportsDataIO,
-        status: "Connected",
-        apiStatus: "Connected",
-        message: `Enriched ${sportsData.enrichedCount} props with projections/matchups`,
-        lineSourceBadge: "LIVE",
-      };
-    }
-  }
-  if (!allDisplayProps.length && rawProps.length) {
-    allDisplayProps = normalizePropsWithSource(
-      enrichDisplayPropsPipeline(
-        rawProps.map((prop) =>
-          normalizeDisplayProp(prop, {
-            selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
-            source: prop.platform || prop.source || "PrizePicks",
-            status: String(prop.lineSourceBadge || "").toUpperCase() === "CACHED" ? "cached" : "live",
-          })
-        )
-      )
+      getSportsDataTimeoutMs(),
+      {
+        label: "SportsDataIO optional enrich",
+        fallback: () => ({ props: rawProps, warnings: [ENRICHMENT_TIMEOUT_MESSAGE], enrichedCount: 0 }),
+      }
     );
   } else if (allDisplayProps.length) {
     allDisplayProps = normalizePropsWithSource(allDisplayProps);
   }
 
   if (!allDisplayProps.length) {
-    const generated = await generateMlbPropsFromSportsData({ limit: 48 });
-    if (generated.props?.length) {
-      rawProps.length = 0;
-      rawProps.push(...normalizePropsWithSource(generated.props));
-      allDisplayProps = normalizePropsWithSource(
-        enrichDisplayPropsPipeline(
-          rawProps.map((prop) =>
-            normalizeDisplayProp(prop, {
-              selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
-              source: "SportsDataIO",
-              status: "live",
-            })
-          )
-        )
-      );
-      sourceStatus.SportsDataIO = "Connected";
-      pipelineFallback = true;
-      debugInfo.ingestionFallback = "sportsdata-generated";
-    }
+    void withFetchTimeout(
+      () => generateMlbPropsFromSportsData({ limit: 48 }),
+      getSportsDataTimeoutMs(),
+      {
+        label: "SportsDataIO generated props",
+        fallback: () => ({ props: [], generatedCount: 0, warnings: [ENRICHMENT_TIMEOUT_MESSAGE] }),
+      }
+    );
   }
 
-  if (!allDisplayProps.length) {
+  if (!allDisplayProps.length && rawProps.length) {
     const earlyFallback = await resolveIngestionFallback({
       rawProps,
       allDisplayProps,

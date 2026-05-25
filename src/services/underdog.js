@@ -1,5 +1,10 @@
-import { getShortCacheTtlMs, resilientFetch } from "./fetchUtil.js";
-import { getApiTimeoutMs } from "../utils/apiTimeout.js";
+import { getShortCacheTtlMs, lineFeedJsonHeaders, resilientFetch } from "./fetchUtil.js";
+import {
+  getLineFeedTimeoutMs,
+  LINE_FEED_MAX_RETRIES,
+  LINE_FEED_RETRY_DELAY_MS,
+} from "../utils/apiTimeout.js";
+import { safeParseJSON } from "../utils/safeParseJSON.js";
 import { normalizeGameStartTime, startTimeUncertainty } from "../utils/normalizeGameStartTime.js";
 import { inferSportFromText, sportFromUnderdogGame } from "../utils/sportMappings.js";
 import { resolvePropSportLabel } from "../utils/underdogSportDetection.js";
@@ -57,6 +62,7 @@ const UNDERDOG_ENDPOINTS = [
   "/api/underdog/beta/v3/over_under_lines",
 ];
 const UNDERDOG_CACHE_KEY = "dfs-underdog-last-good-payload";
+const UNDERDOG_LEGACY_CACHE_KEY = "ud_cache";
 const UNDERDOG_CACHE_MAX_MS = 60 * 60 * 1000;
 export const UNDERDOG_TEMPORARY_MESSAGE = "Underdog temporarily unavailable.";
 const UNDERDOG_UNAVAILABLE_MESSAGE = UNDERDOG_TEMPORARY_MESSAGE;
@@ -259,8 +265,10 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all" } = 
   return failedUnderdogResult({
     apiUrl: attempts.at(-1)?.url || absoluteUrl(underdogEndpoints()[0]),
     endpointsTried: attempts.map((item) => item.url),
-    message: "Underdog data failed to load.",
+    message: UNDERDOG_TEMPORARY_MESSAGE,
     attempts,
+    sport,
+    statType,
   });
 }
 
@@ -277,7 +285,9 @@ function buildCachedUnderdogResult({ sport, statType, attempts, reason = "fetch-
   const warning =
     rateLimited
       ? cachedLinesMessage(savedAt) || UNDERDOG_RATE_LIMIT_MESSAGE
-      : "Underdog live fetch failed; showing last cached real lines.";
+      : reason === "fetch-failed"
+        ? UNDERDOG_TEMPORARY_MESSAGE
+        : "Underdog live fetch failed; showing last cached real lines.";
   return {
     source: "Underdog",
     status: "Cached",
@@ -322,6 +332,7 @@ async function fetchUnderdogEndpoint(endpoint) {
 }
 
 async function attemptUnderdogEndpoint(endpoint) {
+  const lineFeedTimeoutMs = getLineFeedTimeoutMs();
   const attempt = {
     url: absoluteUrl(endpoint),
     status: null,
@@ -335,8 +346,15 @@ async function attemptUnderdogEndpoint(endpoint) {
   try {
     const response = await resilientFetch(
       endpoint,
-      { headers: { accept: "application/json" }, cache: "no-store" },
-      { source: "Underdog", ttlMs: 0, timeoutMs: getApiTimeoutMs(), maxRetries: 1, skip429Retry: true }
+      { headers: lineFeedJsonHeaders(), cache: "no-store" },
+      {
+        source: "Underdog",
+        ttlMs: 0,
+        timeoutMs: lineFeedTimeoutMs,
+        maxRetries: LINE_FEED_MAX_RETRIES,
+        retryDelayMs: LINE_FEED_RETRY_DELAY_MS,
+        skip429Retry: true,
+      }
     );
     attempt.status = response.status;
     attempt.contentType = response.headers.get("content-type") || "";
@@ -378,8 +396,9 @@ async function attemptUnderdogEndpoint(endpoint) {
     try {
       payload = JSON.parse(trimmed);
     } catch (parseError) {
-      attempt.error = `JSON parse failed: ${parseError.message || "invalid JSON"}`;
-      return { ok: false, attempt };
+      console.error("Non-JSON response:", trimmed.slice(0, 300));
+      attempt.error = `Underdog returned non-JSON response: ${parseError.message || "invalid JSON"}`;
+      return { ok: false, attempt, nonJson: true };
     }
 
     if (payload?.ok === false || payload?.status === "failed") {
@@ -390,7 +409,9 @@ async function attemptUnderdogEndpoint(endpoint) {
     return { ok: true, attempt, payload };
   } catch (error) {
     const message = error?.message || String(error);
-    attempt.error = /timed out|abort/i.test(message) ? "Request timed out after 15s" : message || "Failed to fetch";
+    attempt.error = /timed out|abort/i.test(message)
+      ? `Request timed out after ${Math.round(lineFeedTimeoutMs / 1000)}s`
+      : message || "Failed to fetch";
     attempt.durationMs = Date.now() - startedAt;
     attempt.networkError = true;
     return { ok: false, attempt, networkError: true };
@@ -416,7 +437,14 @@ function formatUnderdogAttemptWarnings(attempts = []) {
   return lines;
 }
 
-function failedUnderdogResult({ apiUrl, endpointsTried, rawPropsLoaded = 0, message, attempts = [] }) {
+function failedUnderdogResult({ apiUrl, endpointsTried, rawPropsLoaded = 0, message, attempts = [], sport = "all", statType = "all" }) {
+  const cachedResult = buildCachedUnderdogResult({ sport, statType, attempts, reason: "fetch-failed" });
+  if (cachedResult) {
+    const warnings = [UNDERDOG_TEMPORARY_MESSAGE, ...(cachedResult.warnings || [])].filter(
+      (item, index, list) => list.indexOf(item) === index
+    );
+    return { ...cachedResult, warnings };
+  }
   const warnings = formatUnderdogAttemptWarnings(attempts);
   const softMessage = UNDERDOG_TEMPORARY_MESSAGE;
   if (message && !warnings.includes(message) && message !== softMessage) warnings.unshift(message);
@@ -428,6 +456,7 @@ function failedUnderdogResult({ apiUrl, endpointsTried, rawPropsLoaded = 0, mess
     lineSourceBadge: "",
     health: "STALE",
     warnings,
+    fallback: true,
     debug: underdogDebug({
       apiUrl,
       apiStatus: "Unavailable",
@@ -488,6 +517,7 @@ function parseUnderdogPayloadInternal(payload, lineSourceBadge = "LIVE", selecte
 function writeCachedPayload(payload) {
   try {
     window.localStorage.setItem(UNDERDOG_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), payload }));
+    window.localStorage.setItem(UNDERDOG_LEGACY_CACHE_KEY, JSON.stringify(payload));
   } catch {
     // ignore
   }
@@ -495,9 +525,18 @@ function writeCachedPayload(payload) {
 
 function readCachedPayload() {
   try {
-    const cached = JSON.parse(window.localStorage.getItem(UNDERDOG_CACHE_KEY) || "null");
-    if (!cached?.payload || Date.now() - cached.savedAt > UNDERDOG_CACHE_MAX_MS) return null;
-    return sanitizeUnderdogPayloadForCache(cached.payload);
+    const cached = safeParseJSON(window.localStorage.getItem(UNDERDOG_CACHE_KEY), null);
+    if (cached?.payload && Date.now() - cached.savedAt <= UNDERDOG_CACHE_MAX_MS) {
+      return sanitizeUnderdogPayloadForCache(cached.payload);
+    }
+  } catch {
+    // fall through to legacy key
+  }
+  try {
+    const legacy = safeParseJSON(window.localStorage.getItem(UNDERDOG_LEGACY_CACHE_KEY), null);
+    if (!legacy) return null;
+    const payload = legacy?.payload && typeof legacy.payload === "object" ? legacy.payload : legacy;
+    return sanitizeUnderdogPayloadForCache(payload);
   } catch {
     return null;
   }
@@ -505,12 +544,12 @@ function readCachedPayload() {
 
 function readCachedPayloadSavedAt() {
   try {
-    const cached = JSON.parse(window.localStorage.getItem(UNDERDOG_CACHE_KEY) || "null");
-    if (!cached?.savedAt) return "";
-    return new Date(cached.savedAt).toISOString();
+    const cached = safeParseJSON(window.localStorage.getItem(UNDERDOG_CACHE_KEY), null);
+    if (cached?.savedAt) return new Date(cached.savedAt).toISOString();
   } catch {
-    return "";
+    // ignore
   }
+  return "";
 }
 
 function rawUnderdogRecordCount(payload) {

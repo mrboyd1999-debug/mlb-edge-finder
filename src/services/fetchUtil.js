@@ -93,6 +93,16 @@ export function buildRotatingHeaders(extra = {}) {
   };
 }
 
+/** Browser-like JSON headers for PrizePicks / Underdog line feeds. */
+export function lineFeedJsonHeaders(extra = {}) {
+  return {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "User-Agent": "Mozilla/5.0",
+    ...extra,
+  };
+}
+
 function readStorageCache(key, ttlMs, now = Date.now()) {
   try {
     const stored = window.localStorage.getItem(`dfs-fetch-cache:${key}`);
@@ -170,7 +180,13 @@ export function clearApiCache({ preserveLastGood = true } = {}) {
       keys.push(key);
     }
     if (!preserveLastGood) {
-      keys.push("dfs-prizepicks-last-good-payload", "dfs-underdog-last-good-payload", "dfs-odds-last-good-comparisons");
+      keys.push(
+        "dfs-prizepicks-last-good-payload",
+        "dfs-underdog-last-good-payload",
+        "dfs-odds-last-good-comparisons",
+        "pp_cache",
+        "ud_cache"
+      );
     }
     keys.forEach((key) => window.localStorage.removeItem(key));
   } catch {
@@ -240,7 +256,9 @@ export async function resilientFetch(url, init = {}, options = {}) {
         });
         if (shouldRetry) {
           retries += 1;
-          const backoffMs = Math.min(12_000, 600 * 2 ** attempt + Math.floor(Math.random() * 400));
+          const backoffMs =
+            options.retryDelayMs ??
+            Math.min(12_000, 600 * 2 ** attempt + Math.floor(Math.random() * 400));
           logFetchEvent(source, "retry-backoff", { url, status: response.status, backoffMs, retries });
           await sleep(backoffMs);
           continue;
@@ -257,7 +275,9 @@ export async function resilientFetch(url, init = {}, options = {}) {
         });
         if (!retryable) throw error;
         retries += 1;
-        const backoffMs = Math.min(12_000, 600 * 2 ** attempt + Math.floor(Math.random() * 400));
+        const backoffMs =
+          options.retryDelayMs ??
+          Math.min(12_000, 600 * 2 ** attempt + Math.floor(Math.random() * 400));
         await sleep(backoffMs);
       }
     }
@@ -451,9 +471,12 @@ export async function safeJsonFetch(url, sourceName = "API", init = {}, options 
   try {
     return { ok: true, source: sourceName, data: JSON.parse(trimmed), props: [], response, text, preview, contentType };
   } catch {
+    console.error("Non-JSON response:", trimmed.slice(0, 300));
     const message = /prizepicks/i.test(source)
-      ? "PrizePicks returned invalid JSON"
-      : "API route is serving source/HTML instead of JSON. Check proxy/backend routing.";
+      ? "PrizePicks returned non-JSON response"
+      : /underdog/i.test(source)
+        ? "Underdog returned non-JSON response"
+        : "Non-JSON response";
     return {
       ok: false,
       source: sourceName,

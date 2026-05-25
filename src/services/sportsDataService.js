@@ -11,7 +11,7 @@
  */
 
 import { getSportsDataApiKey } from "../config/apiConfig.js";
-import { ENRICHMENT_MAX_RETRIES, getApiTimeoutMs } from "../utils/apiTimeout.js";
+import { ENRICHMENT_MAX_RETRIES, getSportsDataTimeoutMs } from "../utils/apiTimeout.js";
 import { fetchJsonSafe, getCacheTtlMs } from "./fetchUtil.js";
 import {
   SOURCE_IDS,
@@ -127,7 +127,7 @@ async function fetchSportsDataEndpoint(cacheKey, url) {
           {
             source: "SportsDataIO",
             ttlMs: getCacheTtlMs(),
-            timeoutMs: getApiTimeoutMs({ enrichment: true }),
+            timeoutMs: getSportsDataTimeoutMs(),
             maxRetries: ENRICHMENT_MAX_RETRIES,
             skip429Retry: true,
             enrichment: true,
@@ -197,7 +197,7 @@ export async function probeSportsDataMlbStatusProxy() {
     {
       source: "SportsDataIO status",
       ttlMs: 0,
-      timeoutMs: getApiTimeoutMs({ enrichment: true }),
+      timeoutMs: getSportsDataTimeoutMs(),
       maxRetries: ENRICHMENT_MAX_RETRIES,
       skip429Retry: true,
       enrichment: true,
