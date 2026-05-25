@@ -435,10 +435,75 @@ export function propPayoutLabel(prop = {}) {
   return "standard";
 }
 
-export {
+import { buildMlbPropProjection } from "../modules/mlbProjectionService.js";
+import {
   buildPitcherStrikeoutProjection,
   buildHitterProjection,
   calculateEdge,
   calculateConfidence,
   calculateVolatility,
 } from "./mlbDataService.js";
+
+export { buildPitcherStrikeoutProjection, buildHitterProjection, calculateEdge, calculateConfidence, calculateVolatility };
+
+/** Verified MLB projection with OVER/UNDER/PASS resolution. */
+export function buildVerifiedMlbProjection(prop = {}, profile = {}, context = {}) {
+  return buildMlbPropProjection(prop, profile, context);
+}
+
+/** Full verified analysis: projection, edge, confidence, recommendation, reasons. */
+export function analyzeVerifiedMlbProp(prop = {}, profile = {}, context = {}) {
+  const model = buildVerifiedMlbProjection(prop, profile, context);
+  const line = Number(prop.line);
+  const volatility = calculateVolatility(prop.statType);
+
+  if (!model.isVerifiedProjection || model.projection == null) {
+    return {
+      ...model,
+      recommendation: "NO VERIFIED PLAY",
+      failureReason: model.statusMessage || "Verified MLB data unavailable",
+      volatility,
+    };
+  }
+
+  const edgeResult = calculateEdge(model.projection, line, model.recommendedSide);
+  const confidence =
+    model.confidence ??
+    calculateConfidence({
+      edge: edgeResult.edge,
+      line,
+      volatility: volatility.score,
+      marketKey: prop.statType,
+      payoutType: prop.payoutType || prop.oddsType,
+    });
+
+  return {
+    ...model,
+    edge: edgeResult.edge,
+    rawEdge: edgeResult.rawEdge,
+    recommendedSide: model.recommendedSide || edgeResult.recommendedSide,
+    confidence,
+    recommendation: resolveMlbRecommendation(model),
+    reasons: generateMlbProjectionReasons(model, profile),
+    volatility,
+    failureReason: null,
+  };
+}
+
+export function resolveMlbRecommendation(model = {}) {
+  if (model.projectionUnavailable || !model.isVerifiedProjection) return "NO VERIFIED PLAY";
+  if (model.passPlay) return "PASS";
+  return model.modelPickLabel || model.recommendedSide?.toUpperCase() || "NO VERIFIED PLAY";
+}
+
+export function generateMlbProjectionReasons(model = {}, profile = {}) {
+  const reasons = [...(model.reasons || [])];
+  if (profile?.matchupNote && reasons.length < 3) reasons.push(profile.matchupNote);
+  if (profile?.opponentContext?.strikeoutsPerGame != null && reasons.length < 3) {
+    reasons.push(`Opponent averaging ${profile.opponentContext.strikeoutsPerGame} K/G`);
+  }
+  if (profile?.last5Average != null && reasons.length < 3) {
+    reasons.push(`Recent average ${profile.last5Average} over last 5`);
+  }
+  return reasons.filter(Boolean).slice(0, 3);
+}

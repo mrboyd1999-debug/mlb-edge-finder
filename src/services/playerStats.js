@@ -1394,3 +1394,7 @@ function clamp(value, min, max) {
 function round(value) {
   return Number(value.toFixed(2));
 }
+
+export { scanLiveMlbProps, scanSingleMlbProp, fetchLiveProps } from "./livePropScanner.js";
+export { getPlayerByName, getPlayerLogs, getPitcherStats, getOpponentStats, getProbablePitchers, getWeatherData } from "./mlbDataService.js";
+export { matchSportsbookPlayerToMlb, normalizeSportsbookName } from "./playerMatcher.js";

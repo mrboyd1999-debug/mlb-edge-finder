@@ -1,0 +1,208 @@
+import { cachedFetch } from "./fetchUtil.js";
+import { readSmartCacheIfFresh, writeSmartCache, CACHE_TTL } from "./smartCache.js";
+import { normalizePlayerName, playerNameTokens, playerNamesMatch } from "../utils/playerNames.js";
+
+const MLB_SEARCH_URL = "https://statsapi.mlb.com/api/v1/people/search";
+
+function logMatcher(stage, payload = {}) {
+  if (typeof console !== "undefined") console.info(`[MLB Data] ${stage}`, payload);
+}
+
+/** Prevent re-resolving the same sportsbook name to different MLB players in one session. */
+const matchRegistry = new Map();
+
+const ABBREVIATION_EXPANSIONS = {
+  aj: "a j",
+  jd: "j d",
+  dj: "d j",
+  cj: "c j",
+  jj: "j j",
+  tj: "t j",
+  mj: "m j",
+  rj: "r j",
+  bj: "b j",
+  kj: "k j",
+};
+
+export function normalizeSportsbookName(name = "") {
+  let text = String(name || "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/\b(vs\.?|@|at)\b.*$/i, " ")
+    .trim();
+  return normalizePlayerName(text);
+}
+
+export function resolveAbbreviations(name = "") {
+  const normalized = normalizeSportsbookName(name);
+  const tokens = normalized.split(" ").filter(Boolean);
+  if (tokens.length < 2) return normalized;
+
+  const first = tokens[0];
+  const expanded = ABBREVIATION_EXPANSIONS[first];
+  if (expanded) {
+    return `${expanded} ${tokens.slice(1).join(" ")}`.trim();
+  }
+  return normalized;
+}
+
+function tokenOverlapScore(leftTokens = [], rightTokens = []) {
+  if (!leftTokens.length || !rightTokens.length) return 0;
+  const shared = leftTokens.filter((token) => rightTokens.includes(token)).length;
+  const lastLeft = leftTokens[leftTokens.length - 1];
+  const lastRight = rightTokens[rightTokens.length - 1];
+  let score = shared / Math.max(leftTokens.length, rightTokens.length);
+  if (lastLeft === lastRight) score += 0.35;
+  if (leftTokens[0] === rightTokens[0]) score += 0.2;
+  if (playerNamesMatch(leftTokens.join(" "), rightTokens.join(" "))) score += 0.4;
+  return Math.min(1, score);
+}
+
+export function scoreMlbPlayerMatch(sportsbookName = "", candidate = {}) {
+  const query = resolveAbbreviations(sportsbookName);
+  const fullName = candidate.fullName || `${candidate.firstName || ""} ${candidate.lastName || ""}`.trim();
+  const normalizedQuery = normalizePlayerName(query);
+  const normalizedCandidate = normalizePlayerName(fullName);
+
+  if (!normalizedQuery || !normalizedCandidate) {
+    return { confidence: 0, reason: "empty name" };
+  }
+  if (normalizedQuery === normalizedCandidate) {
+    return { confidence: 100, reason: "exact match" };
+  }
+  if (playerNamesMatch(query, fullName)) {
+    return { confidence: 92, reason: "strict token match" };
+  }
+
+  const queryTokens = playerNameTokens(query);
+  const candidateTokens = playerNameTokens(fullName);
+  const overlap = tokenOverlapScore(queryTokens, candidateTokens);
+  if (overlap >= 0.85) return { confidence: 88, reason: "high token overlap" };
+  if (overlap >= 0.65) return { confidence: 74, reason: "partial token overlap" };
+  if (normalizedCandidate.includes(normalizedQuery) || normalizedQuery.includes(normalizedCandidate)) {
+    return { confidence: 68, reason: "substring match" };
+  }
+  if (overlap >= 0.45) return { confidence: 55, reason: "weak overlap" };
+  return { confidence: Math.round(overlap * 40), reason: "low overlap" };
+}
+
+export function pickBestMlbMatch(sportsbookName = "", people = []) {
+  if (!people.length) return null;
+
+  const scored = people
+    .map((person) => {
+      const fullName = person.fullName || `${person.firstName || ""} ${person.lastName || ""}`.trim();
+      const { confidence, reason } = scoreMlbPlayerMatch(sportsbookName, person);
+      return { person, fullName, confidence, reason };
+    })
+    .sort((a, b) => b.confidence - a.confidence);
+
+  const best = scored[0];
+  const runnerUp = scored[1];
+  if (!best || best.confidence < 55) return null;
+
+  if (runnerUp && best.confidence - runnerUp.confidence < 8 && runnerUp.confidence >= 55) {
+    logMatcher("match.ambiguous", {
+      incoming: sportsbookName,
+      top: best.fullName,
+      topConfidence: best.confidence,
+      runnerUp: runnerUp.fullName,
+      runnerUpConfidence: runnerUp.confidence,
+    });
+    return null;
+  }
+
+  return best;
+}
+
+export function logPlayerMatch({ incomingName, matchedName, confidence, reason, mlbId = null }) {
+  logMatcher("match.result", {
+    incoming: incomingName,
+    matched: matchedName,
+    confidence,
+    reason,
+    mlbId,
+  });
+}
+
+export async function searchMlbPlayers(query = "") {
+  const text = String(query || "").trim();
+  if (!text) return [];
+
+  const cacheKey = normalizePlayerName(text);
+  const cached = readSmartCacheIfFresh("mlb-player-search-list", cacheKey, CACHE_TTL.STATS_MS);
+  if (cached?.payload?.people) return cached.payload.people;
+
+  const searchUrl = new URL(MLB_SEARCH_URL);
+  searchUrl.searchParams.set("names", text);
+  const response = await cachedFetch(searchUrl);
+  if (!response.ok) throw new Error(`MLB player search failed (${response.status})`);
+
+  const payload = await response.json();
+  const people = payload.people || [];
+  writeSmartCache("mlb-player-search-list", cacheKey, { people }, { source: "mlb-stats-api" });
+  return people;
+}
+
+/**
+ * Resolve a PrizePicks/Underdog player name to a verified MLB StatsAPI player.
+ */
+export async function matchSportsbookPlayerToMlb(sportsbookName = "", { minConfidence = 55 } = {}) {
+  const incoming = String(sportsbookName || "").trim();
+  if (!incoming) {
+    logPlayerMatch({ incomingName: incoming, matchedName: null, confidence: 0, reason: "empty incoming name" });
+    return { player: null, confidence: 0, reason: "empty incoming name" };
+  }
+
+  const registryKey = normalizeSportsbookName(incoming);
+  if (matchRegistry.has(registryKey)) {
+    const cached = matchRegistry.get(registryKey);
+    logPlayerMatch({
+      incomingName: incoming,
+      matchedName: cached.player?.fullName || null,
+      confidence: cached.confidence,
+      reason: "registry cache",
+      mlbId: cached.player?.id,
+    });
+    return cached;
+  }
+
+  const queries = [...new Set([incoming, resolveAbbreviations(incoming)].filter(Boolean))];
+  let best = null;
+
+  for (const query of queries) {
+    const people = await searchMlbPlayers(query);
+    const candidate = pickBestMlbMatch(incoming, people);
+    if (candidate && (!best || candidate.confidence > best.confidence)) {
+      best = candidate;
+    }
+    if (best?.confidence >= 92) break;
+  }
+
+  if (!best || best.confidence < minConfidence) {
+    const result = { player: null, confidence: best?.confidence || 0, reason: best?.reason || "no confident MLB match" };
+    logPlayerMatch({ incomingName: incoming, matchedName: null, confidence: result.confidence, reason: result.reason });
+    return result;
+  }
+
+  const result = {
+    player: {
+      id: best.person.id,
+      fullName: best.fullName,
+      primaryPosition: best.person.primaryPosition?.abbreviation || best.person.primaryPosition?.name || "",
+      currentTeam: best.person.currentTeam?.name || best.person.team?.name || "",
+    },
+    confidence: best.confidence,
+    reason: best.reason,
+  };
+
+  matchRegistry.set(registryKey, result);
+  logPlayerMatch({
+    incomingName: incoming,
+    matchedName: result.player.fullName,
+    confidence: result.confidence,
+    reason: result.reason,
+    mlbId: result.player.id,
+  });
+  return result;
+}
