@@ -14,6 +14,7 @@ import {
 } from "./mlbDataService.js";
 import { analyzeVerifiedMlbProp } from "./projectionEngine.js";
 import { matchSportsbookPlayerToMlb } from "./playerMatcher.js";
+import { logIncomingProp, logPropFailure, logProjectionExecution } from "./mlbPipelineDebug.js";
 
 export const MIN_SCAN_EDGE = 0.35;
 export const MIN_SCAN_CONFIDENCE = 58;
@@ -165,6 +166,18 @@ export async function scanSingleMlbProp(prop = {}, { buildProfile = null } = {})
   };
 
   const analysis = analyzeVerifiedMlbProp(normalized, data.profile, context);
+  logProjectionExecution({
+    projection: analysis.projection,
+    edge: analysis.edge,
+    confidence: analysis.confidence,
+    recommendation: analysis.recommendation,
+  });
+  if (analysis.projectionUnavailable || analysis.failureReason) {
+    logPropFailure(analysis.failureReason || analysis.statusMessage || "Projection unavailable", {
+      player: normalized.playerName,
+      stat: normalized.statType,
+    });
+  }
   const scored = {
     ...normalized,
     projectedValue: analysis.projection,

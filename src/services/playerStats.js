@@ -10,7 +10,11 @@ import {
 import { MLB_ONLY_MODE, shouldRunNonMlbStatFetch } from "../utils/mlbOnlyMode.js";
 import { canonicalStatType } from "../utils/marketNormalization.js";
 import { enrichMlbProfilesFromSportsData } from "./mlbSportsDataEnrichment.js";
-import { fetchMlbDataForProps, fetchMlbPlayerBundle } from "./mlbDataService.js";
+import {
+  fetchMlbDataForProps,
+  fetchMlbPlayerBundle,
+  filterMlbSplitsForStatType,
+} from "./mlbDataService.js";
 import { statProfileKey, findStatProfile } from "../utils/playerNames.js";
 
 export { statProfileKey, findStatProfile };
@@ -97,9 +101,17 @@ async function fetchMlbStats(props) {
     const enriched = enrichedProfiles.get(normalizePlayerName(prop.playerName));
     if (existing && enriched) {
       stats.set(key, {
-        ...existing,
         ...enriched,
+        ...existing,
         opponentContext: existing.opponentContext || enriched.opponentContext,
+        splits: existing.splits || enriched.splits,
+        gradingRows: existing.gradingRows || enriched.gradingRows,
+        last5Average: existing.last5Average ?? enriched.last5Average,
+        seasonAverage: existing.seasonAverage ?? enriched.seasonAverage,
+        sampleSize: existing.sampleSize ?? enriched.sampleSize,
+        hasGameLogs: existing.hasGameLogs ?? enriched.hasGameLogs,
+        sparse: existing.sparse ?? enriched.sparse,
+        fallback: existing.fallback ?? enriched.fallback,
         statSources: uniqueSources([...(existing.statSources || []), ...(enriched.statSources || [])]),
       });
     }
@@ -254,7 +266,7 @@ async function fetchApiFootballProfile(playerName) {
 }
 
 function profileForMlbProp(profile, statType, line) {
-  const splits = profile.splits || [];
+  const splits = filterMlbSplitsForStatType(profile.splits || [], statType);
   const values = valuesFromMlbSplits(splits, statType);
   if (!values.length) {
     return sparseProfileForProp(

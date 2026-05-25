@@ -63,16 +63,24 @@ export function statValueFromRow(row = {}, marketKey = "") {
 }
 
 export function extractPitcherStartRows(profile = {}) {
-  const rows = profile.gradingRows || profile.splits || [];
+  const allRows = profile.gradingRows || profile.splits || [];
+  const pitchingRows = allRows.filter((row) => {
+    const stat = row?.stat || row;
+    const ks = finiteNumber(stat.strikeOuts ?? stat.strikeouts);
+    const ip = inningsFromStat(stat);
+    const ab = finiteNumber(stat.atBats);
+    return ip != null && ip >= 1 && ks != null && ab == null;
+  });
+  const rows = pitchingRows.length ? pitchingRows : allRows;
   const starts = rows.filter(isPitcherStartRow);
   if (starts.length >= 3) return starts;
-  const pitchingRows = rows.filter((row) => {
+  const reliefRows = rows.filter((row) => {
     const stat = row?.stat || row;
     const ks = finiteNumber(stat.strikeOuts ?? stat.strikeouts);
     const ip = inningsFromStat(stat);
     return ks != null && ip != null && ip >= 1;
   });
-  if (pitchingRows.length >= 3) return pitchingRows;
+  if (reliefRows.length >= 3) return reliefRows;
   return starts.length ? starts : rows.slice(0, 10);
 }
 

@@ -1,6 +1,7 @@
 import { cachedFetch } from "./fetchUtil.js";
 import { readSmartCacheIfFresh, writeSmartCache, CACHE_TTL } from "./smartCache.js";
 import { normalizePlayerName, playerNameTokens, playerNamesMatch } from "../utils/playerNames.js";
+import { logMatchedPlayer, logNormalizedName } from "./mlbPipelineDebug.js";
 
 const MLB_SEARCH_URL = "https://statsapi.mlb.com/api/v1/people/search";
 
@@ -149,7 +150,11 @@ export async function searchMlbPlayers(query = "") {
  */
 export async function matchSportsbookPlayerToMlb(sportsbookName = "", { minConfidence = 55 } = {}) {
   const incoming = String(sportsbookName || "").trim();
+  const normalizedName = normalizeSportsbookName(incoming);
+  logNormalizedName(incoming, normalizedName);
+
   if (!incoming) {
+    logMatchedPlayer(null, 0, "empty incoming name");
     logPlayerMatch({ incomingName: incoming, matchedName: null, confidence: 0, reason: "empty incoming name" });
     return { player: null, confidence: 0, reason: "empty incoming name" };
   }
@@ -181,6 +186,7 @@ export async function matchSportsbookPlayerToMlb(sportsbookName = "", { minConfi
 
   if (!best || best.confidence < minConfidence) {
     const result = { player: null, confidence: best?.confidence || 0, reason: best?.reason || "no confident MLB match" };
+    logMatchedPlayer(null, result.confidence, result.reason);
     logPlayerMatch({ incomingName: incoming, matchedName: null, confidence: result.confidence, reason: result.reason });
     return result;
   }
@@ -197,6 +203,7 @@ export async function matchSportsbookPlayerToMlb(sportsbookName = "", { minConfi
   };
 
   matchRegistry.set(registryKey, result);
+  logMatchedPlayer(result.player.fullName, result.confidence, result.reason);
   logPlayerMatch({
     incomingName: incoming,
     matchedName: result.player.fullName,

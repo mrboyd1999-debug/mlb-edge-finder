@@ -3,6 +3,16 @@ import { readSmartCacheIfFresh, writeSmartCache, CACHE_TTL } from "./smartCache.
 import { SOURCE_LABELS } from "./statEnrichment.js";
 import { normalizePlayerName, statProfileKey } from "../utils/playerNames.js";
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
+import {
+  logIncomingProp,
+  logFetchError,
+  logFetchResponse,
+  logFetchStart,
+  logLogsCount,
+  logPropFailure,
+  logProjectionExecution,
+  tracePipelineStage,
+} from "./mlbPipelineDebug.js";
 import { buildMlbPropProjection } from "../modules/mlbProjectionService.js";
 import { matchSportsbookPlayerToMlb } from "./playerMatcher.js";
 import {
@@ -75,9 +85,57 @@ export function normalizeMlbPlayerName(name = "") {
   return normalizePlayerName(name);
 }
 
-function mlbSeasonYears() {
+function mlbSeasonYears(depth = 3) {
   const year = new Date().getFullYear();
-  return [year, year - 1];
+  return Array.from({ length: depth }, (_, index) => year - index);
+}
+
+function tagSplitGroup(split = {}, groupName = "") {
+  const group = String(groupName || split._statGroup || "").toLowerCase();
+  return { ...split, _statGroup: group || split._statGroup || "" };
+}
+
+export function isPitchingSplit(split = {}) {
+  const stat = split?.stat || split;
+  const group = String(split?._statGroup || "").toLowerCase();
+  if (group === "pitching") return true;
+  const ip = stat.inningsPitched;
+  if (ip != null && String(ip) !== "0.0" && String(ip) !== "0") return true;
+  const ks = finiteNumber(stat.strikeOuts ?? stat.strikeouts);
+  const ab = finiteNumber(stat.atBats);
+  const pa = finiteNumber(stat.plateAppearances);
+  return ks != null && ab == null && pa == null && ip != null;
+}
+
+export function isHittingSplit(split = {}) {
+  const stat = split?.stat || split;
+  const group = String(split?._statGroup || "").toLowerCase();
+  if (group === "hitting") return true;
+  return finiteNumber(stat.atBats) != null || finiteNumber(stat.plateAppearances) != null;
+}
+
+/** Keep pitching rows for pitcher markets and hitting rows for batter markets. */
+export function filterMlbSplitsForStatType(splits = [], statType = "") {
+  const key = canonicalMarketKey(statType);
+  const pitcherKeys = ["strikeouts", "outs", "hitsAllowed", "earnedRuns"];
+  if (pitcherKeys.includes(key)) {
+    const pitching = (splits || []).filter(isPitchingSplit);
+    if (pitching.length >= 1) return pitching;
+    return (splits || []).filter((split) => {
+      const stat = split?.stat || split;
+      return finiteNumber(stat.strikeOuts ?? stat.strikeouts) != null && stat.inningsPitched != null;
+    });
+  }
+  const hitting = (splits || []).filter(isHittingSplit);
+  return hitting.length ? hitting : splits || [];
+}
+
+function summarizeLogResponse(payload = {}, season = null) {
+  const buckets = (payload.stats || []).map((bucket) => ({
+    group: bucket.group?.displayName || bucket.group?.groupName || "unknown",
+    splits: bucket.splits?.length || 0,
+  }));
+  return { season, buckets, totalSplits: buckets.reduce((sum, row) => sum + row.splits, 0) };
 }
 
 export async function searchMlbPlayer(playerName = "") {
@@ -228,9 +286,14 @@ export async function getWeatherData({ team = "", opponent = "", date = new Date
 export async function fetchMlbGameLogs(playerId, { seasons = mlbSeasonYears(), group = "pitching,hitting" } = {}) {
   if (!playerId) return [];
 
-  const cacheKey = `${playerId}|${seasons.join(",")}|${group}`;
+  const cacheKey = `${playerId}|${seasons.join(",")}|${group}|v2`;
   const cached = readSmartCacheIfFresh("mlb-game-logs", cacheKey, CACHE_TTL.STATS_MS);
-  if (cached?.payload?.splits) return cached.payload.splits;
+  if (cached?.payload?.splits) {
+    logLogsCount(cached.payload.splits.length, { playerId, source: "cache" });
+    return cached.payload.splits;
+  }
+
+  logFetchStart("game logs", { playerId, seasons, group });
 
   const allSplits = [];
   for (const season of seasons) {
@@ -238,13 +301,24 @@ export async function fetchMlbGameLogs(playerId, { seasons = mlbSeasonYears(), g
     statsUrl.searchParams.set("stats", "gameLog");
     statsUrl.searchParams.set("group", group);
     statsUrl.searchParams.set("season", String(season));
-    const response = await cachedFetch(statsUrl);
+    let response;
+    try {
+      response = await cachedFetch(statsUrl);
+    } catch (error) {
+      logFetchError("game logs", { playerId, season, message: error.message });
+      continue;
+    }
     if (!response.ok) {
+      logFetchError("game logs", { playerId, season, status: response.status, url: String(statsUrl) });
       logMlbData("logs.failed", { playerId, season, status: response.status, reason: "StatsAPI gameLog failed" });
       continue;
     }
     const payload = await response.json();
-    const splits = (payload.stats || []).flatMap((bucket) => bucket.splits || []);
+    logFetchResponse("game logs", summarizeLogResponse(payload, season));
+    const splits = (payload.stats || []).flatMap((bucket) => {
+      const groupName = bucket.group?.displayName || bucket.group?.groupName || "";
+      return (bucket.splits || []).map((split) => tagSplitGroup(split, groupName));
+    });
     allSplits.push(...splits);
   }
 
@@ -258,13 +332,19 @@ export async function fetchMlbGameLogs(playerId, { seasons = mlbSeasonYears(), g
     .filter((split) => Number.isFinite(split.playedAt))
     .sort((a, b) => b.playedAt - a.playedAt)
     .forEach((split) => {
-      const key = `${split.date || split.game?.gameDate}|${split.stat?.inningsPitched || ""}|${split.stat?.atBats || ""}`;
+      const key = `${split.date || split.game?.gameDate}|${split._statGroup}|${split.stat?.inningsPitched || ""}|${split.stat?.atBats || ""}`;
       if (seen.has(key)) return;
       seen.add(key);
       deduped.push(split);
     });
 
   writeSmartCache("mlb-game-logs", cacheKey, { splits: deduped }, { source: "mlb-stats-api" });
+  logLogsCount(deduped.length, {
+    playerId,
+    pitching: deduped.filter(isPitchingSplit).length,
+    hitting: deduped.filter(isHittingSplit).length,
+    seasons,
+  });
   logMlbData("logs.loaded", { playerId, count: deduped.length, seasons });
   return deduped;
 }
@@ -434,6 +514,7 @@ export async function fetchMlbPlayerBundle(playerName = "") {
  * Delegates stat extraction to playerStats profile builder when available.
  */
 export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null } = {}) {
+  logIncomingProp(prop);
   logMlbData("prop.incoming", {
     player: prop.playerName,
     stat: prop.statType,
@@ -443,21 +524,62 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null }
     source: prop.source || prop.platform,
   });
 
+  const line = Number(prop.line);
+  if (!Number.isFinite(line) || line <= 0) {
+    const reason = "Invalid sportsbook line";
+    logPropFailure(reason, { player: prop.playerName, line: prop.line });
+    return { profile: null, bundle: null, verified: false, reason };
+  }
+
+  const match = await matchSportsbookPlayerToMlb(prop.playerName);
+  if (!match?.player?.id) {
+    const reason = `Player not matched: ${match?.reason || "no StatsAPI match"}`;
+    logPropFailure(reason, { player: prop.playerName, confidence: match?.confidence ?? 0 });
+    return { profile: null, bundle: null, verified: false, reason };
+  }
+
   const bundle = await fetchMlbPlayerBundle(prop.playerName);
   if (!bundle?.splits?.length) {
-    logMlbData("prop.unverified", {
-      player: prop.playerName,
-      reason: bundle ? "No game logs returned" : "Player not matched in StatsAPI",
-    });
+    const reason = bundle ? "No game logs returned from StatsAPI" : "MLB player bundle unavailable";
+    logPropFailure(reason, { player: prop.playerName, mlbId: match.player.id });
+    logMlbData("prop.unverified", { player: prop.playerName, reason });
     return {
       profile: null,
       bundle,
       opponentContext: null,
       probablePitchers: null,
       verified: false,
-      reason: bundle ? "No verified MLB game logs" : "MLB player match failed",
+      reason,
     };
   }
+
+  const relevantSplits = filterMlbSplitsForStatType(bundle.splits, prop.statType);
+  logLogsCount(relevantSplits.length, {
+    player: prop.playerName,
+    stat: prop.statType,
+    totalSplits: bundle.splits.length,
+    filtered: true,
+  });
+
+  if (relevantSplits.length < 3) {
+    const reason = `Insufficient ${canonicalMarketKey(prop.statType) || "market"} logs (${relevantSplits.length}/3 required)`;
+    logPropFailure(reason, {
+      player: prop.playerName,
+      stat: prop.statType,
+      pitchingLogs: bundle.splits.filter(isPitchingSplit).length,
+      hittingLogs: bundle.splits.filter(isHittingSplit).length,
+    });
+    return {
+      profile: null,
+      bundle: { ...bundle, splits: relevantSplits },
+      opponentContext: null,
+      probablePitchers: null,
+      verified: false,
+      reason,
+    };
+  }
+
+  const filteredBundle = { ...bundle, splits: relevantSplits, gradingRows: relevantSplits };
 
   const [opponentContext, probablePitchers, weather] = await Promise.all([
     prop.opponent ? getOpponentStats(prop.opponent) : Promise.resolve(null),
@@ -465,9 +587,9 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null }
     getWeatherData({ team: prop.team, opponent: prop.opponent }),
   ]);
 
-  let profile = bundle;
+  let profile = filteredBundle;
   if (typeof buildProfile === "function") {
-    profile = buildProfile(bundle, prop.statType, prop.line) || bundle;
+    profile = buildProfile(filteredBundle, prop.statType, prop.line) || filteredBundle;
   }
 
   profile = {
@@ -479,9 +601,9 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null }
     statSources: uniqueSources([...(profile.statSources || []), SOURCE_LABELS.mlb]),
     sparse: false,
     fallback: false,
-    hasGameLogs: Boolean(profile.hasGameLogs || bundle.splits.length >= 3),
-    gradingRows: profile.gradingRows || profile.splits || bundle.splits,
-    splits: profile.splits || bundle.splits,
+    hasGameLogs: Boolean(profile.hasGameLogs || relevantSplits.length >= 3),
+    gradingRows: profile.gradingRows || relevantSplits,
+    splits: profile.splits || relevantSplits,
     opponentContext: opponentContext || profile.opponentContext || null,
     opponentPitcherWhip: opponentContext?.whip ?? profile.opponentPitcherWhip ?? null,
     opponentAllowed: opponentContext?.allowed ?? profile.opponentAllowed ?? null,
@@ -505,13 +627,38 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null }
     weather: weather?.note ?? null,
   });
 
+  if (!profile.last5Average && !profile.seasonAverage) {
+    const reason = "Logs loaded but stat values missing for market";
+    logPropFailure(reason, {
+      player: prop.playerName,
+      stat: prop.statType,
+      logs: relevantSplits.length,
+    });
+    return {
+      profile: null,
+      bundle: filteredBundle,
+      opponentContext,
+      probablePitchers,
+      verified: false,
+      reason,
+    };
+  }
+
+  tracePipelineStage("prop.profile.ready", {
+    player: prop.playerName,
+    matched: bundle.playerName,
+    logs: relevantSplits.length,
+    last5: profile.last5Average,
+    season: profile.seasonAverage,
+  });
+
   return {
     profile,
-    bundle,
+    bundle: filteredBundle,
     opponentContext,
     probablePitchers,
-    verified: Boolean(profile.last5Average != null || profile.seasonAverage != null),
-    reason: profile.last5Average != null ? "Verified MLB logs loaded" : "Logs loaded but stat values missing",
+    verified: true,
+    reason: "Verified MLB logs loaded",
   };
 }
 
@@ -587,6 +734,20 @@ export async function analyzeMlbPropWithData(prop = {}, { buildProfile = null } 
   };
 
   const model = buildMlbPropProjection(prop, data.profile, context);
+  logProjectionExecution({
+    projection: model.projection,
+    edge: model.edge,
+    confidence: model.confidence,
+    recommendation: model.modelPickLabel || (model.projectionUnavailable ? "NO VERIFIED PLAY" : model.passPlay ? "PASS" : null),
+  });
+  if (model.projectionUnavailable) {
+    logPropFailure(model.statusMessage || data.reason || "Projection unavailable", {
+      player: prop.playerName,
+      stat: prop.statType,
+      verified: model.isVerifiedProjection,
+      dataStatus: model.dataStatus,
+    });
+  }
   logMlbPropScan(prop, {
     matchedPlayer: match?.player?.fullName || data.profile.playerName,
     matchConfidence: match?.confidence ?? null,
