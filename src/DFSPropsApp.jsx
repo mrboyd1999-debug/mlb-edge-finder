@@ -279,7 +279,7 @@ import {
 } from "./utils/mlbOnlyMode.js";
 import { runFilterPipeline, runUiPipeline } from "./utils/pipelineStages.js";
 import MobileQuickActionBar from "./components/MobileQuickActionBar.jsx";
-import ManualPropsPanel from "./components/ManualPropsPanel.jsx";
+import DfsAnalyzerLayout from "./components/DfsAnalyzerLayout.jsx";
 import {
   analyzeManualProp,
   isManualAnalyzerProp,
@@ -2155,9 +2155,13 @@ export default function DFSPropsApp() {
   const [appView, setAppView] = useState(() => {
     try {
       const stored = window.localStorage.getItem(APP_VIEW_STORAGE_KEY);
-      return stored === "manual" ? "manual" : "live";
+      if (stored === "manual" || stored === "bestPlays" || stored === "goblins" || stored === "demons" || stored === "saved") {
+        return stored;
+      }
+      if (stored === "live") return "bestPlays";
+      return "manual";
     } catch {
-      return "live";
+      return "manual";
     }
   });
   const [manualAnalyzerProps, setManualAnalyzerProps] = useState(() => readManualAnalyzerProps());
@@ -2786,6 +2790,10 @@ export default function DFSPropsApp() {
     [boardDisplayProps]
   );
   const visibleHistory = useMemo(() => history.filter(isSupportedHistoryPick), [history]);
+  const savedDisplayPicks = useMemo(
+    () => visibleHistory.map(historyPickToDisplayProp).slice(0, 60),
+    [visibleHistory]
+  );
   const streakSportBoards = useMemo(
     () => Object.fromEntries(STREAK_TAB_OPTIONS.map((option) => [option.value, emptyStreakSportBoard(option.value)])),
     []
@@ -3257,6 +3265,16 @@ export default function DFSPropsApp() {
     if (!window.confirm("Clear all saved pick history?")) return;
     writeHistory([]);
     setHistory([]);
+    setLearningSaveNotice("Saved picks cleared.");
+  }
+
+  function removeSavedPick(pick = {}) {
+    const id = pick.id || pick.historyId;
+    if (!id) return;
+    const updated = history.filter((row) => row.id !== id);
+    writeHistory(updated);
+    setHistory(updated);
+    setLearningSaveNotice("Saved pick removed.");
   }
 
   function exportHistoryCsv() {
@@ -3460,443 +3478,37 @@ export default function DFSPropsApp() {
 
   return (
     <>
-    <main className="dfs-app-page" style={styles.page}>
-      <div className="dfs-section dfs-order-header">
-      <section style={styles.header}>
-        <div>
-          <p className="mobile-hide-verbose" style={styles.eyebrow}>DFS pick'em analytics</p>
-          <h1 className="dfs-header-title" style={styles.title}>PrizePicks + Underdog Pick'em Engine</h1>
-          <p className="mobile-hide-verbose dfs-header-subtitle" style={styles.subtitle}>
-            Verified PrizePicks and Underdog lines only — no mock, fallback, or generated props.
-          </p>
-          <p className="mobile-hide-verbose" style={styles.lastUpdated}>Last updated: {lastUpdatedLabel}</p>
-          {debugPanelsVisible && rateLimitNotice ? (
-            <p className="mobile-hide-soft-notice" style={{ ...styles.streakNotice, margin: "6px 0 0" }}>
-              {rateLimitNotice}
-            </p>
-          ) : null}
-        </div>
-        <div className="dfs-header-actions" style={{ display: "grid", gap: "8px", justifyItems: "end" }}>
-          <button
-            style={{
-              ...styles.refreshButton,
-              ...(refreshBlocked ? { opacity: 0.55, cursor: "not-allowed" } : {}),
-            }}
-            onClick={() => loadProps({ force: true })}
-            disabled={refreshBlocked}
-            title={
-              refreshCountdownSec > 0
-                ? `Refresh available in ${formatCooldownRemaining(refreshCountdownSec * 1000)}`
-                : "Refetch live lines (respects cooldown to avoid rate limits)"
-            }
-          >
-            {loading
-              ? "Loading…"
-              : refreshCountdownSec > 0
-                ? `Refresh (${formatCooldownRemaining(refreshCountdownSec * 1000)})`
-                : "Refresh lines"}
-          </button>
-          <label style={{ ...styles.selectLabel, alignItems: "center", flexDirection: "row", gap: "6px" }}>
-            <input
-              type="checkbox"
-              checked={compactMode}
-              onChange={(event) => setCompactMode(event.target.checked)}
-            />
-            Compact Mode
-          </label>
-        </div>
-      </section>
-      </div>
-
-      <div className="dfs-section dfs-order-view-tabs">
-        <div style={styles.segmentGroup}>
-          <span style={styles.controlLabel}>Mode</span>
-          <div style={styles.segmentRow}>
-            <button
-              type="button"
-              style={appView === "live" ? styles.segmentActive : styles.segment}
-              onClick={() => setAppView("live")}
-            >
-              Live Board
-            </button>
-            <button
-              type="button"
-              style={appView === "manual" ? styles.segmentActive : styles.segment}
-              onClick={() => setAppView("manual")}
-            >
-              Manual Props
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {learningSaveNotice ? <p className="mobile-hide-verbose dfs-section" style={styles.streakNotice}>{learningSaveNotice}</p> : null}
-
-      {appView === "live" ? (
-      <>
-      <div className="dfs-section dfs-order-filters">
-      <details style={styles.compactDetails}>
-        <summary style={styles.detailsSummary}>
-          <span className="details-summary-stack">
-            <span style={styles.eyebrow}>Board controls</span>
-            <strong>Filters</strong>
-          </span>
-          <span style={styles.countPill}>{sourceLabel(platform)} / {sport === "all" ? "All Sports" : sport}</span>
-        </summary>
-        <PropFilters
-          platform={platform}
-          setPlatform={setPlatform}
-          sport={sport}
-          setSport={setSport}
-          statType={statType}
-          setStatType={setStatType}
-          edgeFilter={edgeFilter}
-          setEdgeFilter={setEdgeFilter}
-          dateFilter={dateFilter}
-          setDateFilter={setDateFilter}
-          readyOnly={readyOnly}
-          setReadyOnly={setReadyOnly}
-          searchText={searchText}
-          setSearchText={setSearchText}
-          filterPrefs={filterPrefs}
-          setFilterPrefs={(next) => {
-            const merged = typeof next === "function" ? next(filterPrefs) : next;
-            setFilterPrefs(merged);
-            writeFilterPrefs(merged);
-          }}
-          platformOptions={platformOptions}
-          sportOptions={sportOptions}
-          propTypes={PRIORITY_PROP_TYPES}
-          edgeFilters={EDGE_FILTER_OPTIONS}
-          dateFilters={DATE_FILTER_OPTIONS}
-          marketQuickFilter={marketQuickFilter}
-          setMarketQuickFilter={setMarketQuickFilter}
-        />
-      </details>
-      </div>
-
-      <div className="dfs-section dfs-order-notices">
-      {debugPanelsVisible && MLB_ONLY_MODE ? (
-        <section className="mobile-hide-verbose" style={styles.compactPanel}>
-          <p style={styles.compactFlags}>
-            <strong>MLB-only mode</strong> — NBA, WNBA, Tennis, Soccer, and NHL are temporarily disabled while the engine focuses on MLB accuracy.
-            {isSafeModeEnabled() ? " Safe mode is ON — showing parsed MLB props with minimal filtering." : ""}
-          </p>
-        </section>
-      ) : null}
-
-      {prizePicksHtmlWarning && !props.length ? (
-        <section style={styles.errorPanel}>
-          <p>{prizePicksHtmlWarning}</p>
-        </section>
-      ) : null}
-
-      {visibleCriticalWarnings.length > 0 && !props.length ? (
-        <section style={styles.errorPanel}>
-          {visibleCriticalWarnings.map((warning) => (
-            <p key={warning}>{warning}</p>
-          ))}
-        </section>
-      ) : null}
-
-      {debugPanelsVisible && underdogDegraded ? (
-        <section className="mobile-hide-soft-notice" style={styles.compactPanel}>
-          <p style={{ ...styles.compactFlags, color: "#fbbf24", margin: 0 }}>{UNDERDOG_DEGRADED_MESSAGE}</p>
-        </section>
-      ) : null}
-
-      {debugPanelsVisible && compactSourceWarning ? (
-        <section className="mobile-warning-banner" role="status">
-          <p>{compactSourceWarning}</p>
-        </section>
-      ) : null}
-
-      {debugPanelsVisible && cacheNotice && !compactSourceWarning ? (
-        <section className="mobile-hide-soft-notice" style={{ ...styles.compactPanel, background: "rgba(251, 191, 36, 0.08)", borderColor: "rgba(251, 191, 36, 0.25)" }}>
-          <p style={{ ...styles.compactFlags, color: "#fbbf24", margin: 0 }}>{cacheNotice}</p>
-        </section>
-      ) : null}
-
-      {loading && isSafeModeEnabled() ? (
-        <section className="mobile-warning-banner" role="status">
-          <p>{SAFE_MODE_LOADING_MESSAGE}</p>
-        </section>
-      ) : null}
-
-      {debugPanelsVisible && safeModeFallbackActive ? (
-        <section className="mobile-warning-banner" role="status">
-          <p>{isSafeModeEnabled() ? SAFE_MODE_FALLBACK_MESSAGE : PIPELINE_FALLBACK_MESSAGE}</p>
-        </section>
-      ) : null}
-
-      {debugPanelsVisible && displayStatusMessage ? (
-        <section className="mobile-warning-banner" role="status">
-          <p>{displayStatusMessage}</p>
-        </section>
-      ) : null}
-
-      {visibleError && !allDisplayProps.length ? <section style={styles.errorPanel}>{visibleError}</section> : null}
-      </div>
-
-      {debugPanelsVisible ? (
-      <div className="dfs-section dfs-order-api-health">
-      <SectionErrorBoundary
-        name="Source Status"
-        onError={handleSectionRenderError}
-        fallback={
-          <div style={{ padding: "8px 0", color: "#fcd34d", fontSize: 12 }}>
-            API diagnostics temporarily unavailable.
-          </div>
-        }
-      >
-      <SourceStatusBar
-        sourceStatus={displaySourceStatus}
-        sourceHealth={sourceHealth}
-        cacheStatus={cacheStatus}
-        stale={Boolean(staleDataWarning)}
-        apiHealth={apiHealth}
-        lastUpdated={lastUpdated}
-        devMode={devEnvironment}
-        upcomingSlateCount={debugInfo.upcomingSlateCount ?? pipelineAudit.upcomingSlate ?? 0}
-        slateExcludedCount={debugInfo.slateExcludedCount ?? pipelineAudit.slateExcluded ?? 0}
-        pregameWindowHours={debugInfo.pregameWindowHours ?? filterPrefs.pregameWindowHours ?? DEFAULT_PREGAME_WINDOW_HOURS}
-        mlbPipelineStatus={mlbPipelineStatus}
-      />
-      </SectionErrorBoundary>
-      </div>
-      ) : null}
-
-      <div id="section-top-picks" className="dfs-section dfs-order-top-picks">
-        <SectionErrorBoundary name="MLB Picks Screen" onError={handleSectionRenderError}>
-          <CuratedPicksScreen
-            sections={topMlbPlayBoard.sections}
-            waitingForProjections={topMlbPlayBoard.waitingForProjections}
-            usedFallback={topMlbPlayBoard.usedFallback}
-            fallbackLabel={topMlbPlayBoard.fallbackLabel}
-            pipelineDebug={topMlbPlayBoard.pipelineDebug}
-            fetchFailureReasons={topMlbPlayBoard.fetchFailureReasons}
-            loadedPropCount={topMlbPlayBoard.loadedPropCount || allDisplayProps.length}
-            showDebugPanels={debugPanelsVisible}
-            loading={loading}
-            loadingStage={loadingStage}
-            onOpen={setSelectedEvaluation}
-            onSectionError={handleSectionRenderError}
-          />
-        </SectionErrorBoundary>
-      </div>
-
-      {debugPanelsVisible ? (
-      <>
-      <div id="section-accepted" className="dfs-section dfs-order-accepted">
-      <AcceptedPropsPanel props={finalAcceptedProps} onOpen={setSelectedEvaluation} compactMode={compactMode} />
-      </div>
-
-      {debugPanelsVisible ? (
-      <>
-      <div className="dfs-section dfs-order-ready">
-      <section style={styles.section} aria-label="Ready to Bet board">
-        <div style={styles.sectionHeading}>
-          <div>
-            <h2 style={styles.sectionTitle}>Ready to Bet</h2>
-            <p className="section-subcopy" style={styles.streakCopy}>
-            Weighted qualification · market-aware thresholds · verified stats · positive edge · target 15–30 per cycle.
-          </p>
-          </div>
-          <p style={styles.countPill}>{readyToBetProps.length} scored</p>
-        </div>
-        {loading ? (
-          <EmptyState text="Loading picks…" />
-        ) : readyToBetProps.length === 0 ? (
-          <EmptyState text={allDisplayProps.length ? "No props matched this sport tab." : boardEmptyState?.text || NO_VERIFIED_PROPS_MESSAGE} />
-        ) : (
-          <>
-            <VirtualCardList
-              items={visibleReadyToBetProps}
-              renderCard={readyRenderCard}
-              initialVisible={INITIAL_VISIBLE_SECTION_LIMIT}
-            />
-            <LoadMoreButton
-              visible={visibleReadyToBetProps.length}
-              total={readyToBetProps.length}
-              onClick={() => showMoreSection("ready")}
-            />
-          </>
-        )}
-      </section>
-      </div>
-
-      <div className="dfs-section dfs-order-near-miss">
-      <NearMissBoard picks={nearMissProps} loading={loading} onOpen={setSelectedEvaluation} compactMode={compactMode} />
-      </div>
-
-      <div className="dfs-section dfs-order-best-value">
-      <section style={styles.section} aria-label="Best Value board">
-        <div style={styles.sectionHeading}>
-          <div>
-            <h2 style={styles.sectionTitleSmall}>Best Value</h2>
-            <p className="section-subcopy" style={styles.streakCopy}>Strongest verified edges from live sportsbook lines.</p>
-          </div>
-          <p style={styles.countPill}>{bestValueProps.length} values</p>
-        </div>
-        {loading || boardEmptyState?.kind === "loading" ? (
-          <EmptyState text="Loading value board…" />
-        ) : bestValueProps.length === 0 ? (
-          <EmptyState text="No strong value props yet." />
-        ) : (
-          <>
-            <VirtualCardList
-              items={visibleBestValueProps}
-              renderCard={valueRenderCard}
-              initialVisible={INITIAL_VISIBLE_SECTION_LIMIT}
-            />
-            <LoadMoreButton visible={visibleBestValueProps.length} total={bestValueProps.length} onClick={() => showMoreSection("value")} />
-          </>
-        )}
-      </section>
-      </div>
-      </>
-      ) : null}
-      </>
-      ) : null}
-      </>
-      ) : (
-      <div id="section-manual-props" className="dfs-section dfs-order-manual-props">
-        <SectionErrorBoundary name="Manual Props" onError={handleSectionRenderError}>
-          <ManualPropsPanel
-            props={manualAnalyzerProps}
-            compactMode={compactMode}
-            notice={learningSaveNotice}
-            onAnalyzeProp={handleAnalyzeManualProp}
-            onRemoveProp={handleRemoveManualProp}
-            onClearAll={handleClearManualProps}
-            onReanalyzeAll={handleReanalyzeManualProps}
-            onOpenProp={setSelectedEvaluation}
-            onSavePick={saveThisPick}
-            mlbPipelineStatus={mlbPipelineStatus}
-            apiHealth={apiHealth}
-          />
-        </SectionErrorBoundary>
-      </div>
-      )}
-
-      <div className="dfs-section dfs-order-settings">
-      <SectionErrorBoundary name="Settings" onError={handleSectionRenderError}>
-      <SettingsPanel
-        onSaved={handleSettingsSaved}
-        onClearCaches={handleSettingsSaved}
-        showDebugPanels={showDebugPanels}
-        onShowDebugPanelsChange={setShowDebugPanels}
-        lastUpdated={lastUpdated}
-        feedHealthContext={feedHealthContext}
-        underdogDebugSnapshot={underdogDebugSnapshot}
-        rejectionAudit={debugInfo.rejectionAudit}
-        apiHealth={apiHealth}
-        mlbPipelineStatus={mlbPipelineStatus}
-      />
-      </SectionErrorBoundary>
-      </div>
-
-      {debugModeEnabled ? (
-        <ProviderDebugDrawer
-          debugInfo={debugInfo}
-          pipelineAudit={pipelineAudit}
-          apiHealth={apiHealth}
-          lastUpdated={lastUpdated}
-          researchOnlyCount={researchOnlyProps.length}
-          feedHealthContext={feedHealthContext}
-        />
-      ) : null}
-
-      {debugPanelsVisible ? (
-      <div className="dfs-section dfs-order-debug">
-      {Object.keys(pipelineCounters).length > 0 ? (
-        <LazyDebugDetails
-          eyebrow="Pipeline"
-          title="Prop Counters"
-          countLabel={`${pipelineCounters.accepted ?? 0} accepted / ${pipelineCounters.rejected ?? 0} rejected`}
-        >
-          <p style={styles.compactFlags}>
-            accepted {pipelineCounters.accepted ?? 0} · rejected {pipelineCounters.rejected ?? 0} · live{" "}
-            {pipelineCounters.live ?? 0} · cached {pipelineCounters.cached ?? 0} · stale {pipelineCounters.stale ?? 0}
-          </p>
-        </LazyDebugDetails>
-      ) : null}
-
-      {rejectedPropSamples.length > 0 ? (
-        <LazyDebugDetails title="Rejected Props Debug" countLabel={`${rejectedPropSamples.length} groups`}>
-          {rejectedPropSamples.slice(0, DEBUG_SAMPLE_LIMIT).map((sample, index) => (
-            <p key={`${sample.stage}-${sample.sport}-${sample.market}-${sample.reason}-${index}`} style={styles.compactFlags}>
-              {formatGroupedDebugLine({ ...sample, stage: sample.stage || "filter" }, pipelineAudit)}
-            </p>
-          ))}
-        </LazyDebugDetails>
-      ) : null}
-
-      {(pipelineAudit.scoringDebug?.length > 0 || pipelineAudit.projectionDebug?.length > 0 || pipelineAudit.lineMovementDebug?.length > 0) ? (
-        <>
-          {pipelineAudit.scoringDebug?.length > 0 ? (
-            <LazyDebugDetails title="Scoring Debug" countLabel={`${pipelineAudit.scoringDebug.length} groups`}>
-              {pipelineAudit.scoringDebug.slice(0, DEBUG_SAMPLE_LIMIT).map((sample, index) => (
-                <p key={`scoring-${sample.sport}-${sample.market}-${sample.reason}-${index}`} style={styles.compactFlags}>
-                  {formatGroupedDebugLine({ ...sample, stage: sample.stage || "scoring" }, pipelineAudit)}
-                </p>
-              ))}
-            </LazyDebugDetails>
-          ) : null}
-          {pipelineAudit.projectionDebug?.length > 0 ? (
-            <LazyDebugDetails title="Projection Debug" countLabel={`${pipelineAudit.projectionDebug.length} groups`}>
-              {pipelineAudit.projectionDebug.slice(0, DEBUG_SAMPLE_LIMIT).map((sample, index) => (
-                <p key={`projection-${sample.sport}-${sample.market}-${sample.reason}-${index}`} style={styles.compactFlags}>
-                  {formatGroupedDebugLine({ ...sample, stage: sample.stage || "projection" }, pipelineAudit)}
-                </p>
-              ))}
-            </LazyDebugDetails>
-          ) : null}
-          {pipelineAudit.lineMovementDebug?.length > 0 ? (
-            <LazyDebugDetails title="Line Movement Debug" countLabel={`${pipelineAudit.lineMovementDebug.length} groups`}>
-              {pipelineAudit.lineMovementDebug.slice(0, DEBUG_SAMPLE_LIMIT).map((sample, index) => (
-                <p key={`movement-${sample.sport}-${sample.market}-${sample.reason}-${index}`} style={styles.compactFlags}>
-                  {formatGroupedDebugLine({ ...sample, stage: sample.stage || "lineMovement" }, pipelineAudit)}
-                </p>
-              ))}
-            </LazyDebugDetails>
-          ) : null}
-        </>
-      ) : null}
-
-      <QualificationAnalyticsPanel analytics={qualificationAnalytics} loading={loading} />
-      <CacheAnalyticsPanel analytics={cacheAnalytics} cacheNotice={cacheNotice} loading={loading} />
-      <RejectionAnalyticsPanel summary={rejectionAnalytics} samples={rejectionSamples} loading={loading} />
-      </div>
-      ) : null}
-
-      <LazyBelowFold>
-      <div className="dfs-section dfs-order-history">
-      <SectionErrorBoundary name="Saved Picks" onError={handleSectionRenderError}>
-      <details style={styles.compactDetails}>
-        <summary style={styles.detailsSummary}>
-          <span className="details-summary-stack">
-            <span style={styles.eyebrow}>Accuracy</span>
-            <strong>Saved pick history</strong>
-          </span>
-          <span style={styles.countPill}>{visibleHistory.length} saved</span>
-        </summary>
-        <div style={styles.compactPanel}>
-          <AccuracyReview
-            dashboard={dashboard}
-            history={visibleHistory}
-            updatePickResult={updatePickResult}
-            clearHistory={clearHistory}
-            exportHistoryCsv={exportHistoryCsv}
-            importHistoryJson={importHistoryJson}
-            filterOptions={historyFilterOptions(visibleHistory)}
-            clearOldResearchPicks={clearOldResearchPicks}
-          />
-        </div>
-      </details>
-      </SectionErrorBoundary>
-      </div>
-      </LazyBelowFold>
+    <DfsAnalyzerLayout
+      appView={appView}
+      setAppView={setAppView}
+      apiHealth={apiHealth}
+      loading={loading}
+      refreshBlocked={refreshBlocked}
+      refreshCountdownSec={refreshCountdownSec}
+      onRefresh={() => loadProps({ force: true })}
+      lastUpdatedLabel={lastUpdatedLabel}
+      learningSaveNotice={learningSaveNotice}
+      manualAnalyzerProps={manualAnalyzerProps}
+      onAnalyzeManualProp={handleAnalyzeManualProp}
+      onRemoveManualProp={handleRemoveManualProp}
+      onClearManualProps={handleClearManualProps}
+      onOpenProp={setSelectedEvaluation}
+      onSavePick={saveThisPick}
+      topMlbPlayBoard={topMlbPlayBoard}
+      curatedGoblinPicks={curatedGoblinPicks}
+      curatedDemonPicks={curatedDemonPicks}
+      savedDisplayPicks={savedDisplayPicks}
+      onRemoveSavedPick={removeSavedPick}
+      onClearSavedPicks={clearHistory}
+      onSectionError={handleSectionRenderError}
+      showDebugPanels={showDebugPanels}
+      onShowDebugPanelsChange={setShowDebugPanels}
+      onSettingsSaved={handleSettingsSaved}
+      feedHealthContext={feedHealthContext}
+      underdogDebugSnapshot={underdogDebugSnapshot}
+      debugInfo={debugInfo}
+      mlbPipelineStatus={mlbPipelineStatus}
+    />
 
       {selectedEvaluation && (
         <PickDetailModal
@@ -3906,14 +3518,6 @@ export default function DFSPropsApp() {
           onSavePick={saveThisPick}
         />
       )}
-    </main>
-    <MobileQuickActionBar
-      onRefresh={() => loadProps({ force: true })}
-      onNavigate={scrollToSection}
-      refreshDisabled={refreshBlocked}
-      refreshLabel={mobileRefreshLabel}
-    />
-    <MobileScrollFab onScrollTop={scrollToTop} onScrollTo={scrollToSection} />
     {debugModeEnabled && showDebugPanels ? (
       <RawApiDebugPanel open={rawApiDebugOpen} onToggle={() => setRawApiDebugOpen((open) => !open)} />
     ) : null}

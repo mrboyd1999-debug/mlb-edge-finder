@@ -56,6 +56,7 @@ export {
 
 export const MANUAL_FALLBACK_MODE_STATUS = "Fallback mode";
 export const MANUAL_FALLBACK_ESTIMATE_STATUS = "Fallback estimate — not verified";
+export const MANUAL_FALLBACK_PROJECTION_MSG = "Projection unavailable — using manual fallback formula";
 export const NO_VERIFIED_GRADE_STATUS = "No verified projection available — do not grade this prop.";
 
 function clamp(value, min, max) {
@@ -778,7 +779,7 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
     }
   }
 
-  const verified = projectionIsVerified({
+  let verified = projectionIsVerified({
     projectedValue: fairLine,
     isFallbackProjection,
     dataStatus,
@@ -786,11 +787,26 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
   });
 
   if (!verified) {
-    return buildUnverifiedManualScore(input, {
-      reason: liveScored?.statusMessage || liveScored?.dataFetchReason || NO_VERIFIED_GRADE_STATUS,
-      apiWarning: liveScored?.manualApiWarning || liveScored?.dataFetchReason || null,
-      playerMatchVerified: Boolean(mergedProfile && !mergedProfile.sparse && !mergedProfile.fallback),
+    console.warn("[Manual Analyzer] projection missing — using manual fallback formula", {
+      player: input.playerName,
+      statType,
+      line,
+      projectionSource,
+      apiWarning: liveScored?.dataFetchReason || liveScored?.statusMessage || null,
+      emptyProfile: !mergedProfile,
     });
+    const profileAvg = mergedProfile?.last5Average ?? mergedProfile?.seasonAverage ?? null;
+    if (Number.isFinite(profileAvg) && profileAvg > 0) {
+      fairLine = round(profileAvg, 2);
+    } else if (!Number.isFinite(fairLine) || fairLine <= 0) {
+      fairLine = estimateFairLine(sportKey, statType, line, payoutType);
+    }
+    projectionSource = "manual-fallback";
+    isFallbackProjection = true;
+    projectionLabel = MANUAL_FALLBACK_PROJECTION_MSG;
+    dataStatus = DATA_STATUS.UNAVAILABLE;
+    projectionBreakdown = [{ label: "Note", display: MANUAL_FALLBACK_PROJECTION_MSG }];
+    verified = false;
   }
 
   const recommendedSide = resolveRecommendedSide(fairLine, line);
@@ -959,23 +975,41 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
     volatilityAdjustedEdge
   );
 
-  const passPlay = shouldPassPlay({ edge: volatilityAdjustedEdge, confidence, isVerified: true });
+  let passPlay = shouldPassPlay({ edge: volatilityAdjustedEdge, confidence, isVerified: !isFallbackProjection });
+  if (isFallbackProjection && recommendedSide && Number.isFinite(fairLine)) {
+    passPlay = false;
+    if (!Number.isFinite(confidence) || confidence <= 0) confidence = 52;
+    confidence = Math.max(50, Math.min(confidence, 62));
+  }
   const riskLevel = classifyManualRisk({ payoutType, volatility, edge, linePct });
   const edgePercent = computeManualEdgePercent(edge, line, fairLine);
   const whyThisPick = passPlay
     ? "Edge or confidence below threshold — PASS on this prop."
-    : generateManualExplanation({
-        pick: recommendedSide,
-        statLabel,
-        line,
-        riskLevel,
-        payoutType,
-        volatility,
-        edge,
-        linePct,
-        sport: sportKey,
-        projection: fairLine,
-      });
+    : isFallbackProjection
+      ? `${MANUAL_FALLBACK_PROJECTION_MSG} ${generateManualExplanation({
+          pick: recommendedSide,
+          statLabel,
+          line,
+          riskLevel,
+          payoutType,
+          volatility,
+          edge,
+          linePct,
+          sport: sportKey,
+          projection: fairLine,
+        })}`.trim()
+      : generateManualExplanation({
+          pick: recommendedSide,
+          statLabel,
+          line,
+          riskLevel,
+          payoutType,
+          volatility,
+          edge,
+          linePct,
+          sport: sportKey,
+          projection: fairLine,
+        });
   const playTag = passPlay
     ? null
     : resolveManualPlayTag({
@@ -1064,8 +1098,9 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
     projectionBreakdown,
     projectionLabel,
     projectionSource: projectionSource || "player-stats-model",
-    isFallbackProjection: false,
-    isVerifiedProjection: true,
+    isFallbackProjection: Boolean(isFallbackProjection),
+    isVerifiedProjection: Boolean(!isFallbackProjection && projectionSource !== "manual-fallback"),
+    fallbackProjectionLabel: isFallbackProjection ? projectionLabel : null,
     playerMatchVerified: Boolean(mergedProfile && !mergedProfile.sparse && !mergedProfile.fallback),
     dataStatus,
     projectionConfidence,

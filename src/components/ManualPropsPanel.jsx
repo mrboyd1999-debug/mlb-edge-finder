@@ -1,27 +1,20 @@
 import { memo, useCallback, useMemo, useState } from "react";
-import PlayerPropCard from "./PlayerPropCard.jsx";
-import { styles } from "../theme/styles.js";
+import CompactPropCard from "./CompactPropCard.jsx";
 import {
   DEFAULT_MANUAL_FORM,
-  MANUAL_OFFLINE_REASON,
   MANUAL_PAYOUT_TYPES,
+  MANUAL_SIDE_OPTIONS,
   MANUAL_SOURCES,
   MLB_STAT_SUGGESTIONS,
-  selectManualTopPicks,
-  selectMlbVerifiedBestBets,
-  selectMlbStrongLeans,
-  sortManualPropsByConfidence,
   validateManualPropFields,
 } from "../utils/manualPropBuilder.js";
-import { shortReason } from "../utils/formatters.js";
-import MlbPipelineStatusPanel from "./MlbPipelineStatusPanel.jsx";
 
 function Field({ label, children, hint = "" }) {
   return (
-    <label style={styles.selectLabel}>
-      {label}
+    <label className="compact-form-field">
+      <span className="compact-form-field__label">{label}</span>
       {children}
-      {hint ? <span style={styles.controlHint}>{hint}</span> : null}
+      {hint ? <span className="compact-form-field__hint">{hint}</span> : null}
     </label>
   );
 }
@@ -33,25 +26,20 @@ function ManualPropsPanel({
   onAnalyzeProp,
   onRemoveProp,
   onClearAll,
-  onReanalyzeAll,
   onOpenProp,
   onSavePick,
-  compactMode = true,
-  mlbPipelineStatus = null,
-  apiHealth = null,
 }) {
-  const [form, setForm] = useState(DEFAULT_MANUAL_FORM);
+  const [form, setForm] = useState({ ...DEFAULT_MANUAL_FORM, side: "over" });
   const [formError, setFormError] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [latestResult, setLatestResult] = useState(null);
 
-  const rankedProps = useMemo(() => sortManualPropsByConfidence(props), [props]);
-  const topPicks = useMemo(() => selectMlbVerifiedBestBets(props, 2), [props]);
-  const strongLeans = useMemo(() => selectMlbStrongLeans(props, 6), [props]);
-  const sportOptions = useMemo(() => {
-    const sports = new Set(["MLB", ...rankedProps.map((prop) => prop.sport).filter(Boolean)]);
-    return Array.from(sports);
-  }, [rankedProps]);
+  const rankedProps = useMemo(
+    () => [...(props || [])].sort((a, b) => Number(b.confidenceScore ?? 0) - Number(a.confidenceScore ?? 0)),
+    [props]
+  );
+  const displayResult = latestResult || rankedProps[0] || null;
 
   function updateField(key, value) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -66,10 +54,12 @@ function ManualPropsPanel({
       opponent: prop.opponent || "",
       statType: prop.statType || "",
       line: prop.line != null ? String(prop.line) : "",
+      side: prop.side || prop.bestPick || prop.pick || "over",
       source: prop.source || prop.platform || "PrizePicks",
       payoutType: prop.oddsType || prop.payoutRole || prop.payoutType || "standard",
     });
     setEditingId(prop.id || null);
+    setLatestResult(prop);
     setFormError("");
   }
 
@@ -83,31 +73,29 @@ function ManualPropsPanel({
         return;
       }
 
-      const numericLine = Number(form.line);
-      if (!Number.isFinite(numericLine) || numericLine <= 0) {
-        setFormError("Enter a valid line greater than 0.");
-        return;
-      }
-
       let analyzed = null;
       if (typeof onAnalyzeProp === "function") {
         analyzed = await onAnalyzeProp({ ...form, editingId });
       }
 
       if (!analyzed || !analyzed.playerName) {
-        throw new Error("Manual analysis did not return a valid prop.");
+        console.warn("[Manual Analyzer] empty analyzer response — check API/fallback logs");
+        setFormError("Analysis returned no result. Check console for API or fallback details.");
+        return;
       }
 
+      setLatestResult(analyzed);
       setEditingId(null);
       setForm((current) => ({
         ...DEFAULT_MANUAL_FORM,
         sport: current.sport || "MLB",
         source: current.source || "PrizePicks",
         payoutType: current.payoutType || "standard",
+        side: current.side || "over",
       }));
     } catch (error) {
-      const message = error?.message || "Manual analysis failed.";
-      setFormError(message);
+      console.error("[Manual Analyzer] analyze failed", error);
+      setFormError(error?.message || "Manual analysis failed.");
     } finally {
       setAnalyzing(false);
     }
@@ -118,243 +106,147 @@ function ManualPropsPanel({
     handleAnalyzeManualProp();
   }
 
-  const renderCard = (prop, index) => {
-    try {
-      if (!prop || typeof prop !== "object") {
-        throw new Error("Invalid manual prop payload");
-      }
-      return (
-        <div key={prop.id || index} style={{ display: "grid", gap: "4px" }}>
-          <PlayerPropCard prop={prop} onOpen={onOpenProp} rank={index + 1} compact={compactMode} />
-          <div style={styles.manualPropMetaRow}>
-            <span style={styles.manualPropReason}>
-              {shortReason(prop) || prop.qualificationReason || prop.whyThisPick || MANUAL_OFFLINE_REASON}
-            </span>
-            <div style={styles.manualPropActions}>
-              <button type="button" style={styles.secondaryButtonSmall} onClick={() => handleEditProp(prop)}>
-                Edit
-              </button>
-              <button type="button" style={styles.secondaryButtonSmall} onClick={() => onSavePick?.(prop)}>
-                Save
-              </button>
-              <button type="button" style={styles.dangerButtonSmall} onClick={() => onRemoveProp?.(prop.id)}>
+  return (
+    <div className="compact-manual-panel">
+      <form className="compact-manual-form" onSubmit={handleFormSubmit}>
+        <div className="compact-manual-form__grid">
+          <Field label="Player name">
+            <input
+              className="compact-input"
+              value={form.playerName}
+              onChange={(event) => updateField("playerName", event.target.value)}
+              placeholder="Nolan McLean"
+              autoComplete="off"
+            />
+          </Field>
+          <Field label="Team">
+            <input
+              className="compact-input"
+              value={form.team}
+              onChange={(event) => updateField("team", event.target.value)}
+              placeholder="NYM"
+              autoComplete="off"
+            />
+          </Field>
+          <Field label="Opponent">
+            <input
+              className="compact-input"
+              value={form.opponent}
+              onChange={(event) => updateField("opponent", event.target.value)}
+              placeholder="PHI"
+              autoComplete="off"
+            />
+          </Field>
+          <Field label="Prop type">
+            <input
+              className="compact-input"
+              list="manual-stat-suggestions"
+              value={form.statType}
+              onChange={(event) => updateField("statType", event.target.value)}
+              placeholder="Pitcher Strikeouts"
+              autoComplete="off"
+            />
+            <datalist id="manual-stat-suggestions">
+              {MLB_STAT_SUGGESTIONS.map((stat) => (
+                <option key={stat} value={stat} />
+              ))}
+            </datalist>
+          </Field>
+          <Field label="Line">
+            <input
+              className="compact-input"
+              type="number"
+              min="0"
+              step="0.5"
+              value={form.line}
+              onChange={(event) => updateField("line", event.target.value)}
+              placeholder="7.5"
+            />
+          </Field>
+          <Field label="Side">
+            <select className="compact-input" value={form.side || "over"} onChange={(event) => updateField("side", event.target.value)}>
+              {MANUAL_SIDE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Source">
+            <select className="compact-input" value={form.source} onChange={(event) => updateField("source", event.target.value)}>
+              {MANUAL_SOURCES.map((source) => (
+                <option key={source} value={source}>
+                  {source}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Payout type">
+            <select className="compact-input" value={form.payoutType} onChange={(event) => updateField("payoutType", event.target.value)}>
+              {MANUAL_PAYOUT_TYPES.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+
+        {formError ? (
+          <p className="compact-form-error" role="alert">
+            {formError}
+          </p>
+        ) : null}
+        {notice ? <p className="compact-form-notice">{notice}</p> : null}
+
+        <button type="submit" className="compact-analyze-btn" disabled={loading || analyzing}>
+          {loading || analyzing ? "Analyzing…" : "Analyze"}
+        </button>
+      </form>
+
+      {displayResult ? (
+        <section className="compact-section" aria-label="Analysis result">
+          <div className="compact-section__head">
+            <h2>Analysis Result</h2>
+            <p>Phase 1 MLB manual grade — tap card for details</p>
+          </div>
+          <CompactPropCard
+            prop={displayResult}
+            onOpen={onOpenProp}
+            onSave={onSavePick}
+            defaultExpanded
+            showSave
+          />
+          <div className="compact-manual-actions">
+            <button type="button" className="compact-prop-card__btn" onClick={() => handleEditProp(displayResult)}>
+              Edit
+            </button>
+            {displayResult.id ? (
+              <button type="button" className="compact-prop-card__btn compact-prop-card__btn--danger" onClick={() => onRemoveProp?.(displayResult.id)}>
                 Remove
               </button>
-            </div>
+            ) : null}
           </div>
-        </div>
-      );
-    } catch (err) {
-      console.error("Manual analyzer failed:", err);
-      return (
-        <div
-          key={prop?.id || `manual-prop-error-${index}`}
-          style={{ ...styles.compactPanel, borderColor: "#991b1b", padding: "10px" }}
-          role="alert"
-        >
-          <strong style={{ color: "#fca5a5" }}>Manual prop card failed</strong>
-          <p style={{ ...styles.compactFlags, margin: "4px 0 0" }}>{err?.message || "Render error"}</p>
-        </div>
-      );
-    }
-  };
+        </section>
+      ) : (
+        <p className="compact-empty">Enter a prop and tap Analyze to grade it.</p>
+      )}
 
-  return (
-    <div className="manual-props-panel" style={styles.manualPropsPanel}>
-      <section style={styles.section} aria-label="Manual prop entry">
-        <div style={styles.sectionHeading}>
-          <div>
-            <h2 style={styles.sectionTitleSmall}>Manual Prop Analyzer</h2>
-            <p className="section-subcopy" style={styles.streakCopy}>
-              Enter PrizePicks or Underdog lines — the engine picks OVER or UNDER from verified projections.
-            </p>
+      {rankedProps.length > 1 ? (
+        <details className="compact-recent-details">
+          <summary>Recent analyzed props ({rankedProps.length})</summary>
+          <div className="compact-card-list">
+            {rankedProps.slice(0, 8).map((prop, index) => (
+              <CompactPropCard key={prop.id || index} prop={prop} rank={index + 1} onOpen={onOpenProp} onSave={onSavePick} />
+            ))}
           </div>
-          <p style={styles.countPill}>{rankedProps.length} analyzed</p>
-        </div>
-
-        <MlbPipelineStatusPanel pipelineStatus={mlbPipelineStatus} apiHealth={apiHealth} compact />
-
-        <form style={styles.manualPropForm} onSubmit={handleFormSubmit}>
-          <div style={styles.manualPropFormGrid}>
-            <Field label="Player name">
-              <input
-                style={styles.textInput}
-                value={form.playerName}
-                onChange={(event) => updateField("playerName", event.target.value)}
-                placeholder="e.g. Michael Busch"
-                autoComplete="off"
-              />
-            </Field>
-            <Field label="Sport">
-              <select style={styles.select} value={form.sport} onChange={(event) => updateField("sport", event.target.value)}>
-                {sportOptions.map((sport) => (
-                  <option key={sport} value={sport}>
-                    {sport}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Team (optional)" hint="Leave blank if unknown">
-              <input
-                style={styles.textInput}
-                value={form.team}
-                onChange={(event) => updateField("team", event.target.value)}
-                placeholder="CHC"
-                autoComplete="off"
-              />
-            </Field>
-            <Field label="Opponent (optional)" hint="Leave blank if unknown">
-              <input
-                style={styles.textInput}
-                value={form.opponent}
-                onChange={(event) => updateField("opponent", event.target.value)}
-                placeholder="Optional"
-                autoComplete="off"
-              />
-            </Field>
-            <Field label="Stat type">
-              <input
-                style={styles.textInput}
-                list="manual-stat-suggestions"
-                value={form.statType}
-                onChange={(event) => updateField("statType", event.target.value)}
-                placeholder="Pitcher Strikeouts"
-                autoComplete="off"
-              />
-              <datalist id="manual-stat-suggestions">
-                {MLB_STAT_SUGGESTIONS.map((stat) => (
-                  <option key={stat} value={stat} />
-                ))}
-              </datalist>
-            </Field>
-            <Field label="Line">
-              <input
-                style={styles.textInput}
-                type="number"
-                min="0"
-                step="0.5"
-                value={form.line}
-                onChange={(event) => updateField("line", event.target.value)}
-                placeholder="5.5"
-              />
-            </Field>
-            <Field label="Source">
-              <select style={styles.select} value={form.source} onChange={(event) => updateField("source", event.target.value)}>
-                {MANUAL_SOURCES.map((source) => (
-                  <option key={source} value={source}>
-                    {source}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Line type">
-              <select
-                style={styles.select}
-                value={form.payoutType}
-                onChange={(event) => updateField("payoutType", event.target.value)}
-              >
-                {MANUAL_PAYOUT_TYPES.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-
-          {formError ? (
-            <p style={styles.manualPropFormError} role="alert">
-              {formError}
-            </p>
-          ) : null}
-
-          {editingId ? (
-            <p style={styles.controlHint} role="status">
-              Editing an existing prop — Analyze updates it in place.
-            </p>
-          ) : null}
-
-          <div style={styles.manualPropFormActions}>
-            <button
-              type="button"
-              style={styles.refreshButton}
-              disabled={loading || analyzing}
-              onClick={handleAnalyzeManualProp}
-            >
-              {loading || analyzing ? "Analyzing…" : editingId ? "Update prop" : "Analyze prop"}
+          {rankedProps.length ? (
+            <button type="button" className="compact-prop-card__btn compact-prop-card__btn--danger" onClick={() => onClearAll?.()}>
+              Clear session list
             </button>
-            {editingId ? (
-              <button
-                type="button"
-                style={styles.secondaryButton}
-                onClick={() => {
-                  setEditingId(null);
-                  setForm(DEFAULT_MANUAL_FORM);
-                }}
-              >
-                Cancel edit
-              </button>
-            ) : null}
-            {rankedProps.length ? (
-              <>
-                <button type="button" style={styles.secondaryButton} onClick={() => onReanalyzeAll?.()}>
-                  Re-analyze all
-                </button>
-                <button type="button" style={styles.dangerButton} onClick={() => onClearAll?.()}>
-                  Clear all
-                </button>
-              </>
-            ) : null}
-          </div>
-        </form>
-
-        {notice ? <p style={styles.streakNotice}>{notice}</p> : null}
-      </section>
-
-      {topPicks.length ? (
-        <section style={styles.section} aria-label="Manual top picks">
-          <div style={styles.sectionHeading}>
-            <div>
-              <h2 style={styles.sectionTitleSmall}>Best MLB Plays</h2>
-              <p className="section-subcopy" style={styles.streakCopy}>
-                Top 2 verified model picks.
-              </p>
-            </div>
-            <p style={styles.countPill}>{topPicks.length} picks</p>
-          </div>
-          <div style={styles.manualTopPickGrid}>{topPicks.map((prop, index) => renderCard(prop, index))}</div>
-        </section>
+          ) : null}
+        </details>
       ) : null}
-
-      {strongLeans.length ? (
-        <section style={styles.section} aria-label="Manual strong leans">
-          <div style={styles.sectionHeading}>
-            <div>
-              <h2 style={styles.sectionTitleSmall}>Strong Leans</h2>
-              <p className="section-subcopy" style={styles.streakCopy}>
-                Next 6 verified model sides ranked by confidence and edge.
-              </p>
-            </div>
-            <p style={styles.countPill}>{strongLeans.length} leans</p>
-          </div>
-          <div style={styles.manualTopPickGrid}>{strongLeans.map((prop, index) => renderCard(prop, index))}</div>
-        </section>
-      ) : null}
-
-      <section style={styles.section} aria-label="Analyzed manual props">
-        <div style={styles.sectionHeading}>
-          <div>
-            <h2 style={styles.sectionTitleSmall}>Analyzed Props</h2>
-            <p className="section-subcopy" style={styles.streakCopy}>Ranked by edge, volatility, and confidence.</p>
-          </div>
-          <p style={styles.countPill}>{rankedProps.length} ranked</p>
-        </div>
-        {!rankedProps.length ? (
-          <div style={styles.emptyStateCompact}>Add a prop above to generate your first grade.</div>
-        ) : (
-          <div style={styles.manualTopPickGrid}>{rankedProps.map((prop, index) => renderCard(prop, index))}</div>
-        )}
-      </section>
     </div>
   );
 }

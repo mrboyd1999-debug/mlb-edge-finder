@@ -59,6 +59,7 @@ export const DEFAULT_MANUAL_FORM = {
   opponent: "",
   statType: "",
   line: "",
+  side: "over",
   source: "PrizePicks",
   payoutType: "standard",
 };
@@ -88,6 +89,7 @@ export function normalizeManualFormInput(form = {}) {
     opponent: String(form.opponent || "").trim(),
     statType: String(form.statType || "").trim(),
     line: numericLine,
+    side: normalizeSide(form.side || form.pick || "over"),
     source: form.source === "Underdog" ? "Underdog" : "PrizePicks",
     payoutType: form.payoutType || "standard",
   };
@@ -318,6 +320,13 @@ export async function analyzeManualProp(form = {}, scoreFn = null) {
   } catch (error) {
     console.warn("[Manual Analyzer] stat fetch failed", error);
     apiWarning = error?.message || "Load failed";
+  }
+
+  if (!profile) {
+    console.warn("[Manual Analyzer] prop data empty — no stat profile returned", {
+      player: form.playerName,
+      statType: form.statType,
+    });
   }
 
   let liveScored = null;
