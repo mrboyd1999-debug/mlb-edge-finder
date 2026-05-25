@@ -1052,6 +1052,34 @@ const preparedBoard = prepareVerifiedCacheBoard({
 assert.ok(preparedBoard?.props?.length >= 1);
 assert.ok(computeFreshnessScore(adaptiveProp, 4 * 60 * 1000) > 0);
 
+const verifiedHitProfile = {
+  hasGameLogs: true,
+  last5Average: 1.2,
+  seasonAverage: 1.05,
+  last10Average: 1.1,
+  sampleSize: 12,
+  sparse: false,
+  source: "MLB StatsAPI game logs",
+};
+const verifiedHrrProfile = {
+  hasGameLogs: true,
+  last5Average: 1.8,
+  seasonAverage: 1.9,
+  last10Average: 1.85,
+  sampleSize: 10,
+  sparse: false,
+  source: "MLB StatsAPI game logs",
+};
+const verifiedNbaAstProfile = {
+  hasGameLogs: true,
+  last5Average: 8.2,
+  seasonAverage: 8.8,
+  avgMinutes: 34,
+  sampleSize: 10,
+  sparse: false,
+  source: "NBA API",
+};
+
 const goblinHit = buildOfflineManualAnalyzedProp({
   playerName: "Juan Soto",
   sport: "MLB",
@@ -1060,7 +1088,7 @@ const goblinHit = buildOfflineManualAnalyzedProp({
   side: "over",
   source: "PrizePicks",
   payoutType: "goblin",
-});
+}, null, verifiedHitProfile);
 const demonHrr = buildOfflineManualAnalyzedProp({
   playerName: "Aaron Judge",
   sport: "MLB",
@@ -1069,7 +1097,7 @@ const demonHrr = buildOfflineManualAnalyzedProp({
   side: "under",
   source: "Underdog",
   payoutType: "demon",
-});
+}, null, verifiedHrrProfile);
 const nbaAst = buildOfflineManualAnalyzedProp({
   playerName: "Trae Young",
   sport: "NBA",
@@ -1078,19 +1106,20 @@ const nbaAst = buildOfflineManualAnalyzedProp({
   side: "under",
   source: "PrizePicks",
   payoutType: "standard",
-});
+}, null, verifiedNbaAstProfile);
 
-assert.ok(goblinHit.confidenceScore >= 72 && goblinHit.confidenceScore <= 85);
-assert.ok(demonHrr.confidenceScore >= 45 && demonHrr.confidenceScore <= 60);
-assert.ok(nbaAst.confidenceScore >= 58 && nbaAst.confidenceScore <= 72);
-assert.ok(goblinHit.edge >= 0.1 && goblinHit.edge <= 2.5);
-assert.ok(demonHrr.edge >= -2.5 && demonHrr.edge <= 2.5);
+assert.ok(goblinHit.projectedValue > goblinHit.line);
+assert.equal(goblinHit.bestPick, "over");
+assert.ok(goblinHit.edge >= 0.35);
+assert.ok(goblinHit.confidenceScore >= 58);
+assert.equal(demonHrr.bestPick, "under");
+assert.ok(demonHrr.projectedValue < demonHrr.line);
+assert.equal(nbaAst.bestPick, "under");
+assert.ok(nbaAst.projectedValue < nbaAst.line);
 assert.notEqual(goblinHit.confidenceScore, demonHrr.confidenceScore);
 assert.notEqual(goblinHit.edge, demonHrr.edge);
-assert.equal(goblinHit.bestPick, "over");
-assert.equal(demonHrr.bestPick, "under");
-assert.ok(goblinHit.whyThisPick.includes("Goblin") || goblinHit.whyThisPick.includes("margin"));
-assert.ok(demonHrr.whyThisPick.length > 20);
+assert.ok(goblinHit.whyThisPick.length > 12);
+assert.ok(demonHrr.whyThisPick.length > 12);
 assert.equal(getManualStatVolatility("MLB", "Hits+Runs+RBIs").tier, "HIGH");
 assert.equal(getManualStatVolatility("MLB", "Hits").tier, "LOW");
 assert.equal(getManualStatVolatility("MLB", "Pitcher Strikeouts").tier, "LOW");
@@ -1099,10 +1128,46 @@ assert.equal(getManualStatVolatility("NBA", "Rebounds").tier, "LOW");
 
 assert.equal(computeDirectionalEdge(5.8, 6.5, "over"), -0.7);
 assert.equal(computeDirectionalEdge(5.8, 6.5, "under"), 0.7);
-assert.ok(goblinHit.impliedHitChance >= 38 && goblinHit.impliedHitChance <= 88);
+assert.ok(goblinHit.impliedHitChance == null || (goblinHit.impliedHitChance >= 42 && goblinHit.impliedHitChance <= 82));
 assert.ok(goblinHit.volatilityLabel);
-assert.equal(goblinHit.scoringModeLabel, "Estimated grade");
-assert.ok(goblinHit.confidenceScore <= 85);
+assert.ok(goblinHit.isVerifiedProjection);
+assert.ok(!goblinHit.isFallbackProjection);
+
+const noProfileHit = buildOfflineManualAnalyzedProp({
+  playerName: "No Data Player",
+  sport: "MLB",
+  statType: "Hits",
+  line: 0.5,
+  side: "over",
+  source: "PrizePicks",
+});
+assert.equal(noProfileHit.projectionUnavailable, true);
+assert.equal(noProfileHit.impliedHitChance, null);
+assert.equal(noProfileHit.hitChanceLabel, "Insufficient verified data");
+
+const kBugProfile = {
+  last5Average: 5.5,
+  seasonAverage: 5.6,
+  hasGameLogs: true,
+  source: "MLB StatsAPI game logs",
+  statSources: ["MLB"],
+  gradingRows: [
+    { stat: { strikeOuts: 5, inningsPitched: "5.0", numberOfPitches: 90, gamesStarted: 1 } },
+    { stat: { strikeOuts: 6, inningsPitched: "5.1", numberOfPitches: 88, gamesStarted: 1 } },
+    { stat: { strikeOuts: 5, inningsPitched: "5.2", numberOfPitches: 92, gamesStarted: 1 } },
+  ],
+};
+const kSideBug = scoreManualPropInput({
+  playerName: "Test Pitcher",
+  sport: "MLB",
+  statType: "Pitcher Strikeouts",
+  line: 6.5,
+  side: "over",
+  source: "PrizePicks",
+}, null, kBugProfile);
+assert.equal(kSideBug.bestPick, "under");
+assert.ok(kSideBug.projectedValue < 6.5);
+assert.ok(kSideBug.edge > 0);
 
 const kProjection = projectPitcherStrikeouts(
   { statType: "Pitcher Strikeouts", line: 6.5, sport: "MLB", side: "over" },
@@ -1125,10 +1190,10 @@ assert.equal(kProjection.projectionLabel, VERIFIED_PROJECTION_LABEL);
 assert.ok(kProjection.projectionBreakdown.some((row) => row.label === "Last 5 Avg Ks"));
 assert.ok(kProjection.projectionBreakdown.some((row) => row.label === "Season Avg Ks"));
 assert.ok(kProjection.projectionBreakdown.some((row) => row.label === "Projected Innings"));
-assert.equal(computePitcherEdge(6.2, 6.5, "over"), -0.3);
+assert.equal(computePitcherEdge(6.2, 6.5, "over"), 0.3);
 assert.equal(computePitcherEdge(6.8, 6.5, "over"), 0.3);
-const fallbackHit = computePitcherHitChance({ edge: 0.2, volatility: { tier: "LOW" }, confidence: 52, isFallback: true });
-assert.ok(fallbackHit >= 35 && fallbackHit <= 65);
+const fallbackHit = computePitcherHitChance({ projection: 5.8, line: 6.5, edge: 0.7, volatility: { tier: "LOW" }, confidence: 62, isFallback: true });
+assert.equal(fallbackHit, null);
 const unverifiedK = projectPitcherStrikeouts(
   { statType: "Pitcher Strikeouts", line: 6.5, sport: "MLB" },
   { sparse: true, last5Average: 6.3 }
@@ -1136,9 +1201,12 @@ const unverifiedK = projectPitcherStrikeouts(
 assert.equal(unverifiedK.projectedValue, null);
 assert.equal(unverifiedK.projectionLabel, DATA_STATUS.FALLBACK);
 
-const topTwo = selectManualTopPicks([demonHrr, goblinHit, nbaAst], 2);
-assert.equal(topTwo.length, 2);
-assert.ok(rankManualPropScore(topTwo[0]) >= rankManualPropScore(topTwo[1]));
+const topTwo = selectManualTopPicks([demonHrr, goblinHit, nbaAst, noProfileHit], 2);
+assert.ok(topTwo.length <= 2);
+assert.ok(topTwo.every((prop) => prop.isDisplayPlayable));
+if (topTwo.length === 2) {
+  assert.ok(rankManualPropScore(topTwo[0]) >= rankManualPropScore(topTwo[1]));
+}
 
 const analyzedNoScoreFn = await analyzeManualProp({
   playerName: "Shohei Ohtani",

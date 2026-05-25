@@ -228,21 +228,31 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
         ) : null}
 
         <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: manualProp ? "3px" : "4px", marginBottom: manualProp ? "4px" : "6px" }}>
-          <MetricIf label="Confidence" value={prop.confidenceScore != null ? `${prop.confidenceScore}%` : null} strong />
-          <MetricIf label="Hit Chance" value={prop.impliedHitChance != null ? `${prop.impliedHitChance}%` : null} strong />
-          <MetricIf label="Edge" value={Number.isFinite(Number(prop.edge)) ? formatSignedNumber(prop.edge) : null} strong />
+          <MetricIf label="Confidence" value={prop.confidenceScore != null && prop.confidenceScore > 0 ? `${prop.confidenceScore}%` : null} strong />
+          <MetricIf
+            label="Hit Chance"
+            value={
+              prop.impliedHitChance != null
+                ? `${prop.impliedHitChance}%`
+                : prop.hitChanceLabel || (manualProp && prop.projectionUnavailable ? "Insufficient verified data" : null)
+            }
+            strong
+          />
+          <MetricIf label="Edge" value={Number.isFinite(Number(prop.edge)) && Number(prop.edge) > 0 ? formatSignedNumber(prop.edge) : null} strong />
           <MetricIf label="Proj vs Line" value={projVsLine} strong />
-          {!manualProp ? (
+          {manualProp ? (
             <>
               <MetricIf label="Line" value={formatNumber(prop.line)} strong />
               <MetricIf
                 label="Projection"
                 value={
-                  prop.projectedValue != null
-                    ? formatNumber(prop.projectedValue)
-                    : prop.projection != null
-                      ? formatNumber(prop.projection)
-                      : null
+                  prop.projectionUnavailable
+                    ? "Unavailable"
+                    : prop.projectedValue != null
+                      ? formatNumber(prop.projectedValue)
+                      : prop.projection != null
+                        ? formatNumber(prop.projection)
+                        : null
                 }
                 strong
               />
@@ -310,6 +320,31 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
               ) : null}
             </div>
           </div>
+        ) : null}
+
+        {manualProp && prop.sideEngineDebug ? (
+          <details style={{ ...styles.compactDetails, marginTop: "4px" }}>
+            <summary style={styles.detailsSummary}>
+              <span>
+                <span style={styles.eyebrow}>Debug</span>
+                <strong>Projection engine</strong>
+              </span>
+            </summary>
+            <div style={{ ...styles.compactPanel, marginTop: "4px" }}>
+              <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "4px" }}>
+                <MetricIf label="Projection source" value={prop.sideEngineDebug.projectionSource} />
+                <MetricIf label="Data status" value={prop.sideEngineDebug.dataStatus} />
+                <MetricIf label="Edge formula" value={prop.sideEngineDebug.edgeFormula} />
+                <MetricIf label="Raw edge" value={prop.sideEngineDebug.rawEdge != null ? formatSignedNumber(prop.sideEngineDebug.rawEdge) : null} />
+                <MetricIf label="Recommended side" value={prop.sideEngineDebug.recommendedSide?.toUpperCase()} />
+                <MetricIf label="Side aligned" value={prop.sideEngineDebug.sideAligned == null ? null : prop.sideEngineDebug.sideAligned ? "Yes" : "No"} />
+                <MetricIf label="Recent average" value={prop.sideEngineDebug.recentAverage != null ? formatNumber(prop.sideEngineDebug.recentAverage) : null} />
+                <MetricIf label="Matchup adjustment" value={prop.sideEngineDebug.matchupNote} />
+                <MetricIf label="Sportsbook line" value={prop.sideEngineDebug.sportsbookLine != null ? formatNumber(prop.sideEngineDebug.sportsbookLine) : null} />
+                <MetricIf label="Volatility tier" value={prop.sideEngineDebug.volatilityTier} />
+              </div>
+            </div>
+          </details>
         ) : null}
 
         {!manualProp && (historical.last10.sample > 0 || historical.last20.sample > 0) && (

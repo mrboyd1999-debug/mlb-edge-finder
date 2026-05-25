@@ -11,7 +11,23 @@ import {
   DATA_STATUS,
 } from "../modules/mlbProjectionEngine.js";
 import { scorePitcherManualProp } from "../modules/scoringEngine.js";
-import { buildFallbackBreakdown, VERIFIED_PROJECTION_LABEL } from "../modules/projectionBreakdown.js";
+import {
+  isFallbackDataStatus,
+  isVerifiedProjectionStatus,
+  VERIFIED_PROJECTION_LABEL,
+} from "../modules/projectionBreakdown.js";
+import {
+  buildSideEngineDebug,
+  computeDirectionalEdgeForSide,
+  computeRawEdge,
+  confidenceFromEdge,
+  hitChanceFromVerifiedEdge,
+  INSUFFICIENT_DATA_LABEL,
+  meetsPlayQualityThresholds,
+  resolveRecommendedSide,
+  sideConsistencyCheck,
+  validateSideAgainstProjection,
+} from "../modules/propSideEngine.js";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -22,24 +38,28 @@ function round(value, digits = 2) {
   return Math.round(Number(value) * factor) / factor;
 }
 
-function propFingerprint(input = {}) {
-  const str = [
-    input.playerName,
-    input.statType,
-    input.line,
-    input.side || input.pick,
-    input.payoutType,
-    input.source,
-    input.sport,
-  ]
-    .join("|")
-    .toLowerCase();
-  let hash = 0;
-  for (let i = 0; i < str.length; i += 1) {
-    hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
+function projectionIsVerified({ projectedValue, isFallbackProjection, dataStatus, projectionSource }) {
+  if (!Number.isFinite(projectedValue) || projectedValue <= 0) return false;
+  if (isFallbackProjection) return false;
+  if (isFallbackDataStatus(dataStatus)) return false;
+  if (projectionSource === "manual-fallback" || projectionSource === "missing") return false;
+  if (isVerifiedProjectionStatus(dataStatus)) return true;
+  if (projectionSource === "player-stats-model") return true;
+  return false;
+}
+
+export function isManualPropPlayable(prop = {}) {
+  if (prop.projectionUnavailable || prop.noEdge) return false;
+  if (prop.isFallbackProjection) return false;
+  return meetsPlayQualityThresholds({
+    projection: prop.projectedValue ?? prop.projection,
+    line: prop.line,
+    side: prop.bestPick || prop.side || prop.pick,
+    edge: prop.edge,
+    confidence: prop.confidenceScore ?? prop.confidence,
+    isVerified: Boolean(prop.isVerifiedProjection),
+    projectionUnavailable: prop.projectionUnavailable,
+  });
 }
 
 /** Sport-specific stat volatility: tier (LOW|MEDIUM|HIGH) and 0–1 score. */
@@ -197,22 +217,24 @@ export function computeManualEdgePercent(edge, line, projection) {
 }
 
 export function computeImpliedHitChance({
+  projection,
+  line,
   confidence = 0,
   edge = 0,
   volatility = DEFAULT_VOLATILITY,
   payoutType = "standard",
+  isVerified = true,
 }) {
-  const payout = normalizePayout(payoutType);
-  const favorableEdge = Math.max(Number(edge) || 0, 0);
-  let pct = Number(confidence) * 0.82 + favorableEdge * 5;
-
-  if (payout === "goblin") pct += 5;
-  if (payout === "demon") pct -= 7;
-  if (volatility.tier === "LOW") pct += 4;
-  if (volatility.tier === "HIGH") pct -= 6;
-  if (Number(edge) < 0) pct -= 10;
-
-  return Math.round(clamp(pct, 38, 88));
+  if (!isVerified) return null;
+  const rawEdge = computeRawEdge(projection, line);
+  if (rawEdge == null) return null;
+  return hitChanceFromVerifiedEdge({
+    absEdge: Math.abs(rawEdge),
+    rawEdge,
+    volatility,
+    confidence,
+    payoutType,
+  });
 }
 
 export function manualScoringModeLabel(liveScored = null, isFallback = false) {
@@ -438,14 +460,22 @@ export function generateManualExplanation(ctx = {}) {
     linePct,
     sport,
     projection,
+    projectionUnavailable,
+    noEdge,
   } = ctx;
+  if (projectionUnavailable) {
+    return "Awaiting verified projection data — analysis unavailable without game logs.";
+  }
+  if (noEdge || !pick) {
+    return "No edge — projection sits on the line. Avoid this prop.";
+  }
   const direction = normalizeManualPick(pick) === "over" ? "Over" : "Under";
   const stat = statLabel || "prop";
   const payout = normalizePayout(payoutType);
   const parts = [];
 
-  if (Number(edge) < 0) {
-    parts.push("Projection sits on the wrong side of the line for this side.");
+  if (Number.isFinite(projection) && Number.isFinite(line)) {
+    parts.push(`Model projects ${formatNumber(projection)} vs line ${formatNumber(line)}.`);
   }
   if (volatility.tier === "HIGH" && linePct > 0.72 && normalizeManualPick(pick) === "under") {
     parts.push(`Line looks high for a volatile ${stat} spot.`);
@@ -492,14 +522,15 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
   const sport = input.sport || "MLB";
   const statType = input.statType || "";
   const line = Number(input.line);
-  const pick = normalizeManualPick(input.side || input.pick);
+  const userPick = normalizeManualPick(input.side || input.pick);
   const payoutType = normalizePayout(input.payoutType || input.oddsType || input.payoutRole);
   const source = input.source === "Underdog" ? "Underdog" : "PrizePicks";
-  const fingerprint = propFingerprint(input);
 
   const volatility = getManualStatVolatility(sport, statType);
   const baseline = getManualStatBaseline(sport, statType);
   const linePct = linePercentile(line, baseline);
+  const statLabel = marketDisplayLabel(statType) || statType;
+  const volatilityLabel = volatility.label || volatilityLabelFromTier(volatility.tier);
 
   let projectionBreakdown = liveScored?.projectionBreakdown || [];
   let projectionLabel = liveScored?.projectionLabel || null;
@@ -524,13 +555,13 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
         playerName: input.playerName,
         opponent: input.opponent,
         team: input.team,
-        side: pick,
+        side: userPick,
         source,
       },
       mergedProfile,
       { opponentContext: mergedProfile.opponentContext }
     );
-    if (strikeoutData && Number.isFinite(strikeoutData.projectedValue)) {
+    if (strikeoutData) {
       fairLine = strikeoutData.projectedValue;
       projectionBreakdown = strikeoutData.projectionBreakdown || [];
       projectionLabel = strikeoutData.projectionLabel;
@@ -548,13 +579,13 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
         playerName: input.playerName,
         opponent: input.opponent,
         team: input.team,
-        side: pick,
+        side: userPick,
         source,
       },
       mergedProfile,
       { opponentContext: mergedProfile.opponentContext }
     );
-    if (pitcher && Number.isFinite(pitcher.projectedValue)) {
+    if (pitcher) {
       fairLine = pitcher.projectedValue;
       projectionBreakdown = pitcher.projectionBreakdown || [];
       projectionLabel = pitcher.projectionLabel;
@@ -576,31 +607,147 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
       mergedProfile,
       { opponentContext: mergedProfile.opponentContext }
     );
-    if (Number.isFinite(real.projectedValue)) {
-      fairLine = real.projectedValue;
-      projectionBreakdown = real.projectionBreakdown || [];
-      projectionLabel = real.projectionLabel;
-      projectionSource = real.projectionSource;
-      isFallbackProjection = real.isFallbackProjection;
-    }
+    fairLine = real.projectedValue;
+    projectionBreakdown = real.projectionBreakdown || [];
+    projectionLabel = real.projectionLabel;
+    projectionSource = real.projectionSource;
+    isFallbackProjection = real.isFallbackProjection;
   }
 
-  if (!Number.isFinite(fairLine)) {
-    fairLine = estimateFairLine(sport, statType, line, payoutType);
-    projectionLabel = DATA_STATUS.FALLBACK;
-    projectionSource = "manual-fallback";
-    isFallbackProjection = true;
-    dataStatus = DATA_STATUS.FALLBACK;
-    projectionConfidence = 48;
-    projectionBreakdown = buildFallbackBreakdown(fairLine);
+  const verified = projectionIsVerified({
+    projectedValue: fairLine,
+    isFallbackProjection,
+    dataStatus,
+    projectionSource,
+  });
+
+  if (!verified) {
+    const whyThisPick = generateManualExplanation({
+      statLabel,
+      line,
+      payoutType,
+      volatility,
+      sport: sportKey,
+      projectionUnavailable: true,
+    });
+    return {
+      projectionUnavailable: true,
+      bestPick: null,
+      side: null,
+      pick: null,
+      lean: "Avoid",
+      confidence: 0,
+      confidenceScore: 0,
+      calibratedConfidence: 0,
+      edge: 0,
+      edgePercent: null,
+      impliedHitChance: null,
+      hitChanceLabel: INSUFFICIENT_DATA_LABEL,
+      riskLevel: "High",
+      playTag: null,
+      isWeakManualPick: true,
+      isDisplayPlayable: false,
+      noEdge: true,
+      userPick,
+      whyThisPick,
+      qualificationReason: whyThisPick,
+      premiumWhySummary: whyThisPick,
+      projectedValue: null,
+      projection: null,
+      projectionBreakdown,
+      projectionLabel: "Projection unavailable",
+      projectionSource: projectionSource || "missing",
+      isFallbackProjection: true,
+      isVerifiedProjection: false,
+      dataStatus: dataStatus || DATA_STATUS.FALLBACK,
+      projectionConfidence: null,
+      manualVolatilityTier: volatility.tier,
+      manualVolatilityScore: volatility.score,
+      volatilityLabel,
+      volatility: round(1.5 + volatility.score * 2.5, 2),
+      manualDynamicAnalysis: true,
+      scoringModeLabel: "Projection unavailable",
+      dataQualityScore: 0,
+      bettingLabel: "Awaiting data",
+      sideEngineDebug: buildSideEngineDebug({
+        projectionSource: projectionSource || "missing",
+        dataStatus: dataStatus || DATA_STATUS.FALLBACK,
+        sportsbookLine: line,
+      }),
+    };
   }
 
-  let edge = computeDirectionalEdge(fairLine, line, pick);
-  if (normalizePayout(payoutType) === "goblin" && edge > 0) edge = round(edge + 0.12, 2);
-  if (normalizePayout(payoutType) === "demon" && edge > 0) edge = round(Math.max(0, edge - 0.18), 2);
-  if (edge > 0) edge = round(clamp(edge, 0.1, 2.5), 2);
-  else if (edge < 0) edge = round(clamp(edge, -2.5, -0.05), 2);
+  const recommendedSide = resolveRecommendedSide(fairLine, line);
+  const rawEdge = computeRawEdge(fairLine, line);
+  const absEdge = rawEdge != null ? Math.abs(rawEdge) : 0;
+  const sideValidation = validateSideAgainstProjection(recommendedSide, fairLine, line);
 
+  if (!recommendedSide) {
+    const whyThisPick = generateManualExplanation({
+      statLabel,
+      line,
+      payoutType,
+      volatility,
+      sport: sportKey,
+      projection: fairLine,
+      noEdge: true,
+    });
+    return {
+      projectionUnavailable: false,
+      noEdge: true,
+      bestPick: null,
+      side: null,
+      pick: null,
+      lean: "Avoid",
+      confidence: 0,
+      confidenceScore: 0,
+      calibratedConfidence: 0,
+      edge: 0,
+      edgePercent: null,
+      impliedHitChance: null,
+      hitChanceLabel: INSUFFICIENT_DATA_LABEL,
+      riskLevel: classifyManualRisk({ payoutType, volatility, edge: 0, linePct }),
+      playTag: null,
+      isWeakManualPick: true,
+      isDisplayPlayable: false,
+      userPick,
+      whyThisPick,
+      qualificationReason: whyThisPick,
+      premiumWhySummary: whyThisPick,
+      projectedValue: fairLine,
+      projection: fairLine,
+      projectionBreakdown,
+      projectionLabel,
+      projectionSource: projectionSource || "player-stats-model",
+      isFallbackProjection: false,
+      isVerifiedProjection: true,
+      dataStatus,
+      projectionConfidence,
+      manualVolatilityTier: volatility.tier,
+      manualVolatilityScore: volatility.score,
+      volatilityLabel,
+      volatility: round(1.5 + volatility.score * 2.5, 2),
+      manualDynamicAnalysis: true,
+      scoringModeLabel: manualScoringModeLabel(liveScored, false),
+      dataQualityScore: Math.round(48 + (1 - volatility.score) * 22),
+      bettingLabel: "No edge",
+      sideEngineDebug: buildSideEngineDebug({
+        projection: fairLine,
+        line,
+        side: userPick,
+        projectionSource,
+        dataStatus,
+        rawEdge,
+        recommendedSide: null,
+        aligned: false,
+        volatility,
+        recentAverage: mergedProfile?.last5Average ?? mergedProfile?.seasonAverage ?? null,
+        sportsbookLine: line,
+      }),
+    };
+  }
+
+  const edge = computeDirectionalEdgeForSide(fairLine, line, recommendedSide);
   let confidence;
   let impliedHitChance;
 
@@ -608,41 +755,37 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
     const pitcherScore = scorePitcherManualProp({
       projection: fairLine,
       line,
-      pick,
+      pick: recommendedSide,
       statType,
       payoutType,
       volatility,
       projectionConfidence: projectionConfidence ?? 60,
-      dataStatus: dataStatus || DATA_STATUS.FALLBACK,
+      dataStatus: dataStatus || DATA_STATUS.VERIFIED,
     });
     confidence = pitcherScore.confidence;
     impliedHitChance = pitcherScore.impliedHitChance;
   } else {
-    confidence = calculateManualConfidence({
-      payoutType,
+    confidence = confidenceFromEdge(absEdge, {
       volatility,
-      edge,
-      line,
-      pick,
-      source,
-      sport,
-      statType,
-      fingerprint,
-      linePct,
+      payoutType,
+      marketKey,
+      isVerified: true,
     });
-    impliedHitChance = computeImpliedHitChance({ confidence, edge, volatility, payoutType, isFallback: isFallbackProjection });
+    impliedHitChance = computeImpliedHitChance({
+      projection: fairLine,
+      line,
+      confidence,
+      edge,
+      volatility,
+      payoutType,
+      isVerified: true,
+    });
   }
 
   const riskLevel = classifyManualRisk({ payoutType, volatility, edge, linePct });
-  const statLabel = marketDisplayLabel(statType) || statType;
   const edgePercent = computeManualEdgePercent(edge, line, fairLine);
-  if (!isPitcherProp) {
-    impliedHitChance = computeImpliedHitChance({ confidence, edge, volatility, payoutType });
-    if (isFallbackProjection) impliedHitChance = Math.round(clamp(impliedHitChance, 35, 65));
-  }
-  const volatilityLabel = volatility.label || volatilityLabelFromTier(volatility.tier);
   const whyThisPick = generateManualExplanation({
-    pick,
+    pick: recommendedSide,
     statLabel,
     line,
     riskLevel,
@@ -650,26 +793,54 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
     volatility,
     edge,
     linePct,
-    sport: normalizeSportKey(sport),
+    sport: sportKey,
     projection: fairLine,
   });
   const playTag = resolveManualPlayTag({ edge, confidence, volatility });
-  const isWeakManualPick = Number(edge) < 0;
+  const isDisplayPlayable = meetsPlayQualityThresholds({
+    projection: fairLine,
+    line,
+    side: recommendedSide,
+    edge,
+    confidence,
+    isVerified: true,
+    projectionUnavailable: false,
+  });
+  const recentAverage = mergedProfile?.last5Average ?? mergedProfile?.seasonAverage ?? null;
+  const matchupNote = mergedProfile?.opponentContext?.note || mergedProfile?.matchupNote || null;
+  const sideEngineDebug = buildSideEngineDebug({
+    projection: fairLine,
+    line,
+    side: recommendedSide,
+    projectionSource,
+    dataStatus,
+    rawEdge,
+    recommendedSide,
+    aligned: sideValidation.aligned,
+    volatility,
+    recentAverage,
+    matchupNote,
+    sportsbookLine: line,
+  });
 
   return {
-    bestPick: pick,
-    side: pick,
-    pick,
-    lean: pick === "over" ? "Over" : "Under",
+    bestPick: recommendedSide,
+    side: recommendedSide,
+    pick: recommendedSide,
+    lean: recommendedSide === "over" ? "Over" : "Under",
+    userPick,
+    sideAligned: sideConsistencyCheck({ bestPick: recommendedSide, projectedValue: fairLine, line }),
     confidence,
     confidenceScore: confidence,
     calibratedConfidence: confidence,
     edge,
     edgePercent,
     impliedHitChance,
+    hitChanceLabel: impliedHitChance == null ? INSUFFICIENT_DATA_LABEL : null,
     riskLevel,
     playTag,
-    isWeakManualPick,
+    isWeakManualPick: !isDisplayPlayable,
+    isDisplayPlayable,
     whyThisPick,
     qualificationReason: whyThisPick,
     premiumWhySummary: whyThisPick,
@@ -677,51 +848,56 @@ export function scoreManualPropInput(input = {}, liveScored = null, profile = nu
     projection: fairLine,
     projectionBreakdown,
     projectionLabel,
-    projectionSource: projectionSource || "manual-dynamic",
-    isFallbackProjection: Boolean(isFallbackProjection),
-    isVerifiedProjection: dataStatus === DATA_STATUS.VERIFIED || dataStatus === DATA_STATUS.PARTIAL,
-    dataStatus: dataStatus || (isFallbackProjection ? DATA_STATUS.FALLBACK : null),
+    projectionSource: projectionSource || "player-stats-model",
+    isFallbackProjection: false,
+    isVerifiedProjection: true,
+    dataStatus,
     projectionConfidence,
     manualVolatilityTier: volatility.tier,
     manualVolatilityScore: volatility.score,
     volatilityLabel,
     volatility: round(1.5 + volatility.score * 2.5, 2),
     manualDynamicAnalysis: true,
-    scoringModeLabel: isFallbackProjection ? "Estimated grade" : manualScoringModeLabel(liveScored, isFallbackProjection),
+    scoringModeLabel: manualScoringModeLabel(liveScored, false),
     dataQualityScore: Math.round(48 + (1 - volatility.score) * 22 + Math.max(edge, 0) * 6),
-    bettingLabel: playTag || "Graded",
+    bettingLabel: playTag || (isDisplayPlayable ? "Playable" : "Below threshold"),
+    sideEngineDebug,
   };
 }
 
 export function mergeManualPropScoring(builtProp = {}, manualScore = {}, liveScored = null) {
-  const lean = manualScore.bestPick || builtProp.bestPick || builtProp.side;
+  const recommended = manualScore.bestPick || null;
   const scoringModeLabel = manualScore.scoringModeLabel || manualScoringModeLabel(liveScored, manualScore.isFallbackProjection);
+  const playable = Boolean(manualScore.isDisplayPlayable) && isManualPropPlayable({ ...builtProp, ...manualScore });
   return {
     ...builtProp,
     ...(liveScored || {}),
     ...manualScore,
-    bestPick: lean,
-    side: lean,
-    pick: lean,
+    bestPick: recommended,
+    side: recommended,
+    pick: recommended,
     line: Number(builtProp.line ?? manualScore.line),
     team: builtProp.team || liveScored?.team || "",
     opponent: builtProp.opponent || liveScored?.opponent || "",
-    isDisplayPlayable: true,
-    bettingLabel: manualScore.bettingLabel || manualScore.playTag || "Graded",
-    displayTier: manualScore.playTag === "Strong Play" ? "playable" : "research",
+    isDisplayPlayable: playable,
+    bettingLabel: manualScore.bettingLabel || manualScore.playTag || (manualScore.projectionUnavailable ? "Awaiting data" : "Graded"),
+    displayTier: manualScore.playTag === "Strong Play" ? "playable" : playable ? "playable" : "research",
     lineSourceBadge: "MANUAL",
     scoringModeLabel,
     projectionBreakdown: manualScore.projectionBreakdown || liveScored?.projectionBreakdown || [],
-    projectionLabel: manualScore.projectionLabel || liveScored?.projectionLabel || "Estimated fallback projection",
+    projectionLabel: manualScore.projectionLabel || liveScored?.projectionLabel || "Projection unavailable",
     isFallbackProjection: manualScore.isFallbackProjection ?? liveScored?.isFallbackProjection,
     isVerifiedProjection: manualScore.isVerifiedProjection ?? liveScored?.isVerifiedProjection,
     dataStatus: manualScore.dataStatus || liveScored?.dataStatus || null,
     projectionConfidence: manualScore.projectionConfidence ?? liveScored?.projectionConfidence ?? null,
+    hitChanceLabel: manualScore.hitChanceLabel || (manualScore.impliedHitChance == null ? INSUFFICIENT_DATA_LABEL : null),
+    sideEngineDebug: manualScore.sideEngineDebug || null,
     analyzedAt: new Date().toISOString(),
   };
 }
 
 export function rankManualPropScore(prop = {}) {
+  if (!isManualPropPlayable(prop)) return -1_000_000;
   const edgePct = Math.max(Number(prop.edgePercent ?? 0), 0);
   const edge = Math.max(Number(prop.edge ?? 0), 0);
   const conf = Number(prop.confidenceScore ?? prop.confidence ?? 0);
@@ -748,7 +924,7 @@ export function sortManualPropsByRank(props = []) {
 }
 
 export function selectManualTopPicksByRank(props = [], limit = 2) {
-  const ranked = sortManualPropsByRank(props);
+  const ranked = sortManualPropsByRank(props).filter(isManualPropPlayable);
   const selected = [];
   for (const prop of ranked) {
     if (selected.length >= Math.max(0, limit)) break;

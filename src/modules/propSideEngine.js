@@ -1,0 +1,179 @@
+import { DATA_STATUS } from "./projectionBreakdown.js";
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function round(value, digits = 2) {
+  const factor = 10 ** digits;
+  return Math.round(Number(value) * factor) / factor;
+}
+
+export const EDGE_NEUTRAL_THRESHOLD = 0.05;
+export const MIN_PLAY_EDGE = 0.35;
+export const MIN_PLAY_CONFIDENCE = 58;
+export const INSUFFICIENT_DATA_LABEL = "Insufficient verified data";
+
+export function normalizePropSide(side = "") {
+  const key = String(side || "").toLowerCase();
+  if (key === "over" || key === "more" || key === "higher") return "over";
+  if (key === "under" || key === "less" || key === "lower") return "under";
+  return "";
+}
+
+/** Raw model edge: projection minus line (positive favors OVER). */
+export function computeRawEdge(projection, line) {
+  const proj = Number(projection);
+  const numericLine = Number(line);
+  if (!Number.isFinite(proj) || !Number.isFinite(numericLine)) return null;
+  return round(proj - numericLine, 2);
+}
+
+/** Recommended side from projection vs line only. */
+export function resolveRecommendedSide(projection, line) {
+  const raw = computeRawEdge(projection, line);
+  if (raw == null) return null;
+  if (Math.abs(raw) < EDGE_NEUTRAL_THRESHOLD) return null;
+  return raw > 0 ? "over" : "under";
+}
+
+/** Directional edge for a given side (positive = side supported). */
+export function computeDirectionalEdgeForSide(projection, line, side) {
+  const raw = computeRawEdge(projection, line);
+  if (raw == null) return 0;
+  const normalized = normalizePropSide(side);
+  if (normalized === "over") return raw;
+  if (normalized === "under") return round(-raw, 2);
+  return 0;
+}
+
+export function validateSideAgainstProjection(side, projection, line) {
+  const recommended = resolveRecommendedSide(projection, line);
+  const normalized = normalizePropSide(side);
+  if (!recommended) {
+    return { ok: false, recommended: null, reason: "No edge — projection equals line", aligned: false };
+  }
+  if (!normalized) {
+    return { ok: false, recommended, reason: "Missing pick side", aligned: false };
+  }
+  const aligned = normalized === recommended;
+  return {
+    ok: aligned,
+    recommended,
+    aligned,
+    reason: aligned
+      ? `${normalized.toUpperCase()} supported by projection`
+      : `Projection supports ${recommended.toUpperCase()}, not ${normalized.toUpperCase()}`,
+  };
+}
+
+export function sideConsistencyCheck(prop = {}) {
+  const side = normalizePropSide(prop.bestPick || prop.side || prop.pick);
+  const projection = Number(prop.projectedValue ?? prop.projection);
+  const line = Number(prop.line);
+  if (!side || !Number.isFinite(projection) || !Number.isFinite(line)) return false;
+  if (side === "over") return projection > line + EDGE_NEUTRAL_THRESHOLD;
+  if (side === "under") return projection < line - EDGE_NEUTRAL_THRESHOLD;
+  return false;
+}
+
+export function confidenceFromEdge(absEdge, {
+  volatility = { tier: "MEDIUM", score: 0.5 },
+  payoutType = "standard",
+  marketKey = "",
+  isVerified = true,
+} = {}) {
+  if (!isVerified || !Number.isFinite(absEdge)) return 0;
+
+  let score = 42 + absEdge * 15;
+  if (absEdge >= 1.5) score += 10;
+  else if (absEdge >= 1.0) score += 6;
+  else if (absEdge >= 0.7) score += 4;
+  else if (absEdge >= 0.4) score += 2;
+  else if (absEdge < 0.2) score -= 10;
+
+  if (volatility?.tier === "LOW") score += 5;
+  else if (volatility?.tier === "HIGH") score -= 8;
+
+  const payout = String(payoutType || "standard").toLowerCase();
+  if (payout === "goblin") {
+    score += 3;
+    return Math.round(clamp(score, 72, 85));
+  }
+  if (payout === "demon") {
+    score -= 4;
+    return Math.round(clamp(score, 45, 60));
+  }
+  if (marketKey === "strikeouts" && absEdge >= 0.7) score += 3;
+  return Math.round(clamp(score, 58, 72));
+}
+
+export function hitChanceFromVerifiedEdge({
+  absEdge,
+  rawEdge,
+  volatility = { tier: "MEDIUM" },
+  confidence = 0,
+  payoutType = "standard",
+} = {}) {
+  if (!Number.isFinite(absEdge) || !Number.isFinite(rawEdge)) return null;
+  if (absEdge < EDGE_NEUTRAL_THRESHOLD) return null;
+
+  let pct = 50 + absEdge * 7 + (Number(confidence) - 50) * 0.22;
+  if (volatility?.tier === "LOW") pct += 4;
+  else if (volatility?.tier === "HIGH") pct -= 7;
+
+  const payout = String(payoutType || "standard").toLowerCase();
+  if (payout === "goblin") pct += 3;
+  if (payout === "demon") pct -= 6;
+
+  return Math.round(clamp(pct, 42, 82));
+}
+
+export function meetsPlayQualityThresholds({
+  projection,
+  line,
+  side,
+  edge,
+  confidence,
+  isVerified = false,
+  projectionUnavailable = false,
+}) {
+  if (projectionUnavailable || !isVerified) return false;
+  if (!Number.isFinite(projection) || !Number.isFinite(line)) return false;
+  if (!normalizePropSide(side)) return false;
+  if (!sideConsistencyCheck({ bestPick: side, projectedValue: projection, line })) return false;
+  if (Number(edge) < MIN_PLAY_EDGE) return false;
+  if (Number(confidence) < MIN_PLAY_CONFIDENCE) return false;
+  return true;
+}
+
+export function buildSideEngineDebug({
+  projection,
+  line,
+  side,
+  projectionSource,
+  dataStatus,
+  rawEdge,
+  recommendedSide,
+  aligned,
+  volatility,
+  recentAverage,
+  matchupNote,
+  sportsbookLine,
+} = {}) {
+  return {
+    projectionSource: projectionSource || "unavailable",
+    dataStatus: dataStatus || DATA_STATUS.FALLBACK,
+    edgeFormula: "rawEdge = projection - line; over edge = rawEdge, under edge = -rawEdge",
+    rawEdge,
+    recommendedSide,
+    userSide: normalizePropSide(side),
+    sideAligned: aligned,
+    projection,
+    line,
+    sportsbookLine: sportsbookLine ?? line,
+    recentAverage,
+    matchupNote: matchupNote || null,
+    volatilityTier: volatility?.tier || null,
+  };
+}

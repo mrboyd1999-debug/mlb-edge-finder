@@ -83,7 +83,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
   const tier = confidenceTier(prop);
   const pickSide = normalizeManualPick(prop.bestPick || prop.side || prop.pick);
   const lean = pickSide === "over" ? "Over" : pickSide === "under" ? "Under" : formatLeanSide(prop.bestPick || prop.side || "Watch");
-  const weakPick = isManual && Number(prop.edge) < 0;
+  const weakPick = isManual && (prop.projectionUnavailable || prop.noEdge || prop.isWeakManualPick);
   const metricFade = manualMetricFadeStyle(prop.edge);
   const payoutLabel = payoutDisplayLabel(prop);
   const projVsLine = projectionVsLineLabel(prop);
@@ -140,7 +140,16 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
       ? prop.calibratedConfidence
       : prop.confidenceScore ?? prop.confidence ?? null;
   const edgeDisplay = Number.isFinite(Number(prop.edge)) ? formatNumber(prop.edge) : null;
-  const hitChanceDisplay = Number.isFinite(Number(prop.impliedHitChance)) ? `${Math.round(Number(prop.impliedHitChance))}%` : null;
+  const hitChanceDisplay = Number.isFinite(Number(prop.impliedHitChance))
+    ? `${Math.round(Number(prop.impliedHitChance))}%`
+    : prop.hitChanceLabel || (isManual && prop.projectionUnavailable ? "Insufficient verified data" : null);
+  const projectionDisplay = prop.projectionUnavailable
+    ? "Unavailable"
+    : prop.projectedValue != null
+      ? formatNumber(prop.projectedValue)
+      : prop.projection != null
+        ? formatNumber(prop.projection)
+        : null;
   const volatilityDisplay = prop.volatilityLabel || null;
   const riskShort = riskShortLabel(prop.riskLevel);
   const showDynamicTier = dynamicTier && String(dynamicTier).toUpperCase() !== "RESEARCH";
@@ -242,55 +251,52 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
               <span className="prop-card-stat-highlight prop-card-prop-line-row" style={{ ...styles.compactMetaItem, flex: "1 1 100%" }}>
                 <strong>
                   {displayMarketLabel(prop)} · Line {formatNumber(prop.line)}
+                  {prop.source || prop.platform ? ` · ${prop.source || prop.platform}` : ""}
                 </strong>
               </span>
               <div className="prop-card-primary-metrics" style={styles.manualPrimaryMetricsRow}>
-                {confDisplay != null ? (
+                {projectionDisplay ? (
+                  <span style={{ ...styles.scoreBadge, ...metricFade, borderColor: "#475569", color: "#cbd5e1", background: "#111827" }}>
+                    PROJ {projectionDisplay}
+                  </span>
+                ) : null}
+                {edgeDisplay != null && Number(prop.edge) > 0 ? (
+                  <span
+                    style={{
+                      ...styles.scoreBadge,
+                      ...metricFade,
+                      borderColor: "#1d4ed8",
+                      color: "#93c5fd",
+                      background: "#1e3a8a",
+                    }}
+                  >
+                    EDGE +{edgeDisplay}
+                  </span>
+                ) : null}
+                {confDisplay != null && Number(confDisplay) > 0 ? (
                   <span style={{ ...styles.scoreBadge, ...metricFade, borderColor: "#166534", color: "#86efac", background: "#052e16" }}>
                     CONF {confDisplay}%
                   </span>
                 ) : null}
                 {hitChanceDisplay ? (
                   <span style={{ ...styles.scoreBadge, ...metricFade, borderColor: "#155e75", color: "#a5f3fc", background: "#083344" }}>
-                    HIT {hitChanceDisplay}
-                  </span>
-                ) : null}
-                {edgeDisplay != null ? (
-                  <span
-                    style={{
-                      ...styles.scoreBadge,
-                      ...metricFade,
-                      borderColor: Number(prop.edge) >= 0 ? "#1d4ed8" : "#991b1b",
-                      color: Number(prop.edge) >= 0 ? "#93c5fd" : "#fca5a5",
-                      background: Number(prop.edge) >= 0 ? "#1e3a8a" : "#450a0a",
-                    }}
-                  >
-                    EDGE {Number(prop.edge) > 0 ? "+" : ""}{edgeDisplay}
-                  </span>
-                ) : null}
-                {projVsLine ? (
-                  <span style={{ ...styles.scoreBadge, ...metricFade, borderColor: "#475569", color: "#cbd5e1", background: "#111827" }}>
-                    {projVsLine}
+                    {String(hitChanceDisplay).includes("%") ? `HIT ${hitChanceDisplay}` : hitChanceDisplay}
                   </span>
                 ) : null}
               </div>
               <div className="prop-card-badge-row" style={styles.badgeRow}>
                 {lean === "Over" || lean === "Under" ? (
                   <span style={{ ...styles.scoreBadge, ...leanBadgeStyle(lean) }}>{lean.toUpperCase()}</span>
-                ) : null}
-                {riskShort ? (
-                  <span style={{ ...styles.scoreBadge, ...manualRiskBadgeStyle(prop.riskLevel) }}>
-                    {riskShort} RISK
-                  </span>
-                ) : null}
-                {confDisplay != null ? (
-                  <span style={{ ...styles.scoreBadge, ...metricFade, borderColor: "#166534", color: "#86efac", background: "#052e16" }}>
-                    {confDisplay}%
-                  </span>
+                ) : prop.projectionUnavailable || prop.noEdge ? (
+                  <span style={{ ...styles.scoreBadge, borderColor: "#475569", color: "#cbd5e1", background: "#1e293b" }}>AVOID</span>
                 ) : null}
                 <span style={{ ...styles.scoreBadge, ...payoutBadgeStyle(prop) }}>{payoutLabel}</span>
               </div>
-              {volatilityDisplay ? (
+              {prop.whyThisPick || prop.qualificationReason ? (
+                <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, marginTop: "2px" }}>
+                  {prop.whyThisPick || prop.qualificationReason}
+                </p>
+              ) : volatilityDisplay ? (
                 <p className="prop-card-volatility-secondary" style={styles.manualVolatilityLine}>
                   {volatilityDisplay}
                 </p>
