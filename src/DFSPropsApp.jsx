@@ -186,7 +186,6 @@ import { enrichPropsWithSportsData, generateMlbPropsFromSportsData } from "./ser
 import { resolveIngestionFallback } from "./services/ingestionFallback.js";
 import { writeLastGoodBoard, readLastGoodBoard, boardFromLastGood } from "./services/lastGoodBoardCache.js";
 import { initRawResponseDebug, dumpDebugGlobals, recordProviderStatus, recordNormalizedProps } from "./utils/rawResponseDebug.js";
-import RawApiDebugPanel from "./components/RawApiDebugPanel.jsx";
 import { logLiveFetchResult, buildLiveFetchFailureSummary } from "./utils/liveFetchAudit.js";
 import {
   buildGuaranteedBaseFeedDisplay,
@@ -215,7 +214,6 @@ import PlayerPropCard from "./components/PlayerPropCard.jsx";
 import PickDetailModal from "./components/PickDetailModal.jsx";
 import AcceptedPropsPanel from "./components/AcceptedPropsPanel.jsx";
 import AccuracyReview from "./components/AccuracyReview.jsx";
-import SourceStatusBar from "./components/SourceStatusBar.jsx";
 import SettingsPanel from "./components/SettingsPanel.jsx";
 import ProviderDebugDrawer from "./components/ProviderDebugDrawer.jsx";
 import { buildFeedHealthContext } from "./services/providerHealth.js";
@@ -2154,7 +2152,6 @@ export default function DFSPropsApp() {
   const [compactMode, setCompactMode] = useState(() => readCompactModePreference());
   const [quickPicksMode, setQuickPicksMode] = useState(() => readQuickPicksModePreference());
   const [showDebugPanels, setShowDebugPanels] = useState(() => readShowDebugPanelsPreference());
-  const [rawApiDebugOpen, setRawApiDebugOpen] = useState(false);
   const [appView, setAppView] = useState(() => {
     try {
       const stored = window.localStorage.getItem(APP_VIEW_STORAGE_KEY);
@@ -3539,9 +3536,6 @@ export default function DFSPropsApp() {
           onSavePick={saveThisPick}
         />
       )}
-    {debugModeEnabled && showDebugPanels ? (
-      <RawApiDebugPanel open={rawApiDebugOpen} onToggle={() => setRawApiDebugOpen((open) => !open)} />
-    ) : null}
     </>
   );
 }

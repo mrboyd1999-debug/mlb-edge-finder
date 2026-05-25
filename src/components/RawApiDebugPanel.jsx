@@ -31,7 +31,7 @@ function JsonBlock({ value }) {
   );
 }
 
-export default function RawApiDebugPanel({ open = false, onToggle }) {
+export default function RawApiDebugPanel({ open = false, onToggle, embedded = false }) {
   const [rows, setRows] = useState(() => buildRawDebugRows());
   const [propTraces, setPropTraces] = useState(() => getPropTraces());
 
@@ -48,47 +48,33 @@ export default function RawApiDebugPanel({ open = false, onToggle }) {
     return () => window.clearInterval(timer);
   }, [open, refresh]);
 
-  return (
-    <>
-      <button
-        type="button"
-        className="raw-api-debug-toggle"
-        onClick={onToggle}
-        style={{
-          position: "fixed",
-          right: 16,
-          bottom: 16,
-          zIndex: 1200,
-          padding: "10px 14px",
-          borderRadius: 999,
-          border: "1px solid rgba(148,163,184,0.35)",
-          background: open ? "#1e293b" : "#0f172a",
-          color: "#f8fafc",
-          fontSize: 13,
-          fontWeight: 600,
-          cursor: "pointer",
-          boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
-        }}
-      >
-        {open ? "Hide Raw API Debug" : "Show Raw API Debug"}
-      </button>
-
-      {open ? (
-        <section
-          aria-label="Raw API Debug"
-          style={{
-            position: "fixed",
-            inset: "auto 12px 68px 12px",
-            maxHeight: "72vh",
-            overflow: "auto",
-            zIndex: 1199,
-            padding: 14,
-            borderRadius: 12,
-            border: "1px solid rgba(148,163,184,0.25)",
-            background: "rgba(2,6,23,0.96)",
-            boxShadow: "0 16px 40px rgba(0,0,0,0.45)",
-          }}
-        >
+  const panelBody = (
+    <section
+      aria-label="Raw API Debug"
+      className={embedded ? "raw-api-debug-panel raw-api-debug-panel--embedded" : undefined}
+      style={
+        embedded
+          ? {
+              marginTop: 8,
+              padding: 10,
+              borderRadius: 8,
+              border: "1px solid #334155",
+              background: "#0f172a",
+            }
+          : {
+              position: "fixed",
+              inset: "auto 12px 68px 12px",
+              maxHeight: "72vh",
+              overflow: "auto",
+              zIndex: 1199,
+              padding: 14,
+              borderRadius: 12,
+              border: "1px solid rgba(148,163,184,0.25)",
+              background: "rgba(2,6,23,0.96)",
+              boxShadow: "0 16px 40px rgba(0,0,0,0.45)",
+            }
+      }
+    >
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
             <div>
               <p style={{ ...styles.eyebrow, margin: 0 }}>Ingestion</p>
@@ -171,8 +157,38 @@ export default function RawApiDebugPanel({ open = false, onToggle }) {
               <JsonBlock value={row.firstRawObject} />
             </article>
           ))}
-        </section>
-      ) : null}
+    </section>
+  );
+
+  if (embedded) {
+    return open ? panelBody : null;
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className="raw-api-debug-toggle"
+        onClick={onToggle}
+        style={{
+          position: "fixed",
+          right: 16,
+          bottom: 16,
+          zIndex: 1200,
+          padding: "10px 14px",
+          borderRadius: 999,
+          border: "1px solid rgba(148,163,184,0.35)",
+          background: open ? "#1e293b" : "#0f172a",
+          color: "#f8fafc",
+          fontSize: 13,
+          fontWeight: 600,
+          cursor: "pointer",
+          boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+        }}
+      >
+        {open ? "Hide Raw API Debug" : "Show Raw API Debug"}
+      </button>
+      {open ? panelBody : null}
     </>
   );
 }

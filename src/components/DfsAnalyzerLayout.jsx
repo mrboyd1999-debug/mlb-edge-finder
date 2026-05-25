@@ -1,13 +1,17 @@
-import { memo } from "react";
+import { memo, useState, useCallback } from "react";
 import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import CompactApiHeader from "./CompactApiHeader.jsx";
 import CompactAppTabs from "./CompactAppTabs.jsx";
+import SystemStatusCard from "./SystemStatusCard.jsx";
 import ManualPropsPanel from "./ManualPropsPanel.jsx";
 import BestPlaysTab from "./BestPlaysTab.jsx";
 import CompactPayoutTab from "./CompactPayoutTab.jsx";
 import SavedPicksTab from "./SavedPicksTab.jsx";
 import SettingsPanel from "./SettingsPanel.jsx";
+import DeveloperDebugPanel from "./DeveloperDebugPanel.jsx";
+import { readSettingsMeta } from "../services/runtimeSettings.js";
 import { GOBLIN_EMPTY_MESSAGE } from "../utils/goblinDemonPairs.js";
+import { isDebugModeEnabled } from "../utils/devMode.js";
 
 function DfsAnalyzerLayout({
   appView,
@@ -40,11 +44,24 @@ function DfsAnalyzerLayout({
   debugInfo,
   mlbPipelineStatus,
 }) {
+  const [connectionReport, setConnectionReport] = useState(() => {
+    const meta = readSettingsMeta();
+    if (meta.lastTestedAt && Array.isArray(meta.lastConnectionReport)) {
+      return { testedAt: meta.lastTestedAt, results: meta.lastConnectionReport };
+    }
+    return null;
+  });
+
+  const handleConnectionReportChange = useCallback((report) => {
+    if (report) setConnectionReport(report);
+  }, []);
+
+  const debugModeEnabled = isDebugModeEnabled();
+
   return (
     <main className="dfs-app-page compact-dfs-app">
       <CompactApiHeader
         title="MLB Pick Finder"
-        apiHealth={apiHealth}
         loading={loading}
         refreshBlocked={refreshBlocked}
         refreshCountdownSec={refreshCountdownSec}
@@ -53,6 +70,12 @@ function DfsAnalyzerLayout({
       />
 
       <CompactAppTabs activeTab={appView} onChange={setAppView} />
+
+      <SystemStatusCard
+        apiHealth={apiHealth}
+        mlbPipelineStatus={mlbPipelineStatus}
+        connectionReport={connectionReport}
+      />
 
       {learningSaveNotice ? <p className="compact-form-notice">{learningSaveNotice}</p> : null}
 
@@ -119,18 +142,27 @@ function DfsAnalyzerLayout({
         </SectionErrorBoundary>
       ) : null}
 
-      <details className="compact-settings-details">
-        <summary>Settings &amp; debug</summary>
-        <SettingsPanel
-          onSaved={onSettingsSaved}
-          onClearCaches={onSettingsSaved}
-          showDebugPanels={showDebugPanels}
-          onShowDebugPanelsChange={onShowDebugPanelsChange}
+      <SettingsPanel
+        onSaved={onSettingsSaved}
+        onClearCaches={onSettingsSaved}
+        onConnectionReportChange={handleConnectionReportChange}
+        feedHealthContext={feedHealthContext}
+        lastUpdated={lastUpdatedLabel}
+      />
+
+      <details className="compact-settings-details developer-debug-details">
+        <summary>Developer Debug</summary>
+        <DeveloperDebugPanel
+          connectionReport={connectionReport}
+          lastTestedAt={connectionReport?.testedAt || readSettingsMeta().lastTestedAt || ""}
+          apiHealth={apiHealth}
+          mlbPipelineStatus={mlbPipelineStatus}
           feedHealthContext={feedHealthContext}
           underdogDebugSnapshot={underdogDebugSnapshot}
           rejectionAudit={debugInfo?.rejectionAudit}
-          apiHealth={apiHealth}
-          mlbPipelineStatus={mlbPipelineStatus}
+          showDebugPanels={showDebugPanels}
+          onShowDebugPanelsChange={onShowDebugPanelsChange}
+          debugModeEnabled={debugModeEnabled}
         />
       </details>
     </main>

@@ -10,25 +10,15 @@ import {
   writeSettingsMeta,
 } from "../services/runtimeSettings.js";
 import { validateApiConfig } from "../config/apiConfig.js";
-import ApiHealthPanel from "./ApiHealthPanel.jsx";
-import MlbPipelineStatusPanel from "./MlbPipelineStatusPanel.jsx";
-import UnderdogDebugPanel from "./UnderdogDebugPanel.jsx";
-import ParsedUnderdogDebugCard from "./ParsedUnderdogDebugCard.jsx";
-import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import { testAllApiConnections, testSportsDataIO, mergeConnectionReportWithFeeds } from "../services/apiConnectionTest.js";
 import { isDebugModeEnabled } from "../utils/devMode.js";
 
 export default function SettingsPanel({
   onSaved,
   onClearCaches,
-  showDebugPanels = false,
-  onShowDebugPanelsChange,
+  onConnectionReportChange,
   lastUpdated = "",
   feedHealthContext = null,
-  underdogDebugSnapshot = null,
-  rejectionAudit = null,
-  mlbPipelineStatus = null,
-  apiHealth = null,
 }) {
   const panelRef = useRef(null);
   const [draft, setDraft] = useState(() => readRuntimeSettings());
@@ -70,8 +60,8 @@ export default function SettingsPanel({
       const failed = (report.results || []).filter((row) => row.showError === true);
       setNotice(
         failed.length
-          ? `${failed.length} provider${failed.length === 1 ? "" : "s"} need attention — see API Health below.`
-          : "Provider health updated from live feed + probe."
+          ? `${failed.length} provider${failed.length === 1 ? "" : "s"} need attention.`
+          : "Connections verified."
       );
       if (collapseAfter) collapsePanel();
       return report;
@@ -120,12 +110,9 @@ export default function SettingsPanel({
       setMeta(readSettingsMeta());
       const sdRow = (report.results || [])[0];
       setNotice(
-        sdRow?.debugLine ||
-          (sdRow?.settingsLine === "Connected" || sdRow?.settingsLine === "Connected via Proxy"
-            ? sdRow.settingsLine === "Connected via Proxy"
-              ? "SportsDataIO connected via backend proxy."
-              : "SportsDataIO endpoint tested successfully."
-            : `SportsDataIO: ${sdRow?.settingsLine || "test complete"} — see console for details.`)
+        sdRow?.settingsLine === "Connected" || sdRow?.settingsLine === "Connected via Proxy"
+          ? "SportsDataIO connected."
+          : `SportsDataIO: ${sdRow?.settingsLine || "test complete"}.`
       );
     } catch (error) {
       setNotice(error?.message || "SportsDataIO test failed.");
@@ -137,6 +124,10 @@ export default function SettingsPanel({
   async function handleTestConnections() {
     await runConnectionTest({ collapseAfter: true });
   }
+
+  useEffect(() => {
+    onConnectionReportChange?.(connectionReport);
+  }, [connectionReport, onConnectionReportChange]);
 
   useEffect(() => {
     if (!feedHealthContext) return;
@@ -153,20 +144,20 @@ export default function SettingsPanel({
       try {
         return mergeConnectionReportWithFeeds(base, feedHealthContext);
       } catch (error) {
-        console.error("[API Health] Feed merge failed — keeping last report", error);
+        console.error("[Settings] Feed merge failed — keeping last report", error);
         return current;
       }
     });
   }, [feedHealthContext]);
 
   return (
-    <details id="section-settings" ref={panelRef} className="settings-panel" style={styles.compactDetails}>
-      <summary style={styles.detailsSummary}>
+    <details id="section-settings" ref={panelRef} className="settings-panel compact-settings-details">
+      <summary>
         <span>
-          <span className="mobile-hide-verbose" style={styles.eyebrow}>Runtime setup</span>
+          <span className="mobile-hide-verbose settings-panel__eyebrow">Runtime setup</span>
           <strong>Settings</strong>
         </span>
-        <span style={styles.countPill}>{isSaved ? "Saved" : "Unsaved"}</span>
+        <span className="settings-panel__pill">{isSaved ? "Saved" : "Unsaved"}</span>
       </summary>
       <div style={styles.compactPanel}>
         <div className="settings-test-row" style={{ ...styles.segmentRow, marginTop: 0, flexWrap: "wrap" }}>
@@ -180,113 +171,21 @@ export default function SettingsPanel({
             {testingSportsData ? "Testing…" : "Test SportsDataIO"}
           </button>
         </div>
-        {debugModeEnabled ? (
-        <label
-          style={{
-            ...styles.selectLabel,
-            flexDirection: "row",
-            alignItems: "center",
-            gap: "8px",
-            marginTop: "8px",
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={showDebugPanels}
-            onChange={(event) => onShowDebugPanelsChange?.(event.target.checked)}
-          />
-          Show Debug Panels
-        </label>
-        ) : null}
-        <p className="mobile-hide-verbose" style={{ ...styles.compactFlags, margin: "8px 0 0" }}>
-          Keys are stored in <code>localStorage</code> for development. For production, set the same{" "}
-          <code>VITE_*</code> variables in Vercel — never commit <code>.env.local</code>.
+        <p className="mobile-hide-verbose settings-panel__hint">
+          Keys are stored locally for development. Set <code>VITE_*</code> variables in Vercel for production.
         </p>
         {apiValidation.warnings.length > 0 && debugModeEnabled ? (
-          <ul className="mobile-hide-verbose" style={{ ...styles.explanationList, margin: "4px 0 0", paddingLeft: "18px" }}>
+          <ul className="mobile-hide-verbose settings-panel__warnings">
             {apiValidation.warnings.map((warning) => (
-              <li key={warning} style={{ ...styles.compactFlags, color: "#fcd34d" }}>
-                {warning}
-              </li>
+              <li key={warning}>{warning}</li>
             ))}
           </ul>
         ) : null}
-        <SectionErrorBoundary
-          name="API Health"
-          fallback={
-            <div className="api-health-settings-panel" style={{ marginTop: "10px" }}>
-              <strong style={{ fontSize: 13 }}>API Health</strong>
-              <p style={{ ...styles.compactFlags, margin: "6px 0 0", color: "#fcd34d" }}>
-                API diagnostics temporarily unavailable.
-              </p>
-            </div>
-          }
-        >
-          <ApiHealthPanel connectionReport={connectionReport} lastTestedAt={meta.lastTestedAt} />
-          <MlbPipelineStatusPanel pipelineStatus={mlbPipelineStatus} apiHealth={apiHealth} />
-        </SectionErrorBoundary>
-        {showDebugPanels && debugModeEnabled ? (
-          <details className="settings-advanced-debug" style={{ ...styles.compactDetails, marginTop: "8px" }} open>
-            <summary style={styles.detailsSummary}>
-              <span>
-                <span className="mobile-hide-verbose" style={styles.eyebrow}>Diagnostics</span>
-                <strong>Advanced Debug</strong>
-              </span>
-            </summary>
-            <div style={{ display: "grid", gap: "8px", marginTop: "8px" }}>
-              <UnderdogDebugPanel snapshot={underdogDebugSnapshot} />
-              <details className="settings-feed-debug" style={styles.compactDetails}>
-                <summary style={styles.detailsSummary}>
-                  <span>
-                    <span className="mobile-hide-verbose" style={styles.eyebrow}>Feed audit</span>
-                    <strong>Provider parse counts</strong>
-                  </span>
-                </summary>
-                <div style={{ display: "grid", gap: "6px", marginTop: "8px" }}>
-                  {["PrizePicks", "Underdog"].map((name) => {
-                    const row = apiHealth?.[name === "Odds API" ? "OddsAPI" : name] || feedHealthContext?.[name] || {};
-                    const raw = row.rawCount ?? row.rawPropsLoaded ?? 0;
-                    const parsed = row.parsedCount ?? row.propsAfterParsing ?? 0;
-                    const usable = row.usableCount ?? row.boardCount ?? 0;
-                    const filtered = row.filteredCount ?? Math.max(0, Number(parsed) - Number(usable));
-                    const cached = row.cachedCount ?? 0;
-                    return (
-                      <p key={name} style={styles.compactFlags}>
-                        {name}: raw {raw} · parsed {parsed} · usable {usable} · filtered {filtered}
-                        {cached > 0 ? ` · cached ${cached}` : ""}
-                        {row.statusLabel ? ` · ${row.statusLabel}` : ""}
-                      </p>
-                    );
-                  })}
-                  <p style={styles.compactFlags}>
-                    MLB usable on board: {feedHealthContext?.Underdog?.boardCount ?? apiHealth?.Underdog?.usableCount ?? 0}
-                  </p>
-                  {rejectionAudit?.reasons && Object.keys(rejectionAudit.reasons).length ? (
-                    <div>
-                      <p style={{ ...styles.compactFlags, marginBottom: 4 }}>Rejected by reason:</p>
-                      {Object.entries(rejectionAudit.reasons)
-                        .sort((a, b) => b[1] - a[1])
-                        .slice(0, 12)
-                        .map(([reason, count]) => (
-                          <p key={reason} style={{ ...styles.compactFlags, margin: "2px 0" }}>
-                            {reason}: {count}
-                          </p>
-                        ))}
-                    </div>
-                  ) : null}
-                </div>
-              </details>
-              {underdogDebugSnapshot?.parsedPreview?.length ? (
-                <ParsedUnderdogDebugCard picks={underdogDebugSnapshot.parsedPreview} />
-              ) : null}
-            </div>
-          </details>
-        ) : null}
-        <details className="settings-keys-expand" style={{ ...styles.compactDetails, marginTop: "8px" }}>
-          <summary style={styles.detailsSummary}>
+        <details className="settings-keys-expand compact-settings-details" style={{ marginTop: "8px" }}>
+          <summary>
             <span>
-              <span className="mobile-hide-verbose" style={styles.eyebrow}>Credentials</span>
-              <strong>API Keys & Proxies</strong>
+              <span className="mobile-hide-verbose settings-panel__eyebrow">Credentials</span>
+              <strong>API Keys</strong>
             </span>
           </summary>
           <div className="settings-key-fields" style={styles.controls}>
@@ -307,7 +206,6 @@ export default function SettingsPanel({
                     onChange={(event) => setDraft((current) => ({ ...current, [def.key]: event.target.value }))}
                     placeholder={def.placeholder || def.key}
                   />
-                  <span className="mobile-hide-verbose" style={{ fontSize: 11, opacity: 0.65 }}>{def.key}</span>
                 </label>
               );
             })}
@@ -315,10 +213,7 @@ export default function SettingsPanel({
         </details>
         <div style={{ ...styles.segmentRow, marginTop: "8px", flexWrap: "wrap" }}>
           {meta.savedAt ? (
-            <span className="mobile-hide-verbose" style={styles.compactFlags}>Last saved: {formatDateTime(meta.savedAt)}</span>
-          ) : null}
-          {meta.lastTestedAt ? (
-            <span className="mobile-hide-verbose" style={styles.compactFlags}>Last tested: {formatDateTime(meta.lastTestedAt)}</span>
+            <span className="mobile-hide-verbose settings-panel__meta">Last saved: {formatDateTime(meta.savedAt)}</span>
           ) : null}
           {notice ? <p style={styles.compactFlags}>{notice}</p> : null}
         </div>
