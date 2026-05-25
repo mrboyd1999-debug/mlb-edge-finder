@@ -28,6 +28,7 @@ export default function SettingsPanel({
   underdogDebugSnapshot = null,
   rejectionAudit = null,
   mlbPipelineStatus = null,
+  apiHealth = null,
 }) {
   const panelRef = useRef(null);
   const [draft, setDraft] = useState(() => readRuntimeSettings());

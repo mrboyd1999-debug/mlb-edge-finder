@@ -1,5 +1,6 @@
 import { slimPropForUi } from "../utils/renderProp.js";
 import { MLB_ONLY_MODE, sanitizeBoardForMlbOnly } from "../utils/mlbOnlyMode.js";
+import { safeParseJSON } from "../utils/safeParseJSON.js";
 import {
   MLB_CACHE_EXPIRED_MS,
   attachCacheMetadata,
@@ -56,7 +57,7 @@ function normalizeStoredOutcomeRow(row = {}) {
 
 export function readHistory() {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(HISTORY_KEY) || "[]");
+    const parsed = safeParseJSON(window.localStorage.getItem(HISTORY_KEY), []);
     if (!Array.isArray(parsed)) throw new Error("invalid history shape");
     return parsed.map(normalizeStoredOutcomeRow).filter(Boolean);
   } catch (error) {
@@ -80,7 +81,7 @@ export function writeHistory(history) {
 
 export function readParlayHistory() {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(PARLAY_HISTORY_KEY) || "[]");
+    const parsed = safeParseJSON(window.localStorage.getItem(PARLAY_HISTORY_KEY), []);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
@@ -97,7 +98,7 @@ export function writeParlayHistory(history) {
 
 function readRawCachedBoard(defaultSourceStatus = {}) {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(DFS_CACHE_KEY) || "null");
+    const parsed = safeParseJSON(window.localStorage.getItem(DFS_CACHE_KEY), null);
     if (!parsed || typeof parsed !== "object") return null;
     const updatedAt = new Date(parsed.updatedAt).getTime();
     if (!Number.isFinite(updatedAt)) return null;
@@ -229,7 +230,7 @@ export function clearBoardCache() {
 
 export function readLineMovement() {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(LINE_MOVEMENT_KEY) || "{}");
+    const parsed = safeParseJSON(window.localStorage.getItem(LINE_MOVEMENT_KEY), {});
     if (!parsed || typeof parsed !== "object") return {};
     if (!MLB_ONLY_MODE) return parsed;
     const scoped = {};
@@ -263,7 +264,7 @@ export function lineMovementKey(prop) {
 
 export function readManualStatsMap() {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(MANUAL_STATS_KEY) || "{}");
+    const parsed = safeParseJSON(window.localStorage.getItem(MANUAL_STATS_KEY), {});
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
@@ -296,7 +297,7 @@ export function writeManualStatsForProp(propId, stats) {
 
 export function readPropHistory() {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(PROP_HISTORY_KEY) || "[]");
+    const parsed = safeParseJSON(window.localStorage.getItem(PROP_HISTORY_KEY), []);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
@@ -342,7 +343,7 @@ export { HISTORY_KEY, PARLAY_HISTORY_KEY, DFS_CACHE_KEY, LINE_MOVEMENT_KEY, MANU
 
 export function readManualAnalyzerProps() {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(MANUAL_ANALYZER_KEY) || "[]");
+    const parsed = safeParseJSON(window.localStorage.getItem(MANUAL_ANALYZER_KEY), []);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];

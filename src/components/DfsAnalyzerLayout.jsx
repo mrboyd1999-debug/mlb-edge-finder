@@ -111,7 +111,7 @@ function DfsAnalyzerLayout({
       {appView === "saved" ? (
         <SectionErrorBoundary name="Saved Picks" onError={onSectionError}>
           <SavedPicksTab
-            picks={savedDisplayPicks}
+            picks={savedDisplayPicks || []}
             onOpen={onOpenProp}
             onDelete={onRemoveSavedPick}
             onClearAll={onClearSavedPicks}

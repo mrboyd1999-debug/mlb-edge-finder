@@ -47,6 +47,7 @@ import {
   VERIFIED_CACHE_COOLDOWN_MESSAGE,
 } from "./services/verifiedCacheFallback.js";
 import { normalizeGameStartTime } from "./utils/normalizeGameStartTime.js";
+import { safeParseJSON } from "./utils/safeParseJSON.js";
 import { inferSportFromText } from "./utils/sportMappings.js";
 import { hasMlbStatIndicator } from "./utils/underdogSportDetection.js";
 import {
@@ -345,7 +346,7 @@ const DEFAULT_FILTER_PREFS = {
 
 function readFilterPrefs() {
   try {
-    const stored = JSON.parse(window.localStorage.getItem(FILTER_PREFS_KEY) || "null");
+    const stored = safeParseJSON(window.localStorage.getItem(FILTER_PREFS_KEY), null);
     return { ...DEFAULT_FILTER_PREFS, ...(stored || {}) };
   } catch {
     return { ...DEFAULT_FILTER_PREFS };
