@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { styles } from "../theme/styles.js";
 import { buildRawDebugRows, dumpDebugGlobals } from "../utils/rawResponseDebug.js";
+import { getPropTraces } from "../services/mlbPropPipelineTrace.js";
 
 function JsonBlock({ value }) {
   const text =
@@ -32,10 +33,12 @@ function JsonBlock({ value }) {
 
 export default function RawApiDebugPanel({ open = false, onToggle }) {
   const [rows, setRows] = useState(() => buildRawDebugRows());
+  const [propTraces, setPropTraces] = useState(() => getPropTraces());
 
   const refresh = useCallback(() => {
     dumpDebugGlobals("manual-refresh");
     setRows(buildRawDebugRows());
+    setPropTraces(getPropTraces());
   }, []);
 
   useEffect(() => {
@@ -109,8 +112,36 @@ export default function RawApiDebugPanel({ open = false, onToggle }) {
           </div>
           <p style={{ ...styles.compactFlags, marginTop: 8 }}>
             Console: <code>window.__DEBUG_RESPONSES__</code>, <code>window.__DEBUG_PROVIDER_STATUS__</code>,{" "}
-            <code>window.__NORMALIZED_PROPS__</code>
+            <code>window.__NORMALIZED_PROPS__</code>, <code>window.__MLB_PROP_DEBUG_TRACES__</code>
           </p>
+
+          {propTraces.length ? (
+            <article
+              style={{
+                marginTop: 12,
+                padding: 12,
+                borderRadius: 10,
+                border: "1px solid rgba(148,163,184,0.18)",
+                background: "rgba(15,23,42,0.55)",
+              }}
+            >
+              <strong style={{ color: "#e2e8f0" }}>MLB Prop Pipeline Traces</strong>
+              {propTraces.slice(0, 6).map((row) => (
+                <div key={row.id || `${row.playerName}-${row.recordedAt}`} style={{ marginTop: 8, fontSize: 12 }}>
+                  <div>
+                    {row.playerName} · {row.statType}
+                  </div>
+                  <div>
+                    Failure reason: <code>{row.failureCode || "—"}</code>
+                    {row.failureReason ? ` — ${row.failureReason}` : ""}
+                  </div>
+                  <div>
+                    Last successful stage: <code>{row.lastSuccessfulStage || "—"}</code>
+                  </div>
+                </div>
+              ))}
+            </article>
+          ) : null}
 
           {rows.map((row) => (
             <article

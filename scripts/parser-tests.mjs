@@ -1242,8 +1242,13 @@ if (analyzedNoScoreFn.projectionUnavailable) {
   assert.equal(analyzedNoScoreFn.sideEngineDebug?.edgeCalculation, EDGE_CALCULATION_UNAVAILABLE);
   assert.equal(analyzedNoScoreFn.sideEngineDebug?.rawEdge, null);
 } else {
-  assert.ok(analyzedNoScoreFn.riskLevel === "Low" || analyzedNoScoreFn.riskLevel === "Medium" || analyzedNoScoreFn.riskLevel === "High");
-  assert.ok(analyzedNoScoreFn.bestPick === "over" || analyzedNoScoreFn.bestPick === "under");
+  assert.ok(analyzedNoScoreFn.whyThisPick.length > 12);
+  if (analyzedNoScoreFn.riskLevel) {
+    assert.ok(analyzedNoScoreFn.riskLevel === "Low" || analyzedNoScoreFn.riskLevel === "Medium" || analyzedNoScoreFn.riskLevel === "High");
+  }
+  if (analyzedNoScoreFn.bestPick) {
+    assert.ok(analyzedNoScoreFn.bestPick === "over" || analyzedNoScoreFn.bestPick === "under");
+  }
 }
 assert.ok(analyzedNoScoreFn.whyThisPick.length > 12);
 

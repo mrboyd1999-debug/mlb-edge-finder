@@ -1,4 +1,11 @@
-/** Verbose MLB pipeline debug — backend only. Filter console for [MLB Pipeline]. */
+/** Verbose MLB pipeline debug — console groups + trace integration. */
+import {
+  finalizePropTrace,
+  logPropDebugGroup,
+  markStage,
+  MLB_STAGE,
+} from "./mlbPropPipelineTrace.js";
+
 const ENABLED = typeof import.meta !== "undefined" ? import.meta.env?.DEV !== false : true;
 
 function emit(label, payload) {
@@ -56,3 +63,13 @@ export function logPropFailure(reason = "", details = {}) {
 export function tracePipelineStage(stage, payload = {}) {
   emit(stage, payload);
 }
+
+export function logFullPropDebug(prop = {}, trace = {}) {
+  logPropDebugGroup(prop, trace);
+}
+
+export function recordPropDebug(prop = {}, trace = {}) {
+  return finalizePropTrace(prop, trace);
+}
+
+export { markStage, MLB_STAGE, finalizePropTrace };

@@ -1,6 +1,7 @@
 /** Pipeline stage logging + debug snapshot for MLB props flow. */
 
 import { isVerifiedSportsbookProp } from "./propValidation.js";
+import { getPropTraceSummary } from "../services/mlbPropPipelineTrace.js";
 
 export function logPipelineStage(stage = "", payload = {}) {
   if (typeof console === "undefined") return;
@@ -22,6 +23,7 @@ export function buildPipelineDebugSnapshot({
   isLive = false,
 } = {}) {
   const verified = (parsedProps || []).filter(isVerifiedSportsbookProp);
+  const propTraceSummary = getPropTraceSummary();
   return {
     rawPropsFetched: rawProps.length,
     parsedPropsCount: parsedProps.length,
@@ -37,6 +39,8 @@ export function buildPipelineDebugSnapshot({
     fallbackLabel,
     fetchFailureReasons,
     isLive,
+    propTraceSummary,
+    propTraces: propTraceSummary.recent,
     activeSources: Object.keys(summarizeSourceStatus(sourceStatus)).filter(
       (k) => !/failed|offline|empty/i.test(String(summarizeSourceStatus(sourceStatus)[k]))
     ),

@@ -14,7 +14,16 @@ import {
   tracePipelineStage,
 } from "./mlbPipelineDebug.js";
 import { buildMlbPropProjection } from "../modules/mlbProjectionService.js";
-import { matchSportsbookPlayerToMlb } from "./playerMatcher.js";
+import { matchSportsbookPlayerToMlb, normalizeSportsbookName } from "./playerMatcher.js";
+import {
+  completeTrace,
+  createPropTrace,
+  failTrace,
+  markStage,
+  MLB_FAILURE,
+  MLB_STAGE,
+} from "./mlbPropPipelineTrace.js";
+import { recordPropDebug } from "./mlbPipelineDebug.js";
 import {
   computeDirectionalEdgeForSide,
   computeRawEdge,
@@ -513,7 +522,8 @@ export async function fetchMlbPlayerBundle(playerName = "") {
  * Build a verified prop profile from raw MLB logs + opponent/probable context.
  * Delegates stat extraction to playerStats profile builder when available.
  */
-export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null } = {}) {
+export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, trace: existingTrace = null } = {}) {
+  const trace = existingTrace || createPropTrace(prop);
   logIncomingProp(prop);
   logMlbData("prop.incoming", {
     player: prop.playerName,
@@ -524,33 +534,86 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null }
     source: prop.source || prop.platform,
   });
 
+  trace.normalizedName = normalizeSportsbookName(prop.playerName);
+  markStage(trace, MLB_STAGE.NORMALIZED, { normalizedName: trace.normalizedName });
+
   const line = Number(prop.line);
   if (!Number.isFinite(line) || line <= 0) {
-    const reason = "Invalid sportsbook line";
-    logPropFailure(reason, { player: prop.playerName, line: prop.line });
-    return { profile: null, bundle: null, verified: false, reason };
+    failTrace(trace, MLB_FAILURE.INVALID_LINE, `Invalid sportsbook line: ${prop.line}`, MLB_STAGE.NORMALIZED);
+    recordPropDebug(prop, trace);
+    return { profile: null, bundle: null, verified: false, reason: trace.failureReason, pipelineTrace: trace };
   }
 
-  const match = await matchSportsbookPlayerToMlb(prop.playerName);
+  let match;
+  try {
+    match = await matchSportsbookPlayerToMlb(prop.playerName);
+  } catch (error) {
+    failTrace(trace, MLB_FAILURE.MLB_API_FAILED, error.message, MLB_STAGE.NORMALIZED);
+    recordPropDebug(prop, trace);
+    return { profile: null, bundle: null, verified: false, reason: trace.failureReason, pipelineTrace: trace };
+  }
+
   if (!match?.player?.id) {
-    const reason = `Player not matched: ${match?.reason || "no StatsAPI match"}`;
-    logPropFailure(reason, { player: prop.playerName, confidence: match?.confidence ?? 0 });
-    return { profile: null, bundle: null, verified: false, reason };
+    failTrace(
+      trace,
+      MLB_FAILURE.PLAYER_NOT_MATCHED,
+      match?.reason || "No StatsAPI player match",
+      MLB_STAGE.NORMALIZED
+    );
+    recordPropDebug(prop, trace);
+    return { profile: null, bundle: null, verified: false, reason: trace.failureReason, pipelineTrace: trace };
   }
 
-  const bundle = await fetchMlbPlayerBundle(prop.playerName);
+  markStage(trace, MLB_STAGE.MATCHED, {
+    matchedPlayer: match.player.fullName,
+    playerId: match.player.id,
+    matchConfidence: match.confidence,
+  });
+
+  let bundle;
+  try {
+    bundle = await fetchMlbPlayerBundle(prop.playerName);
+  } catch (error) {
+    failTrace(trace, MLB_FAILURE.MLB_API_FAILED, error.message, MLB_STAGE.MATCHED);
+    recordPropDebug(prop, trace);
+    return { profile: null, bundle: null, verified: false, reason: trace.failureReason, pipelineTrace: trace };
+  }
+
   if (!bundle?.splits?.length) {
-    const reason = bundle ? "No game logs returned from StatsAPI" : "MLB player bundle unavailable";
-    logPropFailure(reason, { player: prop.playerName, mlbId: match.player.id });
-    logMlbData("prop.unverified", { player: prop.playerName, reason });
+    failTrace(
+      trace,
+      MLB_FAILURE.EMPTY_GAME_LOGS,
+      bundle ? "StatsAPI returned zero game logs" : "Player bundle unavailable",
+      MLB_STAGE.MATCHED
+    );
+    logMlbData("prop.unverified", { player: prop.playerName, reason: trace.failureReason });
+    recordPropDebug(prop, trace);
     return {
       profile: null,
       bundle,
       opponentContext: null,
       probablePitchers: null,
       verified: false,
-      reason,
+      reason: trace.failureReason,
+      pipelineTrace: trace,
     };
+  }
+
+  markStage(trace, MLB_STAGE.LOGS_FETCHED, {
+    logs: bundle.splits.slice(0, 3),
+    logsCount: bundle.splits.length,
+  });
+
+  let pitcherStats = null;
+  try {
+    pitcherStats = await getPitcherStats(match.player.id);
+    trace.pitcherStats = {
+      gameCount: pitcherStats.gameCount,
+      last5Ks: pitcherStats.last5Ks,
+      seasonKs: pitcherStats.seasonKs,
+    };
+  } catch (error) {
+    trace.pitcherStats = { error: error.message };
   }
 
   const relevantSplits = filterMlbSplitsForStatType(bundle.splits, prop.statType);
@@ -562,34 +625,63 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null }
   });
 
   if (relevantSplits.length < 3) {
-    const reason = `Insufficient ${canonicalMarketKey(prop.statType) || "market"} logs (${relevantSplits.length}/3 required)`;
-    logPropFailure(reason, {
-      player: prop.playerName,
-      stat: prop.statType,
-      pitchingLogs: bundle.splits.filter(isPitchingSplit).length,
-      hittingLogs: bundle.splits.filter(isHittingSplit).length,
-    });
+    failTrace(
+      trace,
+      MLB_FAILURE.INSUFFICIENT_MARKET_LOGS,
+      `Only ${relevantSplits.length}/3 ${canonicalMarketKey(prop.statType) || "market"} logs after filtering`,
+      MLB_STAGE.LOGS_FETCHED
+    );
+    trace.logsCount = relevantSplits.length;
+    recordPropDebug(prop, trace);
     return {
       profile: null,
       bundle: { ...bundle, splits: relevantSplits },
       opponentContext: null,
       probablePitchers: null,
       verified: false,
-      reason,
+      reason: trace.failureReason,
+      pipelineTrace: trace,
     };
   }
 
+  markStage(trace, MLB_STAGE.LOGS_FILTERED, { logsCount: relevantSplits.length, logs: relevantSplits.slice(0, 3) });
+
   const filteredBundle = { ...bundle, splits: relevantSplits, gradingRows: relevantSplits };
 
-  const [opponentContext, probablePitchers, weather] = await Promise.all([
-    prop.opponent ? getOpponentStats(prop.opponent) : Promise.resolve(null),
-    getProbablePitchers({ team: prop.team, opponent: prop.opponent }),
-    getWeatherData({ team: prop.team, opponent: prop.opponent }),
-  ]);
+  let opponentContext = null;
+  let probablePitchers = null;
+  let weather = null;
+  try {
+    [opponentContext, probablePitchers, weather] = await Promise.all([
+      prop.opponent ? getOpponentStats(prop.opponent) : Promise.resolve(null),
+      getProbablePitchers({ team: prop.team, opponent: prop.opponent }),
+      getWeatherData({ team: prop.team, opponent: prop.opponent }),
+    ]);
+    trace.opponentStats = opponentContext;
+    markStage(trace, MLB_STAGE.OPPONENT_FETCHED, { opponentStats: opponentContext });
+  } catch (error) {
+    failTrace(trace, MLB_FAILURE.MLB_API_FAILED, error.message, MLB_STAGE.LOGS_FILTERED);
+    recordPropDebug(prop, trace);
+    return { profile: null, bundle: filteredBundle, verified: false, reason: trace.failureReason, pipelineTrace: trace };
+  }
 
   let profile = filteredBundle;
   if (typeof buildProfile === "function") {
     profile = buildProfile(filteredBundle, prop.statType, prop.line) || filteredBundle;
+  }
+
+  if (profile?.sparse || profile?.fallback) {
+    failTrace(trace, MLB_FAILURE.MISSING_STAT_VALUES, "Profile builder returned sparse/fallback profile", MLB_STAGE.LOGS_FILTERED);
+    recordPropDebug(prop, trace);
+    return {
+      profile: null,
+      bundle: filteredBundle,
+      opponentContext,
+      probablePitchers,
+      verified: false,
+      reason: trace.failureReason,
+      pipelineTrace: trace,
+    };
   }
 
   profile = {
@@ -616,40 +708,35 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null }
     weatherData: weather || profile.weatherData || null,
   };
 
-  logMlbData("prop.profile", {
-    player: prop.playerName,
-    matched: bundle.playerName,
-    logs: bundle.splits.length,
-    last5: profile.last5Average,
-    season: profile.seasonAverage,
-    opponentK: opponentContext?.strikeoutsPerGame ?? null,
-    probable: probablePitchers?.opponentStarterNote ?? null,
-    weather: weather?.note ?? null,
-  });
-
   if (!profile.last5Average && !profile.seasonAverage) {
-    const reason = "Logs loaded but stat values missing for market";
-    logPropFailure(reason, {
-      player: prop.playerName,
-      stat: prop.statType,
-      logs: relevantSplits.length,
-    });
+    failTrace(trace, MLB_FAILURE.MISSING_STAT_VALUES, "Logs loaded but stat values missing for market", MLB_STAGE.LOGS_FILTERED);
+    recordPropDebug(prop, trace);
     return {
       profile: null,
       bundle: filteredBundle,
       opponentContext,
       probablePitchers,
       verified: false,
-      reason,
+      reason: trace.failureReason,
+      pipelineTrace: trace,
     };
   }
 
-  tracePipelineStage("prop.profile.ready", {
+  markStage(trace, MLB_STAGE.PROFILE_BUILT, {
+    last5: profile.last5Average,
+    season: profile.seasonAverage,
+    sampleSize: profile.sampleSize,
+  });
+
+  logMlbData("prop.profile", {
     player: prop.playerName,
     matched: bundle.playerName,
     logs: relevantSplits.length,
     last5: profile.last5Average,
     season: profile.seasonAverage,
+    opponentK: opponentContext?.strikeoutsPerGame ?? null,
+    probable: probablePitchers?.opponentStarterNote ?? null,
+    weather: weather?.note ?? null,
   });
 
   return {
@@ -659,6 +746,7 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null }
     probablePitchers,
     verified: true,
     reason: "Verified MLB logs loaded",
+    pipelineTrace: trace,
   };
 }
 
@@ -704,25 +792,27 @@ export async function fetchMlbDataForProps(props = [], { buildProfile = null } =
 
 export async function analyzeMlbPropWithData(prop = {}, { buildProfile = null } = {}) {
   const data = await buildMlbPropDataPackage(prop, { buildProfile });
-  const match = await matchSportsbookPlayerToMlb(prop.playerName);
+  const trace = data.pipelineTrace || createPropTrace(prop);
 
   if (!data.profile) {
     logMlbPropScan(prop, {
-      matchedPlayer: match?.player?.fullName || null,
-      matchConfidence: match?.confidence ?? 0,
-      logsFound: data.bundle?.splits?.length ?? 0,
+      matchedPlayer: trace.matchedPlayer || null,
+      matchConfidence: trace.matchConfidence ?? 0,
+      logsFound: trace.logsCount ?? data.bundle?.splits?.length ?? 0,
       projection: null,
       edge: null,
       confidence: null,
       recommendation: "NO VERIFIED PLAY",
-      failureReason: data.reason || "Verified MLB data unavailable",
+      failureReason: trace.failureReason || data.reason || "Verified MLB data unavailable",
     });
+    recordPropDebug(prop, trace);
     return {
       ...prop,
       projectionUnavailable: true,
       displayStatus: "NO VERIFIED PLAY",
       statusMessage: "Awaiting projection data",
-      dataFetchReason: data.reason,
+      dataFetchReason: trace.failureReason || data.reason,
+      mlbPipelineTrace: trace,
     };
   }
 
@@ -734,33 +824,133 @@ export async function analyzeMlbPropWithData(prop = {}, { buildProfile = null } 
   };
 
   const model = buildMlbPropProjection(prop, data.profile, context);
-  logProjectionExecution({
-    projection: model.projection,
-    edge: model.edge,
-    confidence: model.confidence,
-    recommendation: model.modelPickLabel || (model.projectionUnavailable ? "NO VERIFIED PLAY" : model.passPlay ? "PASS" : null),
-  });
-  if (model.projectionUnavailable) {
-    logPropFailure(model.statusMessage || data.reason || "Projection unavailable", {
-      player: prop.playerName,
-      stat: prop.statType,
-      verified: model.isVerifiedProjection,
-      dataStatus: model.dataStatus,
+  trace.projection = model.projection;
+  trace.confidence = model.confidence;
+  trace.edge = model.edge;
+  trace.recommendation = model.modelPickLabel || (model.projectionUnavailable ? "NO VERIFIED PLAY" : model.passPlay ? "PASS" : null);
+
+  if (model.projectionUnavailable || !model.isVerifiedProjection) {
+    failTrace(trace, MLB_FAILURE.PROJECTION_BUILD_FAILED, model.statusMessage || "Projection unavailable", MLB_STAGE.PROFILE_BUILT);
+    recordPropDebug(prop, trace);
+    logMlbPropScan(prop, {
+      matchedPlayer: trace.matchedPlayer,
+      matchConfidence: trace.matchConfidence,
+      logsFound: trace.logsCount ?? data.profile?.splits?.length ?? 0,
+      projection: null,
+      edge: null,
+      confidence: null,
+      recommendation: "NO VERIFIED PLAY",
+      failureReason: trace.failureReason,
     });
+    return {
+      ...applyModelToProp(prop, model),
+      mlbPipelineTrace: trace,
+      dataFetchReason: trace.failureReason,
+    };
   }
-  logMlbPropScan(prop, {
-    matchedPlayer: match?.player?.fullName || data.profile.playerName,
-    matchConfidence: match?.confidence ?? null,
-    logsFound: data.bundle?.splits?.length ?? data.profile?.splits?.length ?? 0,
+
+  markStage(trace, MLB_STAGE.PROJECTION_COMPUTED, {
+    projection: model.projection,
+    recommendation: trace.recommendation,
+  });
+
+  if (model.edge == null || !Number.isFinite(model.edge)) {
+    failTrace(trace, MLB_FAILURE.EDGE_CALCULATION_FAILED, "Edge could not be calculated", MLB_STAGE.PROJECTION_COMPUTED);
+    recordPropDebug(prop, trace);
+    return { ...applyModelToProp(prop, model), mlbPipelineTrace: trace };
+  }
+
+  markStage(trace, MLB_STAGE.EDGE_CALCULATED, { edge: model.edge, confidence: model.confidence });
+  completeTrace(trace, {
     projection: model.projection,
     edge: model.edge,
     confidence: model.confidence,
-    recommendation: model.modelPickLabel || (model.projectionUnavailable ? "NO VERIFIED PLAY" : model.passPlay ? "PASS" : null),
-    failureReason: model.projectionUnavailable ? model.statusMessage || data.reason : null,
+    recommendation: trace.recommendation,
+  });
+  recordPropDebug(prop, trace);
+
+  logMlbPropScan(prop, {
+    matchedPlayer: trace.matchedPlayer,
+    matchConfidence: trace.matchConfidence,
+    logsFound: trace.logsCount ?? data.profile?.splits?.length ?? 0,
+    projection: model.projection,
+    edge: model.edge,
+    confidence: model.confidence,
+    recommendation: trace.recommendation,
+    failureReason: null,
     reasons: model.reasons,
   });
 
-  return applyModelToProp(prop, model);
+  return { ...applyModelToProp(prop, model), mlbPipelineTrace: trace };
+}
+
+/** Synchronous live-board trace when scoring from pre-fetched stats profile. */
+export function traceLiveBoardMlbProp(prop = {}, profile = {}, model = {}, context = {}) {
+  const trace = createPropTrace(prop);
+  trace.normalizedName = normalizeSportsbookName(prop.playerName);
+  markStage(trace, MLB_STAGE.NORMALIZED, { normalizedName: trace.normalizedName });
+
+  if (!profile || profile.sparse || profile.fallback) {
+    failTrace(
+      trace,
+      profile ? MLB_FAILURE.MISSING_STAT_VALUES : MLB_FAILURE.EMPTY_GAME_LOGS,
+      profile?.source || "No stats profile found in live board context",
+      MLB_STAGE.NORMALIZED
+    );
+    recordPropDebug(prop, trace);
+    return trace;
+  }
+
+  trace.matchedPlayer = profile.playerName || prop.playerName;
+  trace.playerId = profile.mlbId || profile.playerId || null;
+  trace.logsCount = profile.sampleSize ?? profile.splits?.length ?? 0;
+  trace.logs = (profile.splits || profile.gradingRows || []).slice(0, 3);
+  trace.pitcherStats = {
+    last5: profile.last5Average,
+    season: profile.seasonAverage,
+    sampleSize: profile.sampleSize,
+  };
+  trace.opponentStats = profile.opponentContext || context.opponentContext || null;
+  markStage(trace, MLB_STAGE.PROFILE_BUILT, {
+    matchedPlayer: trace.matchedPlayer,
+    logsCount: trace.logsCount,
+    last5: profile.last5Average,
+    season: profile.seasonAverage,
+  });
+
+  trace.projection = model.projection ?? null;
+  trace.edge = model.edge ?? null;
+  trace.confidence = model.confidence ?? model.confidenceScore ?? null;
+  trace.recommendation = model.modelPick || model.modelPickLabel || model.displayStatus || null;
+
+  if (model.projectionUnavailable || !model.isVerifiedProjection) {
+    failTrace(
+      trace,
+      MLB_FAILURE.PROJECTION_BUILD_FAILED,
+      model.statusMessage || "Verified projection not produced from live board profile",
+      MLB_STAGE.PROFILE_BUILT
+    );
+    recordPropDebug(prop, trace);
+    return trace;
+  }
+
+  markStage(trace, MLB_STAGE.PROJECTION_COMPUTED, { projection: trace.projection, recommendation: trace.recommendation });
+
+  if (!Number.isFinite(trace.edge)) {
+    failTrace(trace, MLB_FAILURE.EDGE_CALCULATION_FAILED, "Edge missing after projection", MLB_STAGE.PROJECTION_COMPUTED);
+    recordPropDebug(prop, trace);
+    return trace;
+  }
+
+  markStage(trace, MLB_STAGE.EDGE_CALCULATED, { edge: trace.edge, confidence: trace.confidence });
+  completeTrace(trace, {
+    projection: trace.projection,
+    edge: trace.edge,
+    confidence: trace.confidence,
+    recommendation: trace.recommendation,
+  });
+  recordPropDebug(prop, trace);
+  return trace;
 }
 
 function applyModelToProp(prop, model) {

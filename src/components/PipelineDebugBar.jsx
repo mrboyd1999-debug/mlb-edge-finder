@@ -34,6 +34,40 @@ function PipelineDebugBar({ debug = null }) {
             ))
           : null}
       </div>
+      {Array.isArray(debug.propTraces) && debug.propTraces.length ? (
+        <div style={{ marginTop: 10 }}>
+          <p style={styles.pipelineDebugTitle}>MLB Prop Pipeline Traces</p>
+          {debug.propTraces.slice(0, 8).map((row) => (
+            <div
+              key={row.id || `${row.playerName}-${row.statType}-${row.recordedAt}`}
+              style={{
+                marginBottom: 8,
+                padding: "8px 10px",
+                borderRadius: 8,
+                background: "rgba(15,23,42,0.55)",
+                fontSize: 12,
+                lineHeight: 1.45,
+              }}
+            >
+              <div>
+                <strong>{row.playerName}</strong> · {row.statType} · line {row.line}
+              </div>
+              <div>
+                Failure reason: <code>{row.failureCode || "—"}</code>
+                {row.failureReason ? ` — ${row.failureReason}` : ""}
+              </div>
+              <div>
+                Last successful stage: <code>{row.lastSuccessfulStage || "—"}</code>
+              </div>
+              {row.success ? (
+                <div>
+                  Projection: {row.projection} · Edge: {row.edge} · Pick: {row.recommendation}
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }

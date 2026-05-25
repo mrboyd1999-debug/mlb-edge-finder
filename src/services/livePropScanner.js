@@ -7,14 +7,12 @@ import { isMlbVerifiedEngineMarket } from "../modules/mlbProjectionService.js";
 import { isVerifiedRecommendableProp } from "../modules/propSideEngine.js";
 import { sortMlbVerifiedProps, filterMlbRecommendableProps } from "../modules/mlbBestBets.js";
 import {
-  buildMlbPropDataPackage,
+  analyzeMlbPropWithData,
   logMlbData,
   logMlbPropScan,
   MLB_DATA_FETCH_LIMIT,
 } from "./mlbDataService.js";
-import { analyzeVerifiedMlbProp } from "./projectionEngine.js";
 import { matchSportsbookPlayerToMlb } from "./playerMatcher.js";
-import { logIncomingProp, logPropFailure, logProjectionExecution } from "./mlbPipelineDebug.js";
 
 export const MIN_SCAN_EDGE = 0.35;
 export const MIN_SCAN_CONFIDENCE = 58;
@@ -136,98 +134,13 @@ export async function scanSingleMlbProp(prop = {}, { buildProfile = null } = {})
     return failure;
   }
 
-  const data = await buildMlbPropDataPackage(normalized, { buildProfile });
-  if (!data.profile) {
-    const failure = {
-      ...normalized,
-      projectionUnavailable: true,
-      displayStatus: "NO VERIFIED PLAY",
-      statusMessage: "Awaiting projection data",
-      failureReason: data.reason || "No verified MLB game logs",
-    };
-    logMlbPropScan(normalized, {
-      matchedPlayer: match.player.fullName,
-      matchConfidence: match.confidence,
-      logsFound: data.bundle?.splits?.length ?? 0,
-      projection: null,
-      edge: null,
-      confidence: null,
-      recommendation: "NO VERIFIED PLAY",
-      failureReason: failure.failureReason,
-    });
-    return failure;
-  }
-
-  const context = {
-    opponentContext: data.opponentContext,
-    opponentStarterNote: data.probablePitchers?.opponentStarterNote,
-    impliedGameTotal: data.profile.impliedGameTotal,
-    weatherNote: data.profile.weatherNote,
+  const scored = await analyzeMlbPropWithData(normalized, { buildProfile });
+  return {
+    ...scored,
+    matchedMlbPlayer: scored.mlbPipelineTrace?.matchedPlayer || match.player.fullName,
+    matchConfidence: scored.mlbPipelineTrace?.matchConfidence ?? match.confidence,
+    failureReason: scored.mlbPipelineTrace?.failureReason || scored.dataFetchReason || null,
   };
-
-  const analysis = analyzeVerifiedMlbProp(normalized, data.profile, context);
-  logProjectionExecution({
-    projection: analysis.projection,
-    edge: analysis.edge,
-    confidence: analysis.confidence,
-    recommendation: analysis.recommendation,
-  });
-  if (analysis.projectionUnavailable || analysis.failureReason) {
-    logPropFailure(analysis.failureReason || analysis.statusMessage || "Projection unavailable", {
-      player: normalized.playerName,
-      stat: normalized.statType,
-    });
-  }
-  const scored = {
-    ...normalized,
-    projectedValue: analysis.projection,
-    projection: analysis.projection,
-    rawEdge: analysis.rawEdge,
-    edge: analysis.edge ?? 0,
-    bestPick: analysis.recommendedSide,
-    side: analysis.recommendedSide,
-    pick: analysis.recommendedSide,
-    recommendedSide: analysis.modelSide,
-    modelPick: analysis.recommendation,
-    modelSide: analysis.modelSide,
-    confidence: analysis.confidence,
-    confidenceScore: analysis.confidence,
-    riskLevel: analysis.risk,
-    volatilityLabel: analysis.volatilityLabel,
-    dataStatus: analysis.dataStatus,
-    projectionSource: analysis.projectionSource,
-    projectionBreakdown: analysis.projectionBreakdown,
-    projectionLabel: analysis.projectionLabel,
-    isVerifiedProjection: analysis.isVerifiedProjection,
-    isFallbackProjection: analysis.isFallbackProjection,
-    projectionUnavailable: analysis.projectionUnavailable,
-    passPlay: analysis.passPlay,
-    displayStatus: analysis.displayStatus,
-    statusMessage: analysis.statusMessage,
-    whyThisPick: analysis.whyThisPick,
-    modelReasons: analysis.reasons,
-    analyticsReason: analysis.reasons?.join(" · ") || "",
-    noEdge: analysis.passPlay || analysis.projectionUnavailable,
-    isDisplayPlayable: !analysis.passPlay && !analysis.projectionUnavailable && Boolean(analysis.recommendedSide),
-    bettingLabel: analysis.recommendation,
-    matchedMlbPlayer: match.player.fullName,
-    matchConfidence: match.confidence,
-    failureReason: analysis.failureReason,
-  };
-
-  logMlbPropScan(normalized, {
-    matchedPlayer: match.player.fullName,
-    matchConfidence: match.confidence,
-    logsFound: data.bundle?.splits?.length ?? data.profile?.splits?.length ?? 0,
-    projection: analysis.projection,
-    edge: analysis.edge,
-    confidence: analysis.confidence,
-    recommendation: analysis.recommendation,
-    failureReason: analysis.failureReason,
-    reasons: analysis.reasons,
-  });
-
-  return scored;
 }
 
 export function filterWeakPlays(props = []) {

@@ -141,7 +141,7 @@ import {
   hasVerifiedStats,
 } from "./services/statEnrichment.js";
 import { applyMlbProjectionToProp, isMlbVerifiedEngineMarket } from "./modules/mlbProjectionService.js";
-import { logMlbData } from "./services/mlbDataService.js";
+import { logMlbData, traceLiveBoardMlbProp } from "./services/mlbDataService.js";
 import { LIVE_BOARD_LOADING_STAGES, LIVE_BOARD_UNAVAILABLE_MESSAGE } from "./utils/liveBoardLoading.js";
 import { applySportMarketConfidenceCaps } from "./services/sportMarketConfidence.js";
 import { attachElitePickExplanation } from "./services/pickExplanation.js";
@@ -3970,6 +3970,17 @@ function scoreDFSProp(prop, context) {
     isVerifiedProjection = mlbVerifiedModel.isVerifiedProjection;
     dataStatus = mlbVerifiedModel.dataStatus || dataStatus;
     projectionConfidence = mlbVerifiedModel.confidence ?? projectionConfidence;
+    traceLiveBoardMlbProp(
+      { ...prop, line },
+      enriched,
+      mlbVerifiedModel,
+      {
+        opponentContext: enriched?.opponentContext,
+        impliedGameTotal: enriched?.impliedGameTotal,
+        weatherNote: enriched?.weatherNote,
+        opponentStarterNote: enriched?.opponentStarterNote,
+      }
+    );
     logMlbData("live.analyze", {
       player: prop.playerName,
       stat: prop.statType,
