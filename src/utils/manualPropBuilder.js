@@ -10,7 +10,12 @@ import {
 import { withPlayerImageUrl } from "./playerImageFields.js";
 import { buildMlbStatProfileFromLogs } from "../services/playerStats.js";
 import { buildMlbPropDataPackage, logMlbData } from "../services/mlbDataService.js";
-import { buildCardPipelineDebug, getFetchPropTrace } from "../services/mlbPropPipelineTrace.js";
+import {
+  buildCardPipelineDebug,
+  getFetchPropTrace,
+  MLB_CARD_CODE,
+  MLB_FAILURE,
+} from "../services/mlbPropPipelineTrace.js";
 import { normalizeSportsbookName } from "../services/playerMatcher.js";
 
 export const MANUAL_SOURCES = ["PrizePicks", "Underdog"];
@@ -155,19 +160,83 @@ export async function fetchManualPropProfile(form = {}) {
   };
 }
 
+function pickAuthoritativePipelineTrace({ liveScored = null, pipelineTrace = null, built = null, prop = null } = {}) {
+  const candidates = [pipelineTrace, getFetchPropTrace(built || prop), liveScored?.mlbPipelineTrace].filter(Boolean);
+  const priority = [
+    MLB_FAILURE.PLAYER_NOT_MATCHED,
+    MLB_FAILURE.MLB_API_FAILED,
+    MLB_FAILURE.EMPTY_GAME_LOGS,
+    MLB_FAILURE.INSUFFICIENT_MARKET_LOGS,
+    MLB_FAILURE.MISSING_STAT_VALUES,
+    MLB_FAILURE.PROJECTION_BUILD_FAILED,
+  ];
+  for (const code of priority) {
+    const match = candidates.find((trace) => trace.failureCode === code);
+    if (match) return match;
+  }
+  return candidates[0] || null;
+}
+
 function attachPipelineDebug(prop = {}, { liveScored = null, pipelineTrace = null, built = null } = {}) {
-  if (prop.pipelineDebugLine) return prop;
-  const trace = liveScored?.mlbPipelineTrace || pipelineTrace || getFetchPropTrace(built || prop) || null;
-  if (!trace) return prop;
-  const debug = buildCardPipelineDebug(trace, {
-    normalizedName: trace.normalizedName || normalizeSportsbookName(prop.playerName),
-    failureReason: trace.failureReason || prop.dataFetchReason || null,
+  const isMlb = String(prop.sport || "MLB").toUpperCase() === "MLB";
+  if (!isMlb) return prop;
+
+  const trace = pickAuthoritativePipelineTrace({ liveScored, pipelineTrace, built, prop });
+  const projectionUnavailable = Boolean(prop.projectionUnavailable || liveScored?.projectionUnavailable);
+  const projection = Number(prop.projectedValue ?? prop.projection ?? liveScored?.projection);
+  const hasProjection = Number.isFinite(projection) && projection > 0;
+
+  if (hasProjection && !projectionUnavailable) {
+    return {
+      ...prop,
+      pipelineFailureCode: liveScored?.pipelineFailureCode || prop.pipelineFailureCode || MLB_CARD_CODE.PROJECTION_SUCCESS,
+      pipelineDebugLine: liveScored?.pipelineDebugLine || prop.pipelineDebugLine || null,
+      mlbPipelineTrace: liveScored?.mlbPipelineTrace || trace || prop.mlbPipelineTrace || null,
+    };
+  }
+
+  const debug = buildCardPipelineDebug(trace || {}, {
+    normalizedName:
+      trace?.normalizedName ||
+      liveScored?.mlbPipelineTrace?.normalizedName ||
+      normalizeSportsbookName(prop.playerName),
+    failureReason:
+      trace?.failureReason ||
+      liveScored?.mlbPipelineTrace?.failureReason ||
+      prop.dataFetchReason ||
+      null,
+    projectionNotCalled: projectionUnavailable && !trace?.failureCode && !liveScored?.mlbPipelineTrace?.failureCode,
   });
+
+  let failureCode = debug.pipelineFailureCode;
+  let failureTrace = debug.mlbPipelineTrace;
+
+  if ((!failureCode || failureCode === MLB_CARD_CODE.PROJECTION_SUCCESS) && projectionUnavailable) {
+    failureCode = MLB_CARD_CODE.EMPTY_GAME_LOGS;
+    failureTrace = {
+      ...(failureTrace || {}),
+      failureCode: MLB_FAILURE.EMPTY_GAME_LOGS,
+      failureReason: prop.dataFetchReason || trace?.failureReason || "No verified projection produced",
+      normalizedName: failureTrace?.normalizedName || normalizeSportsbookName(prop.playerName),
+      lastSuccessfulStage: failureTrace?.lastSuccessfulStage || "normalized sportsbook prop",
+    };
+  }
+
+  if (!failureCode || failureCode === MLB_CARD_CODE.PROJECTION_SUCCESS) return prop;
+
+  const refreshed = buildCardPipelineDebug(failureTrace || {}, {
+    normalizedName: failureTrace?.normalizedName || normalizeSportsbookName(prop.playerName),
+    failureReason: failureTrace?.failureReason || prop.dataFetchReason || null,
+  });
+
   return {
     ...prop,
-    pipelineFailureCode: debug.pipelineFailureCode,
-    pipelineDebugLine: debug.pipelineDebugLine,
-    mlbPipelineTrace: debug.mlbPipelineTrace,
+    pipelineFailureCode: refreshed.pipelineFailureCode || failureCode,
+    pipelineDebugLine: refreshed.pipelineDebugLine || debug.pipelineDebugLine,
+    mlbPipelineTrace: refreshed.mlbPipelineTrace || failureTrace,
+    statusMessage: refreshed.pipelineFailureCode || failureCode,
+    projectionLabel: refreshed.pipelineFailureCode || failureCode,
+    scoringModeLabel: refreshed.pipelineFailureCode || failureCode,
   };
 }
 

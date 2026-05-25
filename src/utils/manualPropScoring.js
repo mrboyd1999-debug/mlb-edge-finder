@@ -960,19 +960,32 @@ export function mergeManualPropScoring(builtProp = {}, manualScore = {}, liveSco
     bettingLabel: manualScore.bettingLabel || manualScore.playTag || (manualScore.projectionUnavailable ? "Awaiting data" : "Graded"),
     displayTier: manualScore.playTag === "Strong Play" ? "playable" : playable ? "playable" : "research",
     lineSourceBadge: "MANUAL",
-    scoringModeLabel,
     projectionBreakdown: manualScore.projectionBreakdown || liveScored?.projectionBreakdown || [],
-    projectionLabel: manualScore.projectionLabel || liveScored?.projectionLabel || "Projection unavailable",
     isFallbackProjection: manualScore.isFallbackProjection ?? liveScored?.isFallbackProjection,
     isVerifiedProjection: manualScore.isVerifiedProjection ?? liveScored?.isVerifiedProjection,
     dataStatus: manualScore.dataStatus || liveScored?.dataStatus || null,
     projectionConfidence: manualScore.projectionConfidence ?? liveScored?.projectionConfidence ?? null,
     hitChanceLabel: manualScore.hitChanceLabel || (manualScore.impliedHitChance == null ? INSUFFICIENT_DATA_LABEL : null),
     displayStatus: manualScore.displayStatus || (manualScore.projectionUnavailable ? NO_VERIFIED_PLAY_STATUS : null),
-    statusMessage: manualScore.statusMessage || (manualScore.projectionUnavailable ? AWAITING_PROJECTION_STATUS : null),
     pipelineDebugLine: liveScored?.pipelineDebugLine || manualScore.pipelineDebugLine || null,
     pipelineFailureCode: liveScored?.pipelineFailureCode || manualScore.pipelineFailureCode || null,
     mlbPipelineTrace: liveScored?.mlbPipelineTrace || manualScore.mlbPipelineTrace || null,
+    statusMessage:
+      liveScored?.pipelineFailureCode ||
+      manualScore.pipelineFailureCode ||
+      (manualScore.projectionUnavailable ? AWAITING_PROJECTION_STATUS : null),
+    projectionLabel:
+      liveScored?.pipelineFailureCode ||
+      manualScore.pipelineFailureCode ||
+      manualScore.projectionLabel ||
+      liveScored?.projectionLabel ||
+      "Projection unavailable",
+    scoringModeLabel:
+      liveScored?.pipelineFailureCode ||
+      manualScore.pipelineFailureCode ||
+      manualScore.scoringModeLabel ||
+      liveScored?.scoringModeLabel ||
+      "Projection unavailable",
     modelPick:
       manualScore.projectionUnavailable
         ? NO_VERIFIED_PLAY_STATUS

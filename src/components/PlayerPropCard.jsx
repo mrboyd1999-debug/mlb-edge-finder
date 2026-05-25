@@ -8,7 +8,8 @@ import { dataBadgeStyle, styles, tierStyle } from "../theme/styles.js";
 import { isReadyToBet } from "../services/pickScoring.js";
 import { dynamicAcceptanceTier, getVolatilityLabel } from "../services/propQualityGates.js";
 import { riskAccentStyle } from "../utils/displayPropScoring.js";
-import { isManualAnalyzerProp } from "../utils/manualPropBuilder.js";
+import MlbPipelineFailureBlock from "./MlbPipelineFailureBlock.jsx";
+import { shouldShowMlbPipelineFailure } from "../utils/mlbPipelineFailureDisplay.js";
 import {
   AWAITING_PROJECTION_STATUS,
   hasValidProjection,
@@ -286,9 +287,13 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
                     {prop.displayStatus || NO_VERIFIED_PLAY_STATUS}
                   </span>
                 </div>
-                <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, marginTop: "2px", color: "#94a3b8" }}>
-                  {prop.pipelineDebugLine || prop.statusMessage || AWAITING_PROJECTION_STATUS}
-                </p>
+                {shouldShowMlbPipelineFailure(prop) ? (
+                  <MlbPipelineFailureBlock prop={prop} />
+                ) : (
+                  <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, marginTop: "2px", color: "#94a3b8" }}>
+                    {prop.pipelineDebugLine || prop.statusMessage || AWAITING_PROJECTION_STATUS}
+                  </p>
+                )}
                 {projVsLine ? (
                   <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, color: "#64748b" }}>
                     {projVsLine}
@@ -541,6 +546,9 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
             </div>
           )}
         </>
+      ) : null}
+      {shouldShowMlbPipelineFailure(prop) && !(isManual && noVerifiedPlay) ? (
+        <MlbPipelineFailureBlock prop={prop} />
       ) : null}
       {compact ? (
         <button type="button" className="prop-card-why-link" style={styles.whyLink} onClick={openDetails}>
