@@ -15,6 +15,7 @@ const DEFAULT_STATUS = {
     label: "MLB Projection Engine",
     status: "Pending",
     lastSuccessAt: "",
+    lastProjectionGeneratedAt: "",
     lastAttemptAt: "",
     lastError: "",
     lastProjection: null,
@@ -22,8 +23,32 @@ const DEFAULT_STATUS = {
     lastStat: "",
   },
   dfsSources: {
-    PrizePicks: { status: "Pending", lastSuccessAt: "", lastError: "" },
-    Underdog: { status: "Pending", lastSuccessAt: "", lastError: "" },
+    PrizePicks: {
+      status: "Pending",
+      connectionTier: "Pending",
+      lastSuccessAt: "",
+      lastError: "",
+      rawCount: 0,
+      parsedCount: 0,
+      usableCount: 0,
+      filteredCount: 0,
+      cachedCount: 0,
+      statusLabel: "",
+      ingestionSummary: "",
+    },
+    Underdog: {
+      status: "Pending",
+      connectionTier: "Pending",
+      lastSuccessAt: "",
+      lastError: "",
+      rawCount: 0,
+      parsedCount: 0,
+      usableCount: 0,
+      filteredCount: 0,
+      cachedCount: 0,
+      statusLabel: "",
+      ingestionSummary: "",
+    },
   },
 };
 
@@ -94,18 +119,17 @@ export function recordMlbProjectionResult({
   pipelineStatus.projectionApi.lastAttemptAt = now;
   pipelineStatus.projectionApi.lastPlayer = player || pipelineStatus.projectionApi.lastPlayer;
   pipelineStatus.projectionApi.lastStat = statType || pipelineStatus.projectionApi.lastStat;
-  if (ok && projection != null) {
+  const hasProjection = projection != null && Number.isFinite(Number(projection));
+  if (ok || hasProjection) {
     pipelineStatus.projectionApi.status = "Connected";
     pipelineStatus.projectionApi.lastSuccessAt = now;
+    pipelineStatus.projectionApi.lastProjectionGeneratedAt = now;
     pipelineStatus.projectionApi.lastProjection = projection;
     pipelineStatus.projectionApi.lastError = "";
   } else {
-    pipelineStatus.projectionApi.status = ok ? "Connected" : "Failed";
-    if (!ok) pipelineStatus.projectionApi.lastError = error || "Projection unavailable";
-    if (ok) {
-      pipelineStatus.projectionApi.lastSuccessAt = now;
-      pipelineStatus.projectionApi.lastProjection = projection;
-    }
+    pipelineStatus.projectionApi.status =
+      pipelineStatus.projectionApi.lastProjectionGeneratedAt ? "Warning" : "Failed";
+    pipelineStatus.projectionApi.lastError = error || "Projection unavailable";
   }
   notifyPipelineStatusListeners();
 }
@@ -115,6 +139,7 @@ export function recordDfsSourceStatus(source = "", { ok = false, error = "" } = 
   if (!key) return;
   const now = new Date().toISOString();
   pipelineStatus.dfsSources[key].status = ok ? "Connected" : "Failed";
+  pipelineStatus.dfsSources[key].connectionTier = ok ? "Connected" : "Failed";
   if (ok) {
     pipelineStatus.dfsSources[key].lastSuccessAt = now;
     pipelineStatus.dfsSources[key].lastError = "";
@@ -127,12 +152,33 @@ export function recordDfsSourceStatus(source = "", { ok = false, error = "" } = 
 export function mergeDfsSourceStatusFromApiHealth(apiHealth = {}) {
   ["PrizePicks", "Underdog"].forEach((name) => {
     const row = apiHealth?.[name] || {};
-    const failed = /failed|unavailable|offline|empty/i.test(String(row.statusLabel || row.lineSourceBadge || row.status || ""));
-    const ok = !failed && (Number(row.usableCount) > 0 || /live|connected|cached/i.test(String(row.statusLabel || "")));
-    if (row.lastFetchAt || row.lastSuccessfulFetchAt) {
-      pipelineStatus.dfsSources[name].lastSuccessAt = row.lastFetchAt || row.lastSuccessfulFetchAt || pipelineStatus.dfsSources[name].lastSuccessAt;
-    }
-    pipelineStatus.dfsSources[name].status = ok ? "Connected" : failed ? "Failed" : pipelineStatus.dfsSources[name].status;
-    if (row.lastError) pipelineStatus.dfsSources[name].lastError = row.lastError;
+    const usable = Number(row.usableCount) || 0;
+    const parsed = Number(row.parsedCount) || 0;
+    const cachedCount = Number(row.cachedCount) || 0;
+    const hasCached = cachedCount > 0 || /cached/i.test(String(row.statusLabel || row.lineSourceBadge || ""));
+    const connected = usable > 0 || parsed > 0 || hasCached;
+    const warning =
+      connected &&
+      (hasCached ||
+        row.connectionTier === "Warning" ||
+        /cached|warning|fallback|degraded/i.test(String(row.statusLabel || row.status || "")));
+
+    const tier = connected ? (warning ? "Warning" : "Connected") : "Failed";
+    const lastFetchAt = row.lastFetchAt || row.lastSuccessfulFetchAt || "";
+
+    pipelineStatus.dfsSources[name] = {
+      ...pipelineStatus.dfsSources[name],
+      status: tier,
+      connectionTier: tier,
+      statusLabel: row.statusLabel || pipelineStatus.dfsSources[name].statusLabel || "",
+      rawCount: Number(row.rawCount) || 0,
+      parsedCount: Number(row.parsedCount) || 0,
+      usableCount: usable,
+      filteredCount: Number(row.filteredCount) || Math.max(0, parsed - usable),
+      cachedCount: cachedCount,
+      ingestionSummary: row.ingestionSummary || "",
+      lastSuccessAt: connected ? lastFetchAt || pipelineStatus.dfsSources[name].lastSuccessAt : pipelineStatus.dfsSources[name].lastSuccessAt,
+      lastError: tier === "Failed" ? row.lastError || pipelineStatus.dfsSources[name].lastError : "",
+    };
   });
 }

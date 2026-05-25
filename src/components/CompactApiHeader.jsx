@@ -1,20 +1,29 @@
 import { memo, useMemo } from "react";
 import { getOddsApiKey, getSportsDataApiKey } from "../services/runtimeSettings.js";
 import { formatCooldownRemaining } from "../services/sourceRateLimit.js";
+import { CONNECTION_TIERS } from "../services/sourceHealth.js";
 
-function badge(label, connected) {
-  return (
-    <span className={`compact-api-badge${connected ? " compact-api-badge--ok" : " compact-api-badge--bad"}`}>
-      {label}: {connected ? "Connected" : "Not Connected"}
-    </span>
-  );
+function badgeClass(tier = "") {
+  const key = String(tier || "").toLowerCase();
+  if (key === "connected") return " compact-api-badge--ok";
+  if (key === "warning") return " compact-api-badge--warn";
+  if (key === "failed") return " compact-api-badge--bad";
+  return "";
 }
 
-function sourceConnected(apiHealth = {}, key = "") {
+function sourceTier(apiHealth = {}, key = "") {
   const row = apiHealth?.[key];
-  if (!row) return false;
+  if (!row) return CONNECTION_TIERS.PENDING;
+  if (row.connectionTier) return row.connectionTier;
+  const usable = Number(row.usableCount) || 0;
+  const parsed = Number(row.parsedCount) || 0;
+  if (usable > 0 || parsed > 0) {
+    return /cached|warning/i.test(String(row.statusLabel || "")) ? CONNECTION_TIERS.WARNING : CONNECTION_TIERS.CONNECTED;
+  }
   const status = String(row.status || "").toLowerCase();
-  return status === "ok" || status === "success" || status === "cached" || status === "live";
+  if (status === "connected" || status === "full" || status === "live") return CONNECTION_TIERS.CONNECTED;
+  if (/failed|unavailable|offline/i.test(status)) return CONNECTION_TIERS.FAILED;
+  return CONNECTION_TIERS.PENDING;
 }
 
 function CompactApiHeader({
@@ -28,13 +37,18 @@ function CompactApiHeader({
 }) {
   const oddsConnected = Boolean(getOddsApiKey());
   const sportsDataConnected = Boolean(getSportsDataApiKey());
-  const ppConnected = sourceConnected(apiHealth, "PrizePicks");
-  const udConnected = sourceConnected(apiHealth, "Underdog");
+  const ppTier = sourceTier(apiHealth, "PrizePicks");
+  const udTier = sourceTier(apiHealth, "Underdog");
   const dfsLabel = useMemo(() => {
-    if (ppConnected && udConnected) return "Connected";
-    if (ppConnected || udConnected) return "Partial";
-    return "Not Connected";
-  }, [ppConnected, udConnected]);
+    const connected = [ppTier, udTier].filter((tier) => tier === CONNECTION_TIERS.CONNECTED).length;
+    const warning = [ppTier, udTier].filter((tier) => tier === CONNECTION_TIERS.WARNING).length;
+    if (connected === 2) return { tier: CONNECTION_TIERS.CONNECTED, text: "Connected" };
+    if (connected + warning >= 1) return { tier: CONNECTION_TIERS.WARNING, text: "Partial" };
+    if (ppTier === CONNECTION_TIERS.FAILED && udTier === CONNECTION_TIERS.FAILED) {
+      return { tier: CONNECTION_TIERS.FAILED, text: "Not Connected" };
+    }
+    return { tier: CONNECTION_TIERS.PENDING, text: "Pending" };
+  }, [ppTier, udTier]);
 
   const refreshLabel = loading
     ? "Loading…"
@@ -59,10 +73,14 @@ function CompactApiHeader({
         </button>
       </div>
       <div className="compact-app-header__badges">
-        {badge("Odds API", oddsConnected)}
-        {badge("SportsDataIO", sportsDataConnected)}
-        <span className={`compact-api-badge${dfsLabel === "Connected" ? " compact-api-badge--ok" : dfsLabel === "Partial" ? " compact-api-badge--warn" : " compact-api-badge--bad"}`}>
-          PrizePicks/Underdog: {dfsLabel}
+        <span className={`compact-api-badge${oddsConnected ? " compact-api-badge--ok" : ""}`}>
+          Odds API: {oddsConnected ? "Connected" : "Not Connected"}
+        </span>
+        <span className={`compact-api-badge${sportsDataConnected ? " compact-api-badge--ok" : ""}`}>
+          SportsDataIO: {sportsDataConnected ? "Connected" : "Not Connected"}
+        </span>
+        <span className={`compact-api-badge${badgeClass(dfsLabel.tier)}`}>
+          PrizePicks/Underdog: {dfsLabel.text}
         </span>
       </div>
     </header>

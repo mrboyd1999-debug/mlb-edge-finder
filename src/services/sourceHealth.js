@@ -23,7 +23,18 @@ export const CONNECTION_LABELS = {
   EMPTY: EMPTY_SOURCE_MESSAGE,
 };
 
-const HEALTH_COLORS = {
+export const CONNECTION_TIERS = {
+  CONNECTED: "Connected",
+  WARNING: "Warning",
+  FAILED: "Failed",
+  PENDING: "Pending",
+};
+
+export const HEALTH_COLORS = {
+  Connected: { bg: "rgba(34,197,94,0.18)", text: "#86efac", border: "rgba(34,197,94,0.35)" },
+  Warning: { bg: "rgba(234,179,8,0.18)", text: "#fde047", border: "rgba(234,179,8,0.35)" },
+  Failed: { bg: "rgba(239,68,68,0.15)", text: "#fca5a5", border: "rgba(239,68,68,0.3)" },
+  Pending: { bg: "rgba(148,163,184,0.12)", text: "#cbd5e1", border: "rgba(148,163,184,0.28)" },
   LIVE: { bg: "rgba(34,197,94,0.18)", text: "#86efac", border: "rgba(34,197,94,0.35)" },
   CACHED: { bg: "rgba(59,130,246,0.18)", text: "#93c5fd", border: "rgba(59,130,246,0.35)" },
   STALE: { bg: "rgba(234,179,8,0.18)", text: "#fde047", border: "rgba(234,179,8,0.35)" },
@@ -34,9 +45,23 @@ const HEALTH_COLORS = {
   "NOT CONFIGURED": { bg: "rgba(148,163,184,0.15)", text: "#cbd5e1", border: "rgba(148,163,184,0.3)" },
 };
 
+const LEGACY_HEALTH_COLORS = {
+  LIVE: HEALTH_COLORS.LIVE,
+  CACHED: HEALTH_COLORS.CACHED,
+  STALE: HEALTH_COLORS.STALE,
+  DEGRADED: HEALTH_COLORS.DEGRADED,
+  OFFLINE: HEALTH_COLORS.OFFLINE,
+  FAILED: HEALTH_COLORS.FAILED,
+  EMPTY: HEALTH_COLORS.EMPTY,
+  "NOT CONFIGURED": HEALTH_COLORS["NOT CONFIGURED"],
+};
+
 export function healthStateStyle(state = "") {
-  const key = String(state || "").toUpperCase();
-  const colors = HEALTH_COLORS[key] || HEALTH_COLORS.DEGRADED;
+  const key = String(state || "");
+  const colors =
+    HEALTH_COLORS[key] ||
+    LEGACY_HEALTH_COLORS[String(key).toUpperCase()] ||
+    HEALTH_COLORS.Pending;
   return {
     display: "inline-flex",
     alignItems: "center",
@@ -51,6 +76,71 @@ export function healthStateStyle(state = "") {
   };
 }
 
+function finiteCount(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
+/**
+ * Canonical provider connection tier — props/cache win over stale fetch flags.
+ */
+export function resolveProviderConnectionStatus({
+  usableCount = 0,
+  parsedCount = 0,
+  rawCount = 0,
+  cachedCount = 0,
+  cached = false,
+  fallback = false,
+  partial = false,
+  fetchFailed = false,
+  timedOut = false,
+} = {}) {
+  const usable = finiteCount(usableCount);
+  const parsed = finiteCount(parsedCount);
+  const raw = finiteCount(rawCount);
+  const cachedProps = finiteCount(cachedCount);
+  const hasCached = cached || cachedProps > 0;
+  const hasData = usable > 0 || parsed > 0 || hasCached;
+
+  if (timedOut && !hasData) {
+    return { tier: CONNECTION_TIERS.FAILED, badge: HEALTH_STATES.FAILED, connected: false };
+  }
+  if (hasData) {
+    const warning =
+      hasCached ||
+      fallback ||
+      partial ||
+      (raw > 0 && usable === 0 && parsed > 0) ||
+      (fetchFailed && hasData);
+    return {
+      tier: warning ? CONNECTION_TIERS.WARNING : CONNECTION_TIERS.CONNECTED,
+      badge: warning ? (hasCached ? HEALTH_STATES.CACHED : HEALTH_STATES.DEGRADED) : HEALTH_STATES.LIVE,
+      connected: true,
+      warning,
+    };
+  }
+  if (fetchFailed || timedOut) {
+    return { tier: CONNECTION_TIERS.FAILED, badge: HEALTH_STATES.FAILED, connected: false };
+  }
+  return { tier: CONNECTION_TIERS.FAILED, badge: HEALTH_STATES.EMPTY, connected: false };
+}
+
+export function formatIngestionMetrics(row = {}) {
+  const raw = finiteCount(row.rawCount ?? row.rawPropsLoaded);
+  const parsed = finiteCount(row.parsedCount ?? row.propsAfterParsing);
+  const usable = finiteCount(row.usableCount ?? row.usablePropsCount);
+  const filtered = finiteCount(row.filteredCount ?? Math.max(0, parsed - usable));
+  const cached = finiteCount(row.cachedCount ?? (row.lineSourceBadge === HEALTH_STATES.CACHED ? usable : 0));
+  return {
+    rawCount: raw,
+    parsedCount: parsed,
+    usableCount: usable,
+    filteredCount: filtered,
+    cachedCount: cached,
+    summary: `raw ${raw} · parsed ${parsed} · usable ${usable} · filtered ${filtered}${cached > 0 ? ` · cached ${cached}` : ""}`,
+  };
+}
+
 export function resolveFetchHealthBadge({
   ok = true,
   rateLimited = false,
@@ -61,51 +151,64 @@ export function resolveFetchHealthBadge({
   parsedCount = 0,
   usableCount = 0,
   lastError = "",
+  fallback = false,
+  partial = false,
 } = {}) {
-  const badge = resolveLiveBadge({ usableCount, cached: cached || rateLimited, failed: failed || ok === false, timedOut });
+  const connection = resolveProviderConnectionStatus({
+    usableCount,
+    parsedCount,
+    rawCount,
+    cached,
+    fallback,
+    partial,
+    fetchFailed: failed || ok === false,
+    timedOut,
+  });
+
   const statusLabel = formatProviderStatusLabel({
-    badge,
+    badge: connection.badge,
     usableCount,
     rawCount,
     parsedCount,
-    failed: failed || ok === false,
+    failed: connection.tier === CONNECTION_TIERS.FAILED,
     timedOut,
-    cached: cached || rateLimited,
+    cached: cached || rateLimited || connection.warning,
     lastError,
+    connectionTier: connection.tier,
   });
 
-  if (timedOut) {
-    return { pipelineStatus: "Timed out", badge: "TIMED OUT", message: statusLabel };
-  }
-  if (failed || ok === false) {
-    return { pipelineStatus: "Failed", badge: HEALTH_STATES.FAILED, message: statusLabel };
-  }
-  if (usableCount > 0) {
-    const pipelineStatus = cached || rateLimited ? "Cached" : "Full";
+  if (connection.tier === CONNECTION_TIERS.CONNECTED) {
     return {
-      pipelineStatus,
-      badge: cached || rateLimited ? HEALTH_STATES.CACHED : HEALTH_STATES.LIVE,
+      pipelineStatus: cached || rateLimited ? "Cached" : "Full",
+      badge: connection.badge,
       message: statusLabel,
+      connectionTier: connection.tier,
     };
+  }
+  if (connection.tier === CONNECTION_TIERS.WARNING) {
+    return {
+      pipelineStatus: cached || rateLimited ? "Cached" : "Degraded",
+      badge: connection.badge,
+      message: statusLabel,
+      connectionTier: connection.tier,
+    };
+  }
+  if (timedOut) {
+    return { pipelineStatus: "Timed out", badge: "TIMED OUT", message: statusLabel, connectionTier: CONNECTION_TIERS.FAILED };
   }
   if (rawCount > 0 && parsedCount === 0) {
     return {
       pipelineStatus: "Empty",
       badge: HEALTH_STATES.EMPTY,
-      message: "Underdog connected, but parser returned 0 props.",
-    };
-  }
-  if (rateLimited || cached) {
-    return {
-      pipelineStatus: "Cached",
-      badge: HEALTH_STATES.CACHED,
-      message: rateLimited ? "Rate limited with no usable cached props." : EMPTY_SOURCE_MESSAGE,
+      message: statusLabel || "Underdog connected, but parser returned 0 props.",
+      connectionTier: CONNECTION_TIERS.WARNING,
     };
   }
   return {
-    pipelineStatus: "Empty",
-    badge: HEALTH_STATES.EMPTY,
-    message: EMPTY_SOURCE_MESSAGE,
+    pipelineStatus: "Failed",
+    badge: connection.badge,
+    message: statusLabel,
+    connectionTier: connection.tier,
   };
 }
 

@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { formatDateTime } from "../utils/formatters.js";
 import { styles } from "../theme/styles.js";
+import { healthStateStyle } from "../services/sourceHealth.js";
 
 const ROW_STYLE = {
   display: "grid",
@@ -11,25 +12,34 @@ const ROW_STYLE = {
   background: "#0f172a",
 };
 
-function statusColor(status = "") {
-  const key = String(status || "").toLowerCase();
-  if (key === "connected" || key === "live") return "#86efac";
-  if (key === "failed") return "#fca5a5";
-  if (key === "pending") return "#cbd5e1";
-  return "#fde047";
+function resolveDisplayStatus(row = {}) {
+  const tier = row.connectionTier || row.status || "Pending";
+  const label = row.statusLabel || tier;
+  return { tier, label };
 }
 
-function StatusRow({ label, status, lastSuccessAt, lastError, details = [] }) {
+function StatusRow({ label, row = {}, lastSuccessAt, lastError, details = [], extraTimestamp = "" }) {
+  const { tier, label: statusLabel } = resolveDisplayStatus(row);
   return (
     <div style={ROW_STYLE}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "center" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
         <strong style={{ fontSize: 12 }}>{label}</strong>
-        <span style={{ fontSize: 11, fontWeight: 800, color: statusColor(status) }}>{status || "Pending"}</span>
+        <span style={healthStateStyle(tier)}>{statusLabel}</span>
       </div>
       <p style={{ ...styles.compactFlags, margin: 0, color: "#94a3b8" }}>
         Last success: {lastSuccessAt ? formatDateTime(lastSuccessAt) : "—"}
       </p>
-      {lastError ? (
+      {extraTimestamp ? (
+        <p style={{ ...styles.compactFlags, margin: 0, color: "#94a3b8" }}>
+          {extraTimestamp}
+        </p>
+      ) : null}
+      {row.ingestionSummary ? (
+        <p style={{ ...styles.compactFlags, margin: 0, color: "#64748b", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 10 }}>
+          {row.ingestionSummary}
+        </p>
+      ) : null}
+      {lastError && tier === "Failed" ? (
         <p style={{ ...styles.compactFlags, margin: 0, color: "#fca5a5" }}>{lastError}</p>
       ) : null}
       {details.map((line) => (
@@ -44,15 +54,19 @@ function StatusRow({ label, status, lastSuccessAt, lastError, details = [] }) {
 function MlbPipelineStatusPanel({ pipelineStatus = null, apiHealth = null, compact = false }) {
   const stats = pipelineStatus?.mlbStatsApi || {};
   const projection = pipelineStatus?.projectionApi || {};
-  const pp = pipelineStatus?.dfsSources?.PrizePicks || apiHealth?.PrizePicks || {};
-  const ud = pipelineStatus?.dfsSources?.Underdog || apiHealth?.Underdog || {};
+  const pp = { ...(apiHealth?.PrizePicks || {}), ...(pipelineStatus?.dfsSources?.PrizePicks || {}) };
+  const ud = { ...(apiHealth?.Underdog || {}), ...(pipelineStatus?.dfsSources?.Underdog || {}) };
 
   const statsDetails = [
     stats.lastUrl ? `URL: ${stats.lastUrl}` : "",
     stats.lastStatusCode != null ? `HTTP ${stats.lastStatusCode}` : "",
     stats.playersReturned != null ? `Players returned: ${stats.playersReturned}` : "",
     stats.matchedPlayer ? `Matched: ${stats.matchedPlayer}${stats.playerId ? ` (${stats.playerId})` : ""}` : "",
-    projection.lastProjection != null ? `Last projection: ${projection.lastProjection}` : "",
+  ].filter(Boolean);
+
+  const projectionDetails = [
+    projection.lastPlayer && projection.lastStat ? `Last: ${projection.lastPlayer} · ${projection.lastStat}` : "",
+    projection.lastProjection != null ? `Projection used: ${projection.lastProjection}` : "",
   ].filter(Boolean);
 
   return (
@@ -67,32 +81,38 @@ function MlbPipelineStatusPanel({ pipelineStatus = null, apiHealth = null, compa
       ) : null}
       <StatusRow
         label="PrizePicks"
-        status={pp.status || pp.statusLabel || "Pending"}
+        row={pp}
         lastSuccessAt={pp.lastSuccessAt || pp.lastFetchAt}
         lastError={pp.lastError}
       />
       <StatusRow
         label="Underdog"
-        status={ud.status || ud.statusLabel || "Pending"}
+        row={ud}
         lastSuccessAt={ud.lastSuccessAt || ud.lastFetchAt}
         lastError={ud.lastError}
       />
       <StatusRow
         label={stats.label || "MLB Stats API"}
-        status={stats.status}
+        row={{ status: stats.status, connectionTier: stats.status, statusLabel: stats.status }}
         lastSuccessAt={stats.lastSuccessAt}
         lastError={stats.lastError}
         details={statsDetails}
       />
       <StatusRow
         label={projection.label || "MLB Projection Engine"}
-        status={projection.status}
+        row={{
+          status: projection.status,
+          connectionTier: projection.status,
+          statusLabel: projection.status,
+        }}
         lastSuccessAt={projection.lastSuccessAt}
         lastError={projection.lastError}
-        details={[
-          projection.lastPlayer && projection.lastStat ? `Last: ${projection.lastPlayer} · ${projection.lastStat}` : "",
-          projection.lastProjection != null ? `Projection used: ${projection.lastProjection}` : "",
-        ].filter(Boolean)}
+        extraTimestamp={
+          projection.lastProjectionGeneratedAt
+            ? `Last projection generated: ${formatDateTime(projection.lastProjectionGeneratedAt)}`
+            : ""
+        }
+        details={projectionDetails}
       />
     </div>
   );

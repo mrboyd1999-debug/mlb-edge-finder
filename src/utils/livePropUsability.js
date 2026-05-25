@@ -61,29 +61,40 @@ export function formatProviderStatusLabel({
   timedOut = false,
   cached = false,
   lastError = "",
+  connectionTier = "",
 } = {}) {
   const usable = finiteOr(usableCount, 0);
   const raw = finiteOr(rawCount, 0);
   const parsed = finiteOr(parsedCount, 0);
   const normalizedBadge = String(badge || status || "").toUpperCase();
   const errorText = String(lastError || "");
+  const tier = String(connectionTier || "").toLowerCase();
 
   if (timedOut || isTimeoutPreview(errorText) || /timed?\s*out/i.test(normalizedBadge)) {
+    if (usable > 0 || parsed > 0) {
+      return cached ? `Cached — ${usable || parsed} usable props` : `Live — ${usable || parsed} usable props`;
+    }
     return "Timed out — fallback disabled";
   }
-  if (
-    failed ||
-    normalizedBadge === HEALTH_STATES.FAILED ||
-    normalizedBadge === "UNAVAILABLE" ||
-    normalizedBadge === "OFFLINE"
-  ) {
-    return `Failed — ${failureDetail(errorText, timedOut)}`;
-  }
+
   if (usable > 0) {
-    if (cached || normalizedBadge === HEALTH_STATES.CACHED || /cached/i.test(String(status || ""))) {
+    if (cached || normalizedBadge === HEALTH_STATES.CACHED || /cached/i.test(String(status || "")) || tier === "warning") {
       return `Cached — ${usable} usable props`;
     }
     return `Live — ${usable} usable props`;
+  }
+  if (parsed > 0) {
+    return cached ? `Cached — ${parsed} parsed props` : `Connected — ${parsed} parsed props`;
+  }
+
+  if (
+    failed &&
+    tier !== "connected" &&
+    tier !== "warning" &&
+    normalizedBadge !== HEALTH_STATES.LIVE &&
+    normalizedBadge !== HEALTH_STATES.CACHED
+  ) {
+    return `Failed — ${failureDetail(errorText, timedOut)}`;
   }
   if (raw > 0 && parsed === 0) {
     return "Connected — parser returned 0 props";
@@ -100,17 +111,21 @@ export function formatProviderStatusLabel({
   return normalizedBadge ? String(badge || status) : "Pending";
 }
 
+export function resolveLiveBadge({ usableCount = 0, parsedCount = 0, cached = false, failed = false, timedOut = false } = {}) {
+  const usable = finiteOr(usableCount, 0);
+  const parsed = finiteOr(parsedCount, 0);
+  if (usable > 0 || parsed > 0) {
+    return cached ? HEALTH_STATES.CACHED : HEALTH_STATES.LIVE;
+  }
+  if (timedOut) return "TIMED OUT";
+  if (failed) return HEALTH_STATES.FAILED;
+  return HEALTH_STATES.EMPTY;
+}
+
 export function summarizeSourceUsability(row = {}, propsSample = []) {
   const rawCount = finiteOr(row.rawPropsLoaded ?? row.rawCount, 0);
   const parsedCount = finiteOr(row.propsAfterParsing ?? row.parsedCount, 0);
   const sampleUsable = countUsableProps(propsSample);
   const usableCount = finiteOr(row.usablePropsCount ?? row.usableCount, sampleUsable || parsedCount);
   return { rawCount, parsedCount, usableCount };
-}
-
-export function resolveLiveBadge({ usableCount = 0, cached = false, failed = false, timedOut = false } = {}) {
-  if (timedOut) return "TIMED OUT";
-  if (failed) return HEALTH_STATES.FAILED;
-  if (usableCount > 0) return cached ? HEALTH_STATES.CACHED : HEALTH_STATES.LIVE;
-  return HEALTH_STATES.EMPTY;
 }

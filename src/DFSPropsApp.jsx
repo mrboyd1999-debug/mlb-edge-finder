@@ -6,7 +6,7 @@ import {
   applyUnderdogProviderToDebug,
   UNDERDOG_SOFT_MESSAGE,
 } from "./services/providers/underdogProvider.js";
-import { resolveSourceHealthState, resolveFetchHealthBadge, summarizeSourceCounts, formatProviderStatusLabel, HEALTH_STATES, EMPTY_SOURCE_MESSAGE } from "./services/sourceHealth.js";
+import { resolveSourceHealthState, resolveFetchHealthBadge, summarizeSourceCounts, formatProviderStatusLabel, HEALTH_STATES, EMPTY_SOURCE_MESSAGE, resolveProviderConnectionStatus, formatIngestionMetrics, CONNECTION_TIERS } from "./services/sourceHealth.js";
 import { enrichLineMovementWithTags } from "./services/lineMovementTrust.js";
 import { fetchSportsbookComparison } from "./services/sportsbookOdds";
 import { fetchOddsApiDisplayProps } from "./services/oddsApiPlayerProps.js";
@@ -802,44 +802,54 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
   const sourceSnapshot = buildSourceHealthSnapshot();
   const boardTs = board?.updatedAt ? new Date(board.updatedAt).getTime() : 0;
   const boardPropCount = (board?.props || []).length;
-  const resolveBadge = (row, status, fallbackTs = boardTs) => {
+  const buildRow = (row, status) => {
     const counts = summarizeSourceCounts(row);
-    const rawCount = Number(row.rawPropsLoaded ?? counts.rawCount ?? 0);
-    const usableCount = Number(row.usablePropsCount ?? counts.usableCount ?? 0);
-    const parsedCount = Number(row.propsAfterParsing ?? counts.parsedCount ?? 0);
-    const failed = /failed|unavailable|offline/i.test(String(status || row.status || ""));
+    const fetchFailed = /failed|unavailable|offline/i.test(String(status || row.status || ""));
     const timedOut = /timed?\s*out/i.test(String(row.message || row.lastError || status || ""));
     const cached = /cached/i.test(String(status || row.status || row.lineSourceBadge || ""));
-    return resolveFetchHealthBadge({
-      ok: !failed,
-      failed,
+    const health = resolveFetchHealthBadge({
+      ok: !fetchFailed,
+      failed: fetchFailed,
       timedOut,
       rateLimited: cached,
       cached,
-      rawCount,
-      parsedCount,
-      usableCount,
+      rawCount: counts.rawCount,
+      parsedCount: counts.parsedCount,
+      usableCount: counts.usableCount,
       lastError: row.message || row.lastError || "",
-    }).badge;
-  };
-  const buildRow = (row, status) => {
-    const counts = summarizeSourceCounts(row);
-    const badge = resolveBadge(row, status);
-    const failed = badge === HEALTH_STATES.FAILED;
-    const timedOut = String(badge).toUpperCase() === "TIMED OUT";
-    const cached = badge === HEALTH_STATES.CACHED;
+      fallback: Boolean(row.fallback),
+      partial: counts.rawCount > 0 && counts.usableCount === 0 && counts.parsedCount > 0,
+    });
+    const connection = resolveProviderConnectionStatus({
+      usableCount: counts.usableCount,
+      parsedCount: counts.parsedCount,
+      rawCount: counts.rawCount,
+      cached,
+      fallback: Boolean(row.fallback),
+      fetchFailed,
+      timedOut,
+    });
+    const metrics = formatIngestionMetrics({ ...counts, lineSourceBadge: health.badge });
     const statusLabel = formatLiveProviderLabel({
-      badge,
-      status,
+      badge: health.badge,
+      status: connection.tier,
       usableCount: counts.usableCount,
       rawCount: counts.rawCount,
       parsedCount: counts.parsedCount,
-      failed,
+      failed: connection.tier === CONNECTION_TIERS.FAILED,
       timedOut,
       cached,
       lastError: row.message || row.lastError || "",
+      connectionTier: connection.tier,
     });
-    return { ...counts, lineSourceBadge: badge, statusLabel };
+    return {
+      ...counts,
+      filteredCount: metrics.filteredCount,
+      cachedCount: metrics.cachedCount,
+      lineSourceBadge: health.badge,
+      statusLabel,
+      connectionTier: connection.tier,
+    };
   };
   const ppRow = buildRow(pp, board?.sourceStatus?.PrizePicks);
   const udRow = buildRow(ud, board?.sourceStatus?.Underdog);
@@ -859,13 +869,17 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
   const statsLoadedCount = Number(board?.debugInfo?.statsLoadedCount || 0);
   return {
     PrizePicks: {
-      status: sourceSnapshot[SOURCE_IDS.PRIZEPICKS]?.status || board?.sourceStatus?.PrizePicks || pp.status || "Pending",
+      status: ppRow.connectionTier || CONNECTION_TIERS.PENDING,
+      connectionTier: ppRow.connectionTier || CONNECTION_TIERS.PENDING,
       lastFetchAt: pp.lastSuccessfulFetchAt || sourceSnapshot.PrizePicks?.lastSuccessfulFetchAt || board?.updatedAt || "",
       lineSourceBadge: ppRow.lineSourceBadge,
       statusLabel: ppRow.statusLabel,
       rawCount: ppRow.rawCount,
       parsedCount: ppRow.parsedCount,
       usableCount: ppRow.usableCount,
+      filteredCount: ppRow.filteredCount,
+      cachedCount: ppRow.cachedCount,
+      ingestionSummary: formatIngestionMetrics(ppRow).summary,
       cooldownRemainingMs: sourceSnapshot.PrizePicks?.cooldownRemainingMs || 0,
       cacheAge: sourceSnapshot.PrizePicks?.cacheAge || "",
       requestCount: sourceSnapshot.PrizePicks?.requestCount || 0,
@@ -873,13 +887,17 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
       lastError: sourceSnapshot.PrizePicks?.lastError || pp.message || "",
     },
     Underdog: {
-      status: sourceSnapshot.Underdog?.status || board?.sourceStatus?.Underdog || ud.status || "Pending",
+      status: udRow.connectionTier || CONNECTION_TIERS.PENDING,
+      connectionTier: udRow.connectionTier || CONNECTION_TIERS.PENDING,
       lastFetchAt: ud.lastSuccessfulFetchAt || sourceSnapshot.Underdog?.lastSuccessfulFetchAt || board?.updatedAt || "",
       lineSourceBadge: udRow.lineSourceBadge,
       statusLabel: udRow.statusLabel,
       rawCount: udRow.rawCount,
       parsedCount: udRow.parsedCount,
       usableCount: udRow.usableCount,
+      filteredCount: udRow.filteredCount,
+      cachedCount: udRow.cachedCount,
+      ingestionSummary: formatIngestionMetrics(udRow).summary,
       cooldownRemainingMs: sourceSnapshot.Underdog?.cooldownRemainingMs || 0,
       cacheAge: sourceSnapshot.Underdog?.cacheAge || "",
       requestCount: sourceSnapshot.Underdog?.requestCount || 0,
@@ -962,11 +980,16 @@ function applySourceResult({
   );
   const usableCount = countUsableProps(props);
   logLiveFetchResult(label, result);
-  const failed =
-    result.status === "Failed" || (result.status === "Unavailable" && !(incoming || []).length);
   const rateLimited = Boolean(result.rateLimited || result.cached);
-  const cached = result.status === "Cached" || rateLimited;
+  const cached = result.status === "Cached" || rateLimited || Boolean(result.fallback);
   const timedOut = /timed?\s*out/i.test(String(result.debug?.message || result.warnings?.join(" ") || ""));
+  const fetchFailed =
+    (result.status === "Failed" || result.status === "Unavailable") &&
+    usableCount === 0 &&
+    parsedCount === 0 &&
+    props.length === 0 &&
+    !cached;
+  const failed = fetchFailed;
   const health = resolveFetchHealthBadge({
     ok: !failed,
     failed,
@@ -977,7 +1000,10 @@ function applySourceResult({
     parsedCount,
     usableCount,
     lastError: result.debug?.message || result.warnings?.join(" | ") || "",
+    fallback: Boolean(result.fallback),
+    partial: rawCount > 0 && usableCount === 0 && parsedCount > 0,
   });
+  const connectionTier = health.connectionTier || CONNECTION_TIERS.PENDING;
 
   if (label === "Underdog" && failed) {
     const detailWarnings = result.warnings?.length ? result.warnings : [UNDERDOG_UNAVAILABLE_MESSAGE];
@@ -993,8 +1019,9 @@ function applySourceResult({
     }
     debugInfo.sources[label] = {
       ...debugInfo.sources[label],
-      status: props.length ? "Connected" : "Unavailable",
-      apiStatus: result.debug?.apiStatus || (props.length ? "Connected" : "Unavailable"),
+      status: connectionTier,
+      connectionTier,
+      apiStatus: connectionTier,
       apiUrl: result.debug?.apiUrl || "",
       endpointsTried: result.debug?.endpointsTried || [],
       rawPropsLoaded: rawCount,
@@ -1034,8 +1061,9 @@ function applySourceResult({
     }
     debugInfo.sources[label] = {
       ...debugInfo.sources[label],
-      status: sourceStatus[label],
-      apiStatus: result.debug?.apiStatus || sourceStatus[label],
+      status: connectionTier,
+      connectionTier,
+      apiStatus: connectionTier,
       apiUrl: result.debug?.apiUrl || "",
       endpointsTried: result.debug?.endpointsTried || [],
       rawPropsLoaded: rawCount,
@@ -1050,13 +1078,13 @@ function applySourceResult({
   }
 
   const pipelineStatus =
-    label === "Underdog" && health.pipelineStatus === "Full"
-      ? "Connected"
-      : health.pipelineStatus === "Full"
-        ? label === "Underdog"
-          ? "Connected"
+    connectionTier === CONNECTION_TIERS.CONNECTED || connectionTier === CONNECTION_TIERS.WARNING
+      ? label === "Underdog"
+        ? "Connected"
+        : connectionTier === CONNECTION_TIERS.WARNING
+          ? "Cached"
           : "Full"
-        : health.pipelineStatus;
+      : health.pipelineStatus;
   sourceStatus[label] = pipelineStatus;
 
   if (health.message && !sourceWarnings.includes(health.message)) {
@@ -1067,8 +1095,9 @@ function applySourceResult({
 
   debugInfo.sources[label] = {
     ...debugInfo.sources[label],
-    status: pipelineStatus,
-    apiStatus: result.debug?.apiStatus || pipelineStatus,
+    status: connectionTier,
+    connectionTier,
+    apiStatus: connectionTier,
     apiUrl: result.debug?.apiUrl || "",
     endpointsTried: result.debug?.endpointsTried || [],
     rawPropsLoaded: rawCount,
