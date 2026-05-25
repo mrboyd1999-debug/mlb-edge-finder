@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { styles } from "../theme/styles.js";
+import { HIDDEN_SETTING_DEFS, getEffectiveSetting } from "../services/runtimeSettings.js";
 import ApiHealthPanel from "./ApiHealthPanel.jsx";
 import MlbPipelineStatusPanel from "./MlbPipelineStatusPanel.jsx";
 import UnderdogDebugPanel from "./UnderdogDebugPanel.jsx";
@@ -34,6 +35,25 @@ function DeveloperDebugPanel({
       <SectionErrorBoundary name="Developer Debug">
         <ApiHealthPanel connectionReport={connectionReport} lastTestedAt={lastTestedAt} />
         <MlbPipelineStatusPanel pipelineStatus={mlbPipelineStatus} apiHealth={apiHealth} compact />
+        <details className="settings-advanced-config compact-settings-details">
+          <summary style={styles.detailsSummary}>
+            <span>
+              <span className="mobile-hide-verbose" style={styles.eyebrow}>Reserved</span>
+              <strong>Proxy URLs &amp; StatMuse</strong>
+            </span>
+          </summary>
+          <div style={{ display: "grid", gap: "6px", marginTop: "8px" }}>
+            {HIDDEN_SETTING_DEFS.map((def) => {
+              const value = getEffectiveSetting(def.key);
+              return (
+                <p key={def.key} style={styles.compactFlags}>
+                  {def.label}: {value ? (def.type === "secret" ? "configured" : value) : "not configured"}
+                  {def.key === "VITE_STATMUSE_API_KEY" ? " — reserved, not wired in this build" : ""}
+                </p>
+              );
+            })}
+          </div>
+        </details>
       </SectionErrorBoundary>
 
       {showDebugPanels && debugModeEnabled ? (

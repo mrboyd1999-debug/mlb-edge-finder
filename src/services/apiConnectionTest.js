@@ -431,6 +431,17 @@ async function testSportsDataProvider() {
   };
 }
 
+/** Standalone Odds API probe. */
+export async function testOddsAPI() {
+  const startedAt = Date.now();
+  const result = await testOddsApi();
+  return {
+    testedAt: new Date().toISOString(),
+    durationMs: Date.now() - startedAt,
+    results: [result],
+  };
+}
+
 /** Standalone SportsDataIO probe — logs URL, status, and error body to console. */
 export async function testSportsDataIO() {
   const startedAt = Date.now();

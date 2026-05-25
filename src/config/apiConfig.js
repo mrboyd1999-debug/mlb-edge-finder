@@ -20,6 +20,7 @@
 
 import {
   RUNTIME_SETTING_DEFS,
+  USER_SETTING_DEFS,
   getEffectiveSetting,
   getOddsApiKey,
   getProxyUrl,
@@ -46,6 +47,7 @@ export {
   getStatmuseApiKey,
   isSettingConfigured,
   RUNTIME_SETTING_DEFS,
+  USER_SETTING_DEFS,
 };
 
 /**
@@ -53,7 +55,7 @@ export {
  * Each entry: { key, label, configured, source: "override"|"env"|"legacy"|null }
  */
 export function describeApiConfig() {
-  return RUNTIME_SETTING_DEFS.map((def) => {
+  return USER_SETTING_DEFS.map((def) => {
     const value = getEffectiveSetting(def.key);
     const configured = Boolean(value);
     return {
@@ -69,24 +71,17 @@ export function describeApiConfig() {
 
 /**
  * Validation result — returns `{ ok, warnings, missing }`.
- * Critical = Odds API key, since without it we cannot do sportsbook comparison.
- * Optional = SportsData/StatMuse/proxies; warnings only.
+ * Only user-facing keys are surfaced; hidden proxy/StatMuse keys are ignored.
  */
 export function validateApiConfig() {
   const warnings = [];
   const missing = [];
 
-  RUNTIME_SETTING_DEFS.forEach((def) => {
+  USER_SETTING_DEFS.forEach((def) => {
     if (isSettingConfigured(def.key)) return;
     missing.push(def.key);
     if (def.key === API_KEYS.ODDS) {
       warnings.push(`${def.label} missing — sportsbook comparison + edge scoring disabled.`);
-    } else if (def.key === API_KEYS.SPORTSDATA) {
-      warnings.push(`${def.label} missing — player stat enrichment may be limited.`);
-    } else if (def.key === API_KEYS.PRIZEPICKS_PROXY) {
-      warnings.push(`${def.label} missing — using built-in /api/prizepicks route.`);
-    } else if (def.key === API_KEYS.UNDERDOG_PROXY) {
-      warnings.push(`${def.label} missing — using built-in /api/underdog route.`);
     }
   });
 

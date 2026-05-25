@@ -2,7 +2,8 @@
 
 import { clearSourceAuthBlock, SOURCE_IDS } from "./sourceRateLimit.js";
 
-export const RUNTIME_SETTING_DEFS = [
+/** User-facing keys shown in Settings — live feeds (PP/UD) use built-in routes, not user keys. */
+export const USER_SETTING_DEFS = [
   {
     key: "VITE_ODDS_API_KEY",
     label: "Odds API Key",
@@ -19,6 +20,10 @@ export const RUNTIME_SETTING_DEFS = [
     envKeys: ["VITE_SPORTSDATA_API_KEY", "SPORTSDATA_API_KEY"],
     legacyStorageKeys: [],
   },
+];
+
+/** Hidden from Settings UI — still resolved from env/localStorage for ingestion/debug. */
+export const HIDDEN_SETTING_DEFS = [
   {
     key: "VITE_STATMUSE_API_KEY",
     label: "StatMuse API Key",
@@ -44,7 +49,10 @@ export const RUNTIME_SETTING_DEFS = [
   },
 ];
 
+export const RUNTIME_SETTING_DEFS = [...USER_SETTING_DEFS, ...HIDDEN_SETTING_DEFS];
+
 export const RUNTIME_SETTING_KEYS = RUNTIME_SETTING_DEFS.map((def) => def.key);
+export const USER_SETTING_KEYS = USER_SETTING_DEFS.map((def) => def.key);
 
 const SETTINGS_META_KEY = "dfs-runtime-settings-meta-v1";
 
@@ -187,6 +195,10 @@ export function getStatmuseApiKey() {
   return getEffectiveSetting("VITE_STATMUSE_API_KEY");
 }
 
+export function userSettingsDraftMatchesSaved(draft = {}, saved = {}) {
+  return USER_SETTING_KEYS.every((key) => String(draft[key] || "").trim() === String(saved[key] || "").trim());
+}
+
 export function settingsDraftMatchesSaved(draft = {}, saved = {}) {
-  return RUNTIME_SETTING_KEYS.every((key) => String(draft[key] || "").trim() === String(saved[key] || "").trim());
+  return userSettingsDraftMatchesSaved(draft, saved);
 }

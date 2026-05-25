@@ -1052,6 +1052,41 @@ body,
   color: #64748b;
 }
 
+.settings-panel__body {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-api-row {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-api-row__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-api-row__saved {
+  font-size: 11px;
+  color: #86efac;
+  font-weight: 700;
+}
+
+.settings-api-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-panel__notice {
+  margin: 0;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
 .compact-app-header {
   display: grid;
   gap: 6px;

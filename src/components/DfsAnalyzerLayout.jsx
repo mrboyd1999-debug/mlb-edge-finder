@@ -147,7 +147,6 @@ function DfsAnalyzerLayout({
         onClearCaches={onSettingsSaved}
         onConnectionReportChange={handleConnectionReportChange}
         feedHealthContext={feedHealthContext}
-        lastUpdated={lastUpdatedLabel}
       />
 
       <details className="compact-settings-details developer-debug-details">

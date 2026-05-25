@@ -1,31 +1,40 @@
 import { useRef, useState, useEffect } from "react";
 import { styles } from "../theme/styles.js";
-import { formatDateTime } from "../utils/formatters.js";
 import {
-  RUNTIME_SETTING_DEFS,
+  USER_SETTING_DEFS,
   readRuntimeSettings,
   readSettingsMeta,
-  settingsDraftMatchesSaved,
+  userSettingsDraftMatchesSaved,
   writeRuntimeSettings,
   writeSettingsMeta,
 } from "../services/runtimeSettings.js";
-import { validateApiConfig } from "../config/apiConfig.js";
-import { testAllApiConnections, testSportsDataIO, mergeConnectionReportWithFeeds } from "../services/apiConnectionTest.js";
-import { isDebugModeEnabled } from "../utils/devMode.js";
+import { testOddsAPI, testSportsDataIO, mergeConnectionReportWithFeeds } from "../services/apiConnectionTest.js";
+
+function mergeProviderResult(current, report, providerName) {
+  const otherResults = (current?.results || []).filter(
+    (row) => String(row.provider || "").toLowerCase() !== providerName.toLowerCase()
+  );
+  return mergeConnectionReportWithFeeds(
+    {
+      testedAt: report.testedAt,
+      durationMs: report.durationMs,
+      results: [...otherResults, ...(report.results || [])],
+    },
+    {}
+  );
+}
 
 export default function SettingsPanel({
   onSaved,
   onClearCaches,
   onConnectionReportChange,
-  lastUpdated = "",
   feedHealthContext = null,
 }) {
   const panelRef = useRef(null);
   const [draft, setDraft] = useState(() => readRuntimeSettings());
   const [saved, setSaved] = useState(() => readRuntimeSettings());
-  const [meta, setMeta] = useState(() => readSettingsMeta());
   const [notice, setNotice] = useState("");
-  const [testing, setTesting] = useState(false);
+  const [testingOdds, setTestingOdds] = useState(false);
   const [testingSportsData, setTestingSportsData] = useState(false);
   const [connectionReport, setConnectionReport] = useState(() => {
     const storedMeta = readSettingsMeta();
@@ -35,71 +44,39 @@ export default function SettingsPanel({
     return null;
   });
 
-  const isSaved = settingsDraftMatchesSaved(draft, saved);
-  const apiValidation = validateApiConfig();
-  const debugModeEnabled = isDebugModeEnabled();
+  const isSaved = userSettingsDraftMatchesSaved(draft, saved);
 
-  function collapsePanel() {
-    if (panelRef.current) panelRef.current.open = false;
+  function persistDraft() {
+    const merged = { ...readRuntimeSettings(), ...draft };
+    writeRuntimeSettings(merged);
+    const nextSaved = readRuntimeSettings();
+    setSaved(nextSaved);
+    onClearCaches?.();
+    onSaved?.(nextSaved);
+    return nextSaved;
   }
 
-  async function runConnectionTest({ collapseAfter = false } = {}) {
-    setTesting(true);
-    try {
-      const report = await testAllApiConnections({
-        feedContext: feedHealthContext || undefined,
-        lastUpdated,
-      });
-      setConnectionReport(report);
-      writeSettingsMeta({
-        ...readSettingsMeta(),
-        lastTestedAt: report.testedAt,
-        lastConnectionReport: report.results,
-      });
-      setMeta(readSettingsMeta());
-      const failed = (report.results || []).filter((row) => row.showError === true);
-      setNotice(
-        failed.length
-          ? `${failed.length} provider${failed.length === 1 ? "" : "s"} need attention.`
-          : "Connections verified."
-      );
-      if (collapseAfter) collapsePanel();
-      return report;
-    } catch (error) {
-      setNotice(error?.message || "Connection test failed.");
-      return null;
-    } finally {
-      setTesting(false);
-    }
+  function updateConnectionReport(report) {
+    setConnectionReport(report);
+    writeSettingsMeta({
+      ...readSettingsMeta(),
+      lastTestedAt: report.testedAt,
+      lastConnectionReport: report.results,
+    });
   }
 
   async function handleSave() {
-    writeRuntimeSettings(draft);
-    const nextSaved = readRuntimeSettings();
-    setSaved(nextSaved);
-    setMeta(readSettingsMeta());
-    setNotice("Settings saved — testing connections…");
-    onClearCaches?.();
-    onSaved?.(nextSaved);
-    await runConnectionTest();
+    persistDraft();
+    setNotice("API keys saved.");
   }
 
-  async function handleTestSportsData() {
-    setTestingSportsData(true);
+  async function handleTestOdds() {
+    setTestingOdds(true);
     try {
-      const report = await testSportsDataIO();
+      persistDraft();
+      const report = await testOddsAPI();
       setConnectionReport((current) => {
-        const otherResults = (current?.results || []).filter(
-          (row) => String(row.provider || "").toLowerCase() !== "sportsdataio"
-        );
-        const merged = mergeConnectionReportWithFeeds(
-          {
-            testedAt: report.testedAt,
-            durationMs: report.durationMs,
-            results: [...otherResults, ...(report.results || [])],
-          },
-          feedHealthContext || {}
-        );
+        const merged = mergeProviderResult(current, report, "Odds API");
         writeSettingsMeta({
           ...readSettingsMeta(),
           lastTestedAt: merged.testedAt,
@@ -107,7 +84,33 @@ export default function SettingsPanel({
         });
         return merged;
       });
-      setMeta(readSettingsMeta());
+      const oddsRow = (report.results || [])[0];
+      setNotice(
+        oddsRow?.settingsLine === "Connected"
+          ? "Odds API connected."
+          : `Odds API: ${oddsRow?.settingsLine || "test complete"}.`
+      );
+    } catch (error) {
+      setNotice(error?.message || "Odds API test failed.");
+    } finally {
+      setTestingOdds(false);
+    }
+  }
+
+  async function handleTestSportsData() {
+    setTestingSportsData(true);
+    try {
+      persistDraft();
+      const report = await testSportsDataIO();
+      setConnectionReport((current) => {
+        const merged = mergeProviderResult(current, report, "SportsDataIO");
+        writeSettingsMeta({
+          ...readSettingsMeta(),
+          lastTestedAt: merged.testedAt,
+          lastConnectionReport: merged.results,
+        });
+        return merged;
+      });
       const sdRow = (report.results || [])[0];
       setNotice(
         sdRow?.settingsLine === "Connected" || sdRow?.settingsLine === "Connected via Proxy"
@@ -119,10 +122,6 @@ export default function SettingsPanel({
     } finally {
       setTestingSportsData(false);
     }
-  }
-
-  async function handleTestConnections() {
-    await runConnectionTest({ collapseAfter: true });
   }
 
   useEffect(() => {
@@ -150,73 +149,73 @@ export default function SettingsPanel({
     });
   }, [feedHealthContext]);
 
+  const oddsDef = USER_SETTING_DEFS.find((def) => def.key === "VITE_ODDS_API_KEY");
+  const sdDef = USER_SETTING_DEFS.find((def) => def.key === "VITE_SPORTSDATA_API_KEY");
+  const oddsSaved = Boolean(saved[oddsDef.key]?.trim());
+  const sdSaved = Boolean(saved[sdDef.key]?.trim());
+
   return (
     <details id="section-settings" ref={panelRef} className="settings-panel compact-settings-details">
       <summary>
         <span>
-          <span className="mobile-hide-verbose settings-panel__eyebrow">Runtime setup</span>
+          <span className="mobile-hide-verbose settings-panel__eyebrow">API keys</span>
           <strong>Settings</strong>
         </span>
         <span className="settings-panel__pill">{isSaved ? "Saved" : "Unsaved"}</span>
       </summary>
-      <div style={styles.compactPanel}>
-        <div className="settings-test-row" style={{ ...styles.segmentRow, marginTop: 0, flexWrap: "wrap" }}>
-          <button type="button" style={styles.secondaryButton} onClick={handleSave}>
-            Save
+      <div className="settings-panel__body" style={styles.compactPanel}>
+        <div className="settings-api-row">
+          <label className="settings-api-row__field" style={styles.selectLabel}>
+            <span className="settings-api-row__head">
+              <span>{oddsDef.label}</span>
+              {oddsSaved ? <span className="settings-api-row__saved">Saved</span> : null}
+            </span>
+            <input
+              style={styles.textInput}
+              type="password"
+              autoComplete="off"
+              value={draft[oddsDef.key] || ""}
+              onChange={(event) => setDraft((current) => ({ ...current, [oddsDef.key]: event.target.value }))}
+              placeholder={oddsDef.placeholder}
+            />
+          </label>
+          <button type="button" style={styles.secondaryButton} onClick={handleTestOdds} disabled={testingOdds}>
+            {testingOdds ? "Testing…" : "Test Odds API"}
           </button>
-          <button type="button" style={styles.secondaryButton} onClick={handleTestConnections} disabled={testing}>
-            {testing ? "Testing…" : "Test API"}
-          </button>
-          <button type="button" style={styles.secondaryButton} onClick={handleTestSportsData} disabled={testingSportsData}>
+        </div>
+
+        <div className="settings-api-row">
+          <label className="settings-api-row__field" style={styles.selectLabel}>
+            <span className="settings-api-row__head">
+              <span>{sdDef.label}</span>
+              {sdSaved ? <span className="settings-api-row__saved">Saved</span> : null}
+            </span>
+            <input
+              style={styles.textInput}
+              type="password"
+              autoComplete="off"
+              value={draft[sdDef.key] || ""}
+              onChange={(event) => setDraft((current) => ({ ...current, [sdDef.key]: event.target.value }))}
+              placeholder={sdDef.placeholder}
+            />
+          </label>
+          <button
+            type="button"
+            style={styles.secondaryButton}
+            onClick={handleTestSportsData}
+            disabled={testingSportsData}
+          >
             {testingSportsData ? "Testing…" : "Test SportsDataIO"}
           </button>
         </div>
-        <p className="mobile-hide-verbose settings-panel__hint">
-          Keys are stored locally for development. Set <code>VITE_*</code> variables in Vercel for production.
-        </p>
-        {apiValidation.warnings.length > 0 && debugModeEnabled ? (
-          <ul className="mobile-hide-verbose settings-panel__warnings">
-            {apiValidation.warnings.map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-          </ul>
-        ) : null}
-        <details className="settings-keys-expand compact-settings-details" style={{ marginTop: "8px" }}>
-          <summary>
-            <span>
-              <span className="mobile-hide-verbose settings-panel__eyebrow">Credentials</span>
-              <strong>API Keys</strong>
-            </span>
-          </summary>
-          <div className="settings-key-fields" style={styles.controls}>
-            {RUNTIME_SETTING_DEFS.map((def) => {
-              const value = draft[def.key] || "";
-              const effectiveSaved = Boolean(saved[def.key]?.trim());
-              return (
-                <label key={def.key} style={styles.selectLabel}>
-                  <span style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
-                    <span>{def.label}</span>
-                    <span style={{ fontSize: 11, opacity: 0.75 }}>{effectiveSaved ? "Saved" : "Not saved"}</span>
-                  </span>
-                  <input
-                    style={styles.textInput}
-                    type={def.type === "secret" ? "password" : "text"}
-                    autoComplete="off"
-                    value={value}
-                    onChange={(event) => setDraft((current) => ({ ...current, [def.key]: event.target.value }))}
-                    placeholder={def.placeholder || def.key}
-                  />
-                </label>
-              );
-            })}
-          </div>
-        </details>
-        <div style={{ ...styles.segmentRow, marginTop: "8px", flexWrap: "wrap" }}>
-          {meta.savedAt ? (
-            <span className="mobile-hide-verbose settings-panel__meta">Last saved: {formatDateTime(meta.savedAt)}</span>
-          ) : null}
-          {notice ? <p style={styles.compactFlags}>{notice}</p> : null}
+
+        <div className="settings-api-actions">
+          <button type="button" style={styles.secondaryButton} onClick={handleSave}>
+            Save Keys
+          </button>
         </div>
+
+        {notice ? <p className="settings-panel__notice">{notice}</p> : null}
       </div>
     </details>
   );

@@ -1,18 +1,29 @@
 import { memo } from "react";
 import { formatDateTime } from "../utils/formatters.js";
 import { readSettingsMeta } from "../services/runtimeSettings.js";
-import { getOddsApiKey, getSportsDataApiKey } from "../config/apiConfig.js";
 import { healthStateStyle, CONNECTION_TIERS } from "../services/sourceHealth.js";
 
 function findProviderRow(results = [], name) {
   return results.find((row) => String(row.provider || "").toLowerCase() === name.toLowerCase()) || null;
 }
 
-function providerConnected(row, keyConfigured = false) {
+function resolveKeyProviderStatus(row, tested) {
+  if (!tested) return "Not Tested";
+  if (!row) return "Not Tested";
   const line = String(row?.settingsLine || row?.displayStatus || "").toLowerCase();
-  if (/connected|live|partial|cached|ok|success/.test(line)) return true;
-  if (/failed|invalid|unauthorized|error|timeout|offline|unavailable/.test(line)) return false;
-  return Boolean(keyConfigured);
+  if (/connected|live|partial|ok|success/.test(line)) return "Connected";
+  if (/not configured|not tested|not used/.test(line)) return "Not Tested";
+  return "Failed";
+}
+
+function resolveServiceStatus(connected) {
+  return connected ? "Connected" : "Failed";
+}
+
+function statusTier(status) {
+  if (status === "Connected") return CONNECTION_TIERS.CONNECTED;
+  if (status === "Not Tested") return CONNECTION_TIERS.PENDING;
+  return CONNECTION_TIERS.FAILED;
 }
 
 function formatTimestamp(value) {
@@ -22,12 +33,11 @@ function formatTimestamp(value) {
 }
 
 function StatusLine({ label, status, timestamp, timestampLabel }) {
-  const tier = status === "Connected" ? CONNECTION_TIERS.CONNECTED : CONNECTION_TIERS.FAILED;
   return (
     <div className="system-status-card__row">
       <div className="system-status-card__row-head">
         <span className="system-status-card__label">{label}</span>
-        <span style={healthStateStyle(tier)}>{status}</span>
+        <span style={healthStateStyle(statusTier(status))}>{status}</span>
       </div>
       {timestampLabel ? (
         <p className="system-status-card__meta">
@@ -41,12 +51,10 @@ function StatusLine({ label, status, timestamp, timestampLabel }) {
 function SystemStatusCard({ apiHealth = {}, mlbPipelineStatus = null, connectionReport = null }) {
   const meta = readSettingsMeta();
   const reportRows = connectionReport?.results || meta.lastConnectionReport || [];
+  const testedAt = connectionReport?.testedAt || meta.lastTestedAt || "";
+  const hasBeenTested = Boolean(testedAt);
   const oddsRow = findProviderRow(reportRows, "Odds API");
   const sdRow = findProviderRow(reportRows, "SportsDataIO");
-  const oddsKeyConfigured = Boolean(getOddsApiKey());
-  const sdKeyConfigured = Boolean(getSportsDataApiKey());
-  const oddsConnected = providerConnected(oddsRow, oddsKeyConfigured);
-  const sdConnected = providerConnected(sdRow, sdKeyConfigured);
 
   const stats = mlbPipelineStatus?.mlbStatsApi || {};
   const projection = mlbPipelineStatus?.projectionApi || {};
@@ -67,25 +75,25 @@ function SystemStatusCard({ apiHealth = {}, mlbPipelineStatus = null, connection
       <div className="system-status-card__grid">
         <StatusLine
           label="Odds API"
-          status={oddsConnected ? "Connected" : "Failed"}
-          timestamp={connectionReport?.testedAt || meta.lastTestedAt}
+          status={resolveKeyProviderStatus(oddsRow, hasBeenTested && Boolean(oddsRow))}
+          timestamp={testedAt}
           timestampLabel="Last tested"
         />
         <StatusLine
           label="SportsDataIO"
-          status={sdConnected ? "Connected" : "Failed"}
-          timestamp={connectionReport?.testedAt || meta.lastTestedAt}
+          status={resolveKeyProviderStatus(sdRow, hasBeenTested && Boolean(sdRow))}
+          timestamp={testedAt}
           timestampLabel="Last tested"
         />
         <StatusLine
           label="MLB Stats API"
-          status={statsConnected ? "Connected" : "Failed"}
+          status={resolveServiceStatus(statsConnected)}
           timestamp={stats.lastSuccessAt}
           timestampLabel="Last success"
         />
         <StatusLine
           label="Projection Engine"
-          status={projectionConnected ? "Connected" : "Failed"}
+          status={resolveServiceStatus(projectionConnected)}
           timestamp={projection.lastProjectionGeneratedAt || projection.lastSuccessAt}
           timestampLabel="Last projection"
         />
