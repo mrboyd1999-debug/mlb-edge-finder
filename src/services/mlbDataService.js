@@ -33,6 +33,11 @@ import {
   confidenceFromEdge,
   resolveRecommendedSide,
 } from "../modules/propSideEngine.js";
+import {
+  getMlbPipelineStatus,
+  recordMlbProjectionResult,
+  recordMlbStatsFetch,
+} from "./mlbPipelineStatus.js";
 
 const MLB_SEARCH_URL = "https://statsapi.mlb.com/api/v1/people/search";
 const MLB_SCHEDULE_URL = "https://statsapi.mlb.com/api/v1/schedule";
@@ -42,6 +47,8 @@ const profileInflight = new Map();
 const opponentInflight = new Map();
 
 export const MLB_DATA_FETCH_LIMIT = 120;
+
+export { getMlbPipelineStatus } from "./mlbPipelineStatus.js";
 
 export function logMlbData(stage, payload = {}) {
   if (typeof console === "undefined") return;
@@ -190,6 +197,10 @@ export async function getPlayerByName(playerName = "") {
 export async function getPlayerLogs(playerRef, options = {}) {
   if (typeof playerRef === "object" && playerRef?.id) {
     return fetchMlbGameLogs(playerRef.id, options);
+  }
+  const numericId = Number(playerRef);
+  if (Number.isFinite(numericId) && numericId > 0 && String(playerRef).trim() === String(numericId)) {
+    return fetchMlbGameLogs(numericId, options);
   }
   const player = await getPlayerByName(String(playerRef || ""));
   if (!player?.id) return [];
@@ -487,6 +498,47 @@ export async function fetchMlbOpponentMatchup(opponentName = "") {
   return task;
 }
 
+export async function fetchMlbPlayerBundleById(playerId, playerName = "", meta = {}) {
+  const numericId = Number(playerId);
+  if (!Number.isFinite(numericId) || numericId <= 0) return null;
+
+  const cacheKey = `id:${numericId}`;
+  if (profileInflight.has(cacheKey)) return profileInflight.get(cacheKey);
+
+  const task = (async () => {
+    const cached = readSmartCacheIfFresh("mlb-stats", cacheKey, CACHE_TTL.STATS_MS);
+    if (cached?.payload?.splits?.length) return cached.payload;
+
+    const splits = await fetchMlbGameLogs(numericId);
+    recordMlbStatsFetch({
+      ok: splits.length > 0,
+      url: `https://statsapi.mlb.com/api/v1/people/${numericId}/stats?stats=gameLog`,
+      statusCode: 200,
+      matchedPlayer: playerName || meta.fullName || null,
+      playerId: numericId,
+      error: splits.length ? "" : "No game logs returned",
+    });
+
+    const bundle = {
+      playerName: playerName || meta.fullName || String(numericId),
+      playerImage: `https://img.mlbstatic.com/mlb-photos/image/upload/w_213,q_100/v1/people/${numericId}/headshot/67/current`,
+      mlbId: numericId,
+      playerId: numericId,
+      primaryPosition: meta.primaryPosition || null,
+      currentTeam: meta.currentTeam || null,
+      splits,
+      source: "MLB StatsAPI game logs",
+      statSources: [SOURCE_LABELS.mlb],
+      hasGameLogs: splits.length >= 3,
+    };
+    writeSmartCache("mlb-stats", cacheKey, bundle, { source: "mlb-stats-api" });
+    return bundle;
+  })().finally(() => profileInflight.delete(cacheKey));
+
+  profileInflight.set(cacheKey, task);
+  return task;
+}
+
 export async function fetchMlbPlayerBundle(playerName = "") {
   const cacheKey = normalizePlayerName(playerName);
   if (!cacheKey) return null;
@@ -501,6 +553,14 @@ export async function fetchMlbPlayerBundle(playerName = "") {
     if (!player?.id) return null;
 
     const splits = await fetchMlbGameLogs(player.id);
+    recordMlbStatsFetch({
+      ok: splits.length > 0,
+      url: `${MLB_SEARCH_URL}?names=${encodeURIComponent(playerName)}`,
+      statusCode: 200,
+      matchedPlayer: player.fullName || playerName,
+      playerId: player.id,
+      error: splits.length ? "" : "No game logs returned",
+    });
     const bundle = {
       playerName: player.fullName || playerName,
       playerImage: `https://img.mlbstatic.com/mlb-photos/image/upload/w_213,q_100/v1/people/${player.id}/headshot/67/current`,
@@ -521,8 +581,15 @@ export async function fetchMlbPlayerBundle(playerName = "") {
   return task;
 }
 
+function validateTeamMatch(propTeam = "", matchedTeam = "") {
+  const a = normalizeTeamKey(propTeam);
+  const b = normalizeTeamKey(matchedTeam);
+  if (!a || !b) return { ok: true };
+  if (a === b || b.includes(a) || a.includes(b)) return { ok: true };
+  return { ok: false, reason: `Team mismatch: sportsbook ${propTeam} vs MLB ${matchedTeam}` };
+}
+
 /**
- * Build a verified prop profile from raw MLB logs + opponent/probable context.
  * Delegates stat extraction to playerStats profile builder when available.
  */
 export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, trace: existingTrace = null } = {}) {
@@ -547,16 +614,31 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
     return { profile: null, bundle: null, verified: false, reason: trace.failureReason, pipelineTrace: trace };
   }
 
+  trace.propIdentity = {
+    playerName: prop.playerName,
+    team: prop.team || "",
+    statType: prop.statType,
+    line,
+    source: prop.source || prop.platform || "",
+  };
+
   let match;
   try {
-    match = await matchSportsbookPlayerToMlb(prop.playerName);
+    match = await matchSportsbookPlayerToMlb(prop.playerName, { team: prop.team || "" });
   } catch (error) {
+    recordMlbStatsFetch({ ok: false, error: error.message, url: MLB_SEARCH_URL });
     failTrace(trace, MLB_FAILURE.MLB_API_FAILED, error.message, MLB_STAGE.NORMALIZED);
     recordPropDebug(prop, trace);
     return { profile: null, bundle: null, verified: false, reason: trace.failureReason, pipelineTrace: trace };
   }
 
   if (!match?.player?.id) {
+    recordMlbStatsFetch({
+      ok: false,
+      error: match?.reason || "No StatsAPI player match",
+      url: `${MLB_SEARCH_URL}?names=${encodeURIComponent(prop.playerName)}`,
+      playersReturned: match?.candidatesCount ?? 0,
+    });
     failTrace(
       trace,
       MLB_FAILURE.PLAYER_NOT_MATCHED,
@@ -567,6 +649,34 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
     return { profile: null, bundle: null, verified: false, reason: trace.failureReason, pipelineTrace: trace };
   }
 
+  const teamCheck = validateTeamMatch(prop.team, match.player.currentTeam);
+  if (!teamCheck.ok) {
+    recordMlbStatsFetch({
+      ok: false,
+      error: teamCheck.reason,
+      matchedPlayer: match.player.fullName,
+      playerId: match.player.id,
+    });
+    failTrace(trace, MLB_FAILURE.PLAYER_NOT_MATCHED, teamCheck.reason, MLB_STAGE.MATCHED);
+    recordPropDebug(prop, trace);
+    return { profile: null, bundle: null, verified: false, reason: trace.failureReason, pipelineTrace: trace };
+  }
+
+  recordMlbStatsFetch({
+    ok: true,
+    url: `${MLB_SEARCH_URL}?names=${encodeURIComponent(prop.playerName)}`,
+    statusCode: match.apiStatusCode ?? 200,
+    playersReturned: match.candidatesCount ?? null,
+    matchedPlayer: match.player.fullName,
+    playerId: match.player.id,
+  });
+  console.info("[MLB Pipeline] matched player result:", {
+    matchedPlayer: match.player.fullName,
+    playerId: match.player.id,
+    confidence: match.confidence,
+    team: match.player.currentTeam || null,
+  });
+
   markStage(trace, MLB_STAGE.MATCHED, {
     matchedPlayer: match.player.fullName,
     playerId: match.player.id,
@@ -576,8 +686,13 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
 
   let bundle;
   try {
-    bundle = await fetchMlbPlayerBundle(prop.playerName);
+    bundle = await fetchMlbPlayerBundleById(match.player.id, match.player.fullName, {
+      fullName: match.player.fullName,
+      primaryPosition: match.player.primaryPosition,
+      currentTeam: match.player.currentTeam,
+    });
   } catch (error) {
+    recordMlbStatsFetch({ ok: false, error: error.message, matchedPlayer: match.player.fullName, playerId: match.player.id });
     failTrace(trace, MLB_FAILURE.MLB_API_FAILED, error.message, MLB_STAGE.MATCHED);
     recordPropDebug(prop, trace);
     return { profile: null, bundle: null, verified: false, reason: trace.failureReason, pipelineTrace: trace };
@@ -665,9 +780,8 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
     trace.opponentStats = opponentContext;
     markStage(trace, MLB_STAGE.OPPONENT_FETCHED, { opponentStats: opponentContext });
   } catch (error) {
-    failTrace(trace, MLB_FAILURE.MLB_API_FAILED, error.message, MLB_STAGE.LOGS_FILTERED);
-    recordPropDebug(prop, trace);
-    return { profile: null, bundle: filteredBundle, verified: false, reason: trace.failureReason, pipelineTrace: trace };
+    trace.opponentFetchError = error.message;
+    logMlbData("opponent.optional.failed", { player: prop.playerName, error: error.message });
   }
 
   let profile = filteredBundle;
@@ -751,6 +865,20 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
     weather: weather?.note ?? null,
   });
 
+  recordMlbProjectionResult({
+    ok: true,
+    player: prop.playerName,
+    statType: prop.statType,
+    projection: profile.last5Average ?? profile.seasonAverage ?? null,
+  });
+  console.info("[MLB Pipeline] projection inputs ready:", {
+    player: prop.playerName,
+    statType: prop.statType,
+    line,
+    last5: profile.last5Average,
+    season: profile.seasonAverage,
+  });
+
   return {
     profile,
     bundle: filteredBundle,
@@ -821,8 +949,9 @@ export async function analyzeMlbPropWithData(prop = {}, { buildProfile = null } 
     return {
       ...prop,
       projectionUnavailable: true,
+      unverifiedGradeBlocked: true,
       displayStatus: "NO VERIFIED PLAY",
-      statusMessage: "Awaiting projection data",
+      statusMessage: "No verified projection available — do not grade this prop.",
       dataFetchReason: trace.failureReason || data.reason,
       mlbPipelineTrace: trace,
     };
@@ -841,7 +970,22 @@ export async function analyzeMlbPropWithData(prop = {}, { buildProfile = null } 
   trace.edge = model.edge;
   trace.recommendation = model.modelPickLabel || (model.projectionUnavailable ? "NO VERIFIED PLAY" : model.passPlay ? "PASS" : null);
 
+  console.info("[MLB Pipeline] projection value used:", {
+    player: prop.playerName,
+    statType: prop.statType,
+    line: prop.line,
+    projection: model.projection,
+    verified: model.isVerifiedProjection,
+    source: model.projectionSource,
+  });
+
   if (model.projectionUnavailable || !model.isVerifiedProjection) {
+    recordMlbProjectionResult({
+      ok: false,
+      player: prop.playerName,
+      statType: prop.statType,
+      error: model.statusMessage || "Verified projection unavailable",
+    });
     failTrace(trace, MLB_FAILURE.PROJECTION_BUILD_FAILED, model.statusMessage || "Projection unavailable", MLB_STAGE.PROFILE_BUILT);
     recordPropDebug(prop, trace);
     logMlbPropScan(prop, {
@@ -864,6 +1008,13 @@ export async function analyzeMlbPropWithData(prop = {}, { buildProfile = null } 
   markStage(trace, MLB_STAGE.PROJECTION_COMPUTED, {
     projection: model.projection,
     recommendation: trace.recommendation,
+  });
+
+  recordMlbProjectionResult({
+    ok: true,
+    player: prop.playerName,
+    statType: prop.statType,
+    projection: model.projection,
   });
 
   if (model.edge == null || !Number.isFinite(model.edge)) {

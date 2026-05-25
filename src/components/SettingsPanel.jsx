@@ -11,6 +11,7 @@ import {
 } from "../services/runtimeSettings.js";
 import { validateApiConfig } from "../config/apiConfig.js";
 import ApiHealthPanel from "./ApiHealthPanel.jsx";
+import MlbPipelineStatusPanel from "./MlbPipelineStatusPanel.jsx";
 import UnderdogDebugPanel from "./UnderdogDebugPanel.jsx";
 import ParsedUnderdogDebugCard from "./ParsedUnderdogDebugCard.jsx";
 import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
@@ -26,7 +27,7 @@ export default function SettingsPanel({
   feedHealthContext = null,
   underdogDebugSnapshot = null,
   rejectionAudit = null,
-  apiHealth = {},
+  mlbPipelineStatus = null,
 }) {
   const panelRef = useRef(null);
   const [draft, setDraft] = useState(() => readRuntimeSettings());
@@ -221,6 +222,7 @@ export default function SettingsPanel({
           }
         >
           <ApiHealthPanel connectionReport={connectionReport} lastTestedAt={meta.lastTestedAt} />
+          <MlbPipelineStatusPanel pipelineStatus={mlbPipelineStatus} apiHealth={apiHealth} />
         </SectionErrorBoundary>
         {showDebugPanels && debugModeEnabled ? (
           <details className="settings-advanced-debug" style={{ ...styles.compactDetails, marginTop: "8px" }} open>

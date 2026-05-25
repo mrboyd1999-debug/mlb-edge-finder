@@ -21,7 +21,7 @@ import {
   NO_VERIFIED_PLAY_STATUS,
   normalizeManualPick,
   PASS_STATUS,
-  MANUAL_FALLBACK_MODE_STATUS,
+  NO_VERIFIED_GRADE_STATUS,
   payoutBadgeStyle,
   payoutDisplayLabel,
   projectionVsLineLabel,
@@ -91,11 +91,10 @@ function noVerifiedPlayBadgeStyle() {
 
 function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, cardStyle, savedResult }) {
   const isManual = isManualAnalyzerProp(prop);
-  const isFallbackMode = isManual && Boolean(prop.manualFallbackMode || prop.displayStatus === MANUAL_FALLBACK_MODE_STATUS);
   const hasProjection = hasValidProjection(prop);
-  const passPlay = isManual && !isFallbackMode && (prop.passPlay || prop.displayStatus === PASS_STATUS || prop.bettingLabel === PASS_STATUS);
-  const noVerifiedPlay = isManual && !isFallbackMode && (!hasProjection || prop.projectionUnavailable);
-  const showEngineSide = isManual && (hasProjection || isFallbackMode) && !noVerifiedPlay && !passPlay;
+  const passPlay = isManual && (prop.passPlay || prop.displayStatus === PASS_STATUS || prop.bettingLabel === PASS_STATUS);
+  const noVerifiedPlay = isManual && (!hasProjection || prop.projectionUnavailable || prop.unverifiedGradeBlocked);
+  const showEngineSide = isManual && hasProjection && !noVerifiedPlay && !passPlay;
   const tier = confidenceTier(prop);
   const pickSide = showEngineSide ? normalizeManualPick(prop.bestPick || prop.side || prop.pick) : "";
   const lean = showEngineSide
@@ -277,51 +276,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
       <div className="prop-card-meta-row prop-card-meta-primary" style={styles.compactMetaRow}>
         {compact ? (
           isManual ? (
-            isFallbackMode ? (
-              <>
-                <span className="prop-card-stat-highlight prop-card-prop-line-row" style={{ ...styles.compactMetaItem, flex: "1 1 100%" }}>
-                  <strong>
-                    {displayMarketLabel(prop)} · Line {formatNumber(prop.line)}
-                    {prop.source || prop.platform ? ` · ${prop.source || prop.platform}` : ""}
-                  </strong>
-                </span>
-                <div className="prop-card-primary-metrics" style={styles.manualPrimaryMetricsRow}>
-                  <span style={{ ...styles.scoreBadge, borderColor: "#ca8a04", background: "#422006", color: "#fef08a" }}>
-                    {MANUAL_FALLBACK_MODE_STATUS}
-                  </span>
-                  {projectionDisplay ? (
-                    <span style={{ ...styles.scoreBadge, borderColor: "#475569", color: "#cbd5e1", background: "#111827" }}>
-                      PROJ {projectionDisplay}
-                    </span>
-                  ) : null}
-                  {confDisplayPositive != null ? (
-                    <span style={{ ...styles.scoreBadge, borderColor: "#166534", color: "#86efac", background: "#052e16" }}>
-                      CONF {confDisplayPositive}%
-                    </span>
-                  ) : null}
-                </div>
-                <div className="prop-card-badge-row" style={styles.badgeRow}>
-                  {lean === "Over" || lean === "Under" ? (
-                    <span style={{ ...styles.scoreBadge, ...leanBadgeStyle(lean) }}>
-                      {`Model Pick ${lean.toUpperCase()}`}
-                    </span>
-                  ) : null}
-                  <span style={{ ...styles.scoreBadge, ...payoutBadgeStyle(prop) }}>{payoutLabel}</span>
-                </div>
-                <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, marginTop: "2px", color: "#fbbf24" }}>
-                  {prop.statusMessage || prop.manualApiWarning || "Fallback estimate — not verified."}
-                </p>
-                {prop.whyThisPick ? (
-                  <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, color: "#94a3b8" }}>
-                    {prop.whyThisPick}
-                  </p>
-                ) : projVsLine ? (
-                  <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, color: "#64748b" }}>
-                    {projVsLine}
-                  </p>
-                ) : null}
-              </>
-            ) : noVerifiedPlay ? (
+            noVerifiedPlay ? (
               <>
                 <span className="prop-card-stat-highlight prop-card-prop-line-row" style={{ ...styles.compactMetaItem, flex: "1 1 100%" }}>
                   <strong>
@@ -338,7 +293,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
                   <MlbPipelineFailureBlock prop={prop} />
                 ) : (
                   <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, marginTop: "2px", color: "#94a3b8" }}>
-                    {prop.pipelineDebugLine || prop.statusMessage || AWAITING_PROJECTION_STATUS}
+                    {prop.statusMessage || prop.whyThisPick || NO_VERIFIED_GRADE_STATUS || AWAITING_PROJECTION_STATUS}
                   </p>
                 )}
                 {projVsLine ? (

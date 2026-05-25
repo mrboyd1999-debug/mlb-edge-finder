@@ -141,7 +141,8 @@ import {
   hasVerifiedStats,
 } from "./services/statEnrichment.js";
 import { applyMlbProjectionToProp, isMlbVerifiedEngineMarket } from "./modules/mlbProjectionService.js";
-import { logMlbData, traceLiveBoardMlbProp } from "./services/mlbDataService.js";
+import { logMlbData, traceLiveBoardMlbProp, getMlbPipelineStatus } from "./services/mlbDataService.js";
+import { mergeDfsSourceStatusFromApiHealth } from "./services/mlbPipelineStatus.js";
 import { buildCardPipelineDebug } from "./services/mlbPropPipelineTrace.js";
 import { normalizeSportsbookName } from "./services/playerMatcher.js";
 import { LIVE_BOARD_LOADING_STAGES, LIVE_BOARD_UNAVAILABLE_MESSAGE } from "./utils/liveBoardLoading.js";
@@ -2209,6 +2210,11 @@ export default function DFSPropsApp() {
   const lastAutoRefreshRef = useRef(0);
   const scoringContextRef = useRef(null);
 
+  const mlbPipelineStatus = useMemo(() => {
+    mergeDfsSourceStatusFromApiHealth(apiHealth);
+    return getMlbPipelineStatus();
+  }, [apiHealth, manualAnalyzerProps, lastUpdated]);
+
   useEffect(() => {
     const trimmedHistory = trimHistoryToLimit(readHistory());
     const trimmedParlays = trimHistoryToLimit(readParlayHistory());
@@ -3754,6 +3760,8 @@ export default function DFSPropsApp() {
             onReanalyzeAll={handleReanalyzeManualProps}
             onOpenProp={setSelectedEvaluation}
             onSavePick={saveThisPick}
+            mlbPipelineStatus={mlbPipelineStatus}
+            apiHealth={apiHealth}
           />
         </SectionErrorBoundary>
       </div>
@@ -3771,6 +3779,7 @@ export default function DFSPropsApp() {
         underdogDebugSnapshot={underdogDebugSnapshot}
         rejectionAudit={debugInfo.rejectionAudit}
         apiHealth={apiHealth}
+        mlbPipelineStatus={mlbPipelineStatus}
       />
       </SectionErrorBoundary>
       </div>

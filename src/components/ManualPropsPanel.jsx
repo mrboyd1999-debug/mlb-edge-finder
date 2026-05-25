@@ -14,6 +14,7 @@ import {
   validateManualPropFields,
 } from "../utils/manualPropBuilder.js";
 import { shortReason } from "../utils/formatters.js";
+import MlbPipelineStatusPanel from "./MlbPipelineStatusPanel.jsx";
 
 function Field({ label, children, hint = "" }) {
   return (
@@ -36,6 +37,8 @@ function ManualPropsPanel({
   onOpenProp,
   onSavePick,
   compactMode = true,
+  mlbPipelineStatus = null,
+  apiHealth = null,
 }) {
   const [form, setForm] = useState(DEFAULT_MANUAL_FORM);
   const [formError, setFormError] = useState("");
@@ -168,6 +171,8 @@ function ManualPropsPanel({
           </div>
           <p style={styles.countPill}>{rankedProps.length} analyzed</p>
         </div>
+
+        <MlbPipelineStatusPanel pipelineStatus={mlbPipelineStatus} apiHealth={apiHealth} compact />
 
         <form style={styles.manualPropForm} onSubmit={handleFormSubmit}>
           <div style={styles.manualPropFormGrid}>

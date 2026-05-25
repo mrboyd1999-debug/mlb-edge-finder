@@ -116,7 +116,7 @@ import {
   rankManualPropScore,
   computeDirectionalEdge,
   projectionVsLineLabel,
-  MANUAL_FALLBACK_MODE_STATUS,
+  NO_VERIFIED_GRADE_STATUS,
 } from "../src/utils/manualPropScoring.js";
 import { projectPitcherStrikeouts, projectMlbHitterProp, DATA_STATUS } from "../src/modules/mlbProjectionEngine.js";
 import { PROJECTION_UNAVAILABLE_LABEL, PROJECTION_SOURCE_MISSING, AWAITING_VERIFIED_MLB_DATA, EDGE_FORMULA_DISABLED, EDGE_CALCULATION_UNAVAILABLE } from "../src/modules/projectionBreakdown.js";
@@ -1155,14 +1155,14 @@ const noProfileHit = buildOfflineManualAnalyzedProp({
   line: 1.5,
   source: "PrizePicks",
 });
-assert.equal(noProfileHit.manualFallbackMode, true);
-assert.equal(noProfileHit.projectionUnavailable, false);
-assert.ok(noProfileHit.projectedValue > 0);
+assert.equal(noProfileHit.projectionUnavailable, true);
+assert.equal(noProfileHit.unverifiedGradeBlocked, true);
 assert.equal(noProfileHit.impliedHitChance, null);
 assert.equal(noProfileHit.hitChanceLabel, "Insufficient verified data");
-assert.equal(noProfileHit.displayStatus, MANUAL_FALLBACK_MODE_STATUS);
-assert.ok(noProfileHit.bestPick === "over" || noProfileHit.bestPick === "under");
-assert.ok(projectionVsLineLabel(noProfileHit).includes("vs"));
+assert.equal(noProfileHit.displayStatus, "NO VERIFIED PLAY");
+assert.equal(noProfileHit.bestPick, null);
+assert.ok(String(noProfileHit.statusMessage || "").includes("No verified projection"));
+assert.ok(projectionVsLineLabel({ line: 6.5, projectionUnavailable: true }).includes("--"));
 
 const kBugProfile = {
   last5Average: 5.5,
@@ -1236,20 +1236,10 @@ const analyzedNoScoreFn = await analyzeManualProp({
   source: "PrizePicks",
   payoutType: "standard",
 });
-if (analyzedNoScoreFn.manualFallbackMode) {
-  assert.equal(analyzedNoScoreFn.displayStatus, MANUAL_FALLBACK_MODE_STATUS);
-  assert.ok(analyzedNoScoreFn.projectedValue > 0);
-  assert.ok(analyzedNoScoreFn.bestPick === "over" || analyzedNoScoreFn.bestPick === "under");
-  assert.ok(Number(analyzedNoScoreFn.confidence) >= 50 && Number(analyzedNoScoreFn.confidence) <= 60);
-  assert.equal(analyzedNoScoreFn.projectionUnavailable, false);
-} else if (analyzedNoScoreFn.projectionUnavailable) {
+if (analyzedNoScoreFn.projectionUnavailable) {
   assert.equal(analyzedNoScoreFn.displayStatus, "NO VERIFIED PLAY");
   assert.equal(analyzedNoScoreFn.bestPick, null);
-  assert.equal(analyzedNoScoreFn.sideEngineDebug?.projectionSource, PROJECTION_SOURCE_MISSING);
-  assert.equal(analyzedNoScoreFn.sideEngineDebug?.dataStatus, AWAITING_VERIFIED_MLB_DATA);
-  assert.equal(analyzedNoScoreFn.sideEngineDebug?.edgeFormula, EDGE_FORMULA_DISABLED);
-  assert.equal(analyzedNoScoreFn.sideEngineDebug?.edgeCalculation, EDGE_CALCULATION_UNAVAILABLE);
-  assert.equal(analyzedNoScoreFn.sideEngineDebug?.rawEdge, null);
+  assert.ok(String(analyzedNoScoreFn.statusMessage || analyzedNoScoreFn.whyThisPick || "").includes("No verified projection"));
 } else {
   assert.ok(analyzedNoScoreFn.whyThisPick.length > 12);
   if (analyzedNoScoreFn.riskLevel) {
@@ -1258,6 +1248,7 @@ if (analyzedNoScoreFn.manualFallbackMode) {
   if (analyzedNoScoreFn.bestPick) {
     assert.ok(analyzedNoScoreFn.bestPick === "over" || analyzedNoScoreFn.bestPick === "under");
   }
+  assert.equal(analyzedNoScoreFn.isVerifiedProjection, true);
 }
 assert.ok(analyzedNoScoreFn.whyThisPick.length > 12);
 

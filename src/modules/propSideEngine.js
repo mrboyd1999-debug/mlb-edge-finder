@@ -23,6 +23,7 @@ export const INSUFFICIENT_DATA_LABEL = "Insufficient verified data";
 export const NO_VERIFIED_PLAY_STATUS = "NO VERIFIED PLAY";
 export const AWAITING_PROJECTION_STATUS = "Awaiting projection data";
 export const PASS_STATUS = "PASS";
+export const NO_VERIFIED_GRADE_MESSAGE = "No verified projection available — do not grade this prop.";
 
 /** True when a numeric projection exists and is positive. */
 export function hasValidProjection(prop = {}) {
@@ -38,7 +39,22 @@ export function hasSportsbookLine(prop = {}) {
   return Number.isFinite(line) && line > 0;
 }
 
+/** Edge is only valid when projection, line, and player match are all verified. */
+export function canCalculateVerifiedEdge(prop = {}) {
+  if (!hasValidProjection(prop)) return false;
+  if (!hasSportsbookLine(prop)) return false;
+  if (prop.isFallbackProjection || prop.projectionSource === "missing" || prop.projectionSource === "manual-fallback") {
+    return false;
+  }
+  if (prop.projectionUnavailable || prop.unverifiedGradeBlocked) return false;
+  if (prop.isManualAnalyzer || prop.manualAnalyzer) {
+    return Boolean(prop.isVerifiedProjection && prop.playerMatchVerified !== false);
+  }
+  return Boolean(prop.isVerifiedProjection || prop.hasVerifiedStats);
+}
+
 export function hasCalculatedEdge(prop = {}) {
+  if (!canCalculateVerifiedEdge(prop)) return false;
   const edge = Number(prop.edge);
   return Number.isFinite(edge) && edge > 0;
 }

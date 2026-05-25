@@ -6,7 +6,7 @@ import {
   scoreManualPropInput,
   selectManualTopPicksByRank,
   sortManualPropsByRank,
-  MANUAL_FALLBACK_ESTIMATE_STATUS,
+  NO_VERIFIED_GRADE_STATUS,
 } from "./manualPropScoring.js";
 import { withPlayerImageUrl } from "./playerImageFields.js";
 import { buildMlbStatProfileFromLogs } from "../services/playerStats.js";
@@ -167,6 +167,13 @@ export async function fetchManualPropProfile(form = {}) {
         playerId: data.pipelineTrace?.playerId ?? null,
         logsCount: data.pipelineTrace?.logsCount ?? 0,
       });
+      console.info("[Manual Analyzer] projection value used:", {
+        player: built.playerName,
+        statType: built.statType,
+        line: built.line,
+        last5: data.profile.last5Average,
+        season: data.profile.seasonAverage,
+      });
     } else {
       console.warn("[Manual Analyzer] profile unavailable", {
         reason: data.reason,
@@ -224,27 +231,19 @@ function attachPipelineDebug(prop = {}, { liveScored = null, pipelineTrace = nul
   if (!isMlb) return prop;
 
   const trace = pickAuthoritativePipelineTrace({ liveScored, pipelineTrace, built, prop });
+  const blockedGrade = Boolean(prop.projectionUnavailable || prop.unverifiedGradeBlocked);
+  const projectionUnavailable = Boolean(prop.projectionUnavailable || liveScored?.projectionUnavailable);
+  const projection = Number(prop.projectedValue ?? prop.projection ?? liveScored?.projection);
+  const hasProjection = Number.isFinite(projection) && projection > 0;
 
-  if (prop.manualFallbackMode) {
-    const apiWarning = trace?.failureReason || prop.manualApiWarning || null;
-    console.info("[Manual Analyzer] fallback mode", {
-      player: prop.playerName,
-      normalizedName: trace?.normalizedName || normalizeSportsbookName(prop.playerName),
-      apiWarning,
-      lean: prop.bestPick || prop.side,
-      projection: prop.projectedValue ?? prop.projection,
-    });
+  if (blockedGrade) {
     return {
       ...prop,
-      manualApiWarning: apiWarning || prop.manualApiWarning || null,
+      statusMessage: prop.statusMessage || NO_VERIFIED_GRADE_STATUS,
       mlbPipelineTrace: prop.mlbPipelineTrace || trace || null,
       pipelineFailureCode: null,
     };
   }
-
-  const projectionUnavailable = Boolean(prop.projectionUnavailable || liveScored?.projectionUnavailable);
-  const projection = Number(prop.projectedValue ?? prop.projection ?? liveScored?.projection);
-  const hasProjection = Number.isFinite(projection) && projection > 0;
 
   if (hasProjection && !projectionUnavailable) {
     return {
@@ -333,9 +332,13 @@ export async function analyzeManualProp(form = {}, scoreFn = null) {
   }
 
   const analyzed = buildOfflineManualAnalyzedProp(form, liveScored?.playerName ? liveScored : null, profile);
-  if (apiWarning && analyzed.manualFallbackMode) {
-    analyzed.manualApiWarning = apiWarning;
-    analyzed.statusMessage = `${MANUAL_FALLBACK_ESTIMATE_STATUS}. ${apiWarning}`;
+  if (profile && !profile.sparse && !profile.fallback) {
+    analyzed.playerMatchVerified = true;
+    analyzed.mlbId = profile.mlbId || profile.playerId || analyzed.mlbId;
+    analyzed.playerId = profile.playerId || profile.mlbId || analyzed.playerId;
+  }
+  if (apiWarning && analyzed.projectionUnavailable) {
+    analyzed.statusMessage = analyzed.statusMessage || `${NO_VERIFIED_GRADE_STATUS} ${apiWarning}`.trim();
   }
 
   return attachPipelineDebug(analyzed, { liveScored, pipelineTrace, built });

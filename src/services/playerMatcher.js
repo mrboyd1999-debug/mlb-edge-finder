@@ -191,7 +191,7 @@ export async function searchMlbPlayers(query = "") {
 /**
  * Resolve a PrizePicks/Underdog player name to a verified MLB StatsAPI player.
  */
-export async function matchSportsbookPlayerToMlb(sportsbookName = "", { minConfidence = 55 } = {}) {
+export async function matchSportsbookPlayerToMlb(sportsbookName = "", { minConfidence = 55, team = "" } = {}) {
   const incoming = String(sportsbookName || "").trim();
   const normalizedName = normalizeSportsbookName(incoming);
   logNormalizedName(incoming, normalizedName);
@@ -219,9 +219,12 @@ export async function matchSportsbookPlayerToMlb(sportsbookName = "", { minConfi
 
   const queries = [...new Set([incoming, resolveAbbreviations(incoming)].filter(Boolean))];
   let best = null;
+  let lastCandidatesCount = 0;
 
   for (const query of queries) {
     const people = await searchMlbPlayers(query);
+    lastCandidatesCount = Math.max(lastCandidatesCount, people.length);
+    console.info("[Manual Prop Matcher] players returned:", people.length, { query });
     const candidate = pickBestMlbMatch(incoming, people);
     if (candidate && (!best || candidate.confidence > best.confidence)) {
       best = candidate;
@@ -230,7 +233,12 @@ export async function matchSportsbookPlayerToMlb(sportsbookName = "", { minConfi
   }
 
   if (!best || best.confidence < minConfidence) {
-    const result = { player: null, confidence: best?.confidence || 0, reason: best?.reason || "no confident MLB match" };
+    const result = {
+      player: null,
+      confidence: best?.confidence || 0,
+      reason: best?.reason || "no confident MLB match",
+      candidatesCount: lastCandidatesCount,
+    };
     logMatchedPlayer(null, result.confidence, result.reason);
     logPlayerMatch({ incomingName: incoming, matchedName: null, confidence: result.confidence, reason: result.reason });
     console.info("[Manual Prop Matcher] matched player result:", {
@@ -251,6 +259,8 @@ export async function matchSportsbookPlayerToMlb(sportsbookName = "", { minConfi
     },
     confidence: best.confidence,
     reason: best.reason,
+    candidatesCount: lastCandidatesCount,
+    apiStatusCode: 200,
   };
 
   matchRegistry.set(registryKey, result);
