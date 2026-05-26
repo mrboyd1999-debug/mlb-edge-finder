@@ -27,16 +27,18 @@ import { computeLiveConfidence } from "./liveConfidenceEngine.js";
 import { applyCrossSectionPlayerCap } from "./sectionPlayerDedupe.js";
 import { buildLiveFetchFailureSummary } from "./liveFetchAudit.js";
 import { isMinimalRenderableProp } from "./normalizeProp.js";
+import { filterQualityMlbProps } from "./mlbPropQualityFilter.js";
+import { GOBLIN_MIN_CONFIDENCE } from "./mlbWeightedConfidence.js";
 import { isFakeOrFallbackProp } from "./livePropRender.js";
 
 export const TOP_MLB_PLAYS_LIMIT = 20;
-export const SECTION_BEST_PLAYS = MLB_BEST_PLAYS_LIMIT;
-export const SECTION_STRONG_LEANS = MLB_STRONG_LEANS_LIMIT;
-export const SECTION_STREAK = 2;
-export const SECTION_GOBLINS = 6;
-export const SECTION_DEMONS = 6;
-export const SECTION_UNDERS = 4;
-export const SECTION_PARLAY = 4;
+export const SECTION_BEST_PLAYS = 2;
+export const SECTION_GOBLINS = 2;
+export const SECTION_DEMONS = 2;
+export const SECTION_STRONG_LEANS = 0;
+export const SECTION_STREAK = 0;
+export const SECTION_UNDERS = 0;
+export const SECTION_PARLAY = 0;
 export const MAX_PLAYER_APPEARANCES = 2;
 export const WAITING_FOR_PROJECTIONS_MESSAGE = "Waiting for verified projections…";
 export const FALLBACK_PROJECTIONS_LABEL = "Relaxed ranking applied";
@@ -76,7 +78,7 @@ function buildTopMlbPlayPool(displayProps = [], rawProps = [], parsedUnderdogPro
   });
 
   logPipelineStage("pool.filtered", { count: pool.length, relaxed });
-  return pool;
+  return filterQualityMlbProps(pool);
 }
 
 export function auditTopMlbPlayPool(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
@@ -168,10 +170,35 @@ function fillMinimum(existing = [], source = [], limit = 0, { allowRelaxed = fal
   return out.slice(0, limit);
 }
 
+function pickHighestBy(props = [], field = "edge") {
+  const sorted = [...props].sort((a, b) => {
+    const av = Number(a[field] ?? a.confidenceScore ?? a.confidence ?? 0);
+    const bv = Number(b[field] ?? b.confidenceScore ?? b.confidence ?? 0);
+    return bv - av;
+  });
+  return sorted[0] || null;
+}
+
 function playerKey(prop = {}) {
   return String(prop.playerName || prop.player || "")
     .trim()
     .toLowerCase();
+}
+
+function pickSafestPlays(ranked = [], limit = SECTION_BEST_PLAYS, annotateOpts = {}) {
+  return [...ranked]
+    .filter((prop) => {
+      const conf = Number(prop.confidenceScore ?? prop.confidence ?? 0);
+      return Number.isFinite(conf) && conf >= GOBLIN_MIN_CONFIDENCE - 8;
+    })
+    .sort(
+      (a, b) =>
+        Number(b.confidenceScore ?? b.confidence ?? 0) - Number(a.confidenceScore ?? a.confidence ?? 0) ||
+        Math.abs(Number(b.edge ?? 0)) - Math.abs(Number(a.edge ?? 0))
+    )
+    .slice(0, limit)
+    .map((prop, idx) => annotateTopPlay(prop, idx + 1, annotateOpts))
+    .filter(Boolean);
 }
 
 function statKey(prop = {}) {
@@ -311,46 +338,55 @@ export function resolveTopMlbPlaySections(
     allowDemo: isDemoBoard,
   });
 
+  const goblinKeys = new Set(goblins.map((prop) => prop.id || `${prop.playerName}|${prop.statType}|${prop.line}|${prop.source}`));
+  demons = demons.filter((prop) => !goblinKeys.has(prop.id || `${prop.playerName}|${prop.statType}|${prop.line}|${prop.source}`));
+  const demonKeys = new Set(demons.map((prop) => prop.id || `${prop.playerName}|${prop.statType}|${prop.line}|${prop.source}`));
+  goblins = goblins.filter((prop) => !demonKeys.has(prop.id || `${prop.playerName}|${prop.statType}|${prop.line}|${prop.source}`));
+
   const verifiedRanked = filterMlbRecommendableProps(ranked);
-  const bestPlays = selectMlbVerifiedBestBets(verifiedRanked.length ? verifiedRanked : ranked, SECTION_BEST_PLAYS);
-  const strongLeans = selectMlbStrongLeans(verifiedRanked.length ? verifiedRanked : ranked, SECTION_STRONG_LEANS);
-  const streakPlays = fillMinimum(
-    ranked.filter((p) => p.recommendedSide === "UNDER").slice(0, SECTION_STREAK),
-    ranked,
-    SECTION_STREAK,
-    { allowRelaxed: true, allowLiveLine: true, allowDemo: isDemoBoard }
-  );
-  const safeUnders = fillMinimum(
-    ranked.filter((p) => p.recommendedSide === "UNDER").slice(0, SECTION_UNDERS),
-    ranked,
-    SECTION_UNDERS,
-    { allowRelaxed: true, allowLiveLine: true, allowDemo: isDemoBoard }
-  );
-  let parlayPicks = buildRankableParlayPicks(ranked, SECTION_PARLAY);
-  parlayPicks = fillMinimum(parlayPicks, ranked, SECTION_PARLAY, {
+  const safestPlays = pickSafestPlays(verifiedRanked.length ? verifiedRanked : ranked, SECTION_BEST_PLAYS, {
     allowRelaxed: true,
     allowLiveLine: true,
-    allowDemo: isDemoBoard,
   });
+  const highestEdgePlay = pickHighestBy(verifiedRanked.length ? verifiedRanked : ranked, "edge");
+  const highestConfidencePlay = pickHighestBy(verifiedRanked.length ? verifiedRanked : ranked, "confidenceScore");
+
+  goblins = goblins.slice(0, SECTION_GOBLINS);
+  demons = demons.slice(0, SECTION_DEMONS);
 
   let sections = [
     {
       id: "best-plays",
-      title: "Best MLB Plays",
-      eyebrow: "Top verified MLB edges",
-      picks: bestPlays,
+      title: "Top 2 Safest",
+      eyebrow: "Highest-confidence verified edges",
+      picks: safestPlays,
     },
     {
-      id: "strong-leans",
-      title: "Strong Leans",
-      eyebrow: "Verified model sides",
-      picks: strongLeans,
+      id: "goblins",
+      title: "Top 2 Goblins",
+      eyebrow: "Safer payout lines (72%+ confidence)",
+      picks: goblins,
     },
-    { id: "streak-plays", title: "Streak Plays", eyebrow: "Strongest unders", picks: streakPlays },
-    { id: "goblins", title: "Goblins", eyebrow: "Safer payout lines", picks: goblins },
-    { id: "demons", title: "Demons", eyebrow: "Higher payout lines", picks: demons },
-    { id: "safe-unders", title: "Safe Unders", eyebrow: "Unders prioritized", picks: safeUnders },
-    { id: "4-man-builder", title: "4-Man Builder", eyebrow: "Low-correlation legs", picks: parlayPicks },
+    {
+      id: "demons",
+      title: "Top 2 Demons",
+      eyebrow: "Higher payout / volatile (45–65% confidence)",
+      picks: demons,
+    },
+    {
+      id: "highest-edge",
+      title: "Highest Edge",
+      eyebrow: "Largest model vs line gap",
+      picks: highestEdgePlay ? [annotateTopPlay(highestEdgePlay, 1, { allowRelaxed: true, allowLiveLine: true })].filter(Boolean) : [],
+    },
+    {
+      id: "highest-confidence",
+      title: "Highest Confidence",
+      eyebrow: "Strongest weighted model score",
+      picks: highestConfidencePlay
+        ? [annotateTopPlay(highestConfidencePlay, 1, { allowRelaxed: true, allowLiveLine: true })].filter(Boolean)
+        : [],
+    },
   ].map((section) => ({ ...section, picks: section.picks.filter(Boolean) }));
 
   sections = applyCrossSectionPlayerCap(sections, MAX_PLAYER_APPEARANCES);

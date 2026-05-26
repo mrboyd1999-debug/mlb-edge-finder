@@ -204,7 +204,24 @@ export function computeDisplayRiskLevel(confidence = BASE_CONFIDENCE) {
   return "HIGH";
 }
 
+function isMlbWeightedConfidenceProp(prop = {}) {
+  return (
+    String(prop.sport || "").toUpperCase() === "MLB" &&
+    (prop.isVerifiedProjection || prop.confidenceFactors) &&
+    Number.isFinite(Number(prop.confidenceScore ?? prop.confidence))
+  );
+}
+
 function computeWeightedConfidence(prop = {}, projection, line, edge) {
+  if (isMlbWeightedConfidenceProp(prop)) {
+    const score = Math.round(Number(prop.confidenceScore ?? prop.confidence));
+    return {
+      confidence: score,
+      boostLabels: prop.confidenceFactors ? ["MLB weighted model"] : [],
+      penaltyLabels: [],
+    };
+  }
+
   let confidence = BASE_CONFIDENCE;
   const boostLabels = [];
   const penaltyLabels = [];
@@ -311,9 +328,11 @@ function computeWeightedConfidence(prop = {}, projection, line, edge) {
     boostLabels.push("Live source");
   }
 
-  confidence += propVariance(prop);
-  confidence += statTypeConfidenceOffset(prop);
-  confidence += sourceConfidenceOffset(prop);
+  if (!isMlbWeightedConfidenceProp(prop)) {
+    confidence += propVariance(prop);
+    confidence += statTypeConfidenceOffset(prop);
+    confidence += sourceConfidenceOffset(prop);
+  }
   confidence += lineDifficultyOffset(prop, line, projection, side);
 
   if (prop.sportsDataSeason || prop.sportsDataRecentGames?.length) {
@@ -326,7 +345,7 @@ function computeWeightedConfidence(prop = {}, projection, line, edge) {
     confidence += clamp((enrichmentQuality - 50) * 0.08, -4, 3);
   }
 
-  confidence = clamp(Math.round(confidence), 48, 85);
+  confidence = clamp(Math.round(confidence), 45, 92);
 
   return { confidence, boostLabels, penaltyLabels };
 }
@@ -380,7 +399,9 @@ export function scoreDisplayProp(prop = {}) {
     analyticsReason,
   });
 
-  const finalConfidence = calibrateRealisticConfidence(calibrated.confidence, { ...calibrated, ...prop }, edge);
+  const finalConfidence = isMlbWeightedConfidenceProp({ ...calibrated, ...prop })
+    ? Math.round(Number(calibrated.confidenceScore ?? calibrated.confidence))
+    : calibrateRealisticConfidence(calibrated.confidence, { ...calibrated, ...prop }, edge);
   const finalized = {
     ...calibrated,
     confidence: finalConfidence,

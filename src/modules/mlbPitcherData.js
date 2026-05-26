@@ -166,7 +166,8 @@ export function buildMlbPitcherDataPackage(prop = {}, profile = {}, context = {}
     ? profile.pitchCountTrend
     : pitchCountTrendFromValues(pitchValues);
 
-  const opponent = context.opponentContext || profile.opponentContext || {};
+  const opponentRaw = context?.opponentContext || profile?.opponentContext;
+  const opponent = opponentRaw && typeof opponentRaw === "object" ? opponentRaw : {};
   const handednessMatchup = profile.handednessMatchup || "";
   const handednessBoost = handednessBoostFromNote(handednessMatchup);
   const homeAwaySplit = profile.homeAwaySplit || homeAwaySplitFromStartRows(startRows, marketKey);

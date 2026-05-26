@@ -3,6 +3,11 @@
  */
 
 import { isDemonProp, isGoblinProp } from "./propLabels.js";
+import {
+  DEMON_MAX_CONFIDENCE,
+  DEMON_MIN_CONFIDENCE,
+  GOBLIN_MIN_CONFIDENCE,
+} from "./mlbWeightedConfidence.js";
 import { computeLiveConfidence } from "./liveConfidenceEngine.js";
 
 function finiteOr(value, fallback = NaN) {
@@ -20,13 +25,20 @@ export function classifyGoblinDemon(prop = {}) {
   const hit10 = finiteOr(prop.last10HitRate ?? prop.recentHitRate, NaN);
   const mult = finiteOr(prop.multiplier ?? prop.payout, 1);
 
-  if (platformGoblin || (Number.isFinite(conf) && conf > 65 && edge >= 0.3 && (!Number.isFinite(hit10) || hit10 >= 0.55))) {
+  if (
+    platformGoblin ||
+    (Number.isFinite(conf) && conf >= GOBLIN_MIN_CONFIDENCE && edge >= 0.35 && (!Number.isFinite(hit10) || hit10 >= 0.55))
+  ) {
     return { tier: "goblin", role: "goblin", confidence: conf, edge };
   }
 
   if (
     platformDemon ||
-    (Number.isFinite(conf) && conf >= 50 && conf <= 70 && edge >= 1.0 && mult >= 1.1)
+    (Number.isFinite(conf) &&
+      conf >= DEMON_MIN_CONFIDENCE &&
+      conf <= DEMON_MAX_CONFIDENCE &&
+      edge >= 0.85 &&
+      mult >= 1.1)
   ) {
     return { tier: "demon", role: "demon", confidence: conf, edge };
   }

@@ -9,7 +9,6 @@ import {
   AWAITING_PROJECTION_STATUS,
   computeDirectionalEdgeForSide,
   computeRawEdge,
-  confidenceFromEdge,
   NO_VERIFIED_PLAY_STATUS,
   PASS_STATUS,
   resolveRecommendedSide,
@@ -25,6 +24,7 @@ import {
   LIVE_LINE_PROJECTION_UNAVAILABLE,
   PROJECTION_UNAVAILABLE_LABEL,
 } from "./projectionBreakdown.js";
+import { calculateWeightedMlbConfidence } from "../utils/mlbWeightedConfidence.js";
 
 const MLB_VOLATILITY = {
   strikeouts: { tier: "LOW", score: 0.38, label: "Low variance" },
@@ -135,7 +135,7 @@ export function buildMlbPropProjection(prop = {}, profile = {}, context = {}) {
     ? projectMlbPitcherProp(prop, profile, context)
     : projectMlbHitterProp(prop, profile, context);
 
-  const projection = finiteOr(engineResult?.projectedValue);
+  let projection = finiteOr(engineResult?.projectedValue);
   const verified = Boolean(engineResult?.isVerifiedProjection && projection != null && projection > 0);
 
   if (!verified) {
@@ -156,23 +156,37 @@ export function buildMlbPropProjection(prop = {}, profile = {}, context = {}) {
     };
   }
 
+  if (Number.isFinite(line) && Number.isFinite(projection) && Math.abs(projection - line) < 0.08) {
+    const sideHint = resolveRecommendedSide(projection, line);
+    const nudge = sideHint === "under" ? -0.15 : 0.15;
+    projection = round(projection + nudge, 1);
+  }
+
   const rawEdge = computeRawEdge(projection, line);
   const recommendedSide = resolveRecommendedSide(projection, line);
   const edge = recommendedSide ? computeDirectionalEdgeForSide(projection, line, recommendedSide) : 0;
   const volatilityAdjustedEdge = computeVolatilityAdjustedEdge(Math.abs(rawEdge ?? 0), volatility);
-  let confidence = confidenceFromEdge(volatilityAdjustedEdge, {
-    volatility,
-    payoutType,
-    marketKey,
-    isVerified: true,
-    consistencyScore: profile.consistencyScore ?? engineResult?.pitcherInputs?.consistencyScore ?? null,
-    matchupQuality: profile.handednessMatchup ? "neutral" : null,
-  });
-  confidence = calibrateRealisticConfidence(
-    confidence,
-    { ...prop, ...profile, edge: volatilityAdjustedEdge, volatilityAdjustedEdge, sampleSize: profile.sampleSize },
-    volatilityAdjustedEdge
+
+  const weighted = calculateWeightedMlbConfidence(
+    {
+      ...prop,
+      projection,
+      edge,
+      volatilityAdjustedEdge,
+      line,
+      statType,
+    },
+    profile,
+    context
   );
+  let confidence = weighted.score;
+  if (profile.sampleSize != null && profile.sampleSize < 3) {
+    confidence = calibrateRealisticConfidence(
+      weighted.score,
+      { ...prop, ...profile, edge: volatilityAdjustedEdge, volatilityAdjustedEdge, sampleSize: profile.sampleSize, confidenceFactors: weighted.factors },
+      volatilityAdjustedEdge
+    );
+  }
   const passPlay = shouldPassPlay({ edge: volatilityAdjustedEdge, confidence, isVerified: true });
   const risk = classifyRisk({ edge, volatility, payoutType });
   const modelSide = passPlay ? PASS_STATUS : recommendedSide?.toUpperCase() || null;
@@ -200,6 +214,7 @@ export function buildMlbPropProjection(prop = {}, profile = {}, context = {}) {
     modelSide,
     modelPickLabel,
     confidence,
+    confidenceFactors: weighted.factors,
     risk,
     volatility,
     volatilityLabel: volatility.label,
@@ -311,4 +326,9 @@ export function applyMlbProjectionToProp(prop = {}, profile = {}, context = {}) 
         ? PASS_STATUS
         : model.modelPickLabel,
   };
+}
+
+/** Primary MLB projection entry — MLB Stats API first, SportsDataIO enrichment optional. */
+export function calculateProjection(prop = {}, profile = {}, context = {}) {
+  return buildMlbPropProjection(prop, profile, context);
 }

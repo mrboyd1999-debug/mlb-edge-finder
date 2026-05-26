@@ -84,7 +84,11 @@ export function calculateProjectionConfidence(prop = {}, options = {}) {
   if (options.sportCap != null) score = Math.min(score, options.sportCap);
 
   const isMlb = String(prop.sport || "").toUpperCase() === "MLB";
-  if (isMlb && hasLine) {
+  const hasWeightedMlbScore =
+    isMlb && (prop.isVerifiedProjection || prop.confidenceFactors) && Number.isFinite(Number(prop.confidenceScore ?? prop.confidence));
+  if (hasWeightedMlbScore) {
+    score = Math.round(Number(prop.confidenceScore ?? prop.confidence));
+  } else if (isMlb && hasLine) {
     const calibrated = calibrateRealisticConfidence(
       score,
       { ...prop, edge: prop.volatilityAdjustedEdge ?? prop.edge },

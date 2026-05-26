@@ -2,14 +2,14 @@
 
 import { isDebugModeEnabled } from "./devMode.js";
 
-export const MIN_DISPLAY_CONFIDENCE = 50;
-export const MIN_BEST_PLAY_CONFIDENCE = 54;
-export const MIN_GOBLIN_DEMON_CONFIDENCE = 54;
+export const MIN_DISPLAY_CONFIDENCE = 45;
+export const MIN_BEST_PLAY_CONFIDENCE = 58;
+export const MIN_GOBLIN_DEMON_CONFIDENCE = 45;
 export const MIN_STREAK_CONFIDENCE = 54;
 
-export const STANDARD_CONFIDENCE_CAP = 65;
-export const ELITE_CONFIDENCE_CAP = 70;
-export const STRONG_PLAY_MIN_CONFIDENCE = 62;
+export const STANDARD_CONFIDENCE_CAP = 82;
+export const ELITE_CONFIDENCE_CAP = 92;
+export const STRONG_PLAY_MIN_CONFIDENCE = 68;
 export const STRONG_PLAY_MIN_EDGE = 1.0;
 export const STRONG_PLAY_MIN_SAMPLE = 5;
 export const STRONG_PLAY_MIN_DQ = 52;
@@ -31,13 +31,13 @@ function finiteOr(value, fallback = NaN) {
   return Number.isFinite(num) ? num : fallback;
 }
 
-/** 50-55 Lean · 56-61 Solid · 62-67 Strong · 68+ Elite */
+/** 45-54 Lean · 55-64 Solid · 65-74 Strong · 75+ Elite */
 export function confidenceCalibrationTier(score) {
   const c = finiteOr(score, NaN);
-  if (!Number.isFinite(c) || c < 50) return "Research Only";
-  if (c <= 55) return "Lean";
-  if (c <= 61) return "Solid";
-  if (c <= 67) return "Strong";
+  if (!Number.isFinite(c) || c < 45) return "Research Only";
+  if (c <= 54) return "Lean";
+  if (c <= 64) return "Solid";
+  if (c <= 74) return "Strong";
   return "Elite";
 }
 
@@ -249,21 +249,22 @@ export function collectConfidencePenalties(prop = {}, profile = {}) {
 export function calibrateRealisticConfidence(rawConfidence, prop = {}, edge = null) {
   const raw = finiteOr(rawConfidence, NaN);
   if (!Number.isFinite(raw)) return null;
+  if (typeof raw === "string") return raw;
 
-  let score = Math.round(raw * 0.82 + 48 * 0.18);
+  let score = Math.round(raw * 0.94 + 50 * 0.06);
   const edgeVal = Math.abs(finiteOr(edge ?? prop.volatilityAdjustedEdge ?? prop.edge, 0));
   const penalties = collectConfidencePenalties(prop);
   const penaltyTotal = penalties.reduce((sum, item) => sum + item.amount, 0);
-  score -= Math.min(28, penaltyTotal);
+  score -= Math.min(18, penaltyTotal);
 
   const elite = isEliteConfidenceEligible(prop, edgeVal);
   let maxCap = elite ? ELITE_CONFIDENCE_CAP : STANDARD_CONFIDENCE_CAP;
   const dq = computeGradingDataQuality(prop);
   if (dq < 45) maxCap = Math.min(maxCap, 58);
-  else if (dq < 52) maxCap = Math.min(maxCap, 62);
-  if (prop.displayFallback || prop.isFallback || prop.isFallbackProjection) maxCap = Math.min(maxCap, 54);
+  else if (dq < 52) maxCap = Math.min(maxCap, 68);
+  if (prop.displayFallback || prop.isFallback || prop.isFallbackProjection) maxCap = Math.min(maxCap, 62);
 
-  score = clamp(score, 48, maxCap);
+  score = clamp(score, 45, maxCap);
   return Math.round(score);
 }
 

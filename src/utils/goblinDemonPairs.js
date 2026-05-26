@@ -5,7 +5,6 @@
 
 import { buildPropDedupeKey } from "./displayPropScoring.js";
 import { withPlayerImageUrl } from "./playerImageFields.js";
-import { calibrateRealisticConfidence } from "./mlbConfidenceEngine.js";
 import { buildAnalyticsReason } from "./propReasonEngine.js";
 import { isDemonProp, isGoblinProp } from "./propLabels.js";
 import { resolvePickSide } from "./pickRecommendation.js";
@@ -21,10 +20,8 @@ import {
 } from "./projectionQuality.js";
 
 const MIN_LINE_GAP = 0.5;
-const GOBLIN_CONFIDENCE_BOOST = 10;
-const DEMON_CONFIDENCE_PENALTY = 10;
-const DISPLAY_CONF_MIN = 52;
-const DISPLAY_CONF_MAX = 82;
+const DISPLAY_CONF_MIN = 45;
+const DISPLAY_CONF_MAX = 92;
 
 function finiteOr(value, fallback = 0) {
   const num = Number(value);
@@ -90,14 +87,9 @@ function baseConfidence(prop = {}) {
   );
 }
 
-function adjustRoleConfidence(confidence, role, prop = {}) {
-  const delta = role === "goblin" ? GOBLIN_CONFIDENCE_BOOST : -DEMON_CONFIDENCE_PENALTY;
-  return calibrateRealisticConfidence(confidence + delta, prop);
-}
-
 function annotatePayoutProp(prop = {}, role, { pairedLine = null, pairedWith = null, verified = false } = {}) {
   const isGoblin = role === "goblin";
-  const conf = adjustRoleConfidence(baseConfidence(prop), role, prop);
+  const conf = baseConfidence(prop);
   const analyticsReason = buildAnalyticsReason(prop);
   return withPlayerImageUrl({
     ...prop,
@@ -268,6 +260,12 @@ export function resolveCuratedGoblinDemonBoards(
 
   let goblins = paired.goblins.filter(isGoblinRankEligible);
   let demons = paired.demons.filter(isDemonRankEligible);
+
+  const goblinLineKeys = new Set(goblins.map((prop) => lineKey(prop)));
+  demons = demons.filter((prop) => !goblinLineKeys.has(lineKey(prop)));
+
+  const demonLineKeys = new Set(demons.map((prop) => lineKey(prop)));
+  goblins = goblins.filter((prop) => !demonLineKeys.has(lineKey(prop)));
 
   if (!goblins.length) {
     const verified = (goblinBoardPicks || []).filter(isGoblinProp).slice(0, goblinLimit);

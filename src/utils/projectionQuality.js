@@ -3,6 +3,12 @@
  */
 
 import { playerRoleStatMismatchReason } from "./propPlayerRole.js";
+import {
+  DEMON_MAX_CONFIDENCE,
+  DEMON_MIN_CONFIDENCE,
+  GOBLIN_MIN_CONFIDENCE,
+  MIN_MLB_CONFIDENCE,
+} from "./mlbWeightedConfidence.js";
 import { validatePropSanityRejectReason, isPropSanityValid } from "./propSanity.js";
 import { resolvePropSportLabel } from "./underdogSportDetection.js";
 import { lockSportFromStatType, sportStatMismatchReason } from "./propStatSportLock.js";
@@ -149,6 +155,9 @@ function baseSportStatRejectReason(prop = {}) {
   const statType = prop.statType || prop.market || prop.propType || "";
   if (!statType) return "Rejected: missing stat type";
 
+  const roleMismatch = playerRoleStatMismatchReason(prop);
+  if (roleMismatch) return roleMismatch;
+
   const sport = resolvePropSportLabel(prop) || prop.inferredSport || prop.sport || prop.league || "";
   const statLock = lockSportFromStatType(statType);
   const effectiveSport = sport && sport !== "Unknown" && sport !== "Unsupported" ? sport : statLock || "";
@@ -176,6 +185,9 @@ export function validateProjectionRejectReason(prop = {}) {
   if (edge <= 0) {
     return "Rejected: zero edge";
   }
+  if (edge < 0.12) {
+    return "Rejected: projection too close to line";
+  }
 
   return "";
 }
@@ -193,7 +205,10 @@ export function validateBestPlayRejectReason(prop = {}) {
   }
 
   const conf = finiteOr(prop.confidenceScore ?? prop.confidence, NaN);
-  if (!Number.isFinite(conf) || conf < 55) {
+  if (!Number.isFinite(conf) || conf < MIN_MLB_CONFIDENCE) {
+    return "Rejected: confidence below floor";
+  }
+  if (conf < 58) {
     return "Rejected: confidence below Best Plays floor";
   }
 
@@ -209,17 +224,22 @@ export function validateGoblinRejectReason(prop = {}) {
   if (projectionReject) return projectionReject;
 
   const conf = finiteOr(prop.confidenceScore ?? prop.confidence, NaN);
-  if (!Number.isFinite(conf) || conf < 58) {
-    return "Rejected: confidence below Goblin floor";
+  if (!Number.isFinite(conf) || conf < GOBLIN_MIN_CONFIDENCE) {
+    return "Rejected: confidence below Goblin floor (72%)";
   }
 
   const edge = computeAbsoluteProjectionEdge(prop);
-  if (edge <= 0.5) {
+  if (edge <= 0.35) {
     return "Rejected: Goblin edge too small";
   }
 
   if (goblinVarianceTooHigh(prop)) {
     return "Rejected: variance too high for Goblin";
+  }
+
+  const hit = finiteOr(prop.last10HitRate ?? prop.recentHitRate ?? prop.last5HitRate, NaN);
+  if (Number.isFinite(hit) && hit < 0.52) {
+    return "Rejected: historical hit rate too low for Goblin";
   }
 
   return "";
@@ -234,12 +254,15 @@ export function validateDemonRejectReason(prop = {}) {
   if (projectionReject) return projectionReject;
 
   const conf = finiteOr(prop.confidenceScore ?? prop.confidence, NaN);
-  if (!Number.isFinite(conf) || conf < 52) {
+  if (!Number.isFinite(conf) || conf < DEMON_MIN_CONFIDENCE) {
     return "Rejected: confidence below Demon floor";
+  }
+  if (conf > DEMON_MAX_CONFIDENCE) {
+    return "Rejected: confidence too high for Demon (max 65%)";
   }
 
   const edge = computeAbsoluteProjectionEdge(prop);
-  if (edge <= 1.0) {
+  if (edge <= 0.85) {
     return "Rejected: Demon edge too small";
   }
 

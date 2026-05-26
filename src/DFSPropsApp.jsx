@@ -3913,7 +3913,10 @@ function scoreDFSProp(prop, context) {
       historyRows: context.historyRows || [],
     }
   );
-  let confidenceScore = Math.max(confidenceResult.score, Number.isFinite(line) && line > 0 ? 28 : 0);
+  let confidenceScore =
+    isMlbProp && mlbVerifiedModel?.isVerifiedProjection && Number.isFinite(Number(mlbVerifiedModel.confidence))
+      ? Math.round(Number(mlbVerifiedModel.confidence))
+      : Math.max(confidenceResult.score, Number.isFinite(line) && line > 0 ? 28 : 0);
   const confidenceBreakdown = confidenceResult.explanation;
   const manualConfidenceAdjustment = clamp(Number(manualStats?.confidenceAdjustment || 0), -15, 15);
   if (Number.isFinite(manualConfidenceAdjustment) && manualConfidenceAdjustment !== 0) {
@@ -4178,6 +4181,7 @@ function scoreDFSProp(prop, context) {
     manualEnriched: Boolean(enriched?.manualEnriched || manualStats),
     confidenceScore,
     confidence: confidenceScore,
+    confidenceFactors: mlbVerifiedModel?.confidenceFactors || prop.confidenceFactors || null,
     gradingDataQuality,
     playTag,
     volatilityAdjustedEdge: round(volatilityAdjustedEdge),
