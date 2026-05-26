@@ -86,6 +86,17 @@ function DfsAnalyzerLayout({
 
       {learningSaveNotice ? <p className="compact-form-notice">{learningSaveNotice}</p> : null}
 
+      {appView === "bestPlays" ? (
+        <SectionErrorBoundary name="Best Plays" onError={onSectionError}>
+          <BestPlaysTab
+            sections={topMlbPlayBoard?.sections || []}
+            loading={loading}
+            onOpen={onOpenProp}
+            onSave={onSavePick}
+          />
+        </SectionErrorBoundary>
+      ) : null}
+
       {appView === "manual" ? (
         <SectionErrorBoundary name="Manual Analyzer" onError={onSectionError}>
           <ManualPropsPanel
@@ -97,17 +108,6 @@ function DfsAnalyzerLayout({
             onClearAll={onClearManualProps}
             onOpenProp={onOpenProp}
             onSavePick={onSavePick}
-          />
-        </SectionErrorBoundary>
-      ) : null}
-
-      {appView === "bestPlays" ? (
-        <SectionErrorBoundary name="Best Plays" onError={onSectionError}>
-          <BestPlaysTab
-            sections={topMlbPlayBoard?.sections || []}
-            loading={loading}
-            onOpen={onOpenProp}
-            onSave={onSavePick}
           />
         </SectionErrorBoundary>
       ) : null}

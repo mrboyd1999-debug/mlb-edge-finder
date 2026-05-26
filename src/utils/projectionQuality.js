@@ -208,7 +208,7 @@ export function validateBestPlayRejectReason(prop = {}) {
   if (!Number.isFinite(conf) || conf < MIN_MLB_CONFIDENCE) {
     return "Rejected: confidence below floor";
   }
-  if (conf < 58) {
+  if (conf < 65) {
     return "Rejected: confidence below Best Plays floor";
   }
 

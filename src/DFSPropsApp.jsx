@@ -2105,13 +2105,13 @@ export default function DFSPropsApp() {
   const [appView, setAppView] = useState(() => {
     try {
       const stored = window.localStorage.getItem(APP_VIEW_STORAGE_KEY);
-      if (stored === "manual" || stored === "bestPlays" || stored === "goblins" || stored === "demons" || stored === "saved") {
+      if (stored === "bestPlays" || stored === "goblins" || stored === "demons" || stored === "saved" || stored === "prizepicks" || stored === "underdog" || stored === "manual") {
+        if (stored === "manual" || stored === "live") return "bestPlays";
         return stored;
       }
-      if (stored === "live") return "bestPlays";
-      return "manual";
+      return "bestPlays";
     } catch {
-      return "manual";
+      return "bestPlays";
     }
   });
   const [manualAnalyzerProps, setManualAnalyzerProps] = useState(() => readManualAnalyzerProps());
@@ -3491,6 +3491,7 @@ export default function DFSPropsApp() {
           onClose={() => setSelectedEvaluation(null)}
           onSaveManualStats={handleManualStatsSave}
           onSavePick={saveThisPick}
+          variant={isManualAnalyzerProp(selectedEvaluation) ? "manual" : "breakdown"}
         />
       )}
     </>

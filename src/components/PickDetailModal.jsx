@@ -78,8 +78,9 @@ function FlagRow({ flags = [], tone = "positive" }) {
   );
 }
 
-export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveManualStats, onSavePick }) {
-  const manualProp = isManualAnalyzerProp(prop);
+export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveManualStats, onSavePick, variant = "breakdown" }) {
+  const manualProp = variant === "manual" && isManualAnalyzerProp(prop);
+  const breakdownMode = !manualProp;
   const hasProjection = hasValidProjection(prop);
   const noVerifiedPlay = manualProp && (!hasProjection || prop.projectionUnavailable);
   const pickSide = noVerifiedPlay ? "" : normalizeManualPick(prop.bestPick || prop.side || prop.pick);
@@ -161,14 +162,14 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
         style={{ ...styles.modalPanel, maxHeight: manualProp ? "76vh" : "80vh", padding: manualProp ? "4px 6px" : "6px 8px" }}
         role="dialog"
         aria-modal="true"
-        aria-label={`${prop.playerName} evaluation`}
+        aria-label={breakdownMode ? "Highest Probability Pick Breakdown" : `${prop.playerName} evaluation`}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="pick-detail-modal-sticky" style={{ ...styles.modalHeader, position: "sticky", top: 0, zIndex: 2, background: "#0f172a", paddingBottom: "4px", marginBottom: "4px", borderBottom: "1px solid #1e293b" }}>
           <div style={styles.modalPlayer}>
             <PlayerImage prop={prop} large />
             <div style={{ minWidth: 0 }}>
-              <p style={styles.platform}>{prop.platform}</p>
+              <p style={styles.platform}>{breakdownMode ? "Highest Probability Pick Breakdown" : prop.platform}</p>
               <h2 style={{ ...styles.modalTitle, fontSize: "15px" }}>{prop.playerName}</h2>
               {(prop.team || prop.opponent) ? (
                 <p style={{ ...styles.gameLine, fontSize: "11px", margin: "2px 0 0" }}>
@@ -290,6 +291,22 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
             </>
           ) : null}
           <MetricIf label="Prop" value={prop.statType} />
+          {breakdownMode ? <MetricIf label="Source" value={prop.platform || prop.source} /> : null}
+          {breakdownMode ? <MetricIf label="Line" value={formatNumber(prop.line)} strong /> : null}
+          {breakdownMode ? (
+            <MetricIf
+              label="Projection"
+              value={
+                prop.projectedValue != null
+                  ? formatNumber(prop.projectedValue)
+                  : prop.projection != null
+                    ? formatNumber(prop.projection)
+                    : null
+              }
+              strong
+            />
+          ) : null}
+          {breakdownMode ? <MetricIf label="Lean" value={lean} strong /> : null}
           {manualProp && !noVerifiedPlay ? <MetricIf label="Risk" value={prop.riskLevel} /> : null}
           {!manualProp ? <MetricIf label="Risk" value={prop.riskLevel} /> : null}
           {!noVerifiedPlay ? <MetricIf label="Volatility" value={prop.volatilityLabel || null} /> : null}
@@ -311,7 +328,7 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
         </div>
 
         <div style={{ ...styles.explanationBlock, padding: manualProp ? "5px 6px" : "6px 8px", marginBottom: "3px" }}>
-          <strong style={{ fontSize: "11px" }}>{manualProp ? "Grade summary" : "Why this pick"}</strong>
+          <strong style={{ fontSize: "11px" }}>{breakdownMode ? "Why it qualifies" : manualProp ? "Grade summary" : "Why this pick"}</strong>
           {manualProp && noVerifiedPlay ? (
             <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "11px", lineHeight: 1.35, color: "#94a3b8" }}>
               {prop.statusMessage || AWAITING_PROJECTION_STATUS}
@@ -419,11 +436,11 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
           </div>
         )}
 
-        <details style={{ ...styles.compactDetails, marginTop: manualProp ? "4px" : "8px" }} open={!manualProp ? undefined : false}>
+        <details style={{ ...styles.compactDetails, marginTop: manualProp ? "4px" : "8px" }} open={breakdownMode ? false : undefined}>
           <summary style={styles.detailsSummary}>
             <span>
               <span style={styles.eyebrow}>{manualProp ? "Details" : "Deep dive"}</span>
-              <strong>{manualProp ? "More info" : "More research"}</strong>
+              <strong>{breakdownMode ? "More breakdown" : manualProp ? "More info" : "More research"}</strong>
             </span>
           </summary>
           <div style={{ ...styles.compactPanel, marginTop: "4px" }}>
@@ -518,6 +535,7 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
               ))}
             </div>
 
+            {manualProp ? (
             <details style={{ ...styles.compactDetails, marginTop: "8px" }}>
               <summary style={styles.detailsSummary}>Manual stat boost</summary>
               <div style={{ ...styles.compactPanel, marginTop: "6px" }}>
@@ -540,6 +558,7 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
                 </button>
               </div>
             </details>
+            ) : null}
 
             <div style={{ ...styles.evaluationText, marginTop: "8px", fontSize: "11px" }}>
               <p>{keyStatsSummary(prop)}</p>

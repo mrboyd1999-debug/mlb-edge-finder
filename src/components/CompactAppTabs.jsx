@@ -1,16 +1,16 @@
 import { memo } from "react";
 
 export const COMPACT_APP_TABS = [
-  { id: "manual", label: "Manual" },
   { id: "bestPlays", label: "Best Plays" },
   { id: "prizepicks", label: "PrizePicks" },
   { id: "underdog", label: "Underdog" },
   { id: "goblins", label: "Goblins" },
   { id: "demons", label: "Demons" },
+  { id: "manual", label: "Manual" },
   { id: "saved", label: "Saved" },
 ];
 
-function CompactAppTabs({ activeTab = "manual", onChange }) {
+function CompactAppTabs({ activeTab = "bestPlays", onChange }) {
   return (
     <nav className="compact-app-tabs" aria-label="Main sections">
       {COMPACT_APP_TABS.map((tab) => (

@@ -1,64 +1,40 @@
 import { memo, useMemo } from "react";
-import CompactPropCard from "./CompactPropCard.jsx";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
 
-const SECTION_SPECS = [
-  { id: "best-plays", title: "Top 2 Safest Plays", limit: 2, useRow: true },
-  { id: "4-man-builder", title: "4-Man Builder", limit: 4, useRow: false },
-  { id: "goblins", title: "Top 6 Goblins", limit: 6, useRow: false },
-  { id: "demons", title: "Top 6 Demons", limit: 6, useRow: false },
-];
-
-function BestPlaysTab({ sections = [], loading = false, onOpen, onSave }) {
-  const mapped = useMemo(() => {
-    const byId = Object.fromEntries((sections || []).map((section) => [section.id, section]));
-    return SECTION_SPECS.map((spec) => ({
-      ...spec,
-      picks: (byId[spec.id]?.picks || []).slice(0, spec.limit),
-      eyebrow: byId[spec.id]?.eyebrow || "",
-    })).filter((section) => section.picks.length > 0 || loading);
-  }, [sections, loading]);
+function BestPlaysTab({ sections = [], loading = false, onOpen }) {
+  const picks = useMemo(() => {
+    const section =
+      (sections || []).find((row) => row.id === "highest-probability") ||
+      (sections || []).find((row) => row.id === "best-plays") ||
+      (sections || [])[0];
+    return section?.picks || [];
+  }, [sections]);
 
   if (loading) {
-    return <p className="compact-empty">Loading best MLB plays…</p>;
+    return <p className="compact-empty">Loading highest probability props…</p>;
   }
 
-  if (!mapped.some((section) => section.picks.length)) {
+  if (!picks.length) {
     return (
       <p className="compact-empty">
-        No live MLB plays yet. Open PrizePicks or Underdog tabs, or refresh when feeds are connected.
+        No highest-probability MLB plays yet. Verified projections need 65%+ confidence, +0.5 edge, and matched MLB Stats API logs.
       </p>
     );
   }
 
   return (
     <div className="compact-tab-panel">
-      {mapped.map((section) =>
-        section.picks.length ? (
-          <section key={section.id} className="compact-section">
-            <div className="compact-section__head">
-              <h2>{section.title}</h2>
-              {section.eyebrow ? <p>{section.eyebrow}</p> : null}
-            </div>
-            <div className={section.useRow ? "compact-card-list" : "compact-prop-grid"}>
-              {section.picks.map((prop, index) =>
-                section.useRow ? (
-                  <BestPlayRowCard key={prop.id || `${section.id}-${index}`} prop={prop} rank={index + 1} onOpen={onOpen} />
-                ) : (
-                  <CompactPropCard
-                    key={prop.id || `${section.id}-${index}`}
-                    prop={prop}
-                    rank={index + 1}
-                    onOpen={onOpen}
-                    onSave={onSave}
-                    qualifyReason={prop.analyticsReason || prop.whyThisPick}
-                  />
-                )
-              )}
-            </div>
-          </section>
-        ) : null
-      )}
+      <section className="compact-section">
+        <div className="compact-section__head">
+          <h2>Highest Probability Props</h2>
+          <p>Top verified MLB edges ranked by confidence, edge, and sample depth</p>
+        </div>
+        <div className="compact-card-list">
+          {picks.map((prop, index) => (
+            <BestPlayRowCard key={prop.id || `hp-${index}`} prop={prop} rank={index + 1} onOpen={onOpen} />
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

@@ -5,32 +5,32 @@ import { formatNumber, formatSignedNumber } from "../utils/formatters.js";
 import { withPlayerImageUrl } from "../utils/playerImageFields.js";
 import {
   formatPlatformSideLabel,
-  normalizeSourceLabel,
-  platformBadgePalette,
   recommendationPalette,
   resolvePickSide,
 } from "../utils/pickRecommendation.js";
 import { displayFullMarketLabel } from "../utils/propLabels.js";
 import { resolveProjectionValue } from "../utils/projectionQuality.js";
+import {
+  buildHighestProbabilityQualifyReason,
+  formatHighestProbabilitySource,
+} from "../utils/highestProbabilityPlays.js";
 
 function BestPlayRowCard({ prop, onOpen, rank }) {
   const enriched = withPlayerImageUrl(prop || {});
   const side = resolvePickSide(enriched);
   const sidePalette = recommendationPalette(side);
-  const platform = normalizeSourceLabel(enriched);
-  const platformPalette = platformBadgePalette(platform);
+  const platform = formatHighestProbabilitySource(enriched);
   const playerName = enriched.playerName || enriched.player || "Unknown";
   const propType = enriched.propType || enriched.statType || enriched.market || displayFullMarketLabel(enriched);
   const line = formatNumber(enriched.line);
   const sideLabel = side === "WATCH" ? "PASS" : formatPlatformSideLabel(enriched);
-  const evaluation = enriched.sideEvaluation || {};
-  const edge = evaluation.edge ?? enriched.edge ?? null;
-  const edgeLabel = edge != null && Number(edge) >= 0.3 ? formatSignedNumber(edge) : "—";
-  const confidence = evaluation.confidence ?? enriched.confidenceScore ?? enriched.confidence;
+  const edge = enriched.edge ?? null;
+  const edgeLabel = Number.isFinite(Number(edge)) && Number(edge) >= 0.5 ? formatSignedNumber(edge) : "—";
+  const confidence = enriched.confidenceScore ?? enriched.confidence;
+  const confLabel = Number.isFinite(Number(confidence)) && Number(confidence) >= 65 ? `${Math.round(Number(confidence))}%` : "—";
   const projection = resolveProjectionValue(enriched);
-  const projectionLabel = projection != null ? formatNumber(projection) : "—";
-  const matchup =
-    enriched.matchup || (enriched.team && enriched.opponent ? `${enriched.team} vs ${enriched.opponent}` : "");
+  const projectionLabel = projection != null && projection > 0 ? formatNumber(projection) : "—";
+  const qualifyReason = buildHighestProbabilityQualifyReason(enriched);
 
   function openDetails(event) {
     event?.stopPropagation?.();
@@ -60,23 +60,20 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
             <span
               style={{
                 ...styles.bestPlayPlatformBadge,
-                border: `1px solid ${platformPalette.border}`,
-                background: platformPalette.bg,
-                color: platformPalette.color,
+                border: "1px solid #334155",
+                background: "#1e293b",
+                color: "#cbd5e1",
               }}
             >
-              {platformPalette.label}
+              {platform}
             </span>
-            {enriched.isDemoData || enriched.displayDemoData ? (
-              <span style={{ ...styles.bestPlayPlatformBadge, border: "1px solid #fbbf24", color: "#fbbf24", background: "#422006" }}>
-                DEMO
-              </span>
-            ) : null}
           </div>
           <p style={styles.bestPlayRowSubline}>
-            {propType} · {line} · Proj {projectionLabel}
-            {matchup ? ` · ${matchup}` : ""}
+            {propType} · Line {line} · Lean {sideLabel} · Proj {projectionLabel}
           </p>
+          {qualifyReason ? (
+            <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 2 }}>{qualifyReason}</p>
+          ) : null}
         </div>
       </div>
 
@@ -91,10 +88,12 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
         >
           {sideLabel}
         </div>
-        <span style={styles.bestPlayMetric}>
-          {confidence != null && confidence >= 55 ? `${Math.round(confidence)}%` : "—"}
+        <span style={styles.bestPlayMetric} title="Confidence">
+          {confLabel}
         </span>
-        <span style={styles.bestPlayMetric}>{edgeLabel !== "—" ? `+${edgeLabel}` : "—"}</span>
+        <span style={styles.bestPlayMetric} title="Edge">
+          {edgeLabel !== "—" ? `+${edgeLabel}` : "—"}
+        </span>
       </div>
     </article>
   );
