@@ -142,6 +142,10 @@ import {
   hasVerifiedStats,
 } from "./services/statEnrichment.js";
 import { applyMlbProjectionToProp, isMlbVerifiedEngineMarket } from "./modules/mlbProjectionService.js";
+import {
+  DATA_UNAVAILABLE_CONFIDENCE,
+  LIVE_LINE_PROJECTION_UNAVAILABLE,
+} from "./modules/projectionBreakdown.js";
 import { logMlbData, traceLiveBoardMlbProp, getMlbPipelineStatus, subscribeMlbPipelineStatus } from "./services/mlbDataService.js";
 import { mergeDfsSourceStatusFromApiHealth } from "./services/mlbPipelineStatus.js";
 import { NO_VERIFIED_GRADE_STATUS } from "./utils/manualPropScoring.js";
@@ -3642,9 +3646,17 @@ function scoreDFSProp(prop, context) {
     ) {
       mlbGradeBlocked = true;
       mlbGradeBlockReason =
+        mlbVerifiedModel?.projectionDebugReason ||
         mlbVerifiedModel?.statusMessage ||
         mlbPipelineTrace?.failureReason ||
-        NO_VERIFIED_GRADE_STATUS;
+        LIVE_LINE_PROJECTION_UNAVAILABLE;
+      console.error("[MLB Projection] live board grading blocked", {
+        player: prop.playerName,
+        statType: prop.statType,
+        line,
+        reason: mlbGradeBlockReason,
+        failureCode: mlbPipelineTrace?.failureCode,
+      });
     } else if (!verifiedStats || profileIsSparse) {
       mlbGradeBlocked = true;
       mlbGradeBlockReason = NO_VERIFIED_GRADE_STATUS;
@@ -3684,7 +3696,7 @@ function scoreDFSProp(prop, context) {
       edgeLine: line,
     };
   } else if (mlbVerifiedModel?.projectionUnavailable || mlbVerifiedModel?.passPlay) {
-    edgeResult = { edge: 0, bestPick: "", rawEdge: 0, sportsbookEdge: null, dfsEdge: null, edgeLine: line };
+    edgeResult = { edge: null, bestPick: "", rawEdge: null, sportsbookEdge: null, dfsEdge: null, edgeLine: line };
   }
 
   if (!mlbGradeBlocked && !edgeResult.bestPick && !edgeResult.edge) {
@@ -3724,12 +3736,12 @@ function scoreDFSProp(prop, context) {
     }
   }
   if (mlbGradeBlocked) {
-    edge = 0;
+    edge = null;
   }
   if (!hasProjection) {
-    edge = 0;
+    edge = null;
   }
-  const absoluteEdge = Math.abs(edge);
+  const absoluteEdge = edge == null ? 0 : Math.abs(edge);
   const lineValueBoost = lineComparison ? Math.min(10, Math.abs(lineComparison.difference) * 4) : 0;
   const sportsbookBoost = sportsbookValueBoost(prop, bestPick, sportsbookComparison);
   const recentHitRate = Number.isFinite(enriched?.recentHitRate) ? enriched.recentHitRate : null;
@@ -3918,7 +3930,7 @@ function scoreDFSProp(prop, context) {
   confidenceScore = sportCapResult.score;
   const sportCapReason = sportCapResult.capReason || "";
   if (mlbGradeBlocked) {
-    confidenceScore = null;
+    confidenceScore = DATA_UNAVAILABLE_CONFIDENCE;
   }
   const strongData = confidenceResult.strongData;
   const verifiedHistory = confidenceResult.verifiedHistory;
@@ -4075,16 +4087,18 @@ function scoreDFSProp(prop, context) {
       ? { label: "Time uncertain", tone: "partial" }
       : null;
 
-  const qualificationReason = buildQualificationReason({
-    ...prop,
-    projectedValue,
-    projection,
-    edge: round(edge),
-    bestPick,
-    confidenceScore,
-    volatility,
-    riskLevel,
-  });
+  const qualificationReason = mlbGradeBlocked
+    ? mlbGradeBlockReason || LIVE_LINE_PROJECTION_UNAVAILABLE
+    : buildQualificationReason({
+        ...prop,
+        projectedValue,
+        projection,
+        edge: edge == null ? null : round(edge),
+        bestPick,
+        confidenceScore,
+        volatility,
+        riskLevel,
+      });
 
   const playTag =
     mlbGradeBlocked || !isVerifiedProjection
@@ -4145,8 +4159,11 @@ function scoreDFSProp(prop, context) {
     modelReasons: mlbVerifiedModel?.modelReasons || null,
     displayStatus: mlbGradeBlocked ? "NO VERIFIED PLAY" : mlbVerifiedModel?.displayStatus || null,
     statusMessage: mlbGradeBlocked
-      ? mlbGradeBlockReason || NO_VERIFIED_GRADE_STATUS
+      ? mlbGradeBlockReason || LIVE_LINE_PROJECTION_UNAVAILABLE
       : mlbVerifiedModel?.statusMessage || null,
+    projectionDebugReason: mlbGradeBlocked
+      ? mlbGradeBlockReason || mlbPipelineTrace?.failureReason || LIVE_LINE_PROJECTION_UNAVAILABLE
+      : mlbVerifiedModel?.projectionDebugReason || null,
     whyThisPick: mlbVerifiedModel?.whyThisPick || qualificationReason,
     analyticsReason: mlbVerifiedModel?.analyticsReason || reasoningSummary,
     edgePercent: mlbVerifiedModel?.edgePercent ?? prop.edgePercent ?? null,
@@ -4187,7 +4204,7 @@ function scoreDFSProp(prop, context) {
     historicalHitRateNote: historicalHitRateSignal.note,
     edgeScore,
     edgeRating: edgeRatingFinal,
-    edge: round(edge),
+    edge: mlbGradeBlocked || edge == null ? null : round(edge),
     sportsbookEdge: edgeResult.sportsbookEdge,
     dfsEdge: edgeResult.dfsEdge,
     dataQualityScore: Math.round(dataQualityScore),

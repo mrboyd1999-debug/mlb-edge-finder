@@ -101,6 +101,13 @@ export function recordMlbStatsFetch({
     pipelineStatus.mlbStatsApi.status = "Connected";
     pipelineStatus.mlbStatsApi.lastSuccessAt = now;
     pipelineStatus.mlbStatsApi.lastError = "";
+    if (
+      pipelineStatus.projectionApi.status === "Pending" ||
+      pipelineStatus.projectionApi.status === "Failed"
+    ) {
+      pipelineStatus.projectionApi.status = "Connected";
+      pipelineStatus.projectionApi.lastError = "";
+    }
   } else {
     pipelineStatus.mlbStatsApi.status = "Failed";
     pipelineStatus.mlbStatsApi.lastError = error || "MLB Stats API request failed";
@@ -114,18 +121,26 @@ export function recordMlbProjectionResult({
   statType = "",
   projection = null,
   error = "",
+  engineOperational = null,
 } = {}) {
   const now = new Date().toISOString();
   pipelineStatus.projectionApi.lastAttemptAt = now;
   pipelineStatus.projectionApi.lastPlayer = player || pipelineStatus.projectionApi.lastPlayer;
   pipelineStatus.projectionApi.lastStat = statType || pipelineStatus.projectionApi.lastStat;
   const hasProjection = projection != null && Number.isFinite(Number(projection));
+  const mlbStatsOperational =
+    engineOperational != null ? engineOperational : pipelineStatus.mlbStatsApi.status === "Connected";
   if (ok || hasProjection) {
     pipelineStatus.projectionApi.status = "Connected";
     pipelineStatus.projectionApi.lastSuccessAt = now;
     pipelineStatus.projectionApi.lastProjectionGeneratedAt = now;
     pipelineStatus.projectionApi.lastProjection = projection;
     pipelineStatus.projectionApi.lastError = "";
+  } else if (mlbStatsOperational) {
+    pipelineStatus.projectionApi.status = pipelineStatus.projectionApi.lastProjectionGeneratedAt
+      ? "Warning"
+      : "Connected";
+    pipelineStatus.projectionApi.lastError = error || "Last prop projection unavailable — MLB Stats API active";
   } else {
     pipelineStatus.projectionApi.status =
       pipelineStatus.projectionApi.lastProjectionGeneratedAt ? "Warning" : "Failed";

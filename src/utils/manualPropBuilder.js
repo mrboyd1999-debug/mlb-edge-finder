@@ -343,36 +343,52 @@ export async function analyzeManualProp(form = {}, scoreFn = null) {
   }
 
   if (profile && !profile.sparse && !profile.fallback && built) {
-    const mlbApplied = applyMlbProjectionToProp(built, profile, {
-      opponentContext: profile.opponentContext,
-      impliedGameTotal: profile.impliedGameTotal,
-      weatherNote: profile.weatherNote,
-      opponentStarterNote: profile.opponentStarterNote,
-    });
-    recordMlbProjectionResult({
-      ok: Boolean(mlbApplied.isVerifiedProjection && Number.isFinite(mlbApplied.projection)),
-      player: built.playerName,
-      statType: built.statType,
-      projection: mlbApplied.projection,
-      error: mlbApplied.projectionUnavailable ? mlbApplied.statusMessage || NO_VERIFIED_GRADE_STATUS : "",
-    });
-    console.info("[Manual Analyzer] projection value used:", {
-      player: built.playerName,
-      statType: built.statType,
-      line: built.line,
-      projection: mlbApplied.projection,
-      source: mlbApplied.projectionSource,
-      verified: mlbApplied.isVerifiedProjection,
-    });
-    if (mlbApplied.isVerifiedProjection) {
-      liveScored = { ...(liveScored || {}), ...mlbApplied };
-    } else if (!liveScored?.projectionSource || liveScored.projectionSource === "missing") {
-      liveScored = {
-        ...(liveScored || {}),
-        ...mlbApplied,
-        projectionUnavailable: true,
-        unverifiedGradeBlocked: true,
-      };
+    try {
+      const mlbApplied = applyMlbProjectionToProp(built, profile, {
+        opponentContext: profile.opponentContext,
+        impliedGameTotal: profile.impliedGameTotal,
+        weatherNote: profile.weatherNote,
+        opponentStarterNote: profile.opponentStarterNote,
+      });
+      recordMlbProjectionResult({
+        ok: Boolean(mlbApplied.isVerifiedProjection && Number.isFinite(mlbApplied.projection)),
+        player: built.playerName,
+        statType: built.statType,
+        projection: mlbApplied.projection,
+        error: mlbApplied.projectionUnavailable ? mlbApplied.statusMessage || NO_VERIFIED_GRADE_STATUS : "",
+        engineOperational: true,
+      });
+      console.info("[Manual Analyzer] projection value used:", {
+        player: built.playerName,
+        statType: built.statType,
+        line: built.line,
+        projection: mlbApplied.projection,
+        source: mlbApplied.projectionSource,
+        verified: mlbApplied.isVerifiedProjection,
+      });
+      if (mlbApplied.isVerifiedProjection) {
+        liveScored = { ...(liveScored || {}), ...mlbApplied };
+      } else if (!liveScored?.projectionSource || liveScored.projectionSource === "missing") {
+        liveScored = {
+          ...(liveScored || {}),
+          ...mlbApplied,
+          projectionUnavailable: true,
+          unverifiedGradeBlocked: true,
+        };
+      }
+    } catch (error) {
+      console.error("[Manual Analyzer] projection failed", {
+        player: built.playerName,
+        statType: built.statType,
+        error: error?.message || String(error),
+      });
+      recordMlbProjectionResult({
+        ok: false,
+        player: built.playerName,
+        statType: built.statType,
+        error: error?.message || "Manual projection failed",
+        engineOperational: true,
+      });
     }
   }
 

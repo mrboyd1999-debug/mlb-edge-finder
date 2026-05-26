@@ -8,6 +8,7 @@ const TEST_PLAYERS = [
   { name: "Zack Wheeler", line: 7.5 },
   { name: "Corbin Burnes", line: 6.5 },
   { name: "Shohei Ohtani", line: 6.5 },
+  { name: "Nolan McLean", line: 7.5 },
 ];
 
 let passed = 0;

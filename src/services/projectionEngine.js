@@ -444,6 +444,7 @@ export function propPayoutLabel(prop = {}) {
 }
 
 import { buildMlbPropProjection } from "../modules/mlbProjectionService.js";
+import { DATA_UNAVAILABLE_CONFIDENCE, LIVE_LINE_PROJECTION_UNAVAILABLE } from "../modules/projectionBreakdown.js";
 import {
   buildPitcherStrikeoutProjection,
   buildHitterProjection,
@@ -466,10 +467,18 @@ export function analyzeVerifiedMlbProp(prop = {}, profile = {}, context = {}) {
   const volatility = calculateVolatility(prop.statType);
 
   if (!model.isVerifiedProjection || model.projection == null) {
+    console.error("[MLB Projection] verified analysis unavailable", {
+      player: prop.playerName,
+      statType: prop.statType,
+      reason: model.statusMessage || model.projectionDebugReason,
+    });
     return {
       ...model,
+      edge: null,
+      rawEdge: null,
+      confidence: DATA_UNAVAILABLE_CONFIDENCE,
       recommendation: "NO VERIFIED PLAY",
-      failureReason: model.statusMessage || "Verified MLB data unavailable",
+      failureReason: model.statusMessage || LIVE_LINE_PROJECTION_UNAVAILABLE,
       volatility,
     };
   }

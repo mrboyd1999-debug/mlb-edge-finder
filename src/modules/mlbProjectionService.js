@@ -19,6 +19,12 @@ import {
   calibrateRealisticConfidence,
   computeVolatilityAdjustedEdge,
 } from "../utils/mlbConfidenceEngine.js";
+import {
+  DATA_STATUS,
+  DATA_UNAVAILABLE_CONFIDENCE,
+  LIVE_LINE_PROJECTION_UNAVAILABLE,
+  PROJECTION_UNAVAILABLE_LABEL,
+} from "./projectionBreakdown.js";
 
 const MLB_VOLATILITY = {
   strikeouts: { tier: "LOW", score: 0.38, label: "Low variance" },
@@ -52,6 +58,43 @@ function classifyRisk({ edge, volatility, payoutType }) {
 
 export function isMlbVerifiedEngineMarket(statType = "") {
   return isMlbPitcherMarket(statType) || isMlbHitterPhase2Market(statType);
+}
+
+export function buildProjectionUnavailableFields({
+  reason = LIVE_LINE_PROJECTION_UNAVAILABLE,
+  detail = "",
+  volatility = null,
+} = {}) {
+  const vol = volatility || { tier: "MEDIUM", score: 0.5, label: "Medium variance" };
+  const debugReason = detail || reason;
+  return {
+    projection: null,
+    projectedValue: null,
+    line: null,
+    rawEdge: null,
+    edge: null,
+    recommendedSide: null,
+    modelSide: null,
+    modelPickLabel: NO_VERIFIED_PLAY_STATUS,
+    confidence: DATA_UNAVAILABLE_CONFIDENCE,
+    confidenceScore: DATA_UNAVAILABLE_CONFIDENCE,
+    risk: null,
+    volatility: vol,
+    dataStatus: DATA_STATUS.UNAVAILABLE,
+    projectionSource: "missing",
+    reasons: [reason, ...(detail && detail !== reason ? [detail] : [])].filter(Boolean),
+    projectionUnavailable: true,
+    passPlay: true,
+    displayStatus: NO_VERIFIED_PLAY_STATUS,
+    statusMessage: reason,
+    qualificationReason: reason,
+    projectionDebugReason: debugReason,
+    isVerifiedProjection: false,
+    isFallbackProjection: true,
+    noEdge: true,
+    isDisplayPlayable: false,
+    bettingLabel: NO_VERIFIED_PLAY_STATUS,
+  };
 }
 
 /**
@@ -98,28 +141,17 @@ export function buildMlbPropProjection(prop = {}, profile = {}, context = {}) {
   if (!verified) {
     const reasons = engineResult?.reasoning?.length
       ? engineResult.reasoning.slice(0, 3)
-      : ["Verified MLB data unavailable for this prop."];
+      : ["MLB Stats API data insufficient for verified projection."];
+    const detail = reasons.join(" · ");
     return {
-      projection: null,
+      ...buildProjectionUnavailableFields({
+        reason: LIVE_LINE_PROJECTION_UNAVAILABLE,
+        detail,
+        volatility,
+      }),
       line: Number.isFinite(line) ? line : null,
-      rawEdge: null,
-      recommendedSide: null,
-      modelSide: null,
-      modelPickLabel: NO_VERIFIED_PLAY_STATUS,
-      confidence: null,
-      risk: null,
-      volatility,
-      dataStatus: engineResult?.dataStatus || null,
-      projectionSource: engineResult?.projectionSource || "missing",
-      reasons,
-      projectionUnavailable: true,
-      passPlay: true,
-      displayStatus: NO_VERIFIED_PLAY_STATUS,
-      statusMessage: AWAITING_PROJECTION_STATUS,
-      isVerifiedProjection: false,
-      isFallbackProjection: true,
       projectionBreakdown: engineResult?.projectionBreakdown || [],
-      projectionLabel: engineResult?.projectionLabel || null,
+      projectionLabel: engineResult?.projectionLabel || PROJECTION_UNAVAILABLE_LABEL,
       engineResult,
     };
   }
@@ -227,12 +259,22 @@ function buildProjectionReasons({
 
 export function applyMlbProjectionToProp(prop = {}, profile = {}, context = {}) {
   const model = buildMlbPropProjection(prop, profile, context);
+  if (model.projectionUnavailable) {
+    console.error("[MLB Projection] unavailable", {
+      player: prop.playerName,
+      statType: prop.statType,
+      line: prop.line,
+      reason: model.statusMessage || model.projectionDebugReason,
+      dataStatus: model.dataStatus,
+      source: model.projectionSource,
+    });
+  }
   return {
     ...prop,
     projectedValue: model.projection,
     projection: model.projection,
     rawEdge: model.rawEdge,
-    edge: model.edge ?? 0,
+    edge: model.projectionUnavailable ? null : model.edge ?? null,
     edgePercent: model.edgePercent,
     bestPick: model.recommendedSide,
     side: model.recommendedSide,
@@ -255,9 +297,10 @@ export function applyMlbProjectionToProp(prop = {}, profile = {}, context = {}) 
     passPlay: model.passPlay,
     displayStatus: model.displayStatus,
     statusMessage: model.statusMessage,
+    projectionDebugReason: model.projectionDebugReason || model.statusMessage || "",
     whyThisPick: model.whyThisPick,
     premiumWhySummary: model.whyThisPick,
-    qualificationReason: model.whyThisPick,
+    qualificationReason: model.qualificationReason || model.whyThisPick,
     analyticsReason: model.reasons?.join(" · ") || prop.analyticsReason,
     modelReasons: model.reasons,
     noEdge: model.passPlay || model.projectionUnavailable,

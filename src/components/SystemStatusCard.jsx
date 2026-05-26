@@ -73,7 +73,10 @@ function SystemStatusCard({ apiHealth = {}, mlbPipelineStatus = null, connection
   const stats = mlbPipelineStatus?.mlbStatsApi || {};
   const projection = mlbPipelineStatus?.projectionApi || {};
   const statsConnected = stats.status === "Connected";
-  const projectionConnected = Boolean(projection.lastProjectionGeneratedAt || projection.lastSuccessAt);
+  const projectionConnected =
+    statsConnected ||
+    projection.status === "Connected" ||
+    Boolean(projection.lastProjectionGeneratedAt || projection.lastSuccessAt);
 
   const ppCount = Number(apiHealth?.PrizePicks?.usableCount) || 0;
   const udCount = Number(apiHealth?.Underdog?.usableCount) || 0;

@@ -9,6 +9,8 @@ function displayValue(value) {
   return String(value);
 }
 
+import { LIVE_LINE_PROJECTION_UNAVAILABLE } from "../modules/projectionBreakdown.js";
+
 function hasUsableProjection(prop = {}) {
   const projection = Number(prop.projectedValue ?? prop.projection);
   return Number.isFinite(projection) && projection > 0 && !prop.projectionUnavailable;
@@ -20,7 +22,27 @@ export function isMlbProp(prop = {}) {
 
 export function resolveMlbPipelineFailureView(prop = {}) {
   if (!isMlbProp(prop)) return { show: false };
-  if (prop.unverifiedGradeBlocked || prop.projectionUnavailable) return { show: false };
+
+  if (prop.projectionUnavailable || prop.unverifiedGradeBlocked) {
+    const failureReason =
+      prop.projectionDebugReason ||
+      prop.statusMessage ||
+      prop.dataFetchReason ||
+      prop.mlbPipelineTrace?.failureReason ||
+      LIVE_LINE_PROJECTION_UNAVAILABLE;
+    const trace = prop.mlbPipelineTrace || {};
+    return {
+      show: true,
+      failureReason: LIVE_LINE_PROJECTION_UNAVAILABLE,
+      lastSuccessfulStage: trace.lastSuccessfulStage || "live line loaded",
+      normalizedName: trace.normalizedName || normalizeSportsbookName(prop.playerName) || "null",
+      matchedPlayer: trace.matchedPlayer ?? prop.matchedPlayer ?? null,
+      playerId: trace.playerId ?? prop.mlbId ?? prop.playerId ?? null,
+      logsCount: trace.logsCount ?? prop.sampleSize ?? 0,
+      apiStatusCode: trace.apiStatusCode ?? null,
+      detailReason: failureReason,
+    };
+  }
 
   const trace = prop.mlbPipelineTrace || {};
   let failureReason =

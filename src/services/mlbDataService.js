@@ -14,7 +14,8 @@ import {
   logProjectionExecution,
   tracePipelineStage,
 } from "./mlbPipelineDebug.js";
-import { buildMlbPropProjection } from "../modules/mlbProjectionService.js";
+import { buildMlbPropProjection, buildProjectionUnavailableFields } from "../modules/mlbProjectionService.js";
+import { LIVE_LINE_PROJECTION_UNAVAILABLE } from "../modules/projectionBreakdown.js";
 import { matchSportsbookPlayerToMlb, normalizeSportsbookName } from "./playerMatcher.js";
 import {
   completeTrace,
@@ -669,10 +670,11 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
 
   if (!match?.player?.id) {
     recordMlbStatsFetch({
-      ok: false,
-      error: match?.reason || "No StatsAPI player match",
+      ok: true,
       url: mlbStatsApiPathLabel(buildMlbStatsApiUrl("/v1/people/search", { names: prop.playerName })),
+      statusCode: match?.apiStatusCode ?? 200,
       playersReturned: match?.candidatesCount ?? 0,
+      matchedPlayer: null,
     });
     failTrace(
       trace,
@@ -686,15 +688,15 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
 
   const teamCheck = validateTeamMatch(prop.team, match.player.currentTeam);
   if (!teamCheck.ok) {
-    recordMlbStatsFetch({
-      ok: false,
-      error: teamCheck.reason,
+    trace.weakPlayerMatch = true;
+    trace.teamMatchWarning = teamCheck.reason;
+    markStage(trace, MLB_STAGE.MATCHED, {
       matchedPlayer: match.player.fullName,
       playerId: match.player.id,
+      matchConfidence: match.confidence,
+      weakTeamMatch: true,
+      apiStatusCode: match.apiStatusCode ?? 200,
     });
-    failTrace(trace, MLB_FAILURE.PLAYER_NOT_MATCHED, teamCheck.reason, MLB_STAGE.MATCHED);
-    recordPropDebug(prop, trace);
-    return { profile: null, bundle: null, verified: false, reason: trace.failureReason, pipelineTrace: trace };
   }
 
   recordMlbStatsFetch({
@@ -964,120 +966,167 @@ export async function fetchMlbDataForProps(props = [], { buildProfile = null } =
 }
 
 export async function analyzeMlbPropWithData(prop = {}, { buildProfile = null } = {}) {
-  const data = await buildMlbPropDataPackage(prop, { buildProfile });
-  const trace = data.pipelineTrace || createPropTrace(prop);
+  try {
+    const data = await buildMlbPropDataPackage(prop, { buildProfile });
+    const trace = data.pipelineTrace || createPropTrace(prop);
 
-  if (!data.profile) {
-    logMlbPropScan(prop, {
-      matchedPlayer: trace.matchedPlayer || null,
-      matchConfidence: trace.matchConfidence ?? 0,
-      logsFound: trace.logsCount ?? data.bundle?.splits?.length ?? 0,
-      projection: null,
-      edge: null,
-      confidence: null,
-      recommendation: "NO VERIFIED PLAY",
-      failureReason: trace.failureReason || data.reason || "Verified MLB data unavailable",
-    });
-    recordPropDebug(prop, trace);
-    return {
-      ...prop,
-      projectionUnavailable: true,
-      unverifiedGradeBlocked: true,
-      displayStatus: "NO VERIFIED PLAY",
-      statusMessage: "No verified projection available — do not grade this prop.",
-      dataFetchReason: trace.failureReason || data.reason,
-      mlbPipelineTrace: trace,
+    if (!data.profile) {
+      const detail = trace.failureReason || data.reason || "Verified MLB data unavailable";
+      console.error("[MLB Projection] profile unavailable", {
+        player: prop.playerName,
+        statType: prop.statType,
+        line: prop.line,
+        reason: detail,
+        failureCode: trace.failureCode,
+      });
+      logMlbPropScan(prop, {
+        matchedPlayer: trace.matchedPlayer || null,
+        matchConfidence: trace.matchConfidence ?? 0,
+        logsFound: trace.logsCount ?? data.bundle?.splits?.length ?? 0,
+        projection: null,
+        edge: null,
+        confidence: "Data unavailable",
+        recommendation: "NO VERIFIED PLAY",
+        failureReason: detail,
+      });
+      recordPropDebug(prop, trace);
+      recordMlbProjectionResult({
+        ok: false,
+        player: prop.playerName,
+        statType: prop.statType,
+        error: LIVE_LINE_PROJECTION_UNAVAILABLE,
+        engineOperational: getMlbPipelineStatus().mlbStatsApi.status === "Connected",
+      });
+      return {
+        ...prop,
+        ...buildProjectionUnavailableFields({ reason: LIVE_LINE_PROJECTION_UNAVAILABLE, detail }),
+        unverifiedGradeBlocked: true,
+        dataFetchReason: detail,
+        mlbPipelineTrace: trace,
+      };
+    }
+
+    const context = {
+      opponentContext: data.opponentContext,
+      opponentStarterNote: data.probablePitchers?.opponentStarterNote,
+      impliedGameTotal: data.profile.impliedGameTotal,
+      weatherNote: data.profile.weatherNote,
     };
-  }
 
-  const context = {
-    opponentContext: data.opponentContext,
-    opponentStarterNote: data.probablePitchers?.opponentStarterNote,
-    impliedGameTotal: data.profile.impliedGameTotal,
-    weatherNote: data.profile.weatherNote,
-  };
+    const model = buildMlbPropProjection(prop, data.profile, context);
+    trace.projection = model.projection;
+    trace.confidence = model.confidence;
+    trace.edge = model.edge;
+    trace.recommendation = model.modelPickLabel || (model.projectionUnavailable ? "NO VERIFIED PLAY" : model.passPlay ? "PASS" : null);
 
-  const model = buildMlbPropProjection(prop, data.profile, context);
-  trace.projection = model.projection;
-  trace.confidence = model.confidence;
-  trace.edge = model.edge;
-  trace.recommendation = model.modelPickLabel || (model.projectionUnavailable ? "NO VERIFIED PLAY" : model.passPlay ? "PASS" : null);
-
-  console.info("[MLB Pipeline] projection value used:", {
-    player: prop.playerName,
-    statType: prop.statType,
-    line: prop.line,
-    projection: model.projection,
-    verified: model.isVerifiedProjection,
-    source: model.projectionSource,
-  });
-
-  if (model.projectionUnavailable || !model.isVerifiedProjection) {
-    recordMlbProjectionResult({
-      ok: false,
+    console.info("[MLB Pipeline] projection value used:", {
       player: prop.playerName,
       statType: prop.statType,
-      error: model.statusMessage || "Verified projection unavailable",
+      line: prop.line,
+      projection: model.projection,
+      verified: model.isVerifiedProjection,
+      source: model.projectionSource,
     });
-    failTrace(trace, MLB_FAILURE.PROJECTION_BUILD_FAILED, model.statusMessage || "Projection unavailable", MLB_STAGE.PROFILE_BUILT);
+
+    if (model.projectionUnavailable || !model.isVerifiedProjection) {
+      const detail = model.projectionDebugReason || model.statusMessage || trace.failureReason || "Projection unavailable";
+      console.error("[MLB Projection] build failed", {
+        player: prop.playerName,
+        statType: prop.statType,
+        line: prop.line,
+        reason: detail,
+        dataStatus: model.dataStatus,
+      });
+      recordMlbProjectionResult({
+        ok: false,
+        player: prop.playerName,
+        statType: prop.statType,
+        error: model.statusMessage || LIVE_LINE_PROJECTION_UNAVAILABLE,
+        engineOperational: true,
+      });
+      failTrace(trace, MLB_FAILURE.PROJECTION_BUILD_FAILED, detail, MLB_STAGE.PROFILE_BUILT);
+      recordPropDebug(prop, trace);
+      logMlbPropScan(prop, {
+        matchedPlayer: trace.matchedPlayer,
+        matchConfidence: trace.matchConfidence,
+        logsFound: trace.logsCount ?? data.profile?.splits?.length ?? 0,
+        projection: null,
+        edge: null,
+        confidence: "Data unavailable",
+        recommendation: "NO VERIFIED PLAY",
+        failureReason: detail,
+      });
+      return {
+        ...applyModelToProp(prop, model),
+        mlbPipelineTrace: trace,
+        dataFetchReason: detail,
+      };
+    }
+
+    markStage(trace, MLB_STAGE.PROJECTION_COMPUTED, {
+      projection: model.projection,
+      recommendation: trace.recommendation,
+    });
+
+    recordMlbProjectionResult({
+      ok: true,
+      player: prop.playerName,
+      statType: prop.statType,
+      projection: model.projection,
+      engineOperational: true,
+    });
+
+    if (model.edge == null || !Number.isFinite(model.edge)) {
+      failTrace(trace, MLB_FAILURE.EDGE_CALCULATION_FAILED, "Edge could not be calculated", MLB_STAGE.PROJECTION_COMPUTED);
+      recordPropDebug(prop, trace);
+      return { ...applyModelToProp(prop, model), mlbPipelineTrace: trace };
+    }
+
+    markStage(trace, MLB_STAGE.EDGE_CALCULATED, { edge: model.edge, confidence: model.confidence });
+    completeTrace(trace, {
+      projection: model.projection,
+      edge: model.edge,
+      confidence: model.confidence,
+      recommendation: trace.recommendation,
+    });
     recordPropDebug(prop, trace);
+
     logMlbPropScan(prop, {
       matchedPlayer: trace.matchedPlayer,
       matchConfidence: trace.matchConfidence,
       logsFound: trace.logsCount ?? data.profile?.splits?.length ?? 0,
-      projection: null,
-      edge: null,
-      confidence: null,
-      recommendation: "NO VERIFIED PLAY",
-      failureReason: trace.failureReason,
+      projection: model.projection,
+      edge: model.edge,
+      confidence: model.confidence,
+      recommendation: trace.recommendation,
+      failureReason: null,
+      reasons: model.reasons,
+    });
+
+    return { ...applyModelToProp(prop, model), mlbPipelineTrace: trace };
+  } catch (error) {
+    console.error("[MLB Projection] analyze failed", {
+      player: prop.playerName,
+      statType: prop.statType,
+      line: prop.line,
+      error: error?.message || String(error),
+    });
+    recordMlbProjectionResult({
+      ok: false,
+      player: prop.playerName,
+      statType: prop.statType,
+      error: error?.message || "Projection analyze failed",
+      engineOperational: getMlbPipelineStatus().mlbStatsApi.status === "Connected",
     });
     return {
-      ...applyModelToProp(prop, model),
-      mlbPipelineTrace: trace,
-      dataFetchReason: trace.failureReason,
+      ...prop,
+      ...buildProjectionUnavailableFields({
+        reason: LIVE_LINE_PROJECTION_UNAVAILABLE,
+        detail: error?.message || "Projection analyze failed",
+      }),
+      mlbPipelineTrace: createPropTrace(prop),
     };
   }
-
-  markStage(trace, MLB_STAGE.PROJECTION_COMPUTED, {
-    projection: model.projection,
-    recommendation: trace.recommendation,
-  });
-
-  recordMlbProjectionResult({
-    ok: true,
-    player: prop.playerName,
-    statType: prop.statType,
-    projection: model.projection,
-  });
-
-  if (model.edge == null || !Number.isFinite(model.edge)) {
-    failTrace(trace, MLB_FAILURE.EDGE_CALCULATION_FAILED, "Edge could not be calculated", MLB_STAGE.PROJECTION_COMPUTED);
-    recordPropDebug(prop, trace);
-    return { ...applyModelToProp(prop, model), mlbPipelineTrace: trace };
-  }
-
-  markStage(trace, MLB_STAGE.EDGE_CALCULATED, { edge: model.edge, confidence: model.confidence });
-  completeTrace(trace, {
-    projection: model.projection,
-    edge: model.edge,
-    confidence: model.confidence,
-    recommendation: trace.recommendation,
-  });
-  recordPropDebug(prop, trace);
-
-  logMlbPropScan(prop, {
-    matchedPlayer: trace.matchedPlayer,
-    matchConfidence: trace.matchConfidence,
-    logsFound: trace.logsCount ?? data.profile?.splits?.length ?? 0,
-    projection: model.projection,
-    edge: model.edge,
-    confidence: model.confidence,
-    recommendation: trace.recommendation,
-    failureReason: null,
-    reasons: model.reasons,
-  });
-
-  return { ...applyModelToProp(prop, model), mlbPipelineTrace: trace };
 }
 
 /** Synchronous live-board trace when scoring from pre-fetched stats profile. */
@@ -1160,7 +1209,7 @@ function applyModelToProp(prop, model) {
     projectedValue: model.projection,
     projection: model.projection,
     rawEdge: model.rawEdge,
-    edge: model.edge ?? 0,
+    edge: model.projectionUnavailable ? null : model.edge ?? null,
     edgePercent: model.edgePercent,
     bestPick: model.recommendedSide,
     side: model.recommendedSide,
@@ -1182,9 +1231,11 @@ function applyModelToProp(prop, model) {
     passPlay: model.passPlay,
     displayStatus: model.displayStatus,
     statusMessage: model.statusMessage,
+    projectionDebugReason: model.projectionDebugReason || model.statusMessage || "",
     whyThisPick: model.whyThisPick,
     modelReasons: model.reasons,
     analyticsReason: model.reasons?.join(" · ") || "",
+    qualificationReason: model.qualificationReason || model.whyThisPick || model.statusMessage || "",
     noEdge: model.passPlay || model.projectionUnavailable,
     isDisplayPlayable: !model.passPlay && !model.projectionUnavailable && Boolean(model.recommendedSide),
     bettingLabel: model.bettingLabel,

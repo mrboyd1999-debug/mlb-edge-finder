@@ -36,15 +36,16 @@ export const PROJECTION_SOURCE_LABEL = {
 };
 
 const VERIFIED_SOURCES = new Set([
-  "sportsdataio",
-  "sportsdata",
   "player-stats",
   "player_stats",
+  "player-stats-model",
   "model",
   "manual-stats",
   "odds-api",
   "oddsapi",
   "the-odds-api",
+  "mlb",
+  "mlb-stats-api",
 ]);
 
 const ESTIMATED_SOURCES = new Set([

@@ -12,6 +12,8 @@ export const AWAITING_VERIFIED_MLB_DATA = "Awaiting verified MLB data";
 export const EDGE_FORMULA_DISABLED = "Disabled until projection exists";
 export const EDGE_CALCULATION_UNAVAILABLE = "Edge calculation unavailable";
 export const PROJECTION_SOURCE_MISSING = "Missing";
+export const DATA_UNAVAILABLE_CONFIDENCE = "Data unavailable";
+export const LIVE_LINE_PROJECTION_UNAVAILABLE = "Live line available; projection data unavailable";
 
 function round(value, digits = 2) {
   const factor = 10 ** digits;
