@@ -24,10 +24,13 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
   const propType = enriched.propType || enriched.statType || enriched.market || displayFullMarketLabel(enriched);
   const line = formatNumber(enriched.line);
   const sideLabel = side === "WATCH" ? "PASS" : formatPlatformSideLabel(enriched);
-  const edge = enriched.edge ?? null;
-  const edgeLabel = Number.isFinite(Number(edge)) && Number(edge) >= 0.5 ? formatSignedNumber(edge) : "—";
-  const confidence = enriched.confidenceScore ?? enriched.confidence;
-  const confLabel = Number.isFinite(Number(confidence)) && Number(confidence) >= 65 ? `${Math.round(Number(confidence))}%` : "—";
+  const edgeScore = enriched.edgeScore ?? enriched.edge ?? null;
+  const edgeLabel =
+    Number.isFinite(Number(edgeScore)) && Math.abs(Number(edgeScore)) >= 0.015
+      ? formatSignedNumber(Math.abs(Number(edgeScore)))
+      : "—";
+  const probability = enriched.verifiedProbability ?? enriched.confidenceScore ?? enriched.confidence;
+  const confLabel = Number.isFinite(Number(probability)) ? `${Math.round(Number(probability))}%` : "—";
   const projection = resolveProjectionValue(enriched);
   const projectionLabel = projection != null && projection > 0 ? formatNumber(projection) : "—";
   const qualifyReason = buildHighestProbabilityQualifyReason(enriched);
@@ -88,12 +91,17 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
         >
           {sideLabel}
         </div>
-        <span style={styles.bestPlayMetric} title="Confidence">
+        <span style={styles.bestPlayMetric} title="Verified probability">
           {confLabel}
         </span>
-        <span style={styles.bestPlayMetric} title="Edge">
-          {edgeLabel !== "—" ? `+${edgeLabel}` : "—"}
+        <span style={styles.bestPlayMetric} title="Edge score">
+          {edgeLabel !== "—" ? edgeLabel : "—"}
         </span>
+        {enriched.verified === false ? (
+          <span style={{ ...styles.bestPlayMetric, color: "#94a3b8" }} title="Below 65% verified threshold">
+            lean
+          </span>
+        ) : null}
       </div>
     </article>
   );

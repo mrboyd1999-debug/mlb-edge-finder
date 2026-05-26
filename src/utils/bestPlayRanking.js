@@ -6,13 +6,59 @@ import { resolveProjectionValue, computeAbsoluteProjectionEdge } from "./project
 import { isPitcherStrikeoutMarket } from "./topMlbPlaysRanking.js";
 import { isMlbPitcherMarket } from "../modules/mlbPitcherData.js";
 
+export const BEST_PLAYS_MIN_EDGE = 0.015;
+export const BEST_PLAYS_MIN_GAMES = 5;
+export const BEST_PLAYS_VERIFIED_THRESHOLD = 65;
+
 function finiteOr(value, fallback = NaN) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
 }
 
+function round(value, digits = 4) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
 function isHitterMarket(prop = {}) {
   return !isMlbPitcherMarket(prop.statType || prop.market || prop.propType || "");
+}
+
+export function resolveGamesPlayed(prop = {}) {
+  const explicit = finiteOr(prop.games ?? prop.sampleSize ?? prop.gamesPlayed, NaN);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  if (prop.hasGameLogs || prop.hasVerifiedStats || prop.isVerifiedProjection) {
+    return BEST_PLAYS_MIN_GAMES;
+  }
+  return 0;
+}
+
+/** Percent-based edge score aligned with Best Plays Engine. */
+export function computePlayEdgeScore({ projection, line, games } = {}) {
+  const proj = finiteOr(projection, NaN);
+  const ln = finiteOr(line, NaN);
+  const sample = finiteOr(games, 0);
+  if (!Number.isFinite(proj) || !Number.isFinite(ln) || ln <= 0) return 0;
+
+  const diff = proj - ln;
+  const percentEdge = diff / ln;
+  const confidenceWeight = sample > 20 ? 1.2 : sample > 10 ? 1.0 : 0.7;
+  const stability = Math.min(sample / 25, 1);
+  return round(percentEdge * confidenceWeight * stability, 4);
+}
+
+/** verifiedProbability = clamp(50 + |edgeScore| * 100, 50, 95) */
+export function computeVerifiedProbability(edgeScore = 0) {
+  const magnitude = Math.abs(finiteOr(edgeScore, 0));
+  const probability = Math.round(50 + magnitude * 100);
+  return Math.max(50, Math.min(95, probability));
+}
+
+export function resolvePlayConfidenceLabel(games = 0) {
+  const sample = finiteOr(games, 0);
+  if (sample >= 20) return "HIGH";
+  if (sample >= 8) return "MED";
+  return "LOW";
 }
 
 /** OVER when projection > line; UNDER when projection < line. */
@@ -57,8 +103,8 @@ export function computeRecentFormScore(prop = {}) {
 
 /** rankScore = (confidence * 0.45) + (abs(edge) * 35) + (recentFormScore * 0.20) */
 export function computeBestPlayRankScore(prop = {}) {
-  const confidence = finiteOr(prop.confidenceScore ?? prop.confidence, 0);
-  const edgeMag = resolveEdgeMagnitude(prop);
+  const confidence = finiteOr(prop.verifiedProbability ?? prop.confidenceScore ?? prop.confidence, 0);
+  const edgeMag = Math.abs(finiteOr(prop.edgeScore, resolveEdgeMagnitude(prop)));
   const recentFormScore = computeRecentFormScore(prop);
   return confidence * 0.45 + edgeMag * 35 + recentFormScore * 0.2;
 }
@@ -87,16 +133,61 @@ export function buildMarketContextNote(prop = {}) {
 }
 
 export function enrichBestPlayRankingFields(prop = {}) {
+  const projection = resolveProjectionValue(prop);
+  const line = finiteOr(prop.line, NaN);
+  const games = resolveGamesPlayed(prop);
   const leanDirection = resolveLeanDirection(prop);
   const edgeMagnitude = resolveEdgeMagnitude(prop);
-  const rankScore = computeBestPlayRankScore(prop);
+  const edgeScore = finiteOr(prop.edgeScore, computePlayEdgeScore({ projection, line, games }));
+  const verifiedProbability = computeVerifiedProbability(edgeScore);
+  const confidence = resolvePlayConfidenceLabel(games);
+  const direction =
+    leanDirection && leanDirection !== "PASS"
+      ? leanDirection
+      : projection != null && line > 0
+        ? projection >= line
+          ? "OVER"
+          : "UNDER"
+        : null;
+  const verified = verifiedProbability >= BEST_PLAYS_VERIFIED_THRESHOLD;
+  const rankScore = computeBestPlayRankScore({
+    ...prop,
+    edgeScore,
+    verifiedProbability,
+  });
   const marketContext = buildMarketContextNote(prop);
+
   return {
     ...prop,
+    projection,
+    projectedValue: projection ?? prop.projectedValue,
+    games,
     leanDirection,
     edgeMagnitude,
+    edgeScore,
+    verifiedProbability,
+    confidence,
+    verified,
+    direction,
     rankScore,
     marketContext,
-    recommendedSide: prop.recommendedSide || (leanDirection === "PASS" ? null : leanDirection),
+    recommendedSide: prop.recommendedSide || direction,
   };
+}
+
+export function passesBestPlaysFilter(prop = {}) {
+  const enriched = prop.edgeScore != null ? prop : enrichBestPlayRankingFields(prop);
+  const line = finiteOr(enriched.line, NaN);
+  const projection = finiteOr(enriched.projection ?? resolveProjectionValue(enriched), NaN);
+  const games = resolveGamesPlayed(enriched);
+  const edgeScore = finiteOr(enriched.edgeScore, 0);
+
+  return (
+    Number.isFinite(line) &&
+    line > 0 &&
+    Number.isFinite(projection) &&
+    projection > 0 &&
+    games >= BEST_PLAYS_MIN_GAMES &&
+    Math.abs(edgeScore) >= BEST_PLAYS_MIN_EDGE
+  );
 }

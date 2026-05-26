@@ -17,7 +17,7 @@ function BestPlaysTab({ sections = [], loading = false, onOpen }) {
   if (!picks.length) {
     return (
       <p className="compact-empty">
-        No highest-probability MLB plays yet. Verified projections need 65%+ confidence, +0.5 edge, and matched MLB Stats API logs.
+        No MLB props available yet. Waiting for live lines and projections from the feed.
       </p>
     );
   }
@@ -27,7 +27,7 @@ function BestPlaysTab({ sections = [], loading = false, onOpen }) {
       <section className="compact-section">
         <div className="compact-section__head">
           <h2>Highest Probability Props</h2>
-          <p>Top verified MLB edges ranked by confidence, edge, and sample depth</p>
+          <p>Top MLB prop edges ranked by verified probability — includes MED confidence leans below 65%</p>
         </div>
         <div className="compact-card-list">
           {picks.map((prop, index) => (

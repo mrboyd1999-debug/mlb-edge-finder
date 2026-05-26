@@ -8,7 +8,8 @@ const ODDS_API_BASE = "https://api.the-odds-api.com";
 const SPORTSDATA_MLB_BASE = "https://api.sportsdata.io/v3/mlb";
 const MLB_SPORT_KEY = "baseball_mlb";
 const CURRENT_SEASON = 2026;
-const MIN_EDGE_ABS = 0.01;
+const MIN_EDGE_ABS = 0.015;
+const MIN_GAMES = 5;
 const TOP_N = 10;
 const MAX_EVENTS = 12;
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -331,7 +332,7 @@ function normalizePropRows(propRows = [], statsByPlayerId = new Map(), nameToPla
     if (!player || line == null || line <= 0) continue;
 
     const games = resolveGamesPlayed(statRow);
-    if (games < 3) continue;
+    if (games < MIN_GAMES) continue;
 
     const avg = resolveSeasonAverage(statRow, row.marketKey);
     if (avg == null) continue;
@@ -360,6 +361,12 @@ function computeConfidence(games) {
   if (games >= 20) return "HIGH";
   if (games >= 8) return "MED";
   return "LOW";
+}
+
+function computeVerifiedProbability(edgeScore = 0) {
+  const magnitude = Math.abs(Number(edgeScore) || 0);
+  const probability = Math.round(50 + magnitude * 100);
+  return Math.max(50, Math.min(95, probability));
 }
 
 function computeEdgeScore(projection, line, games) {
@@ -400,8 +407,11 @@ function analyzeNormalizedProps(normalized = []) {
       line: row.line,
       team: row.team,
       projection,
+      games: row.games,
       confidence: computeConfidence(row.games),
       edgeScore,
+      verifiedProbability: computeVerifiedProbability(edgeScore),
+      verified: computeVerifiedProbability(edgeScore) >= 65,
       direction: projection >= row.line ? "OVER" : "UNDER",
       playerId: row.playerId,
     });
@@ -426,14 +436,51 @@ export async function buildBestPlays() {
   const statsByPlayerId = buildStatsIndex(seasonStats);
   const nameToPlayerId = buildNameToPlayerId(playersDirectory);
   const normalized = normalizePropRows(propRows, statsByPlayerId, nameToPlayerId);
-  const analyzed = analyzeNormalizedProps(normalized);
+  const enriched = normalized.map((row) => {
+    const projection = computeProjection(row.avg, row.games);
+    const edgeScore = computeEdgeScore(projection, row.line, row.games);
+    return { ...row, projection, edgeScore };
+  });
+  const filtered = enriched.filter(
+    (row) =>
+      row.line &&
+      row.projection &&
+      row.games >= MIN_GAMES &&
+      Math.abs(row.edgeScore) >= MIN_EDGE_ABS
+  );
 
-  const ranked = analyzed.sort((a, b) => b.edgeScore - a.edgeScore);
+  console.log({
+    rawProps: propRows.length,
+    analyzed: enriched.length,
+    filtered: filtered.length,
+  });
+
+  const analyzed = analyzeNormalizedProps(normalized);
+  const merged =
+    analyzed.length >= filtered.length
+      ? analyzed
+      : filtered.map((row) => ({
+          player: row.player,
+          prop: row.prop,
+          line: row.line,
+          team: row.team,
+          projection: row.projection,
+          games: row.games,
+          confidence: computeConfidence(row.games),
+          edgeScore: row.edgeScore,
+          verifiedProbability: computeVerifiedProbability(row.edgeScore),
+          verified: computeVerifiedProbability(row.edgeScore) >= 65,
+          direction: row.projection >= row.line ? "OVER" : "UNDER",
+        }));
+
+  const ranked = merged.sort(
+    (a, b) => Number(b.verifiedProbability ?? 0) - Number(a.verifiedProbability ?? 0)
+  );
   const topPlays = ranked.slice(0, TOP_N).map(({ playerId, ...play }) => play);
 
   return {
     success: true,
-    totalAnalyzed: analyzed.length,
+    totalAnalyzed: merged.length,
     returned: topPlays.length,
     plays: topPlays,
   };
