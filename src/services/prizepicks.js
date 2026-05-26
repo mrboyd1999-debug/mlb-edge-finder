@@ -46,12 +46,18 @@ import {
 } from "./sourceRateLimit.js";
 import { getProxyUrl } from "../config/apiConfig.js";
 import { recordProviderResponse } from "../utils/rawResponseDebug.js";
+import {
+  buildPlayerAttributeMap,
+  logPrizePicksRawSample,
+  normalizePrizePicksResponse,
+  parsePrizePicksProjections,
+} from "../utils/prizepicksParse.js";
 
 export const PRIZEPICKS_HTML_BANNER = "API route is serving source/HTML instead of JSON. Check proxy/backend routing.";
 export const PRIZEPICKS_RATE_LIMIT_MESSAGE = "PrizePicks rate limited, using other sources.";
 export const PRIZEPICKS_TEMPORARY_MESSAGE = "PrizePicks temporarily unavailable";
+export const PRIZEPICKS_MLB_LEAGUE_ID = "2";
 
-const PRIZEPICKS_ENDPOINTS = ["/api/prizepicks"];
 const PRIZEPICKS_CACHE_KEY = "dfs-prizepicks-last-good-payload";
 const PRIZEPICKS_LEGACY_CACHE_KEY = "pp_cache";
 const PRIZEPICKS_CACHE_MAX_MS = 15 * 60 * 1000;
@@ -235,7 +241,7 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all" } 
     }
   }
 
-  recordSourceFailure(SOURCE_IDS.PRIZEPICKS, "PrizePicks live fetch failed");
+  recordSourceFailure(SOURCE_IDS.PRIZEPICKS, PRIZEPICKS_TEMPORARY_MESSAGE);
 
   const cachedResult = buildCachedPrizePicksResult({ sport, statType, attempts, endpoint: attempts.at(-1)?.url || prizePicksEndpoints()[0], reason: "fetch-failed" });
   if (cachedResult) return cachedResult;
@@ -260,9 +266,7 @@ function buildCachedPrizePicksResult({ sport, statType, attempts, endpoint, reas
   const warning =
     reason === "rate-limit" || reason === "cooldown"
       ? PRIZEPICKS_RATE_LIMIT_MESSAGE
-      : reason === "fetch-failed"
-        ? PRIZEPICKS_TEMPORARY_MESSAGE
-        : "PrizePicks live fetch failed; showing last cached real lines.";
+      : PRIZEPICKS_TEMPORARY_MESSAGE;
   return {
     source: "PrizePicks",
     status: "Cached",
@@ -368,6 +372,8 @@ async function fetchPrizePicksEndpoint(endpoint, init) {
       return { ok: false, attempt, htmlError: true, rateLimited: false, nonJson: true };
     }
 
+    logPrizePicksRawSample(payload);
+
     if (payload?.ok === true && payload?.fallback === true) {
       attempt.rateLimited = Boolean(payload.rateLimited);
       return { ok: true, attempt, payload, htmlError: false, rateLimited: Boolean(payload.rateLimited) };
@@ -401,10 +407,10 @@ async function fetchPrizePicksEndpoint(endpoint, init) {
 
 function prizePicksEndpoints() {
   const proxyUrl = getProxyUrl("prizepicks");
-  if (!proxyUrl) return PRIZEPICKS_ENDPOINTS;
   const url = new URL("/api/prizepicks", window.location.origin);
-  url.searchParams.set("proxyUrl", proxyUrl);
-  return [url.pathname + url.search, ...PRIZEPICKS_ENDPOINTS];
+  if (MLB_ONLY_MODE) url.searchParams.set("league_id", PRIZEPICKS_MLB_LEAGUE_ID);
+  if (proxyUrl) url.searchParams.set("proxyUrl", proxyUrl);
+  return [url.pathname + url.search];
 }
 
 function formatAttemptWarnings(attempts = []) {
@@ -494,31 +500,32 @@ function normalizePrizePicksPayloadInternal(payload, sport, statType, lineSource
   try {
     audit = createEmptyPipelineAudit();
     const normalizedPayload = unwrapProxyPayload(payload);
-    const rows = Array.isArray(normalizedPayload)
-      ? normalizedPayload
-      : normalizedPayload.data || normalizedPayload.props || [];
-    const includedRecords = Array.isArray(normalizedPayload)
-      ? new Map()
-      : buildIncludedMap(normalizedPayload.included || []);
+    const parsedPreview = parsePrizePicksProjections(normalizedPayload);
+    if (parsedPreview.length) {
+      console.info("[PrizePicks] parsed preview", {
+        valid: parsedPreview.length,
+        sample: parsedPreview.slice(0, 3).map((row) => ({
+          player: row.player,
+          statType: row.statType,
+          line: row.line,
+        })),
+      });
+    }
+    const rows = normalizedPayload.data || [];
+    const includedRecords = buildIncludedMap(normalizedPayload.included || []);
+    const playerAttributeMap = buildPlayerAttributeMap(normalizedPayload.included || []);
     const scopedRows = MLB_ONLY_MODE
       ? rows.filter((item) =>
-          shouldParseIngestionContext(
-            Array.isArray(normalizedPayload)
-              ? buildPrizePicksFlatIngestionContext(item)
-              : buildPrizePicksProjectionIngestionContext(item, includedRecords)
-          )
+          shouldParseIngestionContext(buildPrizePicksProjectionIngestionContext(item, includedRecords))
         )
       : rows;
     audit.fetched = scopedRows.length;
 
-    let props = [];
-    if (Array.isArray(normalizedPayload)) {
-      props = scopedRows.map((item) => normalizeFlatPrizePicksItem(item, lineSourceBadge, audit)).filter(Boolean);
-    } else {
-      props = scopedRows
-        .map((item) => normalizePrizePicksProjection(item, includedRecords, lineSourceBadge, audit))
-        .filter(Boolean);
-    }
+    let props = scopedRows
+      .map((item) =>
+        normalizePrizePicksProjection(item, includedRecords, lineSourceBadge, audit, playerAttributeMap)
+      )
+      .filter(Boolean);
 
     audit.normalized = props.length;
     props.forEach((prop) => recordNormalizedSample(audit, prop));
@@ -539,30 +546,21 @@ function normalizePrizePicksPayloadInternal(payload, sport, statType, lineSource
 }
 
 function unwrapProxyPayload(payload, depth = 0) {
-  if (depth > 5 || !payload || typeof payload !== "object") return { data: [], included: [] };
-  if (Array.isArray(payload)) return { data: payload, included: [] };
+  if (depth > 5 || !payload || typeof payload !== "object") return normalizePrizePicksResponse(null);
+  if (Array.isArray(payload)) return normalizePrizePicksResponse(payload);
 
   if (payload?.source === "PrizePicks") {
     if (payload.data?.data && Array.isArray(payload.data.data)) {
-      return { data: payload.data.data, included: payload.data.included || [] };
+      return normalizePrizePicksResponse({ data: payload.data.data, included: payload.data.included || [] });
     }
     if (Array.isArray(payload.props) && payload.props[0]?.type === "projection") {
-      return { data: payload.props, included: payload.data?.included || [] };
+      return normalizePrizePicksResponse({ data: payload.props, included: payload.data?.included || [] });
     }
     if (payload.data && !Array.isArray(payload.data)) return unwrapProxyPayload(payload.data, depth + 1);
-    if (Array.isArray(payload.data)) return { data: payload.data, included: payload.included || [] };
+    if (Array.isArray(payload.data)) return normalizePrizePicksResponse(payload);
   }
 
-  if (Array.isArray(payload.data) && payload.included) {
-    return { data: payload.data, included: payload.included };
-  }
-  if (Array.isArray(payload.data)) {
-    return { data: payload.data, included: payload.included || [] };
-  }
-  if (Array.isArray(payload.props)) return { data: payload.props, included: payload.included || [] };
-  if (Array.isArray(payload.items)) return { data: payload.items, included: [] };
-  if (Array.isArray(payload.results)) return { data: payload.results, included: [] };
-  return { data: [], included: [] };
+  return normalizePrizePicksResponse(payload);
 }
 
 function setupWarningFromPayload(payload, source) {
@@ -639,10 +637,21 @@ function normalizeFlatPrizePicksItem(item = {}, lineSourceBadge = "LIVE", audit 
   );
 }
 
-function normalizePrizePicksProjection(item, included, lineSourceBadge = "LIVE", audit = null) {
+function normalizePrizePicksProjection(
+  item,
+  included,
+  lineSourceBadge = "LIVE",
+  audit = null,
+  playerAttributeMap = new Map()
+) {
   const attributes = item.attributes || {};
 
   const relationships = item.relationships || {};
+  const playerRelId =
+    relationships.new_player?.data?.id ??
+    relationships.player?.data?.id ??
+    (Array.isArray(relationships.new_player?.data) ? relationships.new_player.data[0]?.id : null);
+  const playerAttrsFromMap = playerRelId != null ? playerAttributeMap.get(String(playerRelId)) : null;
   const player = relatedRecord(included, relationships.new_player || relationships.player);
   const league = relatedRecord(included, relationships.league);
   const game = relatedRecord(included, relationships.game);
@@ -663,7 +672,7 @@ function normalizePrizePicksProjection(item, included, lineSourceBadge = "LIVE",
     return null;
   }
 
-  const playerAttributes = player?.attributes || {};
+  const playerAttributes = playerAttrsFromMap || player?.attributes || {};
   const gameAttributes = game?.attributes || {};
   const playerName =
     playerAttributes.display_name ||

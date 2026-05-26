@@ -472,15 +472,30 @@ function shouldSuppressCriticalUiMessage(message = "", props = [], sourceStatus 
   if (/live refresh paused during cooldown/i.test(message)) return true;
   if (/connected but no usable props parsed/i.test(message)) return true;
   if (/no mlb props in feed|none matched mlb|0 mlb props/.test(message)) return true;
+  const hasAnyProps = Array.isArray(props) && props.length > 0;
+  if (hasAnyProps && /prizepicks live fetch failed|could not load prizepicks|prizepicks temporarily unavailable/i.test(message)) {
+    return true;
+  }
   if (prizePicksHasUsableProps(props, sourceStatus)) {
     if (/no verified sportsbook props/i.test(message)) return true;
     if (/try again after cooldown/i.test(message)) return true;
     if (/rate limited|showing cached|prizepicks.*failed|could not load prizepicks|429/i.test(message)) return true;
   }
-  if (MLB_ONLY_MODE && prizePicksHasUsableProps(props, sourceStatus) && isIndirectSourceFailureBanner(message)) {
+  if (MLB_ONLY_MODE && (prizePicksHasUsableProps(props, sourceStatus) || hasAnyProps) && isIndirectSourceFailureBanner(message)) {
     return true;
   }
   return false;
+}
+
+function filterPrizePicksFailuresWhenAlternativesExist(sourceFailures = [], { rawProps = [], oddsApiProps = [] } = {}) {
+  const hasAlternatives = rawProps.length > 0 || oddsApiProps.length > 0;
+  if (!hasAlternatives) return sourceFailures;
+  return sourceFailures.filter(
+    (message) =>
+      !/prizepicks live fetch failed|could not load prizepicks lines|prizepicks temporarily unavailable/i.test(
+        String(message || "")
+      )
+  );
 }
 
 function filterCriticalUiMessages(messages = [], props = [], sourceStatus = {}) {
@@ -1071,7 +1086,7 @@ function applySourceResult({
       sourceWarnings.push(...detailWarnings);
       if (label === "PrizePicks") {
         const softFailure = detailWarnings.some((warning) =>
-          /temporarily unavailable|non-json|html instead of json/i.test(String(warning))
+          /temporarily unavailable|non-json|html instead of json|showing cached|rate limited/i.test(String(warning))
         );
         if (!softFailure) {
           sourceFailures.push(...(detailWarnings.length ? detailWarnings : [PRIZEPICKS_TEMPORARY_MESSAGE]));
@@ -1364,6 +1379,35 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     }
   }
 
+  oddsApiPlayerResult = await oddsApiPromise.catch(() =>
+    emptyOddsApiResult({ timedOut: true, warnings: [ENRICHMENT_TIMEOUT_MESSAGE] })
+  );
+  applyOddsApiSourceState(oddsApiPlayerResult, sourceStatus, debugInfo);
+
+  if (!rawProps.length && oddsApiPlayerResult?.props?.length && !oddsApiPlayerResult.authDisabled) {
+    rawProps.push(
+      ...normalizePropsWithSource(
+        oddsApiPlayerResult.props.map((prop) =>
+          normalizePropShape(
+            { ...prop, playerName: prop.playerName || prop.player || "" },
+            { platform: prop.platform || "Odds API", source: prop.source || "Odds API" }
+          )
+        )
+      )
+    );
+    pipelineFallback = true;
+    debugInfo.ingestionFallback = debugInfo.ingestionFallback || "odds-api-priority-fallback";
+  }
+
+  sourceFailures.splice(
+    0,
+    sourceFailures.length,
+    ...filterPrizePicksFailuresWhenAlternativesExist(sourceFailures, {
+      rawProps,
+      oddsApiProps: oddsApiPlayerResult?.props || [],
+    })
+  );
+
   const mergedProviderProps = mergeProviderRawProps({
     underdogProps: underdogResult?.parsedProps || underdogResult?.props || [],
     prizePicksProps: prizePicksResult?.props || [],
@@ -1464,7 +1508,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   oddsApiPlayerResult = await oddsApiPromise.catch(() =>
     emptyOddsApiResult({ timedOut: true, warnings: [ENRICHMENT_TIMEOUT_MESSAGE] })
   );
-  applyOddsApiSourceState(oddsApiPlayerResult, sourceStatus, debugInfo);
+  if (!sourceStatus["The Odds API"] || sourceStatus["The Odds API"] === "Pending") {
+    applyOddsApiSourceState(oddsApiPlayerResult, sourceStatus, debugInfo);
+  }
   if (!allDisplayProps.length && oddsApiPlayerResult?.props?.length) {
     allDisplayProps = normalizePropsWithSource(
       buildAllDisplayProps({

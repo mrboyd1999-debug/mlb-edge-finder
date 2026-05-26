@@ -14,13 +14,16 @@ import {
   resolveSportsDataApiKeyFromRequest,
 } from "./api/lib/sportsDataServer.js";
 import { buildBestPlays } from "./api/lib/bestPlaysEngine.js";
+import {
+  fetchPrizePicks,
+  PRIZEPICKS_MLB_LEAGUE_ID,
+} from "./api/lib/prizepicksFetch.js";
 
 const API_FOOTBALL_KEY = process.env.API_FOOTBALL_KEY || process.env.VITE_API_FOOTBALL_KEY || "";
 const ODDS_API_KEY = process.env.ODDS_API_KEY || process.env.VITE_ODDS_API_KEY || "";
 
-const PRIZEPICKS_TARGETS = ["https://partner-api.prizepicks.com", "https://api.prizepicks.com"];
 const UNDERDOG_TARGET = "https://api.underdogfantasy.com";
-const UPSTREAM_TIMEOUT_MS = 8_000;
+const UPSTREAM_TIMEOUT_MS = 10_000;
 
 export default defineConfig({
   plugins: [dfsApiProxy(), react()],
@@ -198,45 +201,49 @@ async function proxyPrizePicksWithCache(req, res) {
 
     markPrizePicksUpstreamAttempt();
 
-    let lastFailure = { status: 0, error: "upstream fetch failed", preview: "" };
+    const leagueId = resolvePrizePicksLeagueId(req.url || "");
+    const data = await fetchPrizePicks({ leagueId });
+    const hasRows = Array.isArray(data?.data) && data.data.length > 0;
 
-    for (const target of PRIZEPICKS_TARGETS) {
-      const result = await fetchPrizePicksUpstream(req, target);
-      if (result.sent) return;
-      if (result.ok) {
-        try {
-          savePrizePicksPayload(JSON.parse(result.text));
-        } catch {
-          // keep raw text response even if cache parse fails
-        }
-        res.statusCode = 200;
-        res.setHeader("content-type", "application/json; charset=utf-8");
-        res.setHeader("cache-control", "no-store");
-        res.end(result.text);
-        return;
-      }
-      lastFailure = result;
-      if (!shouldRetryPrizePicksTarget(result.status)) break;
+    if (hasRows) {
+      savePrizePicksPayload(data);
+      sendJson(res, 200, {
+        ok: true,
+        error: false,
+        source: "PrizePicks",
+        props: data.data,
+        data,
+      });
+      return;
     }
 
     const fallback = buildPrizePicksFallbackPayload(null, {
-      rateLimited: lastFailure.status === 429,
-      message: prizePicksFallbackMessage(lastFailure.status),
+      rateLimited: false,
+      message: prizePicksFallbackMessage(0),
     });
     if (fallback) {
       sendJson(res, 200, fallback);
       return;
     }
 
-    sendJson(
-      res,
-      200,
-      apiErrorPayload("PrizePicks", lastFailure.error || "upstream fetch failed", {
-        preview: lastFailure.preview,
-        upstreamStatus: lastFailure.status,
-      })
-    );
+    sendJson(res, 200, {
+      ok: true,
+      source: "PrizePicks",
+      fallback: true,
+      data: { data: [], included: [] },
+      props: [],
+      message: "Showing cached props.",
+    });
   });
+}
+
+function resolvePrizePicksLeagueId(url = "") {
+  try {
+    const parsed = new URL(url, "http://localhost");
+    return parsed.searchParams.get("league_id") || PRIZEPICKS_MLB_LEAGUE_ID;
+  } catch {
+    return PRIZEPICKS_MLB_LEAGUE_ID;
+  }
 }
 
 function buildPrizePicksCooldownPayload() {

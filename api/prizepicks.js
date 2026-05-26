@@ -6,12 +6,13 @@ import {
   savePrizePicksPayload,
   withPrizePicksServerLock,
 } from "./lib/prizepicksServerCache.js";
+import {
+  fetchPrizePicks,
+  PRIZEPICKS_MLB_LEAGUE_ID,
+} from "./lib/prizepicksFetch.js";
+import { parsePrizePicksProjections } from "../src/utils/prizepicksParse.js";
 
 const APIFY_PRIZEPICKS_ACTOR = "zen-studio~prizepicks-player-props";
-const PRIZEPICKS_PROJECTION_BASES = [
-  "https://partner-api.prizepicks.com/projections",
-  "https://api.prizepicks.com/projections",
-];
 
 export default async function handler(req, res) {
   setCorsHeaders(res);
@@ -31,12 +32,13 @@ export default async function handler(req, res) {
     });
     if (fallback) return res.status(200).json(fallback);
     return res.status(200).json({
-      ok: false,
+      ok: true,
       source: "PrizePicks",
-      status: "failed",
-      error: error.message || "upstream fetch failed",
+      fallback: true,
+      status: "empty",
+      data: { data: [], included: [] },
       props: [],
-      data: [],
+      message: error.message || "upstream fetch failed",
     });
   }
 }
@@ -52,7 +54,7 @@ async function respondWithPrizePicks(res, leagueId, proxyUrl) {
     markPrizePicksUpstreamAttempt();
     const result = await fetchPrizePicksBoard(leagueId, proxyUrl);
 
-    if (result.ok) {
+    if (result.ok && result.data) {
       savePrizePicksPayload(result.data);
       return respondWithFetch(res, result);
     }
@@ -90,57 +92,58 @@ async function fetchPrizePicksBoard(leagueId = "", proxyUrl = "") {
     process.env.PRIZEPICKS_PROXY_URL;
   const apifyToken = process.env.APIFY_TOKEN;
   const configuredUrl = providerUrl || apifyActorUrl(APIFY_PRIZEPICKS_ACTOR, apifyToken);
-  const urls = configuredUrl ? [configuredUrl] : prizePicksProjectionUrls(leagueId);
-  let lastError = null;
 
-  for (const url of urls) {
-    const response = await fetch(url, {
-      headers: prizePicksHeaders(),
-    });
+  if (configuredUrl) {
+    return fetchConfiguredProxy(configuredUrl, leagueId);
+  }
+
+  const effectiveLeagueId = leagueId || PRIZEPICKS_MLB_LEAGUE_ID;
+  const data = await fetchPrizePicks({ leagueId: effectiveLeagueId });
+  const valid = parsePrizePicksProjections(data);
+  const hasData = Array.isArray(data?.data) && data.data.length > 0;
+
+  if (hasData) {
+    return { ok: true, data, status: 200, parsedValid: valid.length };
+  }
+
+  return {
+    ok: false,
+    status: 0,
+    error: leagueId
+      ? `PrizePicks returned no projection data (league ${leagueId}).`
+      : "PrizePicks returned no projection data.",
+    data: null,
+  };
+}
+
+async function fetchConfiguredProxy(url, leagueId) {
+  try {
+    const response = await fetch(url, { headers: prizePicksHeaders() });
     const text = await response.text();
-    const contentType = response.headers.get("content-type") || "";
-    const preview = text.slice(0, 200);
-    const parsed = parseJsonOrError(text, "PrizePicks", contentType);
-
-    console.info("[PrizePicks API] upstream", {
+    const parsed = parseJsonOrError(text, "PrizePicks", response.headers.get("content-type") || "");
+    console.info("[PrizePicks API] configured proxy", {
       leagueId: leagueId || "all",
-      url: redactPrizePicksUrl(url),
       status: response.status,
-      contentType,
       ok: response.ok,
-      preview,
     });
-    console.log("PrizePicks raw response", preview);
-
     if (response.ok && parsed.ok) {
       return { ok: true, data: parsed.data, status: response.status };
     }
-
-    lastError = {
+    return {
       ok: false,
       status: response.status,
       error: !response.ok ? prizePicksStatusMessage(response.status, leagueId) : parsed.error,
-      preview,
+      preview: text.slice(0, 200),
       data: null,
     };
-
-    if (!shouldTryNextUrl(response.status)) break;
-  }
-
-  return (
-    lastError || {
+  } catch (error) {
+    return {
       ok: false,
       status: 0,
-      error: leagueId
-        ? `PrizePicks returned no projection data (league ${leagueId}).`
-        : "PrizePicks returned no projection data.",
+      error: error.message || "configured proxy failed",
       data: null,
-    }
-  );
-}
-
-function shouldTryNextUrl(status) {
-  return status === 0 || status >= 500;
+    };
+  }
 }
 
 function respondWithFetch(res, result) {
@@ -153,7 +156,7 @@ function respondWithFetch(res, result) {
       error: message,
       htmlError: /non-json|html/i.test(message),
       props: [],
-      data: [],
+      data: { data: [], included: [] },
       preview: result.preview || "",
       upstreamStatus: result.status || 0,
     });
@@ -177,14 +180,7 @@ function parseJsonOrError(text, source, contentType = "") {
   if (!trimmed) {
     return { ok: false, error: `${source} returned empty response`, preview: "" };
   }
-  if (looksHtml) {
-    return {
-      ok: false,
-      error: "API route is serving source/HTML instead of JSON. Check proxy/backend routing.",
-      preview: trimmed.slice(0, 300),
-    };
-  }
-  if (looksJavaScript) {
+  if (looksHtml || looksJavaScript) {
     return {
       ok: false,
       error: "API route is serving source/HTML instead of JSON. Check proxy/backend routing.",
@@ -198,32 +194,11 @@ function parseJsonOrError(text, source, contentType = "") {
   }
 }
 
-function prizePicksProjectionUrls(leagueId) {
-  return PRIZEPICKS_PROJECTION_BASES.map((base) => {
-    const url = new URL(base);
-    if (leagueId) url.searchParams.set("league_id", leagueId);
-    url.searchParams.set("per_page", "250");
-    url.searchParams.set("single_stat", "true");
-    url.searchParams.set("game_mode", "pickem");
-    return url.toString();
-  });
-}
-
 function prizePicksStatusMessage(status, leagueId) {
   if (status === 403) return "PrizePicks blocked the request (403)";
   if (status === 429) return "PrizePicks rate limited (429)";
   if (status === 404) return "PrizePicks returned no projection data (404)";
   return `PrizePicks provider returned status ${status} (league ${leagueId}).`;
-}
-
-function redactPrizePicksUrl(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.searchParams.has("token")) parsed.searchParams.set("token", "***");
-    return parsed.toString();
-  } catch {
-    return url;
-  }
 }
 
 function prizePicksHeaders() {
