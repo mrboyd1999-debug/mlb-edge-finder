@@ -101,13 +101,6 @@ export function recordMlbStatsFetch({
     pipelineStatus.mlbStatsApi.status = "Connected";
     pipelineStatus.mlbStatsApi.lastSuccessAt = now;
     pipelineStatus.mlbStatsApi.lastError = "";
-    if (
-      pipelineStatus.projectionApi.status === "Pending" ||
-      pipelineStatus.projectionApi.status === "Failed"
-    ) {
-      pipelineStatus.projectionApi.status = "Connected";
-      pipelineStatus.projectionApi.lastError = "";
-    }
   } else {
     pipelineStatus.mlbStatsApi.status = "Failed";
     pipelineStatus.mlbStatsApi.lastError = error || "MLB Stats API request failed";

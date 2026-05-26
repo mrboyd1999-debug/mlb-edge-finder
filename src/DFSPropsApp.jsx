@@ -11,6 +11,7 @@ import { enrichLineMovementWithTags } from "./services/lineMovementTrust.js";
 import { fetchSportsbookComparison } from "./services/sportsbookOdds";
 import { fetchOddsApiDisplayProps } from "./services/oddsApiPlayerProps.js";
 import { fetchPlayerStats, findStatProfile, statProfileKey } from "./services/playerStats";
+import { playerNamesMatch } from "./utils/playerNames.js";
 import { PRIZEPICKS_HTML_BANNER } from "./services/prizepicks";
 import { fetchInjuryNews } from "./services/injuryNews";
 import { clearApiCache, getRefreshCooldownMs, isDevEnvironment } from "./services/fetchUtil";
@@ -147,7 +148,7 @@ import {
   LIVE_LINE_PROJECTION_UNAVAILABLE,
 } from "./modules/projectionBreakdown.js";
 import { logMlbData, traceLiveBoardMlbProp, getMlbPipelineStatus, subscribeMlbPipelineStatus } from "./services/mlbDataService.js";
-import { mergeDfsSourceStatusFromApiHealth } from "./services/mlbPipelineStatus.js";
+import { mergeDfsSourceStatusFromApiHealth, recordMlbProjectionResult } from "./services/mlbPipelineStatus.js";
 import { NO_VERIFIED_GRADE_STATUS } from "./utils/manualPropScoring.js";
 import {
   computeGradingDataQuality,
@@ -1849,7 +1850,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   for (let index = 0; index < workingNormalProps.length; index += 75) {
     const batch = workingNormalProps.slice(index, index + 75);
     batch.forEach((prop) => {
-      const cacheKey = `${prop.id}|${prop.line}|${prop.statType}|${prop.platform}`;
+      const cacheKey = `${prop.id}|${prop.line}|${prop.statType}|${prop.platform}|mlb-proj-v2`;
       let scored = scoreCache.get(cacheKey);
       if (!scored) {
         const persisted = readSmartCacheIfFresh("projection-score", cacheKey, CACHE_TTL.PROJECTIONS_MS);
@@ -3539,7 +3540,21 @@ function scoreDFSProp(prop, context) {
   if (!scopedProp) return null;
   prop = scopedProp;
   const manualStats = context.manualStatsMap?.[prop.id] || prop.manualStats || null;
-  const baseProfile = findStatProfile(context.stats, prop) || context.stats.get(statLookupKey(prop));
+  let baseProfile = findStatProfile(context.stats, prop) || context.stats.get(statLookupKey(prop));
+  if ((!baseProfile || baseProfile.sparse || baseProfile.fallback) && context.stats instanceof Map) {
+    let bestFallback = null;
+    context.stats.forEach((profile) => {
+      if (!profile || profile.fallback) return;
+      if (String(profile.sport || "MLB").toUpperCase() !== "MLB") return;
+      if (!playerNamesMatch(profile.playerName, prop.playerName)) return;
+      const sampleSize = Number(profile.sampleSize || profile.splits?.length || 0);
+      if (sampleSize < 3 && profile.sparse) return;
+      if (!bestFallback || sampleSize > Number(bestFallback.sampleSize || bestFallback.splits?.length || 0)) {
+        bestFallback = profile;
+      }
+    });
+    if (bestFallback) baseProfile = bestFallback;
+  }
   const profile = mergeManualStatsIntoProfile(baseProfile || {}, manualStats);
   const injury = context.news.get(statLookupKey(prop));
   const lineComparison = context.lineComparisonMap.get(sharedLineKey(prop));
@@ -3658,10 +3673,31 @@ function scoreDFSProp(prop, context) {
         reason: mlbGradeBlockReason,
         failureCode: mlbPipelineTrace?.failureCode,
       });
-    } else if (!verifiedStats || profileIsSparse) {
+    } else if ((!verifiedStats || profileIsSparse) && !mlbVerifiedModel?.isVerifiedProjection) {
       mlbGradeBlocked = true;
       mlbGradeBlockReason = NO_VERIFIED_GRADE_STATUS;
     }
+  }
+
+  if (isMlbProp && mlbVerifiedMarket) {
+    recordMlbProjectionResult({
+      ok: Boolean(
+        mlbVerifiedModel?.isVerifiedProjection &&
+          !mlbVerifiedModel?.projectionUnavailable &&
+          Number.isFinite(mlbVerifiedModel?.projection) &&
+          mlbVerifiedModel.projection > 0 &&
+          !mlbGradeBlocked
+      ),
+      player: prop.playerName,
+      statType: prop.statType,
+      projection: mlbVerifiedModel?.projection,
+      error: mlbGradeBlocked
+        ? mlbGradeBlockReason
+        : mlbVerifiedModel?.projectionUnavailable
+          ? mlbVerifiedModel?.statusMessage || mlbVerifiedModel?.projectionDebugReason
+          : "",
+      engineOperational: true,
+    });
   }
 
   if (mlbGradeBlocked) {
@@ -3747,7 +3783,14 @@ function scoreDFSProp(prop, context) {
   const sportsbookBoost = sportsbookValueBoost(prop, bestPick, sportsbookComparison);
   const recentHitRate = Number.isFinite(enriched?.recentHitRate) ? enriched.recentHitRate : null;
   const volatility = Number.isFinite(enriched?.volatility) ? enriched.volatility : null;
-  const sampleSize = Number(enriched?.sampleSize || 0);
+  const sampleSize = Number(mlbVerifiedModel?.sampleSize ?? enriched?.sampleSize ?? 0);
+  const hasMlbGameLogs = Boolean(
+    mlbVerifiedModel?.hasGameLogs ||
+      enriched?.hasGameLogs ||
+      sampleSize >= 3 ||
+      (enriched?.splits?.length ?? 0) >= 3
+  );
+  const hasVerifiedMlbStats = verifiedStats || Boolean(mlbVerifiedModel?.isVerifiedProjection && hasMlbGameLogs);
   const profileIsFallback = Boolean(enriched?.fallback || enriched?.sparse);
   const historicalHitRateSignal = historicalHitRateForProp(prop, context.historyRows || []);
   const sportsbookDiscrepancyEarly = sportsbookDiscrepancyForPick(prop, bestPick, sportsbookComparison);
@@ -4177,7 +4220,9 @@ function scoreDFSProp(prop, context) {
     statProfileSource: enriched?.source || "",
     statEnrichmentSources: enriched?.statSources || [],
     fallbackProfile: profileIsFallback,
-    hasVerifiedStats: verifiedStats,
+    hasVerifiedStats: hasVerifiedMlbStats,
+    hasGameLogs: hasMlbGameLogs,
+    recentForm: mlbVerifiedModel?.recentForm ?? enriched?.last5Average ?? null,
     sparseProfile: Boolean(enriched?.sparse),
     manualEnriched: Boolean(enriched?.manualEnriched || manualStats),
     confidenceScore,

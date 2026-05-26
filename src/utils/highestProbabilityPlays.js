@@ -150,6 +150,40 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   return sortHighestProbabilityPlays(eligible).slice(0, max);
 }
 
+export function auditHighestProbabilityProps(props = []) {
+  const counters = {
+    filteredMissingProjection: 0,
+    filteredLowConfidence: 0,
+    filteredBadMatch: 0,
+    filteredLowEdge: 0,
+    filteredOther: 0,
+    eligible: 0,
+    attempted: (props || []).length,
+  };
+
+  for (const prop of props || []) {
+    const reason = validateHighestProbabilityRejectReason(prop);
+    if (!reason) {
+      counters.eligible += 1;
+      continue;
+    }
+    const text = reason.toLowerCase();
+    if (/projection|missing|unavailable|insufficient stats|game log|zero edge|too close/.test(text)) {
+      counters.filteredMissingProjection += 1;
+    } else if (/confidence/.test(text)) {
+      counters.filteredLowConfidence += 1;
+    } else if (/match|player|team|role|pitcher|hitter/.test(text)) {
+      counters.filteredBadMatch += 1;
+    } else if (/edge/.test(text)) {
+      counters.filteredLowEdge += 1;
+    } else {
+      counters.filteredOther += 1;
+    }
+  }
+
+  return counters;
+}
+
 export function buildHighestProbabilityQualifyReason(prop = {}) {
   return (
     prop.analyticsReason ||

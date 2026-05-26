@@ -6,11 +6,11 @@ import {
   projectMlbPitcherProp,
 } from "./mlbProjectionEngine.js";
 import {
-  AWAITING_PROJECTION_STATUS,
   computeDirectionalEdgeForSide,
   computeRawEdge,
   NO_VERIFIED_PLAY_STATUS,
   PASS_STATUS,
+  AWAITING_PROJECTION_STATUS,
   resolveRecommendedSide,
   shouldPassPlay,
 } from "./propSideEngine.js";
@@ -18,13 +18,14 @@ import {
   calibrateRealisticConfidence,
   computeVolatilityAdjustedEdge,
 } from "../utils/mlbConfidenceEngine.js";
+import { calculateWeightedMlbConfidence } from "../utils/mlbWeightedConfidence.js";
 import {
   DATA_STATUS,
   DATA_UNAVAILABLE_CONFIDENCE,
   LIVE_LINE_PROJECTION_UNAVAILABLE,
   PROJECTION_UNAVAILABLE_LABEL,
 } from "./projectionBreakdown.js";
-import { calculateWeightedMlbConfidence } from "../utils/mlbWeightedConfidence.js";
+import { logPropProjectionPipeline, recordVerifiedProjectionGenerated } from "../services/mlbProjectionPipelineLog.js";
 
 const MLB_VOLATILITY = {
   strikeouts: { tier: "LOW", score: 0.38, label: "Low variance" },
@@ -203,6 +204,10 @@ export function buildMlbPropProjection(prop = {}, profile = {}, context = {}) {
     profile,
   });
 
+  if (verified) {
+    recordVerifiedProjectionGenerated();
+  }
+
   return {
     projection: round(projection, 1),
     line: Number.isFinite(line) ? line : null,
@@ -221,6 +226,9 @@ export function buildMlbPropProjection(prop = {}, profile = {}, context = {}) {
     dataStatus: engineResult.dataStatus,
     projectionSource: engineResult.projectionSource || "player-stats-model",
     reasons,
+    recentForm: profile.last5Average ?? profile.last10Average ?? null,
+    sampleSize: profile.sampleSize ?? null,
+    reasoning: reasons,
     projectionUnavailable: false,
     passPlay,
     displayStatus: passPlay ? PASS_STATUS : modelPickLabel,
@@ -284,10 +292,21 @@ export function applyMlbProjectionToProp(prop = {}, profile = {}, context = {}) 
       source: model.projectionSource,
     });
   }
+  logPropProjectionPipeline(prop, {
+    matchedMLBPlayer: profile?.playerName || prop.playerName,
+    recentGamesFound: model.sampleSize ?? profile?.sampleSize ?? profile?.splits?.length ?? null,
+    projectionValue: model.projection,
+    confidenceValue: model.confidence,
+    edgeValue: model.edge,
+    rejectionReason: model.projectionUnavailable ? model.statusMessage || model.projectionDebugReason : null,
+  });
   return {
     ...prop,
     projectedValue: model.projection,
     projection: model.projection,
+    recentForm: model.recentForm,
+    sampleSize: model.sampleSize ?? prop.sampleSize ?? profile?.sampleSize,
+    hasGameLogs: Boolean(profile?.hasGameLogs || (model.sampleSize ?? 0) >= 3),
     rawEdge: model.rawEdge,
     edge: model.projectionUnavailable ? null : model.edge ?? null,
     edgePercent: model.edgePercent,

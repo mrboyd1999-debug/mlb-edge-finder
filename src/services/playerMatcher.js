@@ -1,6 +1,7 @@
 import { cachedFetch } from "./fetchUtil.js";
 import { readSmartCacheIfFresh, writeSmartCache, CACHE_TTL } from "./smartCache.js";
 import { normalizePlayerName, playerNameTokens, playerNamesMatch } from "../utils/playerNames.js";
+import { mlbTeamsMatch } from "../utils/mlbTeamMatch.js";
 import { logMatchedPlayer, logNormalizedName } from "./mlbPipelineDebug.js";
 import { buildMlbStatsApiUrl, logMlbStatsApiCall, mlbStatsApiPathLabel } from "./mlbStatsApiUrl.js";
 
@@ -58,7 +59,40 @@ function tokenOverlapScore(leftTokens = [], rightTokens = []) {
   return Math.min(1, score);
 }
 
-export function scoreMlbPlayerMatch(sportsbookName = "", candidate = {}) {
+export function normalizePlayerNameForMatch(name = "") {
+  return normalizeSportsbookName(name);
+}
+
+function candidateTeamName(candidate = {}) {
+  return (
+    candidate.currentTeam?.name ||
+    candidate.team?.name ||
+    candidate.currentTeam ||
+    candidate.team ||
+    ""
+  );
+}
+
+function teamMatchBonus(propTeam = "", candidate = {}) {
+  const team = String(propTeam || "").trim();
+  if (!team) return 0;
+  const candidateTeam = String(candidateTeamName(candidate) || "").trim();
+  if (!candidateTeam) return 0;
+  return mlbTeamsMatch(team, candidateTeam) ? 12 : -8;
+}
+
+function withTeamBonus(result, team, candidate) {
+  if (!result || !Number.isFinite(result.confidence)) return result;
+  const bonus = teamMatchBonus(team, candidate);
+  if (!bonus) return result;
+  return {
+    ...result,
+    confidence: Math.max(0, Math.min(100, result.confidence + bonus)),
+    reason: `${result.reason}${bonus > 0 ? " + team match" : " - team mismatch"}`,
+  };
+}
+
+export function scoreMlbPlayerMatch(sportsbookName = "", candidate = {}, { team = "" } = {}) {
   const query = resolveAbbreviations(sportsbookName);
   const fullName = candidate.fullName || `${candidate.firstName || ""} ${candidate.lastName || ""}`.trim();
   const normalizedQuery = normalizePlayerName(query);
@@ -68,25 +102,27 @@ export function scoreMlbPlayerMatch(sportsbookName = "", candidate = {}) {
     return { confidence: 0, reason: "empty name" };
   }
   if (normalizedQuery === normalizedCandidate) {
-    return { confidence: 100, reason: "exact match" };
+    return withTeamBonus({ confidence: 100, reason: "exact match" }, team, candidate);
   }
   if (playerNamesMatch(query, fullName)) {
-    return { confidence: 92, reason: "strict token match" };
+    return withTeamBonus({ confidence: 92, reason: "strict token match" }, team, candidate);
   }
 
   const queryTokens = playerNameTokens(query);
   const candidateTokens = playerNameTokens(fullName);
   const overlap = tokenOverlapScore(queryTokens, candidateTokens);
-  if (overlap >= 0.85) return { confidence: 88, reason: "high token overlap" };
-  if (overlap >= 0.65) return { confidence: 74, reason: "partial token overlap" };
+  if (overlap >= 0.85) return withTeamBonus({ confidence: 88, reason: "high token overlap" }, team, candidate);
+  if (overlap >= 0.65) return withTeamBonus({ confidence: 74, reason: "partial token overlap" }, team, candidate);
   if (normalizedCandidate.includes(normalizedQuery) || normalizedQuery.includes(normalizedCandidate)) {
-    return { confidence: 68, reason: "substring match" };
+    return withTeamBonus({ confidence: 68, reason: "substring match" }, team, candidate);
   }
-  if (overlap >= 0.45) return { confidence: 55, reason: "weak overlap" };
-  return { confidence: Math.round(overlap * 40), reason: "low overlap" };
+  if (overlap >= 0.45) return withTeamBonus({ confidence: 55, reason: "weak overlap" }, team, candidate);
+  const base = Math.round(overlap * 40);
+  const bonus = teamMatchBonus(team, candidate);
+  return { confidence: Math.max(0, Math.min(100, base + bonus)), reason: "low overlap" };
 }
 
-export function pickBestMlbMatch(sportsbookName = "", people = []) {
+export function pickBestMlbMatch(sportsbookName = "", people = [], { team = "" } = {}) {
   if (!people.length) return null;
 
   const normalizedQuery = normalizeSportsbookName(sportsbookName);
@@ -109,7 +145,7 @@ export function pickBestMlbMatch(sportsbookName = "", people = []) {
   const scored = people
     .map((person) => {
       const fullName = person.fullName || `${person.firstName || ""} ${person.lastName || ""}`.trim();
-      const { confidence, reason } = scoreMlbPlayerMatch(sportsbookName, person);
+      const { confidence, reason } = scoreMlbPlayerMatch(sportsbookName, person, { team });
       return { person, fullName, confidence, reason };
     })
     .sort((a, b) => b.confidence - a.confidence);
@@ -119,6 +155,13 @@ export function pickBestMlbMatch(sportsbookName = "", people = []) {
   if (!best || best.confidence < 55) return null;
 
   if (runnerUp && best.confidence - runnerUp.confidence < 8 && runnerUp.confidence >= 55) {
+    if (team) {
+      const teamMatches = scored.filter((row) => teamMatchBonus(team, row.person) > 0);
+      if (teamMatches.length === 1) return teamMatches[0];
+      if (teamMatches.length > 1) {
+        return teamMatches.sort((a, b) => b.confidence - a.confidence)[0];
+      }
+    }
     logMatcher("match.ambiguous", {
       incoming: sportsbookName,
       top: best.fullName,
@@ -234,6 +277,10 @@ export async function matchSportsbookPlayerToMlb(sportsbookName = "", { minConfi
   }
 
   const queries = [...new Set([incoming, resolveAbbreviations(incoming)].filter(Boolean))];
+  const tokens = playerNameTokens(normalizeSportsbookName(incoming));
+  if (tokens.length >= 2) {
+    queries.push(tokens[tokens.length - 1]);
+  }
   let best = null;
   let lastCandidatesCount = 0;
 
@@ -241,7 +288,7 @@ export async function matchSportsbookPlayerToMlb(sportsbookName = "", { minConfi
     const people = await searchMlbPlayers(query);
     lastCandidatesCount = Math.max(lastCandidatesCount, people.length);
     console.info("[Manual Prop Matcher] players returned:", people.length, { query });
-    const candidate = pickBestMlbMatch(incoming, people);
+    const candidate = pickBestMlbMatch(incoming, people, { team });
     if (candidate && (!best || candidate.confidence > best.confidence)) {
       best = candidate;
     }

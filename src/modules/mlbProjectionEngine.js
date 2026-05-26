@@ -1,4 +1,8 @@
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
+import {
+  computeWeightedRollingProjection,
+  buildRollingFormReason,
+} from "../utils/mlbRollingProjection.js";
 import { formatNumber } from "../utils/formatters.js";
 import {
   buildMlbPitcherDataPackage,
@@ -155,6 +159,23 @@ export function projectPitcherStrikeouts(prop = {}, profile = {}, context = {}) 
   const verified = hasVerifiedStrikeoutGameLogs(data, profile);
 
   if (!verified) {
+    const rolling = computeWeightedRollingProjection(data.statValues || data.last5Starts || [], 5, 3);
+    if (rolling?.value > 0) {
+      breakdown.push(
+        buildBreakdownRow("Rolling form fallback (L5)", rolling.value, {
+          display: buildRollingFormReason({ window: 5, sampleSize: rolling.sampleSize, statLabel: "starts" }),
+          contribution: rolling.value,
+        })
+      );
+      return finalizePitcherProjection({
+        projection: rolling.value,
+        breakdown,
+        dataStatus: DATA_STATUS.PARTIAL,
+        data,
+        marketKey: "strikeouts",
+        profile,
+      });
+    }
     return finalizePitcherProjection({
       projection: null,
       breakdown: buildUnavailableProjectionBreakdown(null, "No verified MLB starter game logs"),
@@ -420,9 +441,27 @@ function projectVerifiedHitterMarket(prop = {}, profile = {}, context = {}, mark
   const verified = hasVerifiedHitterGameLogs(data, profile);
 
   if (!verified) {
+    const values = data.statValues || [];
+    const rolling = computeWeightedRollingProjection(values, 10, 3);
+    if (rolling?.value > 0) {
+      breakdown.push(
+        buildBreakdownRow("Rolling form fallback (L10)", rolling.value, {
+          display: buildRollingFormReason({ window: 10, sampleSize: rolling.sampleSize, statLabel: "games" }),
+          contribution: rolling.value,
+        })
+      );
+      return finalizeHitterProjection({
+        projection: rolling.value,
+        breakdown,
+        dataStatus: DATA_STATUS.PARTIAL,
+        data,
+        marketKey,
+        profile,
+      });
+    }
     return finalizeHitterProjection({
       projection: null,
-      breakdown: buildUnavailableProjectionBreakdown(null, "No verified MLB hitter game logs (need 5+ games)"),
+      breakdown: buildUnavailableProjectionBreakdown(null, "No verified MLB hitter game logs (need 3+ games)"),
       dataStatus: DATA_STATUS.UNAVAILABLE,
       data,
       marketKey,

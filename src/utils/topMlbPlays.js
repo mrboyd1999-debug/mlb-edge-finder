@@ -26,9 +26,15 @@ import { filterQualityMlbProps } from "./mlbPropQualityFilter.js";
 import { isFakeOrFallbackProp } from "./livePropRender.js";
 import {
   HIGHEST_PROBABILITY_MAX_PLAYS,
+  HIGHEST_PROBABILITY_TARGET_PLAYS,
   selectHighestProbabilityPlays,
+  auditHighestProbabilityProps,
   buildHighestProbabilityQualifyReason,
 } from "./highestProbabilityPlays.js";
+import {
+  logProjectionFilterSummary,
+  resetProjectionFilterCounters,
+} from "../services/mlbProjectionPipelineLog.js";
 
 export const TOP_MLB_PLAYS_LIMIT = HIGHEST_PROBABILITY_MAX_PLAYS;
 export const SECTION_BEST_PLAYS = HIGHEST_PROBABILITY_MAX_PLAYS;
@@ -276,9 +282,12 @@ export function resolveTopMlbPlaySections(
   });
 
   const strictPool = buildTopMlbPlayPool(displayProps, rawProps, parsedUnderdogProps, { relaxed: false });
+  resetProjectionFilterCounters();
+  const filterDiagnostics = auditHighestProbabilityProps(strictPool);
   const highestPicks = selectHighestProbabilityPlays(strictPool, HIGHEST_PROBABILITY_MAX_PLAYS).map((prop, idx) =>
     annotateHighestProbabilityPlay(prop, idx + 1)
   );
+  logProjectionFilterSummary("Best Plays filter diagnostics");
 
   logPipelineStage("rank.highestProbability", { pool: strictPool.length, ranked: highestPicks.length });
 
@@ -321,6 +330,8 @@ export function resolveTopMlbPlaySections(
     waitingForProjections: highestPicks.length === 0 && liveVerifiedCount > 0,
     usedFallback: false,
     fallbackLabel: "",
+    filterDiagnostics,
+    showFilterDiagnostics: highestPicks.length < HIGHEST_PROBABILITY_TARGET_PLAYS,
     fetchFailureReasons:
       fetchFailureReasons.length || highestPicks.length
         ? fetchFailureReasons

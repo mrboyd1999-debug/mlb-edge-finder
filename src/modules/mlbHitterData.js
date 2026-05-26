@@ -191,12 +191,13 @@ export function buildMlbHitterDataPackage(prop = {}, profile = {}, context = {})
 }
 
 export function hasVerifiedHitterGameLogs(data = {}, profile = {}) {
+  const gameCount = Number(data.gameCount || data.statValues?.length || 0);
   return Boolean(
     data.verifiedSource &&
       data.hasGameLogs &&
       data.last5Average != null &&
       data.seasonAverage != null &&
-      data.gameCount >= 5 &&
+      gameCount >= 3 &&
       !profile.sparse &&
       !profile.fallback
   );
