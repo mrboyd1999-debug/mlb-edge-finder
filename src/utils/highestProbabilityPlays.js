@@ -84,7 +84,7 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
     enriched.filter((p) => resolveBestPlayProjection(p) != null).length
   );
 
-  const filtered = enriched.filter((p) => resolveBestPlayProjection(p) !== null);
+  const filtered = enriched.filter((p) => passesMinimalBestPlaysFilter(p));
   logBestPlaysPipelineStage("AFTER FILTER:", filtered.length);
 
   const invalidReasons = summarizeInvalidReasons(enriched);

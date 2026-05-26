@@ -4,8 +4,8 @@
 
 import axios from "axios";
 import {
+  computeLineRecoveryProjection,
   computeProjectionForProp,
-  findSeasonStatRow,
   logSportsDataSample,
   resetProjectionDebugCount,
   resolveSportsDataPropLabel,
@@ -233,52 +233,30 @@ function enrichPropRows(propRows = [], seasonStats = []) {
     const propLabel =
       resolveSportsDataPropLabel(row) ||
       resolveSportsDataPropLabel({ statType: row.marketKey, prop: row.prop });
-    const stat = findSeasonStatRow(seasonStats, {
-      playerName: row.player,
-      playerId: row.playerId,
-    });
 
-    let projection = null;
-    let rawStat = null;
-    let games = null;
-    let matchReason = "no stat row match";
-
-    if (stat && propLabel) {
-      const computed = computeProjectionForProp(
-        { ...row, playerName: row.player, statType: propLabel, prop: propLabel },
-        seasonStats
-      );
-      projection = computed.projection;
-      rawStat = computed.rawStat;
-      games = computed.games;
-      matchReason = computed.matchReason;
-    } else if (!propLabel) {
-      matchReason = "unknown prop type";
-    }
+    const computed = computeProjectionForProp(
+      { ...row, playerName: row.player, statType: propLabel || row.prop, prop: propLabel || row.prop },
+      seasonStats
+    );
+    const projection = computed.projection ?? computeLineRecoveryProjection(row);
 
     enriched.push({
       player: row.player,
       prop: propLabel || row.prop,
       line: row.line,
-      team: stat?.Team || "",
+      team: computed.team || "",
       projection,
-      rawStat,
-      games,
-      matchReason,
+      rawStat: computed.rawStat,
+      games: computed.games,
+      matchReason: computed.matchReason,
+      projectionSource: computed.projectionSource,
       direction:
         projection != null && row.line != null
           ? projection >= row.line
             ? "OVER"
             : "UNDER"
           : null,
-      invalidReason:
-        !row.player
-          ? "missing player"
-          : !row.line
-            ? "missing line"
-            : projection == null
-              ? matchReason
-              : "",
+      invalidReason: !row.player ? "missing player" : !row.line ? "missing line" : "",
     });
   }
 
@@ -302,10 +280,10 @@ export async function buildBestPlays() {
   console.log("NORMALIZED:", enriched.length);
   console.log(
     "WITH PROJECTIONS:",
-    enriched.filter((p) => p.projection != null && p.projection > 0).length
+    enriched.filter((p) => p.projection != null && Number.isFinite(Number(p.projection))).length
   );
 
-  const filtered = enriched.filter((p) => p.projection !== null);
+  const filtered = enriched.filter((p) => p.player && p.line != null && Number.isFinite(Number(p.line)));
   console.log("AFTER FILTER:", filtered.length);
 
   const ranked = [...filtered].sort((a, b) => Number(b.projection) - Number(a.projection));

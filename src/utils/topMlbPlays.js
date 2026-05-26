@@ -39,6 +39,7 @@ import {
   syncBestPlaysFilterAudit,
 } from "../services/mlbProjectionPipelineLog.js";
 import { enrichPropsWithSportsDataMlbProjections } from "../services/bestPlaysSportsDataEnrichment.js";
+import { resolveBestPlayProjection } from "./bestPlaysPipelineDebug.js";
 
 export const TOP_MLB_PLAYS_LIMIT = HIGHEST_PROBABILITY_MAX_PLAYS;
 export const SECTION_BEST_PLAYS = HIGHEST_PROBABILITY_MAX_PLAYS;
@@ -74,7 +75,7 @@ function buildBestPlaysCandidatePool(displayProps = [], rawProps = [], parsedUnd
   console.log("NORMALIZED:", pool.length);
   console.log(
     "WITH PROJECTIONS:",
-    pool.filter((p) => Number(p.projection ?? p.projectedValue) > 0).length
+    pool.filter((p) => resolveBestPlayProjection(p) != null).length
   );
   return pool;
 }
@@ -309,7 +310,7 @@ export function resolveTopMlbPlaySections(
   );
   console.log(
     "WITH PROJECTIONS:",
-    projectedPool.filter((p) => Number(p.projection ?? p.projectedValue) > 0).length
+    projectedPool.filter((p) => resolveBestPlayProjection(p) != null).length
   );
   const strictPool = buildTopMlbPlayPool(displayProps, rawProps, parsedUnderdogProps, { relaxed: false });
   const qualityAudit = strictPool._qualityAudit || auditQualityMlbProps(projectedPool);

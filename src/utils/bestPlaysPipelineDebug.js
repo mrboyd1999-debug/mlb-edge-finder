@@ -2,6 +2,7 @@
  * Temporary Best Plays debug helpers — minimal filtering + invalid reason tracking.
  */
 
+import { computeLineRecoveryProjection } from "../../api/lib/sportsDataMlbStatProjection.js";
 import { resolveProjectionValue } from "./projectionQuality.js";
 
 export const BEST_PLAYS_DEBUG_MODE = true;
@@ -17,7 +18,7 @@ export function normalizeMatchName(name = "") {
 
 export function sanitizeProjectionValue(value) {
   const projection = Number(value);
-  if (Number.isNaN(projection) || !Number.isFinite(projection) || projection <= 0) {
+  if (Number.isNaN(projection) || !Number.isFinite(projection)) {
     return null;
   }
   return projection;
@@ -34,14 +35,15 @@ export function resolveBestPlayProjection(prop = {}) {
   if (last5 != null) return last5;
   const season = sanitizeProjectionValue(prop.seasonAverage);
   if (season != null) return season;
-  return sanitizeProjectionValue(resolveProjectionValue(prop));
+  const resolved = sanitizeProjectionValue(resolveProjectionValue(prop));
+  if (resolved != null) return resolved;
+  return computeLineRecoveryProjection(prop);
 }
 
 export function passesMinimalBestPlaysFilter(prop = {}) {
   const player = resolveBestPlayPlayerName(prop);
   const line = Number(prop.line);
-  const projection = resolveBestPlayProjection(prop);
-  return Boolean(player) && Number.isFinite(line) && line > 0 && projection !== null;
+  return Boolean(player) && Number.isFinite(line) && line > 0;
 }
 
 export function resolveBestPlayInvalidReason(prop = {}) {
@@ -49,8 +51,6 @@ export function resolveBestPlayInvalidReason(prop = {}) {
   if (!player) return "missing player";
   const line = Number(prop.line);
   if (!Number.isFinite(line) || line <= 0) return "missing line";
-  const projection = resolveBestPlayProjection(prop);
-  if (projection == null) return "missing projection";
   return "";
 }
 

@@ -1,5 +1,6 @@
 /**
  * SportsDataIO MLB season-stat → per-game projection helpers.
+ * Recovery mode: every valid prop gets a projection (stat-based or line * 0.95).
  */
 
 export function normalizeMatchName(name = "") {
@@ -88,19 +89,60 @@ export function resolveSeasonGames(stat = {}) {
   return games != null && games > 0 ? games : 1;
 }
 
-export function computePerGameProjectionFromSeasonRow(stat = {}, propLabel = "") {
-  const rawStat = resolveRawStatFromSeasonRow(stat, propLabel);
-  if (rawStat === undefined || rawStat === null) return { projection: null, rawStat: null, games: null };
+export function computeLineRecoveryProjection(prop = {}) {
+  const line = Number(prop.line ?? prop.line_score ?? prop.lineScore);
+  if (!Number.isFinite(line) || line <= 0) return null;
+  return Number((line * 0.95).toFixed(2));
+}
 
-  const games = resolveSeasonGames(stat);
-  let projection = rawStat / games;
-  projection = Number(projection.toFixed(2));
+export function safeProjection(prop = {}, stat = null) {
+  const propLabel = resolveSportsDataPropLabel(prop);
+  const games = stat?.Games ?? stat?.GamesPlayed ?? 0;
+  const safeGames = games > 0 ? games : 1;
+  let projection = null;
 
-  if (Number.isNaN(projection) || !Number.isFinite(projection) || projection <= 0) {
-    return { projection: null, rawStat, games };
+  if (stat && propLabel) {
+    switch (propLabel) {
+      case "Hits":
+        projection = (stat?.Hits || 0) / safeGames;
+        break;
+      case "Home Runs":
+        projection = (stat?.HomeRuns || 0) / safeGames;
+        break;
+      case "RBIs":
+        projection = (stat?.RunsBattedIn || 0) / safeGames;
+        break;
+      case "Runs":
+        projection = (stat?.Runs || 0) / safeGames;
+        break;
+      case "Total Bases":
+        projection = (stat?.TotalBases || 0) / safeGames;
+        break;
+      case "Strikeouts":
+        projection = (stat?.PitchingStrikeouts || stat?.Strikeouts || 0) / safeGames;
+        break;
+      default:
+        projection = null;
+    }
   }
 
-  return { projection, rawStat, games };
+  if (projection == null || Number.isNaN(projection) || !Number.isFinite(projection)) {
+    return computeLineRecoveryProjection(prop);
+  }
+
+  return Number(projection.toFixed(2));
+}
+
+export function computePerGameProjectionFromSeasonRow(stat = {}, propLabel = "", prop = {}) {
+  const projection = safeProjection({ prop: propLabel, statType: propLabel, ...prop }, stat);
+  const rawStat = resolveRawStatFromSeasonRow(stat, propLabel);
+  const games = resolveSeasonGames(stat);
+  return {
+    projection,
+    rawStat,
+    games,
+    projectionSource: rawStat != null ? "sportsdataio-season" : "line-recovery",
+  };
 }
 
 export function findSeasonStatRow(seasonStats = [], { playerName = "", playerId = null } = {}) {
@@ -134,39 +176,37 @@ export function resetProjectionDebugCount() {
 export function computeProjectionForProp(prop = {}, seasonStats = [], { logDebug = true } = {}) {
   const propLabel = resolveSportsDataPropLabel(prop);
   const playerName = String(prop.playerName || prop.player || "").trim();
+  const line = Number(prop.line ?? prop.line_score);
   const stat = findSeasonStatRow(seasonStats, {
     playerName,
     playerId: prop.playerId ?? prop.sportsDataPlayerId,
   });
 
-  if (!stat || !propLabel) {
-    return {
-      projection: null,
-      rawStat: null,
-      games: null,
-      propLabel,
-      matchReason: !stat ? "no stat row match" : "unknown prop type",
-    };
+  let projection = safeProjection({ ...prop, prop: propLabel, statType: propLabel || prop.statType }, stat);
+  let matchReason = "matched";
+
+  if (projection == null) {
+    projection = computeLineRecoveryProjection(prop);
+    matchReason = stat ? "line-recovery-after-stat" : "line-recovery-no-stat";
+  } else if (!stat || !propLabel) {
+    matchReason = !stat ? "line-recovery-no-stat-row" : "line-recovery-unknown-prop";
+  } else if (resolveRawStatFromSeasonRow(stat, propLabel) == null) {
+    matchReason = "line-recovery-missing-raw-stat";
   }
 
-  const { projection, rawStat, games } = computePerGameProjectionFromSeasonRow(stat, propLabel);
+  const rawStat = stat && propLabel ? resolveRawStatFromSeasonRow(stat, propLabel) : null;
+  const games = stat ? resolveSeasonGames(stat) : null;
 
-  if (logDebug && projectionDebugCount < 10) {
+  if (logDebug && projectionDebugCount < 20) {
     projectionDebugCount += 1;
     console.log({
       player: playerName,
-      prop: propLabel,
-      rawStat,
-      games: stat.Games ?? games,
+      prop: propLabel || prop.statType || prop.prop,
+      statExists: Boolean(stat),
+      rawStat: stat || null,
       projection,
-      statFields: {
-        Hits: stat.Hits,
-        HomeRuns: stat.HomeRuns,
-        RunsBattedIn: stat.RunsBattedIn,
-        Runs: stat.Runs,
-        PitchingStrikeouts: stat.PitchingStrikeouts,
-        TotalBases: stat.TotalBases,
-      },
+      line,
+      matchReason,
     });
   }
 
@@ -175,8 +215,9 @@ export function computeProjectionForProp(prop = {}, seasonStats = [], { logDebug
     rawStat,
     games,
     propLabel,
-    team: stat.Team || prop.team || "",
-    matchReason: projection != null ? "matched" : "invalid projection value",
+    team: stat?.Team || prop.team || "",
+    matchReason,
+    projectionSource: rawStat != null ? "sportsdataio-season" : "line-recovery",
   };
 }
 
