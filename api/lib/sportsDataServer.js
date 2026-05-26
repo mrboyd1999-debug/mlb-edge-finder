@@ -35,6 +35,7 @@ export function isSportsDataHealthPayload(payload) {
 }
 
 export async function fetchSportsDataUpstream(subPath, { apiKey = "" } = {}) {
+  const cleanedKey = cleanApiKey(apiKey);
   const normalized = subPath.startsWith("/") ? subPath : `/${subPath}`;
   const upstreamUrl = `${SPORTSDATA_MLB_UPSTREAM}${normalized}`;
   const controller = new AbortController();
@@ -44,7 +45,7 @@ export async function fetchSportsDataUpstream(subPath, { apiKey = "" } = {}) {
     const response = await fetch(upstreamUrl, {
       headers: {
         accept: "application/json",
-        ...(apiKey ? { "Ocp-Apim-Subscription-Key": apiKey } : {}),
+        ...(cleanedKey ? { "Ocp-Apim-Subscription-Key": cleanedKey } : {}),
       },
       signal: controller.signal,
     });

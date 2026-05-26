@@ -1093,6 +1093,80 @@ body,
   color: #94a3b8;
 }
 
+.sportsdata-test-results {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.sportsdata-test-results__row {
+  padding: 10px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.65);
+}
+
+.sportsdata-test-results__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.sportsdata-test-results__status {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.15);
+  color: #cbd5e1;
+}
+
+.sportsdata-test-results__status--connected {
+  background: rgba(34, 197, 94, 0.18);
+  color: #86efac;
+}
+
+.sportsdata-test-results__status--invalid-key,
+.sportsdata-test-results__status--unauthorized,
+.sportsdata-test-results__status--endpoint-not-included-in-plan,
+.sportsdata-test-results__status--proxy-error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+
+.sportsdata-test-results__status--rate-limited {
+  background: rgba(59, 130, 246, 0.18);
+  color: #93c5fd;
+}
+
+.sportsdata-test-results__status--network-error {
+  background: rgba(249, 115, 22, 0.18);
+  color: #fdba74;
+}
+
+.sportsdata-test-results__meta {
+  margin: 0;
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+.sportsdata-test-results__url {
+  margin: 4px 0 0;
+  font-size: 10px;
+  color: #64748b;
+  word-break: break-all;
+}
+
+.sportsdata-test-results__fallback {
+  margin: 0;
+  font-size: 11px;
+  color: #fcd34d;
+  line-height: 1.4;
+}
+
 .compact-app-header {
   display: grid;
   gap: 6px;

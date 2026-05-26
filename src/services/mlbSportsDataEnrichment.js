@@ -1,7 +1,9 @@
 import { getSportsDataApiKey } from "../config/apiConfig.js";
+import { cleanApiKey } from "../utils/cleanApiKey.js";
 import { ENRICHMENT_TIMEOUT_MESSAGE, getApiTimeoutMs, withFetchTimeout } from "../utils/apiTimeout.js";
 import { normalizePlayerName } from "../utils/playerNames.js";
 import { SOURCE_LABELS } from "./statEnrichment.js";
+import { SPORTSDATA_UNAVAILABLE_MESSAGE } from "./sportsDataService.js";
 import {
   fetchBattingAverages,
   fetchPitcherSeasonSplits,
@@ -39,35 +41,56 @@ function recentAverage(rows = [], field, limit = 5) {
  * Optional MLB enrichment via SportsDataIO proxy — never throws; PP/UD board stays live.
  */
 export async function enrichMlbProfilesFromSportsData(profiles = new Map(), props = []) {
-  if (!getSportsDataApiKey() || !profiles.size) {
+  if (!cleanApiKey(getSportsDataApiKey()) || !profiles.size) {
     return { profiles, warnings: [] };
   }
 
-  const enrichment = await withFetchTimeout(
-    async () => {
-      const [seasonResult, gameResult, battingResult] = await Promise.all([
-        fetchPlayerSeasonStats(),
-        fetchPlayerGameStats(),
-        fetchBattingAverages(),
-      ]);
-      return { seasonResult, gameResult, battingResult };
-    },
-    getApiTimeoutMs({ enrichment: true }),
-    {
-      label: "SportsDataIO MLB enrichment",
-      fallback: () => null,
-    }
-  );
-
-  if (!enrichment) {
-    return { profiles, warnings: [ENRICHMENT_TIMEOUT_MESSAGE] };
+  let enrichment = null;
+  try {
+    enrichment = await withFetchTimeout(
+      async () => {
+        const [seasonResult, gameResult, battingResult] = await Promise.all([
+          fetchPlayerSeasonStats(),
+          fetchPlayerGameStats(),
+          fetchBattingAverages(),
+        ]);
+        return { seasonResult, gameResult, battingResult };
+      },
+      getApiTimeoutMs({ enrichment: true }),
+      {
+        label: "SportsDataIO MLB enrichment",
+        fallback: () => null,
+      }
+    );
+  } catch {
+    enrichment = null;
   }
 
-  const warnings = [
+  if (!enrichment) {
+    return {
+      profiles,
+      warnings: [ENRICHMENT_TIMEOUT_MESSAGE, SPORTSDATA_UNAVAILABLE_MESSAGE],
+      sportsDataFailed: true,
+    };
+  }
+
+  const seasonData = enrichment.seasonResult?.data || [];
+  const gameData = enrichment.gameResult?.data || [];
+  const battingData = enrichment.battingResult?.data || [];
+  const allEmpty = !seasonData.length && !gameData.length && !battingData.length;
+  const enrichmentWarnings = [
     ...(enrichment.seasonResult?.warnings || []),
     ...(enrichment.gameResult?.warnings || []),
     ...(enrichment.battingResult?.warnings || []),
   ].filter(Boolean);
+
+  if (allEmpty) {
+    return {
+      profiles,
+      warnings: uniqueWarnings([...enrichmentWarnings, SPORTSDATA_UNAVAILABLE_MESSAGE]),
+      sportsDataFailed: true,
+    };
+  }
 
   const seasonByName = new Map();
   for (const row of enrichment.seasonResult?.data || []) {
@@ -83,6 +106,7 @@ export async function enrichMlbProfilesFromSportsData(profiles = new Map(), prop
     gameRowsByName.get(key).push(row);
   }
 
+  const warnings = [...enrichmentWarnings];
   const enriched = new Map(profiles);
   for (const [nameKey, profile] of profiles.entries()) {
     const seasonRow = seasonByName.get(nameKey);
@@ -128,5 +152,9 @@ export async function enrichMlbProfilesFromSportsData(profiles = new Map(), prop
   }
 
   void props;
-  return { profiles: enriched, warnings: [...new Set(warnings)] };
+  return { profiles: enriched, warnings: uniqueWarnings(warnings), sportsDataFailed: false };
+}
+
+function uniqueWarnings(items = []) {
+  return [...new Set(items.filter(Boolean))];
 }

@@ -11,6 +11,7 @@
  */
 
 import { getSportsDataApiKey } from "../config/apiConfig.js";
+import { cleanApiKey } from "../utils/cleanApiKey.js";
 import { ENRICHMENT_MAX_RETRIES, getSportsDataTimeoutMs } from "../utils/apiTimeout.js";
 import { fetchJsonSafe, getCacheTtlMs } from "./fetchUtil.js";
 import {
@@ -33,12 +34,12 @@ const SPORTSDATA_CACHE_PREFIX = "dfs-sportsdata-cache-v1";
 const SPORTSDATA_CACHE_MAX_MS = 60 * 60 * 1000;
 
 export const SPORTSDATA_UNAVAILABLE_MESSAGE =
-  "SportsDataIO temporarily unavailable. Falling back to PrizePicks + Odds API.";
+  "SportsDataIO unavailable — using MLB Stats API for player matching and projections.";
 
 export const SPORTSDATA_CONNECTED_VIA_PROXY = "Connected via Proxy";
 
 function sportsDataProxyHeaders() {
-  const apiKey = getSportsDataApiKey();
+  const apiKey = cleanApiKey(getSportsDataApiKey());
   return {
     accept: "application/json",
     ...(apiKey ? { [SPORTSDATA_PROXY_HEADER]: apiKey } : {}),
@@ -105,7 +106,7 @@ function cachedResult(cached, { source = "SportsDataIO", reason = "" } = {}) {
 }
 
 async function fetchSportsDataEndpoint(cacheKey, url) {
-  const apiKey = getSportsDataApiKey();
+  const apiKey = cleanApiKey(getSportsDataApiKey());
   if (!apiKey) {
     const cached = readCache(cacheKey);
     if (cached) return cachedResult(cached, { reason: "SportsDataIO key not configured — serving cache." });

@@ -4,7 +4,8 @@ import { getOddsApiKey } from "../config/apiConfig.js";
 import { ENRICHMENT_TIMEOUT_MESSAGE, isTimeoutPreview } from "../utils/apiTimeout.js";
 import { isUnderdogProp } from "../utils/underdogStreakPool.js";
 import { normalizeSource } from "../utils/normalizeSource.js";
-import { SPORTSDATA_CONNECTED_VIA_PROXY } from "./sportsDataService.js";
+import { SPORTSDATA_CONNECTED_VIA_PROXY, SPORTSDATA_UNAVAILABLE_MESSAGE } from "./sportsDataService.js";
+import { SPORTSDATA_STATUS_LABELS } from "./sportsDataAuthTest.js";
 import { CONNECTION_STATUS } from "./apiConnectionTest.js";
 
 export const PROVIDER_UI_STATUS = {
@@ -55,6 +56,25 @@ function resolveSportsDataSettingsStatus(probe = {}, feed = {}) {
       debugLine: "",
     };
   }
+
+  if (probe.explicitTest && (probe.endpointTests?.length || probe.statusLabel)) {
+    const connected =
+      probe.ok ||
+      probe.statusLabel === SPORTSDATA_STATUS_LABELS.CONNECTED ||
+      probe.settingsLine === SPORTSDATA_STATUS_LABELS.CONNECTED;
+    return {
+      settingsStatus: probe.statusLabel || probe.settingsLine,
+      settingsLine: probe.statusLabel || probe.settingsLine,
+      keySaved: true,
+      showError: probe.showError ?? !connected,
+      debugLine: probe.debugLine || probe.message || "",
+      endpointTests: probe.endpointTests || [],
+      statusLabel: probe.statusLabel || probe.settingsLine,
+      mlbStatsFallbackNote: probe.mlbStatsFallbackNote || "",
+      feedUsedOnBoard: feed.usedOnBoard,
+    };
+  }
+
   if (probe.corsBlocked) {
     return {
       settingsStatus: PROVIDER_UI_STATUS.PROXY_REQUIRED,
@@ -74,12 +94,16 @@ function resolveSportsDataSettingsStatus(probe = {}, feed = {}) {
     };
   }
   if (probe.unauthorized) {
+    const label =
+      probe.statusLabel ||
+      (probe.settingsLine && probe.settingsLine !== "Invalid key or subscription" ? probe.settingsLine : SPORTSDATA_STATUS_LABELS.INVALID_KEY);
     return {
-      settingsStatus: "Failed",
-      settingsLine: "Invalid key or subscription",
+      settingsStatus: label,
+      settingsLine: label,
       keySaved: true,
       showError: true,
-      debugLine: "",
+      debugLine: probe.debugLine || probe.message || "",
+      mlbStatsFallbackNote: SPORTSDATA_UNAVAILABLE_MESSAGE,
     };
   }
   if (probe.rateLimited) {
@@ -327,6 +351,18 @@ export function mergeConnectionReportWithFeeds(report = {}, feedContext = {}) {
     if (provider === "SportsDataIO") {
       const feed = feedContext.SportsDataIO || {};
       const effective = resolveSportsDataSettingsStatus(row, feed);
+      if (row.explicitTest && row.endpointTests?.length) {
+        return {
+          ...row,
+          ...effective,
+          settingsLine: effective.settingsLine,
+          settingsStatus: effective.settingsStatus,
+          statusLabel: effective.statusLabel || effective.settingsLine,
+          showError: effective.showError,
+          endpointTests: row.endpointTests,
+          debugLine: row.debugLine || effective.debugLine || "",
+        };
+      }
       return {
         ...row,
         ...effective,

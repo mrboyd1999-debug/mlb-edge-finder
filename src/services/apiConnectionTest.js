@@ -12,15 +12,8 @@ import {
   isAbortOrTimeoutError,
   isTimeoutPreview,
 } from "../utils/apiTimeout.js";
-import {
-  probeSportsDataMlbPlayersProxy,
-  SPORTSDATA_MLB_PLAYERS_ROUTE,
-} from "./sportsDataService.js";
-import {
-  getOddsKeyLengthWarning,
-  getSportsDataAuthWarning,
-  getSportsDataMlbAccessMessage,
-} from "../utils/cleanApiKey.js";
+import { getOddsKeyLengthWarning, cleanApiKey } from "../utils/cleanApiKey.js";
+import { runSportsDataMultiEndpointTest, SPORTSDATA_STATUS_LABELS } from "./sportsDataAuthTest.js";
 import { getSourceState, isSourceInCooldown, SOURCE_IDS } from "./sourceRateLimit.js";
 import { readCachedBoard, readVerifiedCacheBoard } from "./pickStore.js";
 import { buildFeedHealthContext, mergeConnectionReportWithFeeds } from "./providerHealth.js";
@@ -428,151 +421,63 @@ async function testOddsApi() {
 }
 
 
-async function probeSportsDataHealth({ apiKey } = {}) {
-  void apiKey;
-  const startedAt = Date.now();
-  const probe = await probeSportsDataMlbPlayersProxy();
-  const healthOk = Boolean(probe.ok);
-
-  return {
-    ok: healthOk,
-    status: probe.responseCode || (healthOk ? 200 : 502),
-    preview: probe.preview || probe.message || "",
-    responseBody: probe.preview || probe.message || "",
-    httpStatus: probe.responseCode || (healthOk ? 200 : 502),
-    durationMs: Date.now() - startedAt,
-    payload: probe.payload ?? probe.data,
-    playerCount: probe.playerCount || 0,
-    rateLimited: Boolean(probe.rateLimited),
-    unauthorized: Boolean(probe.unauthorized),
-    timedOut: Boolean(probe.timedOut),
-    corsBlocked: false,
-    networkError: !healthOk && !probe.timedOut && !probe.unauthorized,
-    url: SPORTSDATA_MLB_PLAYERS_ROUTE,
-    upstreamPath: probe.upstreamPath || "/scores/json/Players",
-    usedDirect: false,
-    proxied: true,
-    text: probe.text || "",
-  };
-}
-
-function classifySportsDataProbe(probe = {}) {
-  const httpStatus = Number(probe.httpStatus ?? probe.status ?? probe.responseCode ?? 0);
-  const responseBody = formatResponseBody(probe.text, probe.preview || probe.responseBody || probe.message);
-  const authWarning = getSportsDataAuthWarning(httpStatus);
-  const mlbAccessMessage = getSportsDataMlbAccessMessage(httpStatus);
-
-  if (probe.timedOut) {
-    return {
-      settingsLine: ENRICHMENT_TIMEOUT_MESSAGE,
-      status: CONNECTION_STATUS.FAILED,
-      message: ENRICHMENT_TIMEOUT_MESSAGE,
-      httpStatus,
-      responseBody,
-      showError: false,
-      timedOut: true,
-    };
-  }
-  if (probe.unauthorized || httpStatus === 401 || httpStatus === 403) {
-    const detail = [authWarning, mlbAccessMessage, responseBody].filter(Boolean).join(" — ");
-    return {
-      settingsLine: `Failed (HTTP ${httpStatus})`,
-      status: CONNECTION_STATUS.FAILED,
-      message: detail,
-      httpStatus,
-      responseBody,
-      authWarning,
-      mlbAccessMessage,
-      showError: true,
-    };
-  }
-  if (probe.rateLimited) {
-    return {
-      settingsLine: "Rate limited",
-      status: CONNECTION_STATUS.CACHED,
-      message: CONNECTION_MESSAGES.RATE_LIMITED,
-      httpStatus,
-      responseBody,
-      showError: false,
-    };
-  }
-  if (probe.ok) {
-    const playerCount = probe.playerCount ?? (Array.isArray(probe.payload) ? probe.payload.length : 0);
-    return {
-      settingsLine: "Connected",
-      settingsStatus: "Connected",
-      status: CONNECTION_STATUS.LIVE,
-      message: `Connected — ${playerCount} MLB players`,
-      httpStatus: 200,
-      responseBody: `OK — ${playerCount} MLB players returned`,
-      showError: false,
-      debugLine: `MLB Players endpoint · ${playerCount} players`,
-      proxied: true,
-      playerCount,
-    };
-  }
-  return {
-    settingsLine: httpStatus ? `Failed (HTTP ${httpStatus})` : "Failed",
-    status: CONNECTION_STATUS.FAILED,
-    message: [responseBody || probe.preview || CONNECTION_MESSAGES.FAILED, mlbAccessMessage].filter(Boolean).join(" — "),
-    httpStatus,
-    responseBody: responseBody || probe.preview || CONNECTION_MESSAGES.FAILED,
-    showError: true,
-  };
-}
-
 async function testSportsDataProvider() {
-  const sportsDataKey = getSportsDataApiKey();
+  const sportsDataKey = cleanApiKey(getSportsDataApiKey());
+  const startedAt = Date.now();
 
   if (!sportsDataKey) {
     console.log("[SportsDataIO Test] Status: skipped — no key saved");
     return {
       provider: "SportsDataIO",
-      route: SPORTSDATA_MLB_PLAYERS_ROUTE,
-      upstreamPath: "/scores/json/Players",
       keyConfigured: false,
       status: CONNECTION_STATUS.NOT_CONFIGURED,
       message: CONNECTION_MESSAGES.NOT_CONFIGURED,
       preview: "No SportsDataIO key configured",
       durationMs: 0,
-      settingsLine: "Not configured",
+      settingsLine: SPORTSDATA_STATUS_LABELS.NOT_CONFIGURED,
+      statusLabel: SPORTSDATA_STATUS_LABELS.NOT_CONFIGURED,
       keySaved: false,
+      endpointTests: [],
+      explicitTest: true,
     };
   }
 
-  const probe = await probeSportsDataHealth({ apiKey: sportsDataKey });
-  const classified = classifySportsDataProbe({ ...probe, playerCount: probe.playerCount });
+  const multi = await runSportsDataMultiEndpointTest({ apiKey: sportsDataKey });
   const state = getSourceState(SOURCE_IDS.SPORTSDATA);
-
-  console.log("[SportsDataIO Test] Proxy route:", SPORTSDATA_MLB_PLAYERS_ROUTE);
-  console.log("[SportsDataIO Test] Upstream:", "/scores/json/Players");
-  console.log("[SportsDataIO Test] Response status:", probe.httpStatus ?? probe.status);
-  console.log("[SportsDataIO Test] Response body:", classified.responseBody || probe.preview);
-
-  const detailMessage = classified.message || classified.responseBody || probe.preview || "";
+  const primary = multi.primaryFailure || multi.endpointTests?.[0] || {};
+  const playersTest = multi.endpointTests?.find((row) => row.id === "players") || primary;
+  const detailMessage =
+    multi.ok
+      ? `All endpoints reachable — Players: ${playersTest.recordCount ?? "?"} records`
+      : [multi.statusLabel, primary.message].filter(Boolean).join(" — ");
 
   return {
     provider: "SportsDataIO",
-    route: SPORTSDATA_MLB_PLAYERS_ROUTE,
-    upstreamPath: "/scores/json/Players",
     keyConfigured: true,
     keySaved: true,
-    keyLength: sportsDataKey.length,
-    httpStatus: classified.httpStatus ?? probe.httpStatus ?? probe.status,
-    responseBody: classified.responseBody || probe.preview || "",
-    settingsLine: classified.settingsLine,
-    settingsStatus: classified.settingsStatus || classified.settingsLine,
-    showError: classified.showError,
-    debugLine: classified.debugLine || detailMessage,
-    authWarning: classified.authWarning || "",
-    mlbAccessMessage: classified.mlbAccessMessage || "",
-    status: classified.status,
+    keyLength: multi.keyLength,
+    httpStatus: primary.httpStatus ?? 0,
+    responseBody: primary.responseBody || primary.message || "",
+    settingsLine: multi.settingsLine,
+    settingsStatus: multi.settingsLine,
+    statusLabel: multi.statusLabel,
+    showError: multi.showError,
+    debugLine: detailMessage,
+    status: multi.ok ? CONNECTION_STATUS.LIVE : CONNECTION_STATUS.FAILED,
     message: detailMessage,
     proxied: true,
-    ...probe,
-    lastSuccessfulFetchAt: probe.ok ? new Date().toISOString() : state.lastSuccessfulFetchAt || "",
+    ok: multi.ok,
+    unauthorized:
+      multi.statusLabel === SPORTSDATA_STATUS_LABELS.INVALID_KEY ||
+      multi.statusLabel === SPORTSDATA_STATUS_LABELS.UNAUTHORIZED,
+    rateLimited: multi.statusLabel === SPORTSDATA_STATUS_LABELS.RATE_LIMITED,
+    endpointTests: multi.endpointTests,
+    mlbStatsFallbackNote: multi.mlbStatsFallbackNote,
+    explicitTest: true,
+    durationMs: Date.now() - startedAt,
+    lastSuccessfulFetchAt: multi.ok ? new Date().toISOString() : state.lastSuccessfulFetchAt || "",
     requestCount: state.requestCount || 0,
-    lastError: classified.showError ? detailMessage : "",
+    lastError: multi.showError ? detailMessage : "",
     cooldownRemainingMs: Math.max(0, Number(state.cooldownUntil || 0) - Date.now()),
   };
 }
@@ -721,17 +626,24 @@ export function formatOddsTestNotice(row = {}) {
 }
 
 export function formatSportsDataTestNotice(row = {}) {
-  if (!row || row.settingsLine === "Not configured") return "Add a SportsDataIO key, then test again.";
-  if (row.settingsLine === "Connected") {
+  if (!row || row.settingsLine === "Not configured" || row.settingsLine === SPORTSDATA_STATUS_LABELS.NOT_CONFIGURED) {
+    return "Add a SportsDataIO key, then retest.";
+  }
+  if (row.settingsLine === "Connected" || row.statusLabel === SPORTSDATA_STATUS_LABELS.CONNECTED) {
     const parts = ["SportsDataIO connected."];
     if (row.keyLength) parts.push(`Key length: ${row.keyLength}.`);
-    if (row.responseBody) parts.push(row.responseBody);
+    const endpointTests = row.endpointTests || [];
+    endpointTests.forEach((test) => {
+      parts.push(`${test.label}: HTTP ${test.httpStatus} — ${test.message || test.responseBody || "OK"}.`);
+    });
     return parts.join(" ");
   }
-  const parts = [`SportsDataIO failed (HTTP ${row.httpStatus ?? row.status ?? "?"}).`];
-  if (row.responseBody) parts.push(row.responseBody);
-  if (row.authWarning) parts.push(row.authWarning);
-  if (row.mlbAccessMessage) parts.push(row.mlbAccessMessage);
+  const label = row.statusLabel || row.settingsLine || "Failed";
+  const parts = [`SportsDataIO: ${label}.`];
+  (row.endpointTests || []).forEach((test) => {
+    parts.push(`${test.label}: HTTP ${test.httpStatus ?? "?"} — ${test.message || test.responseBody || "—"}.`);
+  });
+  if (row.mlbStatsFallbackNote) parts.push(row.mlbStatsFallbackNote);
   return parts.join(" ");
 }
 

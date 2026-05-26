@@ -10,10 +10,21 @@ function findProviderRow(results = [], name) {
 function resolveKeyProviderStatus(row, tested) {
   if (!tested) return "Not Tested";
   if (!row) return "Not Tested";
-  const line = String(row?.settingsLine || row?.displayStatus || "").toLowerCase();
-  if (/connected|live|partial|ok|success/.test(line)) return "Connected";
-  if (/not configured|not tested|not used/.test(line)) return "Not Tested";
-  return "Failed";
+  const label = String(row?.statusLabel || row?.settingsLine || row?.displayStatus || "").trim();
+  if (!label) return "Not Tested";
+  if (/^connected$/i.test(label) || /^live$/i.test(label)) return "Connected";
+  if (/not configured|not tested|not used/i.test(label)) return "Not Tested";
+  const knownFailures = [
+    "Invalid key",
+    "Unauthorized",
+    "Endpoint not included in plan",
+    "Rate limited",
+    "Proxy error",
+    "Network error",
+  ];
+  if (knownFailures.includes(label)) return label;
+  if (/connected|live|partial|ok|success/i.test(label)) return "Connected";
+  return label || "Failed";
 }
 
 function resolveServiceStatus(connected) {

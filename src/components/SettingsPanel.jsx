@@ -16,6 +16,11 @@ import {
   formatSportsDataTestNotice,
 } from "../services/apiConnectionTest.js";
 import { cleanApiKey, getOddsKeyLengthWarning } from "../utils/cleanApiKey.js";
+import SportsDataTestResults from "./SportsDataTestResults.jsx";
+
+function findProviderRow(results = [], name) {
+  return results.find((row) => String(row.provider || "").toLowerCase() === name.toLowerCase()) || null;
+}
 
 function mergeProviderResult(current, report, providerName) {
   const otherResults = (current?.results || []).filter(
@@ -165,6 +170,7 @@ export default function SettingsPanel({
   const oddsSaved = Boolean(saved[oddsDef.key]?.trim());
   const sdSaved = Boolean(saved[sdDef.key]?.trim());
   const oddsKeyWarning = getOddsKeyLengthWarning(cleanedOddsDraft);
+  const sdRow = findProviderRow(connectionReport?.results || [], "SportsDataIO");
 
   return (
     <details id="section-settings" ref={panelRef} className="settings-panel compact-settings-details">
@@ -222,9 +228,14 @@ export default function SettingsPanel({
             onClick={handleTestSportsData}
             disabled={testingSportsData}
           >
-            {testingSportsData ? "Testing…" : "Test SportsDataIO"}
+            {testingSportsData ? "Testing…" : "Retest SportsDataIO"}
           </button>
         </div>
+
+        <SportsDataTestResults
+          endpointTests={sdRow?.endpointTests || []}
+          fallbackNote={sdRow?.mlbStatsFallbackNote || ""}
+        />
 
         <div className="settings-api-actions">
           <button type="button" style={styles.secondaryButton} onClick={handleSave}>
