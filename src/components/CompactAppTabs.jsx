@@ -1,11 +1,13 @@
 import { memo } from "react";
 
 export const COMPACT_APP_TABS = [
-  { id: "manual", label: "Manual Analyzer" },
+  { id: "manual", label: "Manual" },
   { id: "bestPlays", label: "Best Plays" },
+  { id: "prizepicks", label: "PrizePicks" },
+  { id: "underdog", label: "Underdog" },
   { id: "goblins", label: "Goblins" },
   { id: "demons", label: "Demons" },
-  { id: "saved", label: "Saved Picks" },
+  { id: "saved", label: "Saved" },
 ];
 
 function CompactAppTabs({ activeTab = "manual", onChange }) {

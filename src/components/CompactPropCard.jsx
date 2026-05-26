@@ -55,8 +55,9 @@ function CompactPropCard({
     prop.analyticsReason ||
     prop.statusMessage ||
     "";
-  const fallbackNote =
-    prop.isFallbackProjection || prop.projectionSource === "manual-fallback"
+  const fallbackNote = prop.projectionUnavailable
+    ? "Projection unavailable"
+    : prop.isFallbackProjection || prop.projectionSource === "manual-fallback"
       ? prop.projectionLabel || "Projection unavailable — using manual fallback formula"
       : null;
 

@@ -30,7 +30,7 @@ function CompactPayoutTab({
           <h2>{title}</h2>
           <p>{subtitle}</p>
         </div>
-        <div className="compact-card-list">
+        <div className="compact-prop-grid">
           {picks.slice(0, 6).map((prop, index) => (
             <CompactPropCard
               key={prop.id || `${role}-${index}`}

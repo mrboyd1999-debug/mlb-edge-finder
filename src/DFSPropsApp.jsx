@@ -182,7 +182,8 @@ import {
   buildUnderdogParserFailureMessage,
   hasAnyProviderProps,
 } from "./services/providerOrchestration.js";
-import { enrichPropsWithSportsData, generateMlbPropsFromSportsData } from "./services/propSportsDataEnrichment.js";
+import { enrichPropsWithSportsData } from "./services/propSportsDataEnrichment.js";
+import { buildLiveRenderBoard, filterPlatformProps, isFakeOrFallbackProp } from "./utils/livePropRender.js";
 import { resolveIngestionFallback } from "./services/ingestionFallback.js";
 import { writeLastGoodBoard, readLastGoodBoard, boardFromLastGood } from "./services/lastGoodBoardCache.js";
 import { initRawResponseDebug, dumpDebugGlobals, recordProviderStatus, recordNormalizedProps } from "./utils/rawResponseDebug.js";
@@ -226,7 +227,6 @@ import {
 import { countUsableProps, normalizePropShape } from "./utils/propShape.js";
 import {
   buildAllDisplayProps,
-  applyEmergencyDisplayFallback,
   buildDisplayDebugCounts,
   filterAllDisplayPropsBySport,
   logAllDisplayPropsSample,
@@ -1195,53 +1195,8 @@ function buildCoreBoardPreview({ rawProps = [], allDisplayProps = [], sourceStat
   };
 }
 
-async function injectSportsDataIfProvidersEmpty({
-  mergedCount = 0,
-  fetchSport = "MLB",
-  sourceStatus = {},
-  debugInfo = {},
-} = {}) {
-  if (mergedCount > 0) return null;
-  const generated = await withFetchTimeout(
-    () => generateMlbPropsFromSportsData({ limit: 48 }),
-    getSportsDataTimeoutMs(),
-    {
-      label: "SportsDataIO immediate fallback",
-      fallback: () => ({ props: [], generatedCount: 0, warnings: [ENRICHMENT_TIMEOUT_MESSAGE] }),
-    }
-  );
-  if (!generated.props?.length) return null;
-
-  const display = normalizePropsWithSource(
-    enrichDisplayPropsPipeline(
-      generated.props.map((prop) =>
-        normalizeDisplayProp(prop, {
-          selectedSport: fetchSport === "all" ? "MLB" : fetchSport,
-          source: "SportsDataIO",
-          status: "live",
-        })
-      )
-    )
-  );
-
-  sourceStatus.SportsDataIO = "Connected";
-  debugInfo.sources.SportsDataIO = {
-    ...(debugInfo.sources.SportsDataIO || {}),
-    status: "Connected",
-    apiStatus: "Connected",
-    message: `Generated ${generated.generatedCount} MLB projection props`,
-    propsAfterParsing: generated.generatedCount,
-    usablePropsCount: display.length,
-    lineSourceBadge: "LIVE",
-  };
-  debugInfo.ingestionFallback = "sportsdata-immediate";
-  recordNormalizedProps(display, {
-    provider: "sportsdataio",
-    total: display.length,
-    ingestionSource: "sportsdata-immediate",
-  });
-
-  return { rawProps: generated.props, allDisplayProps: display, generated };
+async function injectSportsDataIfProvidersEmpty() {
+  return null;
 }
 
 function enrichmentBackgroundFallback(label) {
@@ -1524,17 +1479,6 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     );
   } else if (allDisplayProps.length) {
     allDisplayProps = normalizePropsWithSource(allDisplayProps);
-  }
-
-  if (!allDisplayProps.length) {
-    void withFetchTimeout(
-      () => generateMlbPropsFromSportsData({ limit: 48 }),
-      getSportsDataTimeoutMs(),
-      {
-        label: "SportsDataIO generated props",
-        fallback: () => ({ props: [], generatedCount: 0, warnings: [ENRICHMENT_TIMEOUT_MESSAGE] }),
-      }
-    );
   }
 
   if (!allDisplayProps.length && rawProps.length) {
@@ -1976,7 +1920,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   if (!qualifiedReadyProps.length && allDisplayProps.length) {
     qualifiedReadyProps = allDisplayProps.slice(0, RENDER_LIMITS.readyToBet);
   }
-  const acceptedPropsForRender = qualifiedReadyProps.length ? qualifiedReadyProps : allDisplayProps.slice(0, RENDER_LIMITS.readyToBet);
+  const liveRenderResult = buildLiveRenderBoard(allDisplayProps);
+  const acceptedPropsForRender = liveRenderResult.props;
+  debugInfo.pipelineRenderCounts = liveRenderResult.counts;
   const modelSignalMap = buildModelSignalMap(filterVerifiedSportsbookProps(qualBoards.allDisplayable));
   let streakProps = [];
 
@@ -2276,18 +2222,11 @@ export default function DFSPropsApp() {
     setPipelineStageCounts(scopedBoard.pipelineStageCounts || scopedBoard.debugInfo?.pipelineStageCounts || {});
     setWatchlist(scopedBoard.watchlist || []);
     setNearQualification(scopedBoard.nearQualification || []);
-    let renderAccepted =
-      scopedBoard.acceptedPropsForRender ||
-      scopedBoard.debugInfo?.acceptedPropsForRender ||
-      scopedBoard.debugInfo?.pipelineAudit?.acceptedPropsForRender ||
-      scopedBoard.qualifiedReadyProps ||
-      scopedBoard.readyProps ||
-      [];
+    let renderAccepted = buildLiveRenderBoard(
+      masterProps.length ? masterProps : boardProps
+    ).props;
     if (!renderAccepted.length && boardProps.length) {
-      renderAccepted = boardProps.filter(isVerifiedSportsbookProp);
-    }
-    if (!renderAccepted.length && boardProps.length) {
-      renderAccepted = boardProps.slice(0, RENDER_LIMITS.readyToBet);
+      renderAccepted = boardProps.filter((prop) => !isFakeOrFallbackProp(prop)).slice(0, RENDER_LIMITS.readyToBet);
     }
     setQualifiedReadyProps(scopedBoard.qualifiedReadyProps || scopedBoard.readyProps || renderAccepted);
     setAcceptedPropsForRender(Array.isArray(renderAccepted) ? renderAccepted : []);
@@ -2707,12 +2646,17 @@ export default function DFSPropsApp() {
     }
     return rows;
   }, [scoredDisplayProps, sport, platform, marketQuickFilter]);
-  const boardDisplayProps = useMemo(() => {
-    if (acceptedPropsForRender?.length) return acceptedPropsForRender;
-    if (selectedSportProps.length) return selectedSportProps;
-    if (allDisplayProps.length) return allDisplayProps;
-    return [];
-  }, [acceptedPropsForRender, selectedSportProps, allDisplayProps]);
+  const liveRenderBoard = useMemo(() => buildLiveRenderBoard(allDisplayProps), [allDisplayProps]);
+  const boardDisplayProps = useMemo(() => liveRenderBoard.props, [liveRenderBoard]);
+  const pipelineRenderCounts = useMemo(() => liveRenderBoard.counts, [liveRenderBoard]);
+  const prizePicksFeedProps = useMemo(
+    () => filterPlatformProps(boardDisplayProps, "prizepicks"),
+    [boardDisplayProps]
+  );
+  const underdogFeedProps = useMemo(
+    () => filterPlatformProps(boardDisplayProps, "underdog"),
+    [boardDisplayProps]
+  );
   const displayStatusMessage = useMemo(() => {
     if (!debugModeEnabled || loading) return "";
     if (allDisplayProps.length > 0) return "Showing live/cached props";
@@ -2929,8 +2873,14 @@ export default function DFSPropsApp() {
     });
     return { goblins: filled.goblins, demons: filled.demons };
   }, [streakSportBoards, boardDisplayProps, props, scoredDisplayProps, selectedSportUdProps, selectedBoardSport]);
-  const curatedGoblinPicks = curatedGoblinDemonBoards.goblins;
-  const curatedDemonPicks = curatedGoblinDemonBoards.demons;
+  const curatedGoblinPicks = useMemo(
+    () => (curatedGoblinDemonBoards.goblins || []).filter((prop) => !prop.isFallbackMlbPick && !isFakeOrFallbackProp(prop)),
+    [curatedGoblinDemonBoards.goblins]
+  );
+  const curatedDemonPicks = useMemo(
+    () => (curatedGoblinDemonBoards.demons || []).filter((prop) => !prop.isFallbackMlbPick && !isFakeOrFallbackProp(prop)),
+    [curatedGoblinDemonBoards.demons]
+  );
   const safeModeFallbackActive = useMemo(() => {
     if (!isSafeModeEnabled()) return pipelineFallback || boardDisplayProps.some((prop) => prop.displayFallback);
     return (
@@ -3526,6 +3476,9 @@ export default function DFSPropsApp() {
       underdogDebugSnapshot={underdogDebugSnapshot}
       debugInfo={debugInfo}
       mlbPipelineStatus={mlbPipelineStatus}
+      pipelineRenderCounts={pipelineRenderCounts}
+      prizePicksFeedProps={prizePicksFeedProps}
+      underdogFeedProps={underdogFeedProps}
     />
 
       {selectedEvaluation && (

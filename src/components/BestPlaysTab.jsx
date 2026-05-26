@@ -26,7 +26,7 @@ function BestPlaysTab({ sections = [], loading = false, onOpen, onSave }) {
   if (!mapped.some((section) => section.picks.length)) {
     return (
       <p className="compact-empty">
-        No ranked MLB plays yet. Use Manual Analyzer or refresh live lines when APIs are connected.
+        No live MLB plays yet. Open PrizePicks or Underdog tabs, or refresh when feeds are connected.
       </p>
     );
   }
@@ -40,7 +40,7 @@ function BestPlaysTab({ sections = [], loading = false, onOpen, onSave }) {
               <h2>{section.title}</h2>
               {section.eyebrow ? <p>{section.eyebrow}</p> : null}
             </div>
-            <div className="compact-card-list">
+            <div className={section.useRow ? "compact-card-list" : "compact-prop-grid"}>
               {section.picks.map((prop, index) =>
                 section.useRow ? (
                   <BestPlayRowCard key={prop.id || `${section.id}-${index}`} prop={prop} rank={index + 1} onOpen={onOpen} />

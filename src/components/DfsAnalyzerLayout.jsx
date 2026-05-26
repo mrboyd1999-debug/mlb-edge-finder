@@ -3,8 +3,10 @@ import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import CompactApiHeader from "./CompactApiHeader.jsx";
 import CompactAppTabs from "./CompactAppTabs.jsx";
 import SystemStatusCard from "./SystemStatusCard.jsx";
+import PropPipelineCounters from "./PropPipelineCounters.jsx";
 import ManualPropsPanel from "./ManualPropsPanel.jsx";
 import BestPlaysTab from "./BestPlaysTab.jsx";
+import PlatformFeedTab from "./PlatformFeedTab.jsx";
 import CompactPayoutTab from "./CompactPayoutTab.jsx";
 import SavedPicksTab from "./SavedPicksTab.jsx";
 import SettingsPanel from "./SettingsPanel.jsx";
@@ -32,6 +34,9 @@ function DfsAnalyzerLayout({
   topMlbPlayBoard,
   curatedGoblinPicks,
   curatedDemonPicks,
+  prizePicksFeedProps,
+  underdogFeedProps,
+  pipelineRenderCounts,
   savedDisplayPicks,
   onRemoveSavedPick,
   onClearSavedPicks,
@@ -77,6 +82,8 @@ function DfsAnalyzerLayout({
         connectionReport={connectionReport}
       />
 
+      <PropPipelineCounters counts={pipelineRenderCounts} />
+
       {learningSaveNotice ? <p className="compact-form-notice">{learningSaveNotice}</p> : null}
 
       {appView === "manual" ? (
@@ -98,6 +105,30 @@ function DfsAnalyzerLayout({
         <SectionErrorBoundary name="Best Plays" onError={onSectionError}>
           <BestPlaysTab
             sections={topMlbPlayBoard?.sections || []}
+            loading={loading}
+            onOpen={onOpenProp}
+            onSave={onSavePick}
+          />
+        </SectionErrorBoundary>
+      ) : null}
+
+      {appView === "prizepicks" ? (
+        <SectionErrorBoundary name="PrizePicks" onError={onSectionError}>
+          <PlatformFeedTab
+            platformLabel="PrizePicks"
+            picks={prizePicksFeedProps || []}
+            loading={loading}
+            onOpen={onOpenProp}
+            onSave={onSavePick}
+          />
+        </SectionErrorBoundary>
+      ) : null}
+
+      {appView === "underdog" ? (
+        <SectionErrorBoundary name="Underdog" onError={onSectionError}>
+          <PlatformFeedTab
+            platformLabel="Underdog"
+            picks={underdogFeedProps || []}
             loading={loading}
             onOpen={onOpenProp}
             onSave={onSavePick}

@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { formatDateTime } from "../utils/formatters.js";
-import { readSettingsMeta } from "../services/runtimeSettings.js";
+import { readSettingsMeta, getOddsApiKey, getSportsDataApiKey } from "../services/runtimeSettings.js";
 import { healthStateStyle, CONNECTION_TIERS } from "../services/sourceHealth.js";
 
 function findProviderRow(results = [], name) {
@@ -56,6 +56,9 @@ function SystemStatusCard({ apiHealth = {}, mlbPipelineStatus = null, connection
   const oddsRow = findProviderRow(reportRows, "Odds API");
   const sdRow = findProviderRow(reportRows, "SportsDataIO");
 
+  const oddsKeyConfigured = Boolean(getOddsApiKey());
+  const sdKeyConfigured = Boolean(getSportsDataApiKey());
+
   const stats = mlbPipelineStatus?.mlbStatsApi || {};
   const projection = mlbPipelineStatus?.projectionApi || {};
   const statsConnected = stats.status === "Connected";
@@ -73,18 +76,22 @@ function SystemStatusCard({ apiHealth = {}, mlbPipelineStatus = null, connection
         <strong>System Status</strong>
       </div>
       <div className="system-status-card__grid">
-        <StatusLine
-          label="Odds API"
-          status={resolveKeyProviderStatus(oddsRow, hasBeenTested && Boolean(oddsRow))}
-          timestamp={testedAt}
-          timestampLabel="Last tested"
-        />
-        <StatusLine
-          label="SportsDataIO"
-          status={resolveKeyProviderStatus(sdRow, hasBeenTested && Boolean(sdRow))}
-          timestamp={testedAt}
-          timestampLabel="Last tested"
-        />
+        {oddsKeyConfigured ? (
+          <StatusLine
+            label="Odds API"
+            status={resolveKeyProviderStatus(oddsRow, hasBeenTested && Boolean(oddsRow))}
+            timestamp={testedAt}
+            timestampLabel="Last tested"
+          />
+        ) : null}
+        {sdKeyConfigured ? (
+          <StatusLine
+            label="SportsDataIO"
+            status={resolveKeyProviderStatus(sdRow, hasBeenTested && Boolean(sdRow))}
+            timestamp={testedAt}
+            timestampLabel="Last tested"
+          />
+        ) : null}
         <StatusLine
           label="MLB Stats API"
           status={resolveServiceStatus(statsConnected)}

@@ -26,6 +26,8 @@ import { normalizeUnifiedProps, countLiveUnifiedProps } from "./unifiedPropNorma
 import { computeLiveConfidence } from "./liveConfidenceEngine.js";
 import { applyCrossSectionPlayerCap } from "./sectionPlayerDedupe.js";
 import { buildLiveFetchFailureSummary } from "./liveFetchAudit.js";
+import { isMinimalRenderableProp } from "./normalizeProp.js";
+import { isFakeOrFallbackProp } from "./livePropRender.js";
 
 export const TOP_MLB_PLAYS_LIMIT = 20;
 export const SECTION_BEST_PLAYS = MLB_BEST_PLAYS_LIMIT;
@@ -66,12 +68,10 @@ function buildTopMlbPlayPool(displayProps = [], rawProps = [], parsedUnderdogPro
 
   const pool = [];
   merged.forEach((prop) => {
-    if (prop.isDemoData) return;
+    if (isFakeOrFallbackProp(prop)) return;
+    if (!isMinimalRenderableProp(prop)) return;
     if (!relaxed && unsupportedMarketRejectReason(prop)) return;
     if (!relaxed && validatePropSanityRejectReason(prop)) return;
-    if (!isTopMlbPlayCandidate(prop)) return;
-    if (!relaxed && !isPrizePicksOrUnderdog(prop) && !isSportsDataProjectionProp(prop)) return;
-    if (!relaxed && !isVerifiedSportsbookProp(prop) && !isSportsDataProjectionProp(prop)) return;
     pool.push(prop);
   });
 
@@ -246,17 +246,17 @@ export function resolveTopMlbPlaySections(
     liveVerified: liveVerifiedCount,
   });
 
-  const strictPool = buildTopMlbPlayPool(displayProps, rawProps, parsedUnderdogProps, { relaxed: false });
-  let ranked = rankPool(strictPool, { relaxed: false });
-  let usedFallback = false;
-  let fallbackLabel = "";
+  const strictPool = buildTopMlbPlayPool(displayProps, rawProps, parsedUnderdogProps, { relaxed: true });
+  let ranked = rankPool(strictPool, { relaxed: true, liveLine: true });
+  let usedFallback = ranked.length > 0;
+  let fallbackLabel = ranked.length ? "Live platform lines" : "";
   let isDemoBoard = false;
 
-  logPipelineStage("rank.strict", { pool: strictPool.length, ranked: ranked.length });
+  logPipelineStage("rank.liveFirst", { pool: strictPool.length, ranked: ranked.length });
 
   if (!ranked.length && liveVerifiedCount > 0) {
     const relaxedPool = buildTopMlbPlayPool(displayProps, rawProps, parsedUnderdogProps, { relaxed: true });
-    ranked = rankPool(relaxedPool, { relaxed: true });
+    ranked = rankPool(relaxedPool, { relaxed: true, liveLine: true });
     if (ranked.length) {
       usedFallback = true;
       fallbackLabel = FALLBACK_PROJECTIONS_LABEL;
@@ -264,26 +264,16 @@ export function resolveTopMlbPlaySections(
     logPipelineStage("rank.relaxed", { pool: relaxedPool.length, ranked: ranked.length });
   }
 
-  if (!ranked.length && liveVerifiedCount > 0) {
-    const liveLinePool = strictPool.filter(isLiveLineRankable);
-    ranked = rankPool(liveLinePool, { relaxed: true, liveLine: true });
+  if (!ranked.length && displayProps.length) {
+    const liveOnly = displayProps.filter((prop) => !isFakeOrFallbackProp(prop) && isMinimalRenderableProp(prop));
+    ranked = liveOnly
+      .map((prop, idx) => annotateTopPlay(prop, idx + 1, { allowRelaxed: true, allowLiveLine: true }))
+      .filter(Boolean);
     if (ranked.length) {
       usedFallback = true;
       fallbackLabel = "Live platform lines";
     }
-    logPipelineStage("rank.liveLine", { pool: liveLinePool.length, ranked: ranked.length });
-  }
-
-  if (!ranked.length && displayProps.length) {
-    const verifiedPool = filterMlbRecommendableProps(displayProps.map((prop) => enrichPropWithSideEvaluation(prop)));
-    ranked = sortMlbVerifiedProps(verifiedPool).map((prop, idx) =>
-      annotateTopPlay(prop, idx + 1, { allowRelaxed: false, allowLiveLine: false })
-    ).filter(Boolean);
-    if (ranked.length) {
-      usedFallback = false;
-      fallbackLabel = "";
-    }
-    logPipelineStage("rank.verifiedOnly", { pool: verifiedPool.length, ranked: ranked.length });
+    logPipelineStage("rank.liveOnly", { pool: liveOnly.length, ranked: ranked.length });
   }
 
   const unifiedRanked = normalizeUnifiedProps(ranked, enrichForBoard);

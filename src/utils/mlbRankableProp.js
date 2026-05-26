@@ -7,6 +7,8 @@ import { validatePropSanityRejectReason } from "./propSanity.js";
 import { unsupportedMarketRejectReason } from "./mlbAllowedMarkets.js";
 import { evaluateBothSides } from "./sideEvaluationEngine.js";
 import { getStaleFilterReason } from "./stalePropFilter.js";
+import { isMinimalRenderableProp } from "./normalizeProp.js";
+import { isFakeOrFallbackProp } from "./livePropRender.js";
 import {
   hasMatchupContext,
   hasRenderableProjection,
@@ -25,11 +27,13 @@ function finiteOr(value, fallback = NaN) {
   return Number.isFinite(num) ? num : fallback;
 }
 
-function baseRejectReason(prop = {}, { requireVerified = true, requireMatchup = true } = {}) {
+function baseRejectReason(prop = {}, { requireVerified = false, requireMatchup = false } = {}) {
   if (!prop) return "Rejected: missing prop";
-  if (requireVerified && !prop.isDemoData && !isVerifiedSportsbookProp(prop)) {
+  if (isFakeOrFallbackProp(prop)) return "Rejected: non-live prop";
+  if (requireVerified && !isVerifiedSportsbookProp(prop)) {
     return "Rejected: unverified sportsbook prop";
   }
+  if (!isMinimalRenderableProp(prop)) return "Rejected: missing player/line/stat";
   if (!prop.isDemoData) {
     const unsupported = unsupportedMarketRejectReason(prop);
     if (unsupported) return unsupported;
@@ -37,15 +41,18 @@ function baseRejectReason(prop = {}, { requireVerified = true, requireMatchup = 
     if (sanity) return sanity;
     if (!isTopMlbPlayCandidate(prop)) return "Rejected: not MLB candidate";
   }
-  const projection = resolveProjectionValue(prop);
-  if (projection == null) return "Rejected: no projection data available";
   if (requireMatchup && !hasMatchupContext(prop)) return "Rejected: matchup missing";
   return "";
 }
 
 export function validateTopMlbPlayRejectReason(prop = {}) {
-  const base = baseRejectReason(prop, { requireVerified: true, requireMatchup: true });
+  if (isLiveLineRankable(prop)) return "";
+
+  const base = baseRejectReason(prop, { requireVerified: false, requireMatchup: false });
   if (base) return base;
+
+  const projection = resolveProjectionValue(prop);
+  if (projection == null) return "";
 
   const projectionReject = validateProjectionRejectReason(prop);
   if (projectionReject && !prop.estimatedProjection && !prop.isDemoData) return projectionReject;
@@ -70,13 +77,14 @@ export function validateTopMlbPlayRejectReason(prop = {}) {
 }
 
 export function validateRelaxedRankableRejectReason(prop = {}) {
+  if (isLiveLineRankable(prop)) return "";
   if (prop.isDemoData) return "";
 
   const base = baseRejectReason(prop, { requireVerified: false, requireMatchup: false });
   if (base && !/unverified/.test(base)) return base;
 
   const projection = resolveProjectionValue(prop);
-  if (projection == null) return "Rejected: no projection data available";
+  if (projection == null) return "";
 
   const evaluation = prop.sideEvaluation || evaluateBothSides(prop);
   if (evaluation.pass || evaluation.recommendedSide === "PASS") {
@@ -107,17 +115,13 @@ export function filterTopMlbPlayRankable(props = [], { relaxed = false } = {}) {
 
 /** Verified platform line — no synthetic projection required. */
 export function validateLiveLineRejectReason(prop = {}) {
+  if (isFakeOrFallbackProp(prop)) return "Rejected: non-live prop";
   if (prop.isDemoData) return "Rejected: demo prop";
-  if (!isVerifiedSportsbookProp(prop)) return "Rejected: unverified sportsbook prop";
+  if (!isMinimalRenderableProp(prop)) return "Rejected: missing player/line/stat";
   const unsupported = unsupportedMarketRejectReason(prop);
   if (unsupported) return unsupported;
   const sanity = validatePropSanityRejectReason(prop);
   if (sanity) return sanity;
-  if (!isTopMlbPlayCandidate(prop)) return "Rejected: not MLB candidate";
-  const line = finiteOr(prop.line, NaN);
-  if (!Number.isFinite(line) || line <= 0) return "Rejected: invalid line";
-  if (!prop.playerName && !prop.player) return "Rejected: missing player";
-  if (!prop.statType && !prop.market && !prop.propType) return "Rejected: missing stat";
   return "";
 }
 
