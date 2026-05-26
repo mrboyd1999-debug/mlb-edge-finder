@@ -326,6 +326,11 @@ export function enrichPropWithSideEvaluation(prop = {}) {
         : prop.projectionLabel || "Verified Projection",
     recommendedSide: evaluation.recommendedSide,
     side: sidePick || prop.side || "",
+    leanDirection:
+      prop.leanDirection ||
+      (evaluation.recommendedSide === "OVER" || evaluation.recommendedSide === "UNDER"
+        ? evaluation.recommendedSide
+        : null),
     pick: sidePick || prop.pick || "",
     bestPick: sidePick || prop.bestPick || "",
     overUnder: sidePick || prop.overUnder || "",

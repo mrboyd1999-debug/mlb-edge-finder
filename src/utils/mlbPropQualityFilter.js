@@ -47,6 +47,37 @@ export function validateMlbPropQualityRejectReason(prop = {}) {
   return "";
 }
 
+export function auditQualityMlbProps(props = []) {
+  const counters = {
+    filteredMissingProjection: 0,
+    filteredLowConfidence: 0,
+    filteredWeakEdge: 0,
+    filteredOther: 0,
+    eligible: 0,
+    attempted: (props || []).length,
+  };
+
+  for (const prop of props || []) {
+    const reason = validateMlbPropQualityRejectReason(prop);
+    if (!reason) {
+      counters.eligible += 1;
+      continue;
+    }
+    const text = reason.toLowerCase();
+    if (/projection|insufficient stats|missing/.test(text)) {
+      counters.filteredMissingProjection += 1;
+    } else if (/confidence/.test(text)) {
+      counters.filteredLowConfidence += 1;
+    } else if (/edge|close to line/.test(text)) {
+      counters.filteredWeakEdge += 1;
+    } else {
+      counters.filteredOther += 1;
+    }
+  }
+
+  return counters;
+}
+
 export function filterQualityMlbProps(props = []) {
   const seen = new Set();
   const out = [];

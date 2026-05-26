@@ -3,12 +3,14 @@
  */
 
 import { isDemonProp, isGoblinProp } from "./propLabels.js";
-import {
-  DEMON_MAX_CONFIDENCE,
-  DEMON_MIN_CONFIDENCE,
-  GOBLIN_MIN_CONFIDENCE,
-} from "./mlbWeightedConfidence.js";
+import { computeAbsoluteProjectionEdge } from "./projectionQuality.js";
 import { computeLiveConfidence } from "./liveConfidenceEngine.js";
+
+const GOBLIN_QUAL_MIN_CONFIDENCE = 65;
+const GOBLIN_QUAL_MIN_EDGE = 0.2;
+const DEMON_QUAL_MIN_CONFIDENCE = 45;
+const DEMON_QUAL_MAX_CONFIDENCE = 60;
+const DEMON_QUAL_MIN_EDGE = 0.2;
 
 function finiteOr(value, fallback = NaN) {
   const num = Number(value);
@@ -21,13 +23,16 @@ export function classifyGoblinDemon(prop = {}) {
   const platformGoblin = isGoblinProp(prop) || prop.oddsType === "goblin";
   const platformDemon = isDemonProp(prop) || prop.oddsType === "demon";
   const conf = computeLiveConfidence(prop) ?? finiteOr(prop.confidenceScore ?? prop.confidence, NaN);
-  const edge = finiteOr(prop.edge ?? prop.sideEvaluation?.edge, 0);
+  const edge = Math.max(
+    finiteOr(prop.edge ?? prop.sideEvaluation?.edge, 0),
+    computeAbsoluteProjectionEdge(prop)
+  );
   const hit10 = finiteOr(prop.last10HitRate ?? prop.recentHitRate, NaN);
   const mult = finiteOr(prop.multiplier ?? prop.payout, 1);
 
   if (
     platformGoblin ||
-    (Number.isFinite(conf) && conf >= GOBLIN_MIN_CONFIDENCE && edge >= 0.35 && (!Number.isFinite(hit10) || hit10 >= 0.55))
+    (Number.isFinite(conf) && conf >= GOBLIN_QUAL_MIN_CONFIDENCE && edge >= GOBLIN_QUAL_MIN_EDGE && (!Number.isFinite(hit10) || hit10 >= 0.52))
   ) {
     return { tier: "goblin", role: "goblin", confidence: conf, edge };
   }
@@ -35,10 +40,9 @@ export function classifyGoblinDemon(prop = {}) {
   if (
     platformDemon ||
     (Number.isFinite(conf) &&
-      conf >= DEMON_MIN_CONFIDENCE &&
-      conf <= DEMON_MAX_CONFIDENCE &&
-      edge >= 0.85 &&
-      mult >= 1.1)
+      conf >= DEMON_QUAL_MIN_CONFIDENCE &&
+      conf <= DEMON_QUAL_MAX_CONFIDENCE &&
+      edge >= DEMON_QUAL_MIN_EDGE)
   ) {
     return { tier: "demon", role: "demon", confidence: conf, edge };
   }

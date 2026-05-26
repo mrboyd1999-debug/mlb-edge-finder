@@ -16,6 +16,7 @@ function DeveloperDebugPanel({
   feedHealthContext = null,
   underdogDebugSnapshot = null,
   rejectionAudit = null,
+  bestPlaysFilter = null,
   showDebugPanels = false,
   onShowDebugPanelsChange,
   debugModeEnabled = false,
@@ -147,6 +148,14 @@ function DeveloperDebugPanel({
                     </div>
                   ) : null}
                   {rejectionAudit.mlbProjection.statsFetchTimedOut ? " · stats timed out" : ""}
+                  {bestPlaysFilter ? (
+                    <p style={{ ...styles.compactFlags, margin: "2px 0" }}>
+                      Best Plays filters: {bestPlaysFilter.filteredMissingProjection ?? 0} missing projection ·{" "}
+                      {bestPlaysFilter.filteredLowConfidence ?? 0} low confidence · {bestPlaysFilter.filteredWeakEdge ?? 0}{" "}
+                      weak edge · {bestPlaysFilter.selected ?? 0} selected
+                      {bestPlaysFilter.usedVerifiedFallback ? " · verified fallback" : ""}
+                    </p>
+                  ) : null}
                   {rejectionAudit.mlbProjection.testMode ? " · test thresholds" : ""}
                   {rejectionAudit.mlbProjection.rejections &&
                   Object.keys(rejectionAudit.mlbProjection.rejections).length ? (

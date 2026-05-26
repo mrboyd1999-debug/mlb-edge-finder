@@ -1,11 +1,8 @@
 import { canonicalMarketKey } from "./marketNormalization.js";
 import { normalizeSource } from "./normalizeSource.js";
 import { resolvePlayerRole } from "./propPlayerRole.js";
-import {
-  computeAbsoluteProjectionEdge,
-  PROJECTION_QUALITY,
-  resolveProjectionQuality,
-} from "./projectionQuality.js";
+import { computeBestPlayRankScore, resolveEdgeMagnitude } from "./bestPlayRanking.js";
+import { PROJECTION_QUALITY, resolveProjectionQuality } from "./projectionQuality.js";
 import {
   enrichPropWithSideEvaluation,
   evaluateBothSides,
@@ -68,18 +65,21 @@ export function computeTopMlbPlayRankScore(prop = {}, { relaxed = false } = {}) 
   const evaluation = prop.sideEvaluation || evaluateBothSides(prop);
   if (!rankable(prop)) return -Infinity;
 
-  let score = Number.isFinite(evaluation.rankScore) && evaluation.rankScore > -Infinity
-    ? evaluation.rankScore
-    : 0;
-
   const confidence = finiteOr(evaluation.confidence ?? prop.confidenceScore ?? prop.confidence, NaN);
-  const edge = finiteOr(evaluation.edge, 0);
-  const minEdge = relaxed ? 0.1 : 0.15;
+  const edgeMag = resolveEdgeMagnitude({ ...prop, edge: evaluation.edge });
+  const minEdge = relaxed ? 0.15 : 0.3;
 
-  if (!Number.isFinite(confidence) || edge < minEdge) return -Infinity;
+  if (!Number.isFinite(confidence) || edgeMag < minEdge) return -Infinity;
 
-  score += confidence * 0.35;
-  score += edge * 4;
+  let score = computeBestPlayRankScore({
+    ...prop,
+    confidenceScore: confidence,
+    edge: edgeMag,
+  });
+
+  if (Number.isFinite(evaluation.rankScore) && evaluation.rankScore > -Infinity) {
+    score = (score + evaluation.rankScore) / 2;
+  }
   score += underPriorityTier(prop) * 8;
 
   if (evaluation.recommendedSide === "UNDER") {
@@ -109,7 +109,7 @@ export function sortTopMlbPlays(props = [], { relaxed = false } = {}) {
         underPriorityTier(b) - underPriorityTier(a) ||
         computeTopMlbPlayRankScore(b, { relaxed }) - computeTopMlbPlayRankScore(a, { relaxed }) ||
         finiteOr(b.confidenceScore ?? b.confidence) - finiteOr(a.confidenceScore ?? a.confidence) ||
-        computeAbsoluteProjectionEdge(b) - computeAbsoluteProjectionEdge(a)
+        resolveEdgeMagnitude(b) - resolveEdgeMagnitude(a)
     );
 }
 

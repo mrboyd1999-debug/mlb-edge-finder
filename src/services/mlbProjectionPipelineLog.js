@@ -3,6 +3,7 @@
  */
 
 import { isDevEnvironment } from "./fetchUtil.js";
+import { resolveEdgeMagnitude } from "../utils/bestPlayRanking.js";
 
 export const MLB_PROJECTION_TEST_MODE =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_MLB_PROJECTION_TEST_MODE === "1") ||
@@ -31,6 +32,7 @@ const filterCounters = {
   filteredLowConfidence: 0,
   filteredBadMatch: 0,
   filteredLowEdge: 0,
+  filteredWeakEdge: 0,
   filteredOther: 0,
   verifiedProjections: 0,
   attempted: 0,
@@ -125,6 +127,7 @@ function bumpFilterCounter(reason = "") {
     filterCounters.filteredBadMatch += 1;
   } else if (/edge/.test(text)) {
     filterCounters.filteredLowEdge += 1;
+    filterCounters.filteredWeakEdge += 1;
   } else if (reason) {
     filterCounters.filteredOther += 1;
   }
@@ -213,6 +216,19 @@ export function logPipelineExecutionSummary(label = "Pipeline execution summary"
   return payload;
 }
 
+export function syncBestPlaysFilterAudit(audit = {}) {
+  filterCounters.filteredMissingProjection = Number(audit.filteredMissingProjection) || 0;
+  filterCounters.filteredLowConfidence = Number(audit.filteredLowConfidence) || 0;
+  filterCounters.filteredWeakEdge =
+    Number(audit.filteredWeakEdge ?? audit.filteredLowEdge) || 0;
+  filterCounters.filteredLowEdge = filterCounters.filteredWeakEdge;
+  filterCounters.filteredBadMatch = Number(audit.filteredBadMatch) || 0;
+  filterCounters.filteredOther = Number(audit.filteredOther) || 0;
+  filterCounters.attempted = Number(audit.attempted) || 0;
+  filterCounters.verifiedProjections = Number(audit.eligible) || 0;
+  return getProjectionFilterCounters();
+}
+
 export function logProjectionFilterSummary(label = "Highest Probability filter summary") {
   const counters = getProjectionFilterCounters();
   console.info(`[MLB Projection Pipeline] ${label}`, counters);
@@ -220,9 +236,8 @@ export function logProjectionFilterSummary(label = "Highest Probability filter s
 }
 
 export function collectVerifiedScoredProps(scoredProps = [], options = {}) {
-  const testMode = options.testMode ?? MLB_PROJECTION_TEST_MODE;
-  const minConf = testMode ? 55 : 65;
-  const minEdge = testMode ? 0.2 : 0.5;
+  const minConf = options.minConf ?? 58;
+  const minEdge = options.minEdge ?? 0.3;
   const minSample = 3;
   const verified = [];
   const rejectionCounts = {
@@ -266,7 +281,7 @@ export function collectVerifiedScoredProps(scoredProps = [], options = {}) {
       continue;
     }
 
-    const edge = Number(prop.edge);
+    const edge = resolveEdgeMagnitude(prop);
     if (!Number.isFinite(edge) || edge < minEdge) {
       rejectionCounts.lowEdge += 1;
       continue;
@@ -286,7 +301,6 @@ export function collectVerifiedScoredProps(scoredProps = [], options = {}) {
     verified,
     verifiedProps: verified,
     rejectionCounts,
-    testMode,
     thresholds: { minConf, minEdge, minSample },
   };
 }
@@ -294,10 +308,9 @@ export function collectVerifiedScoredProps(scoredProps = [], options = {}) {
 export function buildMlbProjectionDiagnostics({
   scoredProps = [],
   statsMap = new Map(),
-  testMode = MLB_PROJECTION_TEST_MODE,
   emergencyDiagnostic = null,
 } = {}) {
-  const { verified, rejectionCounts, thresholds } = collectVerifiedScoredProps(scoredProps, { testMode });
+  const { verified, rejectionCounts, thresholds } = collectVerifiedScoredProps(scoredProps);
   const stageCounts = getPipelineStageCounts();
   const emergency = emergencyDiagnostic || getLastEmergencyDiagnostic();
   const projectionErrors = getProjectionPipelineErrors();
@@ -324,7 +337,6 @@ export function buildMlbProjectionDiagnostics({
     })),
     rejectionCounts,
     thresholds,
-    testMode,
     projectionsComplete: areProjectionsComplete(),
     statsFetchTimedOut,
     statsProfilesLoaded: statsMap instanceof Map ? statsMap.size : 0,

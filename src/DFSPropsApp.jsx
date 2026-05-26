@@ -2860,7 +2860,6 @@ export default function DFSPropsApp() {
   }, [scoredDisplayProps, sport, platform, marketQuickFilter]);
   const liveRenderBoard = useMemo(() => buildLiveRenderBoard(allDisplayProps), [allDisplayProps]);
   const boardDisplayProps = useMemo(() => liveRenderBoard.props, [liveRenderBoard]);
-  const pipelineRenderCounts = useMemo(() => liveRenderBoard.counts, [liveRenderBoard]);
   const prizePicksFeedProps = useMemo(
     () => filterPlatformProps(boardDisplayProps, "prizepicks"),
     [boardDisplayProps]
@@ -3034,6 +3033,18 @@ export default function DFSPropsApp() {
     }
     return board;
   }, [boardDisplayProps, props, parsedUnderdogProps, sourceStatus, lastUpdated, debugInfo, error, allDisplayProps.length]);
+  const pipelineRenderCounts = useMemo(() => {
+    const base = liveRenderBoard.counts;
+    const audit = topMlbPlayBoard?.filterDiagnostics;
+    if (!audit) return base;
+    return {
+      ...base,
+      filteredMissingProjection: audit.filteredMissingProjection || 0,
+      filteredLowConfidence: audit.filteredLowConfidence || 0,
+      filteredWeakEdge: audit.filteredWeakEdge || 0,
+      filteredOut: audit.filteredOut || base.filteredOut,
+    };
+  }, [liveRenderBoard, topMlbPlayBoard]);
   const curatedSportPicks = useMemo(() => {
     const primary = resolveMlbStreakPicks(
       streakSportBoards,

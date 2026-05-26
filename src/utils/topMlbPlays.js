@@ -22,11 +22,12 @@ import { buildPipelineDebugSnapshot, logPipelineStage } from "./mlbPipelineDebug
 import { countLiveUnifiedProps } from "./unifiedPropNormalizer.js";
 import { buildLiveFetchFailureSummary } from "./liveFetchAudit.js";
 import { isMinimalRenderableProp } from "./normalizeProp.js";
-import { filterQualityMlbProps } from "./mlbPropQualityFilter.js";
+import { filterQualityMlbProps, auditQualityMlbProps } from "./mlbPropQualityFilter.js";
 import { isFakeOrFallbackProp } from "./livePropRender.js";
 import {
   HIGHEST_PROBABILITY_MAX_PLAYS,
   HIGHEST_PROBABILITY_TARGET_PLAYS,
+  HIGHEST_PROBABILITY_MIN_VERIFIED_TO_SHOW,
   selectHighestProbabilityPlays,
   auditHighestProbabilityProps,
   buildHighestProbabilityQualifyReason,
@@ -34,8 +35,8 @@ import {
 import {
   logProjectionFilterSummary,
   resetProjectionFilterCounters,
-  MLB_PROJECTION_TEST_MODE,
   areProjectionsComplete,
+  syncBestPlaysFilterAudit,
 } from "../services/mlbProjectionPipelineLog.js";
 
 export const TOP_MLB_PLAYS_LIMIT = HIGHEST_PROBABILITY_MAX_PLAYS;
@@ -79,7 +80,11 @@ function buildTopMlbPlayPool(displayProps = [], rawProps = [], parsedUnderdogPro
   });
 
   logPipelineStage("pool.filtered", { count: pool.length, relaxed });
-  return filterQualityMlbProps(pool);
+  const qualityAudit = auditQualityMlbProps(pool);
+  const qualityFiltered = filterQualityMlbProps(pool);
+  logPipelineStage("pool.quality", { in: pool.length, out: qualityFiltered.length, ...qualityAudit });
+  qualityFiltered._qualityAudit = qualityAudit;
+  return qualityFiltered;
 }
 
 export function auditTopMlbPlayPool(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
@@ -284,25 +289,32 @@ export function resolveTopMlbPlaySections(
   });
 
   const strictPool = buildTopMlbPlayPool(displayProps, rawProps, parsedUnderdogProps, { relaxed: false });
+  const qualityAudit = strictPool._qualityAudit || auditQualityMlbProps(strictPool);
   resetProjectionFilterCounters();
-  const filterDiagnostics = auditHighestProbabilityProps(strictPool, { testMode: false });
-  let highestPicks = selectHighestProbabilityPlays(strictPool, HIGHEST_PROBABILITY_MAX_PLAYS, { testMode: false }).map(
-    (prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1)
-  );
-  if (
-    highestPicks.length < HIGHEST_PROBABILITY_TARGET_PLAYS &&
-    MLB_PROJECTION_TEST_MODE &&
-    areProjectionsComplete()
-  ) {
-    const testDiagnostics = auditHighestProbabilityProps(strictPool, { testMode: true });
-    const testPicks = selectHighestProbabilityPlays(strictPool, HIGHEST_PROBABILITY_MAX_PLAYS, { testMode: true }).map(
-      (prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1)
-    );
-    if (testPicks.length > highestPicks.length) {
-      highestPicks = testPicks;
-      Object.assign(filterDiagnostics, testDiagnostics, { usedTestMode: true });
-    }
-  }
+  const playAudit = auditHighestProbabilityProps(strictPool, { minConfidence: 58, minEdge: 0.3 });
+  syncBestPlaysFilterAudit(playAudit);
+  const filterDiagnostics = {
+    ...playAudit,
+    qualityFilter: qualityAudit,
+  };
+  const strictEligible = playAudit.eligible || 0;
+  const selection = selectHighestProbabilityPlays(strictPool, HIGHEST_PROBABILITY_MAX_PLAYS, {
+    minConfidence: 58,
+    minEdge: 0.3,
+    withMeta: true,
+  });
+  let highestPicks = (selection.picks || []).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
+
+  filterDiagnostics.usedVerifiedFallback = Boolean(selection.usedVerifiedFallback);
+
+  filterDiagnostics.selected = highestPicks.length;
+  filterDiagnostics.eligible = strictEligible;
+  filterDiagnostics.filteredOut =
+    playAudit.filteredMissingProjection +
+    playAudit.filteredLowConfidence +
+    playAudit.filteredWeakEdge +
+    playAudit.filteredBadMatch +
+    playAudit.filteredOther;
   logProjectionFilterSummary("Best Plays filter diagnostics");
 
   logPipelineStage("rank.highestProbability", { pool: strictPool.length, ranked: highestPicks.length });
@@ -311,7 +323,7 @@ export function resolveTopMlbPlaySections(
     {
       id: "highest-probability",
       title: "Highest Probability Props",
-      eyebrow: "Verified MLB edges · 65%+ confidence · +0.5 edge minimum",
+      eyebrow: "Verified MLB edges · 58%+ confidence · 0.3+ edge magnitude · overs & unders",
       picks: highestPicks.filter(Boolean),
     },
   ];
