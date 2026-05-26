@@ -3,6 +3,12 @@
  */
 
 import { resolveProjectionValue, computeAbsoluteProjectionEdge } from "./projectionQuality.js";
+import {
+  passesMinimalBestPlaysFilter,
+  resolveBestPlayInvalidReason,
+  resolveBestPlayProjection,
+  sanitizeProjectionValue,
+} from "./bestPlaysPipelineDebug.js";
 import { isPitcherStrikeoutMarket } from "./topMlbPlaysRanking.js";
 import { isMlbPitcherMarket } from "../modules/mlbPitcherData.js";
 
@@ -133,7 +139,7 @@ export function buildMarketContextNote(prop = {}) {
 }
 
 export function enrichBestPlayRankingFields(prop = {}) {
-  const projection = resolveProjectionValue(prop);
+  const projection = resolveBestPlayProjection(prop);
   const line = finiteOr(prop.line, NaN);
   const games = resolveGamesPlayed(prop);
   const leanDirection = resolveLeanDirection(prop);
@@ -172,22 +178,10 @@ export function enrichBestPlayRankingFields(prop = {}) {
     rankScore,
     marketContext,
     recommendedSide: prop.recommendedSide || direction,
+    invalidReason: resolveBestPlayInvalidReason({ ...prop, projection }),
   };
 }
 
 export function passesBestPlaysFilter(prop = {}) {
-  const enriched = prop.edgeScore != null ? prop : enrichBestPlayRankingFields(prop);
-  const line = finiteOr(enriched.line, NaN);
-  const projection = finiteOr(enriched.projection ?? resolveProjectionValue(enriched), NaN);
-  const games = resolveGamesPlayed(enriched);
-  const edgeScore = finiteOr(enriched.edgeScore, 0);
-
-  return (
-    Number.isFinite(line) &&
-    line > 0 &&
-    Number.isFinite(projection) &&
-    projection > 0 &&
-    games >= BEST_PLAYS_MIN_GAMES &&
-    Math.abs(edgeScore) >= BEST_PLAYS_MIN_EDGE
-  );
+  return passesMinimalBestPlaysFilter(prop);
 }

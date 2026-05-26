@@ -8,11 +8,11 @@ const ODDS_API_BASE = "https://api.the-odds-api.com";
 const SPORTSDATA_MLB_BASE = "https://api.sportsdata.io/v3/mlb";
 const MLB_SPORT_KEY = "baseball_mlb";
 const CURRENT_SEASON = 2026;
-const MIN_EDGE_ABS = 0.015;
-const MIN_GAMES = 5;
 const TOP_N = 10;
+const DEBUG_SAMPLE_SIZE = 25;
 const MAX_EVENTS = 12;
 const REQUEST_TIMEOUT_MS = 30_000;
+const BEST_PLAYS_DEBUG_MODE = true;
 
 const MLB_PLAYER_PROP_MARKETS = [
   "player_props",
@@ -28,7 +28,7 @@ const MLB_PLAYER_PROP_MARKETS = [
 
 const MARKET_LABELS = {
   player_props: "Player Prop",
-  pitcher_strikeouts: "Pitcher Strikeouts",
+  pitcher_strikeouts: "Strikeouts",
   batter_hits: "Hits",
   batter_total_bases: "Total Bases",
   batter_home_runs: "Home Runs",
@@ -46,6 +46,22 @@ function num(value) {
 function round(value, digits = 4) {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
+}
+
+function normalizeName(name = "") {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sanitizeProjection(projection) {
+  const value = Number(projection);
+  if (Number.isNaN(value) || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  return round(value, 2);
 }
 
 function resolveOddsApiKey() {
@@ -233,46 +249,6 @@ async function fetchPlayerSeasonStats(apiKey) {
   }
 }
 
-async function fetchPlayersDirectory(apiKey) {
-  if (!apiKey) return [];
-
-  try {
-    const url = `${SPORTSDATA_MLB_BASE}/scores/json/Players`;
-    const response = await axios.get(url, {
-      headers: {
-        accept: "application/json",
-        "Ocp-Apim-Subscription-Key": apiKey,
-      },
-      timeout: REQUEST_TIMEOUT_MS,
-      validateStatus: () => true,
-    });
-
-    if (response.status !== 200 || !Array.isArray(response.data)) return [];
-    return response.data.filter((row) => row && typeof row === "object");
-  } catch {
-    return [];
-  }
-}
-
-function buildNameToPlayerId(players = []) {
-  const map = new Map();
-  for (const row of players) {
-    const playerId = num(row.PlayerID);
-    if (playerId == null) continue;
-    const names = [
-      row.Name,
-      [row.FirstName, row.LastName].filter(Boolean).join(" "),
-      row.ShortName,
-    ]
-      .map((value) => String(value || "").trim().toLowerCase())
-      .filter(Boolean);
-    for (const name of names) {
-      if (!map.has(name)) map.set(name, playerId);
-    }
-  }
-  return map;
-}
-
 function resolveGamesPlayed(statRow = {}) {
   return (
     num(statRow.Games) ??
@@ -283,27 +259,55 @@ function resolveGamesPlayed(statRow = {}) {
   );
 }
 
-function resolveSeasonAverage(statRow = {}, marketKey = "") {
+function computePerGameByPropType(statRow = {}, propType = "", marketKey = "") {
   const games = resolveGamesPlayed(statRow);
   if (!games || games <= 0) return null;
 
-  const market = String(marketKey || "").toLowerCase();
+  const label = String(propType || MARKET_LABELS[marketKey] || marketKey || "").toLowerCase();
 
-  const totalByMarket = {
-    pitcher_strikeouts: num(statRow.PitchingStrikeouts) ?? num(statRow.Strikeouts),
-    batter_hits: num(statRow.Hits),
-    batter_total_bases: num(statRow.TotalBases),
-    batter_home_runs: num(statRow.HomeRuns),
-    batter_rbis: num(statRow.RunsBattedIn) ?? num(statRow.RBI),
-    batter_runs_scored: num(statRow.Runs),
-    pitcher_hits_allowed: num(statRow.PitchingHits),
-    pitcher_walks: num(statRow.PitchingWalks) ?? num(statRow.Walks),
-    player_props: num(statRow.Hits) ?? num(statRow.PitchingStrikeouts),
-  };
+  if (/strikeout/.test(label)) {
+    const total = num(statRow.PitchingStrikeouts) ?? num(statRow.Strikeouts);
+    return total != null ? total / games : null;
+  }
+  if (/total bases/.test(label)) {
+    const total = num(statRow.TotalBases);
+    return total != null ? total / games : null;
+  }
+  if (/home run/.test(label)) {
+    const total = num(statRow.HomeRuns);
+    return total != null ? total / games : null;
+  }
+  if (/rbi/.test(label)) {
+    const total = num(statRow.RunsBattedIn) ?? num(statRow.RBI);
+    return total != null ? total / games : null;
+  }
+  if (/^runs$|runs scored/.test(label)) {
+    const total = num(statRow.Runs);
+    return total != null ? total / games : null;
+  }
+  if (/hits allowed/.test(label)) {
+    const total = num(statRow.PitchingHits);
+    return total != null ? total / games : null;
+  }
+  if (/walk/.test(label)) {
+    const total = num(statRow.PitchingWalks) ?? num(statRow.Walks);
+    return total != null ? total / games : null;
+  }
+  if (/hit/.test(label)) {
+    const total = num(statRow.Hits);
+    return total != null ? total / games : null;
+  }
 
-  const total = totalByMarket[market];
-  if (total == null) return null;
-  return total / games;
+  return null;
+}
+
+function computeProjectionByPropType(statRow = {}, propType = "", marketKey = "") {
+  const perGame = computePerGameByPropType(statRow, propType, marketKey);
+  if (perGame == null) return null;
+
+  const games = resolveGamesPlayed(statRow);
+  const sampleFactor = 0.6 + 0.4 * Math.min(games / 25, 1);
+  return sanitizeProjection(perGame * sampleFactor);
 }
 
 function buildStatsIndex(seasonStats = []) {
@@ -315,109 +319,89 @@ function buildStatsIndex(seasonStats = []) {
   return byPlayerId;
 }
 
-function normalizePropRows(propRows = [], statsByPlayerId = new Map(), nameToPlayerId = new Map()) {
-  const normalized = [];
+function findStatRow(seasonStats = [], { playerId = null, playerName = "" } = {}, statsByPlayerId = new Map()) {
+  if (playerId != null && statsByPlayerId.has(playerId)) {
+    return statsByPlayerId.get(playerId);
+  }
+
+  const query = normalizeName(playerName);
+  if (!query) return null;
+
+  let stat = seasonStats.find((row) => normalizeName(row.Name) === query);
+  if (stat) return stat;
+
+  stat = seasonStats.find((row) => {
+    const candidate = normalizeName(row.Name);
+    return candidate.includes(query) || query.includes(candidate);
+  });
+  return stat || null;
+}
+
+function resolveInvalidReason(row = {}) {
+  if (!row.player) return "missing player";
+  if (!row.line || row.line <= 0) return "missing line";
+  if (row.projection == null) return row.matchReason || "missing projection";
+  return "";
+}
+
+function enrichPropRows(propRows = [], seasonStats = [], statsByPlayerId = new Map()) {
+  const enriched = [];
 
   for (const row of propRows) {
-    let playerId = num(row.playerId);
-    const playerName = String(row.player || "").trim().toLowerCase();
-    if (playerId == null && playerName) {
-      playerId = nameToPlayerId.get(playerName) ?? null;
-    }
-    const statRow = playerId != null ? statsByPlayerId.get(playerId) : null;
-    if (!statRow) continue;
+    const statRow = findStatRow(
+      seasonStats,
+      { playerId: num(row.playerId), playerName: row.player },
+      statsByPlayerId
+    );
 
-    const line = num(row.line);
-    const player = String(row.player || statRow.Name || "").trim();
-    if (!player || line == null || line <= 0) continue;
+    const projection = statRow
+      ? computeProjectionByPropType(statRow, row.prop, row.marketKey)
+      : null;
 
-    const games = resolveGamesPlayed(statRow);
-    if (games < MIN_GAMES) continue;
-
-    const avg = resolveSeasonAverage(statRow, row.marketKey);
-    if (avg == null) continue;
-
-    normalized.push({
-      player,
-      prop: row.prop,
-      marketKey: row.marketKey,
-      line,
-      team: String(statRow.Team || row.team || "").trim(),
-      avg: round(avg, 4),
-      games,
-      playerId,
-    });
-  }
-
-  return normalized;
-}
-
-function computeProjection(avg, games) {
-  const sampleFactor = 0.6 + 0.4 * Math.min(games / 25, 1);
-  return round(avg * sampleFactor, 2);
-}
-
-function computeConfidence(games) {
-  if (games >= 20) return "HIGH";
-  if (games >= 8) return "MED";
-  return "LOW";
-}
-
-function computeVerifiedProbability(edgeScore = 0) {
-  const magnitude = Math.abs(Number(edgeScore) || 0);
-  const probability = Math.round(50 + magnitude * 100);
-  return Math.max(50, Math.min(95, probability));
-}
-
-function computeEdgeScore(projection, line, games) {
-  const diff = projection - line;
-  const percentEdge = diff / line;
-  const confidenceWeight = games > 20 ? 1.2 : games > 10 ? 1.0 : 0.7;
-  const stability = Math.min(games / 25, 1);
-  return round(percentEdge * confidenceWeight * stability, 4);
-}
-
-function dedupeAnalyzedPlays(plays = []) {
-  const seen = new Map();
-
-  for (const play of plays) {
-    const key = [play.playerId, play.prop, play.line].join("|").toLowerCase();
-    const existing = seen.get(key);
-    if (!existing || Math.abs(play.edgeScore) > Math.abs(existing.edgeScore)) {
-      seen.set(key, play);
-    }
-  }
-
-  return [...seen.values()];
-}
-
-function analyzeNormalizedProps(normalized = []) {
-  const analyzed = [];
-
-  for (const row of normalized) {
-    const projection = computeProjection(row.avg, row.games);
-    if (projection == null || row.line == null) continue;
-
-    const edgeScore = computeEdgeScore(projection, row.line, row.games);
-    if (Math.abs(edgeScore) < MIN_EDGE_ABS) continue;
-
-    analyzed.push({
+    enriched.push({
       player: row.player,
       prop: row.prop,
+      propType: row.prop,
       line: row.line,
-      team: row.team,
+      team: statRow ? String(statRow.Team || row.team || "").trim() : row.team || "",
       projection,
-      games: row.games,
-      confidence: computeConfidence(row.games),
-      edgeScore,
-      verifiedProbability: computeVerifiedProbability(edgeScore),
-      verified: computeVerifiedProbability(edgeScore) >= 65,
-      direction: projection >= row.line ? "OVER" : "UNDER",
-      playerId: row.playerId,
+      games: statRow ? resolveGamesPlayed(statRow) : 0,
+      matched: Boolean(statRow),
+      matchReason: statRow ? "matched" : "no stat row match",
+      direction:
+        projection != null && row.line
+          ? projection >= row.line
+            ? "OVER"
+            : "UNDER"
+          : null,
+      invalidReason: "",
     });
   }
 
-  return dedupeAnalyzedPlays(analyzed);
+  for (const row of enriched) {
+    row.invalidReason = resolveInvalidReason(row);
+    if (row.projection != null && row.line) {
+      const diff = row.projection - row.line;
+      const percentEdge = diff / row.line;
+      const games = row.games || 0;
+      const confidenceWeight = games > 20 ? 1.2 : games > 10 ? 1.0 : 0.7;
+      const stability = Math.min(games / 25, 1);
+      row.edgeScore = round(percentEdge * confidenceWeight * stability, 4);
+      row.verifiedProbability = Math.max(
+        50,
+        Math.min(95, Math.round(50 + Math.abs(row.edgeScore) * 100))
+      );
+      row.verified = row.verifiedProbability >= 65;
+      row.confidence = games >= 20 ? "HIGH" : games >= 8 ? "MED" : "LOW";
+    } else {
+      row.edgeScore = 0;
+      row.verifiedProbability = 50;
+      row.verified = false;
+      row.confidence = "LOW";
+    }
+  }
+
+  return enriched;
 }
 
 /**
@@ -427,61 +411,47 @@ export async function buildBestPlays() {
   const oddsKey = resolveOddsApiKey();
   const sportsKey = resolveSportsDataKey();
 
-  const [propRows, seasonStats, playersDirectory] = await Promise.all([
+  const [propRows, seasonStats] = await Promise.all([
     fetchOddsPlayerProps(oddsKey),
     fetchPlayerSeasonStats(sportsKey),
-    fetchPlayersDirectory(sportsKey),
   ]);
 
+  console.log("RAW ODDS:", propRows.length);
+
   const statsByPlayerId = buildStatsIndex(seasonStats);
-  const nameToPlayerId = buildNameToPlayerId(playersDirectory);
-  const normalized = normalizePropRows(propRows, statsByPlayerId, nameToPlayerId);
-  const enriched = normalized.map((row) => {
-    const projection = computeProjection(row.avg, row.games);
-    const edgeScore = computeEdgeScore(projection, row.line, row.games);
-    return { ...row, projection, edgeScore };
-  });
-  const filtered = enriched.filter(
-    (row) =>
-      row.line &&
-      row.projection &&
-      row.games >= MIN_GAMES &&
-      Math.abs(row.edgeScore) >= MIN_EDGE_ABS
+  const enriched = enrichPropRows(propRows, seasonStats, statsByPlayerId);
+
+  console.log("NORMALIZED:", enriched.length);
+  console.log(
+    "WITH PROJECTIONS:",
+    enriched.filter((p) => Number(p.projection) > 0).length
   );
 
-  console.log({
-    rawProps: propRows.length,
-    analyzed: enriched.length,
-    filtered: filtered.length,
-  });
+  const filtered = enriched.filter((p) => p.player && p.line && p.projection);
+  console.log("AFTER FILTER:", filtered.length);
 
-  const analyzed = analyzeNormalizedProps(normalized);
-  const merged =
-    analyzed.length >= filtered.length
-      ? analyzed
-      : filtered.map((row) => ({
-          player: row.player,
-          prop: row.prop,
-          line: row.line,
-          team: row.team,
-          projection: row.projection,
-          games: row.games,
-          confidence: computeConfidence(row.games),
-          edgeScore: row.edgeScore,
-          verifiedProbability: computeVerifiedProbability(row.edgeScore),
-          verified: computeVerifiedProbability(row.edgeScore) >= 65,
-          direction: row.projection >= row.line ? "OVER" : "UNDER",
-        }));
-
-  const ranked = merged.sort(
+  const ranked = [...filtered].sort(
     (a, b) => Number(b.verifiedProbability ?? 0) - Number(a.verifiedProbability ?? 0)
   );
-  const topPlays = ranked.slice(0, TOP_N).map(({ playerId, ...play }) => play);
+  const topPlays = ranked.slice(0, TOP_N);
+  const sample = enriched.slice(0, DEBUG_SAMPLE_SIZE);
+  const invalidReasons = enriched.reduce((acc, row) => {
+    const reason = row.invalidReason || "unknown";
+    acc[reason] = (acc[reason] || 0) + 1;
+    return acc;
+  }, {});
+
+  const plays = topPlays.length ? topPlays : BEST_PLAYS_DEBUG_MODE ? sample : [];
 
   return {
     success: true,
-    totalAnalyzed: merged.length,
-    returned: topPlays.length,
-    plays: topPlays,
+    debugMode: BEST_PLAYS_DEBUG_MODE,
+    totalProps: enriched.length,
+    totalAnalyzed: enriched.length,
+    filteredCount: filtered.length,
+    returned: plays.length,
+    invalidReasons,
+    sample,
+    plays,
   };
 }

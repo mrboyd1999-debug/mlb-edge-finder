@@ -1,5 +1,5 @@
 /**
- * Highest Probability Props — relaxed Best Plays qualification and ranking.
+ * Highest Probability Props — debug-first Best Plays qualification.
  */
 
 import { resolveProjectionValue } from "./projectionQuality.js";
@@ -8,35 +8,35 @@ import { buildPropDedupeKey } from "./displayPropScoring.js";
 import { isFakeOrFallbackProp } from "./livePropRender.js";
 import { isMinimalRenderableProp } from "./normalizeProp.js";
 import {
-  BEST_PLAYS_MIN_EDGE,
-  BEST_PLAYS_MIN_GAMES,
-  BEST_PLAYS_VERIFIED_THRESHOLD,
+  BEST_PLAYS_DEBUG_MODE,
+  BEST_PLAYS_DEBUG_SAMPLE_SIZE,
+  logBestPlaysPipelineStage,
+  passesMinimalBestPlaysFilter,
+  resolveBestPlayInvalidReason,
+  resolveBestPlayPlayerName,
+  resolveBestPlayProjection,
+  sanitizeProjectionValue,
+} from "./bestPlaysPipelineDebug.js";
+import {
   buildMarketContextNote,
   enrichBestPlayRankingFields,
-  passesBestPlaysFilter,
   resolveEdgeMagnitude,
   resolveLeanDirection,
 } from "./bestPlayRanking.js";
 
-export const HIGHEST_PROBABILITY_MIN_CONFIDENCE = BEST_PLAYS_VERIFIED_THRESHOLD;
-export const HIGHEST_PROBABILITY_MIN_EDGE = BEST_PLAYS_MIN_EDGE;
-export const HIGHEST_PROBABILITY_MAX_PLAYS = 10;
+export const HIGHEST_PROBABILITY_MIN_CONFIDENCE = 65;
+export const HIGHEST_PROBABILITY_MIN_EDGE = 0.015;
+export const HIGHEST_PROBABILITY_MAX_PLAYS = BEST_PLAYS_DEBUG_MODE ? 25 : 10;
 export const HIGHEST_PROBABILITY_TARGET_PLAYS = 5;
 export const HIGHEST_PROBABILITY_MIN_VERIFIED_TO_SHOW = 1;
 
 function isRenderableCandidate(prop = {}) {
   if (!prop || prop.isDemoData || isFakeOrFallbackProp(prop)) return false;
-  if (prop.isLiveLineOnly) return false;
   return isMinimalRenderableProp(prop);
 }
 
 export function enrichBestPlayCandidate(prop = {}) {
   return enrichBestPlayRankingFields(prop);
-}
-
-export function filterBestPlayCandidates(props = []) {
-  const enriched = (props || []).filter(isRenderableCandidate).map(enrichBestPlayCandidate);
-  return enriched.filter(passesBestPlaysFilter);
 }
 
 export function sortHighestProbabilityPlays(props = []) {
@@ -46,27 +46,56 @@ export function sortHighestProbabilityPlays(props = []) {
       const probA = Number(a.verifiedProbability ?? 0);
       const probB = Number(b.verifiedProbability ?? 0);
       if (probB !== probA) return probB - probA;
-
-      const edgeA = Math.abs(Number(a.edgeScore ?? 0));
-      const edgeB = Math.abs(Number(b.edgeScore ?? 0));
-      if (edgeB !== edgeA) return edgeB - edgeA;
-
-      return Number(b.games ?? b.sampleSize ?? 0) - Number(a.games ?? a.sampleSize ?? 0);
+      const withProjA = resolveBestPlayProjection(a) != null ? 1 : 0;
+      const withProjB = resolveBestPlayProjection(b) != null ? 1 : 0;
+      if (withProjB !== withProjA) return withProjB - withProjA;
+      return Number(b.line || 0) - Number(a.line || 0);
     });
+}
+
+function buildDebugSample(enriched = [], max = BEST_PLAYS_DEBUG_SAMPLE_SIZE) {
+  return enriched.slice(0, max).map((prop) => ({
+    ...enrichBestPlayRankingFields(prop),
+    verified: false,
+    debugMode: true,
+    invalidReason: resolveBestPlayInvalidReason(prop),
+  }));
+}
+
+function summarizeInvalidReasons(enriched = []) {
+  return enriched.reduce((acc, prop) => {
+    const reason = resolveBestPlayInvalidReason(prop) || "eligible";
+    acc[reason] = (acc[reason] || 0) + 1;
+    return acc;
+  }, {});
 }
 
 export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABILITY_MAX_PLAYS, options = {}) {
   const rawProps = props || [];
-  const enriched = rawProps.filter(isRenderableCandidate).map(enrichBestPlayCandidate);
-  const filtered = enriched.filter(passesBestPlaysFilter);
 
-  console.log({
-    rawProps: rawProps.length,
-    analyzed: enriched.length,
-    filtered: filtered.length,
-  });
+  logBestPlaysPipelineStage("RAW ODDS:", rawProps.length);
 
-  const ranked = sortHighestProbabilityPlays(filtered);
+  const normalized = rawProps.filter(isRenderableCandidate);
+  logBestPlaysPipelineStage("NORMALIZED:", normalized.length);
+
+  const enriched = normalized.map(enrichBestPlayCandidate);
+  logBestPlaysPipelineStage(
+    "WITH PROJECTIONS:",
+    enriched.filter((p) => resolveBestPlayProjection(p) != null).length
+  );
+
+  const filtered = enriched.filter((p) =>
+    passesMinimalBestPlaysFilter({
+      ...p,
+      player: resolveBestPlayPlayerName(p),
+    })
+  );
+  logBestPlaysPipelineStage("AFTER FILTER:", filtered.length);
+
+  const invalidReasons = summarizeInvalidReasons(enriched);
+  logBestPlaysPipelineStage("INVALID REASONS:", invalidReasons);
+
+  const ranked = sortHighestProbabilityPlays(filtered.length ? filtered : enriched);
   const seen = new Set();
   const picks = [];
 
@@ -78,30 +107,25 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
     picks.push(prop);
   }
 
-  if (!picks.length && enriched.length) {
-    const relaxed = enriched
-      .filter((prop) => {
-        const line = Number(prop.line);
-        const projection = resolveProjectionValue(prop);
-        return Number.isFinite(line) && line > 0 && projection != null && projection > 0;
-      })
-      .map(enrichBestPlayRankingFields)
-      .sort((a, b) => Number(b.verifiedProbability ?? 0) - Number(a.verifiedProbability ?? 0));
-
-    for (const prop of relaxed) {
-      if (picks.length >= max) break;
-      const key = buildPropDedupeKey(prop);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      picks.push({ ...prop, verified: false });
+  if (!picks.length && BEST_PLAYS_DEBUG_MODE && enriched.length) {
+    const sample = buildDebugSample(enriched, max);
+    logBestPlaysPipelineStage("DEBUG SAMPLE:", sample.length);
+    if (options.withMeta) {
+      return {
+        picks: sample,
+        usedVerifiedFallback: true,
+        strictEligible: 0,
+        debugMode: true,
+        invalidReasons,
+        pipelineCounts: {
+          rawProps: rawProps.length,
+          normalized: normalized.length,
+          withProjections: enriched.filter((p) => resolveBestPlayProjection(p) != null).length,
+          filtered: filtered.length,
+        },
+      };
     }
-
-    console.log({
-      rawProps: rawProps.length,
-      analyzed: enriched.length,
-      filtered: filtered.length,
-      relaxedFallback: picks.length,
-    });
+    return sample;
   }
 
   if (options.withMeta) {
@@ -109,6 +133,14 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
       picks,
       usedVerifiedFallback: picks.length > 0 && !picks.some((row) => row.verified),
       strictEligible: picks.filter((row) => row.verified).length,
+      debugMode: BEST_PLAYS_DEBUG_MODE,
+      invalidReasons,
+      pipelineCounts: {
+        rawProps: rawProps.length,
+        normalized: normalized.length,
+        withProjections: enriched.filter((p) => sanitizeProjectionValue(p.projection) != null).length,
+        filtered: filtered.length,
+      },
     };
   }
 
@@ -117,10 +149,10 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
 
 export function validateHighestProbabilityRejectReason(prop = {}, options = {}) {
   void options;
-  const enriched = enrichBestPlayRankingFields(prop);
   if (!isRenderableCandidate(prop)) return "Rejected: not renderable";
-  if (!resolveProjectionValue(enriched)) return "Rejected: missing projection";
-  if (!passesBestPlaysFilter(enriched)) return "Rejected: below Best Plays floor";
+  if (!passesMinimalBestPlaysFilter(prop)) {
+    return `Rejected: ${resolveBestPlayInvalidReason(prop) || "invalid prop"}`;
+  }
   return "";
 }
 
@@ -144,32 +176,27 @@ export function auditHighestProbabilityProps(props = [], options = {}) {
     lowConfidence: 0,
     lowEdge: 0,
     badPlayerMatch: 0,
+    invalidReasons: {},
   };
 
   for (const prop of props || []) {
     const enriched = enrichBestPlayRankingFields(prop);
-    if (passesBestPlaysFilter(enriched)) {
+    const reason = resolveBestPlayInvalidReason(enriched);
+    if (!reason) {
       counters.eligible += 1;
+      counters.invalidReasons.eligible = (counters.invalidReasons.eligible || 0) + 1;
       continue;
     }
 
-    const projection = resolveProjectionValue(enriched);
-    const games = Number(enriched.games ?? enriched.sampleSize ?? 0);
-    const edgeScore = Math.abs(Number(enriched.edgeScore ?? 0));
-
-    if (!projection || projection <= 0 || !enriched.line) {
+    counters.invalidReasons[reason] = (counters.invalidReasons[reason] || 0) + 1;
+    if (/projection/.test(reason)) {
       counters.filteredMissingProjection += 1;
       counters.missingProjection += 1;
-    } else if (games < BEST_PLAYS_MIN_GAMES) {
+    } else if (/line/.test(reason)) {
+      counters.filteredOther += 1;
+    } else if (/player/.test(reason)) {
       counters.filteredBadMatch += 1;
-      counters.missingLogs += 1;
-    } else if (edgeScore < BEST_PLAYS_MIN_EDGE) {
-      counters.filteredWeakEdge += 1;
-      counters.filteredLowEdge += 1;
-      counters.lowEdge += 1;
-    } else if (enriched.verifiedProbability < BEST_PLAYS_VERIFIED_THRESHOLD) {
-      counters.filteredLowConfidence += 1;
-      counters.lowConfidence += 1;
+      counters.badPlayerMatch += 1;
     } else {
       counters.filteredOther += 1;
     }
@@ -190,14 +217,10 @@ export function buildHighestProbabilityQualifyReason(prop = {}) {
   const lean = prop.direction || prop.leanDirection || resolveLeanDirection(prop);
   const edgeMag = resolveEdgeMagnitude(prop);
   const probability = prop.verifiedProbability;
-  const verifiedNote =
-    Number.isFinite(probability) && probability >= BEST_PLAYS_VERIFIED_THRESHOLD
-      ? `${probability}% verified`
-      : Number.isFinite(probability)
-        ? `${probability}% lean`
-        : "";
+  const verifiedNote = Number.isFinite(probability) ? `${probability}%` : "";
   const leanNote = lean && lean !== "PASS" ? `${lean} · ${edgeMag.toFixed(1)} pt edge` : "";
-  return [verifiedNote, leanNote, market, base].filter(Boolean).join(" · ");
+  const debugNote = prop.invalidReason ? `debug: ${prop.invalidReason}` : "";
+  return [debugNote, verifiedNote, leanNote, market, base].filter(Boolean).join(" · ");
 }
 
 export function formatHighestProbabilitySource(prop = {}) {

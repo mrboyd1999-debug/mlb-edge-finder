@@ -93,6 +93,7 @@ function DfsAnalyzerLayout({
             loading={loading}
             onOpen={onOpenProp}
             onSave={onSavePick}
+            filterDiagnostics={topMlbPlayBoard?.filterDiagnostics}
           />
         </SectionErrorBoundary>
       ) : null}

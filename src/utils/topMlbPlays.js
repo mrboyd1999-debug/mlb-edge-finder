@@ -69,6 +69,12 @@ function buildBestPlaysCandidatePool(displayProps = [], rawProps = [], parsedUnd
   const merged = preparePropsForRanking(mergeInputProps(displayProps, rawProps, parsedUnderdogProps));
   const pool = merged.filter((prop) => !isFakeOrFallbackProp(prop) && isMinimalRenderableProp(prop));
   logPipelineStage("pool.bestPlaysCandidates", { count: pool.length, live: countLiveVerifiedProps(pool) });
+  console.log("RAW ODDS:", merged.length);
+  console.log("NORMALIZED:", pool.length);
+  console.log(
+    "WITH PROJECTIONS:",
+    pool.filter((p) => Number(p.projection ?? p.projectedValue) > 0).length
+  );
   return pool;
 }
 
@@ -315,6 +321,9 @@ export function resolveTopMlbPlaySections(
 
   filterDiagnostics.selected = highestPicks.length;
   filterDiagnostics.eligible = strictEligible;
+  filterDiagnostics.debugMode = Boolean(selection.debugMode);
+  filterDiagnostics.pipelineCounts = selection.pipelineCounts || null;
+  filterDiagnostics.invalidReasons = selection.invalidReasons || playAudit.invalidReasons || null;
   filterDiagnostics.filteredOut =
     playAudit.filteredMissingProjection +
     playAudit.filteredLowConfidence +
