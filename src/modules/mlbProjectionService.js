@@ -25,7 +25,7 @@ import {
   LIVE_LINE_PROJECTION_UNAVAILABLE,
   PROJECTION_UNAVAILABLE_LABEL,
 } from "./projectionBreakdown.js";
-import { logPropProjectionPipeline, recordVerifiedProjectionGenerated } from "../services/mlbProjectionPipelineLog.js";
+import { logPropProjectionPipeline, recordVerifiedProjectionGenerated, logProjectionFunctionOutput } from "../services/mlbProjectionPipelineLog.js";
 
 const MLB_VOLATILITY = {
   strikeouts: { tier: "LOW", score: 0.38, label: "Low variance" },
@@ -144,7 +144,7 @@ export function buildMlbPropProjection(prop = {}, profile = {}, context = {}) {
       ? engineResult.reasoning.slice(0, 3)
       : ["MLB Stats API data insufficient for verified projection."];
     const detail = reasons.join(" · ");
-    return {
+    const unavailable = {
       ...buildProjectionUnavailableFields({
         reason: LIVE_LINE_PROJECTION_UNAVAILABLE,
         detail,
@@ -155,6 +155,8 @@ export function buildMlbPropProjection(prop = {}, profile = {}, context = {}) {
       projectionLabel: engineResult?.projectionLabel || PROJECTION_UNAVAILABLE_LABEL,
       engineResult,
     };
+    logProjectionFunctionOutput(prop, unavailable, detail);
+    return unavailable;
   }
 
   if (Number.isFinite(line) && Number.isFinite(projection) && Math.abs(projection - line) < 0.08) {
@@ -208,7 +210,7 @@ export function buildMlbPropProjection(prop = {}, profile = {}, context = {}) {
     recordVerifiedProjectionGenerated();
   }
 
-  return {
+  const result = {
     projection: round(projection, 1),
     line: Number.isFinite(line) ? line : null,
     rawEdge,
@@ -241,6 +243,8 @@ export function buildMlbPropProjection(prop = {}, profile = {}, context = {}) {
     whyThisPick: reasons.slice(0, 2).join(" "),
     engineResult,
   };
+  logProjectionFunctionOutput(prop, result);
+  return result;
 }
 
 function finiteOr(value) {
@@ -295,6 +299,8 @@ export function applyMlbProjectionToProp(prop = {}, profile = {}, context = {}) 
   logPropProjectionPipeline(prop, {
     matchedMLBPlayer: profile?.playerName || prop.playerName,
     recentGamesFound: model.sampleSize ?? profile?.sampleSize ?? profile?.splits?.length ?? null,
+    last5Average: profile?.last5Average ?? null,
+    seasonAverage: profile?.seasonAverage ?? null,
     projectionValue: model.projection,
     confidenceValue: model.confidence,
     edgeValue: model.edge,

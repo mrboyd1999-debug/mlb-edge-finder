@@ -181,6 +181,17 @@ import {
   resolveUnderdogStreakEmptyMessage,
 } from "./utils/underdogPickPool.js";
 import { resolveTopMlbPlaySections, auditTopMlbPlayPool } from "./utils/topMlbPlays.js";
+import { mergeScoredIntoDisplayProps } from "./utils/mergeScoredDisplayProps.js";
+import {
+  resetPipelineExecutionCounters,
+  setPipelineStageCount,
+  summarizeStatsMap,
+  logPipelineExecutionSummary,
+  buildMlbProjectionDiagnostics,
+  markStatsFetchTimedOut,
+  markProjectionsComplete,
+  PIPELINE_STAGES,
+} from "./services/mlbProjectionPipelineLog.js";
 import { logPipelineStage } from "./utils/mlbPipelineDebug.js";
 import {
   mergeProviderRawProps,
@@ -1730,12 +1741,105 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   }
 
   reportProgress("MATCH");
+  resetPipelineExecutionCounters();
+  setPipelineStageCount(PIPELINE_STAGES.FETCHED_PROPS_COUNT, rawProps.length);
+  setPipelineStageCount(PIPELINE_STAGES.NORMALIZED_PROPS_COUNT, allDisplayProps.length);
+
+  const background = {
+    comparisons: [],
+    stats: new Map(),
+    news: new Map(),
+    manualStatsMap: readManualStatsMap(),
+  };
+  const backgroundWarnings = [];
+  let statsTimedOut = false;
+
+  if (MLB_ONLY_MODE) {
+    const statsCapMs = Math.min(enrichmentTimeoutMs, 25000);
+    const statsResult = await withFetchTimeout(
+      () => fetchPlayerStats({ props: workingNormalProps }),
+      statsCapMs,
+      {
+        label: "stats",
+        fallback: () => enrichmentBackgroundFallback("stats"),
+      }
+    );
+    background.stats = statsResult.stats || new Map();
+    statsTimedOut = Boolean(statsResult.timedOut);
+    markStatsFetchTimedOut(statsTimedOut);
+    backgroundWarnings.push(...(statsResult.warnings || []));
+    debugInfo.statsLoadedCount = background.stats.size;
+    const { matchedPlayers, gameLogsFound } = summarizeStatsMap(background.stats);
+    setPipelineStageCount(PIPELINE_STAGES.MATCHED_PLAYERS_COUNT, matchedPlayers);
+    setPipelineStageCount(PIPELINE_STAGES.GAME_LOGS_FOUND_COUNT, gameLogsFound);
+    console.info("[MLB Projection Pipeline] stats fetch complete", {
+      profiles: background.stats.size,
+      matchedPlayers,
+      gameLogsFound,
+      timedOut: statsTimedOut,
+    });
+
+    const secondaryCapMs = Math.min(enrichmentTimeoutMs, 8000);
+    const secondaryJobs = [
+      { label: "sportsbook", run: () => fetchSportsbookComparison({ props: workingNormalProps }) },
+      { label: "news", run: () => fetchInjuryNews({ props: workingNormalProps }) },
+    ];
+    const secondaryResults = await Promise.allSettled(
+      secondaryJobs.map((job) =>
+        withFetchTimeout(job.run, secondaryCapMs, {
+          label: job.label,
+          fallback: () => enrichmentBackgroundFallback(job.label),
+        })
+      )
+    );
+    secondaryResults.forEach((result, index) => {
+      const label = secondaryJobs[index].label;
+      if (result.status !== "fulfilled") {
+        if (label === "sportsbook") backgroundWarnings.push("Sportsbook comparison unavailable.");
+        if (label === "news") backgroundWarnings.push("Could not load injury/news data.");
+        return;
+      }
+      backgroundWarnings.push(...(result.value.warnings || []));
+      if (label === "sportsbook") {
+        background.comparisons = result.value.comparisons || [];
+        sourceStatus["The Odds API"] = result.value.cached
+          ? "Cached"
+          : result.value.rateLimited
+            ? "Cached"
+            : sportsbookSourceStatus(result.value);
+        const playerPropsCount = Number(debugInfo.sources["The Odds API"]?.propsAfterParsing || 0);
+        debugInfo.sources["The Odds API"] = {
+          ...debugInfo.sources["The Odds API"],
+          status: sourceStatus["The Odds API"],
+          apiStatus: sourceStatus["The Odds API"],
+          rawPropsLoaded: Math.max(playerPropsCount, normalProps.length),
+          propsAfterParsing: Math.max(playerPropsCount, background.comparisons.length),
+          propsAfterFilters: background.comparisons.length,
+          usablePropsCount: Math.max(playerPropsCount, background.comparisons.length),
+          message:
+            playerPropsCount > 0
+              ? `${playerPropsCount} player props · ${background.comparisons.length} line comparisons`
+              : background.comparisons.length > 0
+                ? (result.value.warnings || []).join(" ")
+                : EMPTY_SOURCE_MESSAGE,
+          lastSuccessfulFetchAt: result.value.lastSuccessfulFetchAt || debugInfo.sources["The Odds API"]?.lastSuccessfulFetchAt || "",
+          lineSourceBadge:
+            playerPropsCount > 0 || background.comparisons.length > 0
+              ? result.value.cached || result.value.rateLimited
+                ? "CACHED"
+                : "LIVE"
+              : debugInfo.sources["The Odds API"]?.lineSourceBadge || "EMPTY",
+        };
+      }
+      if (label === "news") background.news = result.value.news || new Map();
+    });
+  } else {
   const backgroundJobs = [
     { label: "sportsbook", run: () => fetchSportsbookComparison({ props: workingNormalProps }) },
     { label: "stats", run: () => fetchPlayerStats({ props: workingNormalProps }) },
     { label: "news", run: () => fetchInjuryNews({ props: workingNormalProps }) },
   ];
-  const backgroundCapMs = Math.min(enrichmentTimeoutMs, MLB_ONLY_MODE ? 12000 : 6000);
+  const backgroundCapMs = Math.min(enrichmentTimeoutMs, 6000);
   const settledBackground = await Promise.race([
     Promise.allSettled(
       backgroundJobs.map((job) =>
@@ -1758,13 +1862,6 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       )
     ),
   ]);
-  const background = {
-    comparisons: [],
-    stats: new Map(),
-    news: new Map(),
-    manualStatsMap: readManualStatsMap(),
-  };
-  const backgroundWarnings = [];
 
   settledBackground.forEach((result, index) => {
     const label = backgroundJobs[index].label;
@@ -1804,6 +1901,10 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       if (label === "stats") {
         background.stats = result.value.stats || new Map();
         debugInfo.statsLoadedCount = background.stats.size;
+        if (result.value.timedOut) {
+          statsTimedOut = true;
+          markStatsFetchTimedOut(true);
+        }
       }
       if (label === "news") background.news = result.value.news || new Map();
       return;
@@ -1822,12 +1923,23 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         message: timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "Sportsbook comparison unavailable.",
       };
     }
-    if (label === "stats") backgroundWarnings.push("Could not load player stats.");
+    if (label === "stats") {
+      backgroundWarnings.push("Could not load player stats.");
+      statsTimedOut = true;
+      markStatsFetchTimedOut(true);
+    }
     if (label === "news") backgroundWarnings.push("Could not load injury/news data.");
   });
+  }
 
-  if (settledBackground.some((item) => item.status === "rejected")) {
-    backgroundWarnings.push("Some data sources failed, but available props are still shown.");
+  if (background.stats instanceof Map) {
+    const { matchedPlayers, gameLogsFound } = summarizeStatsMap(background.stats);
+    setPipelineStageCount(PIPELINE_STAGES.MATCHED_PLAYERS_COUNT, matchedPlayers);
+    setPipelineStageCount(PIPELINE_STAGES.GAME_LOGS_FOUND_COUNT, gameLogsFound);
+  }
+
+  if (statsTimedOut) {
+    backgroundWarnings.push("MLB stats fetch timed out before projections could complete.");
   }
 
   const lineComparisonMap = buildLineComparisonMap(workingNormalProps);
@@ -1882,6 +1994,28 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   }
   pipelineAudit.scored = scoredProps.length;
   pipelineAudit = attachDecisionDebug(pipelineAudit, scoredProps);
+
+  const projectionsGenerated = scoredProps.filter(
+    (prop) =>
+      prop?.isVerifiedProjection &&
+      Number.isFinite(Number(prop.projection ?? prop.projectedValue)) &&
+      Number(prop.projection ?? prop.projectedValue) > 0
+  ).length;
+  setPipelineStageCount(PIPELINE_STAGES.PROJECTIONS_GENERATED_COUNT, projectionsGenerated);
+
+  const mlbProjectionDiagnostics = buildMlbProjectionDiagnostics({
+    scoredProps,
+    statsMap: background.stats,
+  });
+  markProjectionsComplete(!statsTimedOut);
+  logPipelineExecutionSummary("Post-scoring pipeline summary");
+  debugInfo.mlbProjectionDiagnostics = mlbProjectionDiagnostics;
+  debugInfo.verifiedProps = mlbProjectionDiagnostics.verifiedProps;
+  debugInfo.verifiedPropsCount = mlbProjectionDiagnostics.verifiedPropsCount;
+
+  allDisplayProps = mergeScoredIntoDisplayProps(allDisplayProps, scoredProps);
+  workingNormalProps = mergeScoredIntoDisplayProps(workingNormalProps, scoredProps);
+  workingActiveProps = mergeScoredIntoDisplayProps(workingActiveProps, scoredProps);
 
   pipelineStageCounts = buildPipelineStageReport({
     ...pipelineStageCounts,
@@ -1956,6 +2090,24 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   debugInfo.rejectionAudit = auditPropRejections(
     [...(qualBoards.allDisplayable || []), ...(allDisplayProps || [])]
   );
+  if (debugInfo.mlbProjectionDiagnostics) {
+    const diag = debugInfo.mlbProjectionDiagnostics;
+    debugInfo.rejectionAudit = {
+      ...debugInfo.rejectionAudit,
+      mlbProjection: {
+        stages: diag.stages,
+        verifiedPropsCount: diag.verifiedPropsCount,
+        rejections: diag.rejectionCounts,
+        testMode: diag.testMode,
+        projectionsComplete: diag.projectionsComplete,
+        statsFetchTimedOut: diag.statsFetchTimedOut,
+      },
+      reasons: {
+        ...(debugInfo.rejectionAudit?.reasons || {}),
+        ...(diag.rejectionCounts || {}),
+      },
+    };
+  }
   const propSanityAudit = auditTopMlbPlayPool(
     displayProps,
     canonicalProps,

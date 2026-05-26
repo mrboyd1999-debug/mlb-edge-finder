@@ -34,6 +34,8 @@ import {
 import {
   logProjectionFilterSummary,
   resetProjectionFilterCounters,
+  MLB_PROJECTION_TEST_MODE,
+  areProjectionsComplete,
 } from "../services/mlbProjectionPipelineLog.js";
 
 export const TOP_MLB_PLAYS_LIMIT = HIGHEST_PROBABILITY_MAX_PLAYS;
@@ -283,10 +285,24 @@ export function resolveTopMlbPlaySections(
 
   const strictPool = buildTopMlbPlayPool(displayProps, rawProps, parsedUnderdogProps, { relaxed: false });
   resetProjectionFilterCounters();
-  const filterDiagnostics = auditHighestProbabilityProps(strictPool);
-  const highestPicks = selectHighestProbabilityPlays(strictPool, HIGHEST_PROBABILITY_MAX_PLAYS).map((prop, idx) =>
-    annotateHighestProbabilityPlay(prop, idx + 1)
+  const filterDiagnostics = auditHighestProbabilityProps(strictPool, { testMode: false });
+  let highestPicks = selectHighestProbabilityPlays(strictPool, HIGHEST_PROBABILITY_MAX_PLAYS, { testMode: false }).map(
+    (prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1)
   );
+  if (
+    highestPicks.length < HIGHEST_PROBABILITY_TARGET_PLAYS &&
+    MLB_PROJECTION_TEST_MODE &&
+    areProjectionsComplete()
+  ) {
+    const testDiagnostics = auditHighestProbabilityProps(strictPool, { testMode: true });
+    const testPicks = selectHighestProbabilityPlays(strictPool, HIGHEST_PROBABILITY_MAX_PLAYS, { testMode: true }).map(
+      (prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1)
+    );
+    if (testPicks.length > highestPicks.length) {
+      highestPicks = testPicks;
+      Object.assign(filterDiagnostics, testDiagnostics, { usedTestMode: true });
+    }
+  }
   logProjectionFilterSummary("Best Plays filter diagnostics");
 
   logPipelineStage("rank.highestProbability", { pool: strictPool.length, ranked: highestPicks.length });
@@ -327,7 +343,8 @@ export function resolveTopMlbPlaySections(
   });
 
   return {
-    waitingForProjections: highestPicks.length === 0 && liveVerifiedCount > 0,
+    waitingForProjections:
+      !areProjectionsComplete() || (highestPicks.length === 0 && liveVerifiedCount > 0),
     usedFallback: false,
     fallbackLabel: "",
     filterDiagnostics,

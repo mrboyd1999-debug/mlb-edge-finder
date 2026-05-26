@@ -9,9 +9,12 @@ import { isPitcherStrikeoutMarket } from "./topMlbPlaysRanking.js";
 import { isMlbPitcherMarket } from "../modules/mlbPitcherData.js";
 import { normalizeSource } from "./normalizeSource.js";
 import { buildPropDedupeKey } from "./displayPropScoring.js";
+import { MLB_PROJECTION_TEST_MODE } from "../services/mlbProjectionPipelineLog.js";
 
 export const HIGHEST_PROBABILITY_MIN_CONFIDENCE = 65;
 export const HIGHEST_PROBABILITY_MIN_EDGE = 0.5;
+export const HIGHEST_PROBABILITY_TEST_MIN_CONFIDENCE = 55;
+export const HIGHEST_PROBABILITY_TEST_MIN_EDGE = 0.2;
 export const HIGHEST_PROBABILITY_MAX_PLAYS = 10;
 export const HIGHEST_PROBABILITY_TARGET_PLAYS = 5;
 export const MIN_PITCHER_START_SAMPLE = 3;
@@ -85,7 +88,17 @@ function hitterRequirementsFailed(prop = {}) {
   return statsMatchingFailed(prop);
 }
 
-export function validateHighestProbabilityRejectReason(prop = {}) {
+function resolveThresholds(options = {}) {
+  const testMode = options.testMode ?? MLB_PROJECTION_TEST_MODE;
+  return {
+    testMode,
+    minConfidence: testMode ? HIGHEST_PROBABILITY_TEST_MIN_CONFIDENCE : HIGHEST_PROBABILITY_MIN_CONFIDENCE,
+    minEdge: testMode ? HIGHEST_PROBABILITY_TEST_MIN_EDGE : HIGHEST_PROBABILITY_MIN_EDGE,
+  };
+}
+
+export function validateHighestProbabilityRejectReason(prop = {}, options = {}) {
+  const { testMode, minConfidence, minEdge } = resolveThresholds(options);
   if (!prop || prop.isDemoData) return "Rejected: demo prop";
   if (prop.manualEntry || isManualAnalyzerProp(prop) || prop.isLiveLineOnly) {
     return "Rejected: manual or live-line-only prop";
@@ -97,13 +110,13 @@ export function validateHighestProbabilityRejectReason(prop = {}) {
   if (hitterRequirementsFailed(prop)) return "Rejected: hitter sample or team match insufficient";
 
   const edge = finiteOr(prop.edge, NaN);
-  if (!Number.isFinite(edge) || edge < HIGHEST_PROBABILITY_MIN_EDGE) {
-    return "Rejected: edge below +0.5";
+  if (!Number.isFinite(edge) || edge < minEdge) {
+    return testMode ? `Rejected: edge below +${minEdge} (test mode)` : "Rejected: edge below +0.5";
   }
 
   const conf = finiteOr(prop.confidenceScore ?? prop.confidence, NaN);
-  if (!Number.isFinite(conf) || conf < HIGHEST_PROBABILITY_MIN_CONFIDENCE) {
-    return "Rejected: confidence below 65%";
+  if (!Number.isFinite(conf) || conf < minConfidence) {
+    return testMode ? `Rejected: confidence below ${minConfidence}% (test mode)` : "Rejected: confidence below 65%";
   }
 
   if (!hasQualificationExplanation(prop)) return "Rejected: no projection explanation";
@@ -113,8 +126,8 @@ export function validateHighestProbabilityRejectReason(prop = {}) {
   return "";
 }
 
-export function isHighestProbabilityPlay(prop = {}) {
-  return !validateHighestProbabilityRejectReason(prop);
+export function isHighestProbabilityPlay(prop = {}, options = {}) {
+  return !validateHighestProbabilityRejectReason(prop, options);
 }
 
 export function sortHighestProbabilityPlays(props = []) {
@@ -137,11 +150,11 @@ export function sortHighestProbabilityPlays(props = []) {
   });
 }
 
-export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABILITY_MAX_PLAYS) {
+export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABILITY_MAX_PLAYS, options = {}) {
   const seen = new Set();
   const eligible = [];
   for (const prop of props || []) {
-    if (!isHighestProbabilityPlay(prop)) continue;
+    if (!isHighestProbabilityPlay(prop, options)) continue;
     const key = buildPropDedupeKey(prop);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -150,7 +163,7 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   return sortHighestProbabilityPlays(eligible).slice(0, max);
 }
 
-export function auditHighestProbabilityProps(props = []) {
+export function auditHighestProbabilityProps(props = [], options = {}) {
   const counters = {
     filteredMissingProjection: 0,
     filteredLowConfidence: 0,
@@ -159,10 +172,15 @@ export function auditHighestProbabilityProps(props = []) {
     filteredOther: 0,
     eligible: 0,
     attempted: (props || []).length,
+    missingProjection: 0,
+    missingLogs: 0,
+    lowConfidence: 0,
+    lowEdge: 0,
+    badPlayerMatch: 0,
   };
 
   for (const prop of props || []) {
-    const reason = validateHighestProbabilityRejectReason(prop);
+    const reason = validateHighestProbabilityRejectReason(prop, options);
     if (!reason) {
       counters.eligible += 1;
       continue;
@@ -170,12 +188,19 @@ export function auditHighestProbabilityProps(props = []) {
     const text = reason.toLowerCase();
     if (/projection|missing|unavailable|insufficient stats|game log|zero edge|too close/.test(text)) {
       counters.filteredMissingProjection += 1;
+      counters.missingProjection += 1;
     } else if (/confidence/.test(text)) {
       counters.filteredLowConfidence += 1;
-    } else if (/match|player|team|role|pitcher|hitter/.test(text)) {
+      counters.lowConfidence += 1;
+    } else if (/match|player|team|role|pitcher|hitter|stats not matched/.test(text)) {
       counters.filteredBadMatch += 1;
+      counters.badPlayerMatch += 1;
     } else if (/edge/.test(text)) {
       counters.filteredLowEdge += 1;
+      counters.lowEdge += 1;
+    } else if (/game log|sample|team match/.test(text)) {
+      counters.missingLogs += 1;
+      counters.filteredOther += 1;
     } else {
       counters.filteredOther += 1;
     }

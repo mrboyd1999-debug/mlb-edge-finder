@@ -85,6 +85,31 @@ function DeveloperDebugPanel({
               <p style={styles.compactFlags}>
                 MLB usable on board: {feedHealthContext?.Underdog?.boardCount ?? apiHealth?.Underdog?.usableCount ?? 0}
               </p>
+              {rejectionAudit?.mlbProjection ? (
+                <div>
+                  <p style={{ ...styles.compactFlags, marginBottom: 4 }}>MLB projection pipeline:</p>
+                  <p style={{ ...styles.compactFlags, margin: "2px 0" }}>
+                    Fetched {rejectionAudit.mlbProjection.stages?.FETCHED_PROPS_COUNT ?? 0} · Normalized{" "}
+                    {rejectionAudit.mlbProjection.stages?.NORMALIZED_PROPS_COUNT ?? 0} · Matched{" "}
+                    {rejectionAudit.mlbProjection.stages?.MATCHED_PLAYERS_COUNT ?? 0} · Logs{" "}
+                    {rejectionAudit.mlbProjection.stages?.GAME_LOGS_FOUND_COUNT ?? 0} · Projections{" "}
+                    {rejectionAudit.mlbProjection.stages?.PROJECTIONS_GENERATED_COUNT ?? 0} · Verified{" "}
+                    {rejectionAudit.mlbProjection.verifiedPropsCount ?? 0}
+                    {rejectionAudit.mlbProjection.statsFetchTimedOut ? " · stats timed out" : ""}
+                    {rejectionAudit.mlbProjection.testMode ? " · test thresholds" : ""}
+                  </p>
+                  {rejectionAudit.mlbProjection.rejections &&
+                  Object.keys(rejectionAudit.mlbProjection.rejections).length ? (
+                    Object.entries(rejectionAudit.mlbProjection.rejections)
+                      .filter(([, count]) => Number(count) > 0)
+                      .map(([reason, count]) => (
+                        <p key={reason} style={{ ...styles.compactFlags, margin: "2px 0" }}>
+                          {reason}: {count}
+                        </p>
+                      ))
+                  ) : null}
+                </div>
+              ) : null}
               {rejectionAudit?.reasons && Object.keys(rejectionAudit.reasons).length ? (
                 <div>
                   <p style={{ ...styles.compactFlags, marginBottom: 4 }}>Rejected by reason:</p>
