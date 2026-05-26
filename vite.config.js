@@ -13,6 +13,7 @@ import {
   probeSportsDataMlbStatus,
   resolveSportsDataApiKeyFromRequest,
 } from "./api/lib/sportsDataServer.js";
+import { buildBestPlays } from "./api/lib/bestPlaysEngine.js";
 
 const API_FOOTBALL_KEY = process.env.API_FOOTBALL_KEY || process.env.VITE_API_FOOTBALL_KEY || "";
 const ODDS_API_KEY = process.env.ODDS_API_KEY || process.env.VITE_ODDS_API_KEY || "";
@@ -58,9 +59,15 @@ function dfsApiProxy() {
                 underdog: "/api/underdog",
                 mlbStats: "/api/mlb/v1/people/search",
                 sportsdataio: "/api/sportsdataio/mlb-status",
+                bestPlays: "/api/best-plays",
               },
               timestamp: new Date().toISOString(),
             });
+            return;
+          }
+
+          if (pathname === "/api/best-plays") {
+            await handleBestPlays(req, res);
             return;
           }
 
@@ -129,6 +136,7 @@ function prependMiddleware(app, handler) {
 function isApiRoute(pathname) {
   return (
     pathname === "/api/health" ||
+    pathname === "/api/best-plays" ||
     pathname.startsWith("/api/prizepicks") ||
     pathname.startsWith("/api/underdog") ||
     pathname.startsWith("/api/mlb") ||
@@ -150,6 +158,18 @@ function apiErrorPayload(source, error, extra = {}) {
     props: [],
     ...extra,
   };
+}
+
+async function handleBestPlays(_req, res) {
+  try {
+    const result = await buildBestPlays();
+    sendJson(res, 200, result);
+  } catch (error) {
+    sendJson(res, 500, {
+      success: false,
+      message: error?.message || "Best Plays Engine failed.",
+    });
+  }
 }
 
 async function proxyWithFallback(req, res, targets, rewriteFn, headers, source) {
