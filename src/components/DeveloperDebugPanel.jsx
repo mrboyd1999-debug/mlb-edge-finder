@@ -88,16 +88,66 @@ function DeveloperDebugPanel({
               {rejectionAudit?.mlbProjection ? (
                 <div>
                   <p style={{ ...styles.compactFlags, marginBottom: 4 }}>MLB projection pipeline:</p>
-                  <p style={{ ...styles.compactFlags, margin: "2px 0" }}>
-                    Fetched {rejectionAudit.mlbProjection.stages?.FETCHED_PROPS_COUNT ?? 0} · Normalized{" "}
-                    {rejectionAudit.mlbProjection.stages?.NORMALIZED_PROPS_COUNT ?? 0} · Matched{" "}
-                    {rejectionAudit.mlbProjection.stages?.MATCHED_PLAYERS_COUNT ?? 0} · Logs{" "}
-                    {rejectionAudit.mlbProjection.stages?.GAME_LOGS_FOUND_COUNT ?? 0} · Projections{" "}
-                    {rejectionAudit.mlbProjection.stages?.PROJECTIONS_GENERATED_COUNT ?? 0} · Verified{" "}
-                    {rejectionAudit.mlbProjection.verifiedPropsCount ?? 0}
-                    {rejectionAudit.mlbProjection.statsFetchTimedOut ? " · stats timed out" : ""}
-                    {rejectionAudit.mlbProjection.testMode ? " · test thresholds" : ""}
-                  </p>
+                  {rejectionAudit.mlbProjection.liveDebug ? (
+                    <>
+                      <p style={{ ...styles.compactFlags, margin: "2px 0" }}>
+                        Props fetched: {rejectionAudit.mlbProjection.liveDebug.propsFetched ?? 0}
+                      </p>
+                      <p style={{ ...styles.compactFlags, margin: "2px 0" }}>
+                        Props normalized: {rejectionAudit.mlbProjection.liveDebug.propsNormalized ?? 0}
+                      </p>
+                      <p style={{ ...styles.compactFlags, margin: "2px 0" }}>
+                        Player matches: {rejectionAudit.mlbProjection.liveDebug.playerMatches ?? 0}
+                      </p>
+                      <p style={{ ...styles.compactFlags, margin: "2px 0" }}>
+                        Game logs fetched: {rejectionAudit.mlbProjection.liveDebug.gameLogsFetched ?? 0}
+                      </p>
+                      <p style={{ ...styles.compactFlags, margin: "2px 0" }}>
+                        Projections created: {rejectionAudit.mlbProjection.liveDebug.projectionsCreated ?? 0}
+                      </p>
+                      <p style={{ ...styles.compactFlags, margin: "2px 0" }}>
+                        Verified props: {rejectionAudit.mlbProjection.liveDebug.verifiedProps ?? 0}
+                      </p>
+                    </>
+                  ) : (
+                    <p style={{ ...styles.compactFlags, margin: "2px 0" }}>
+                      Fetched {rejectionAudit.mlbProjection.stages?.FETCHED_PROPS_COUNT ?? 0} · Normalized{" "}
+                      {rejectionAudit.mlbProjection.stages?.NORMALIZED_PROPS_COUNT ?? 0} · Matched{" "}
+                      {rejectionAudit.mlbProjection.stages?.MATCHED_PLAYERS_COUNT ?? 0} · Logs{" "}
+                      {rejectionAudit.mlbProjection.stages?.GAME_LOGS_FOUND_COUNT ?? 0} · Projections{" "}
+                      {rejectionAudit.mlbProjection.stages?.PROJECTIONS_GENERATED_COUNT ?? 0} · Verified{" "}
+                      {rejectionAudit.mlbProjection.verifiedPropsCount ?? 0}
+                    </p>
+                  )}
+                  {rejectionAudit.mlbProjection.emergencyCanary ? (
+                    <p style={{ ...styles.compactFlags, margin: "2px 0" }}>
+                      Emergency canary ({rejectionAudit.mlbProjection.emergencyCanary.player || "Spencer Strider"}):{" "}
+                      {rejectionAudit.mlbProjection.emergencyCanary.success ? "SUCCESS" : "FAILED"}
+                      {rejectionAudit.mlbProjection.emergencyCanary.projection != null
+                        ? ` · projection ${rejectionAudit.mlbProjection.emergencyCanary.projection}`
+                        : ""}
+                      {rejectionAudit.mlbProjection.emergencyCanary.forcedInjected ? " · injected" : ""}
+                    </p>
+                  ) : null}
+                  {rejectionAudit.mlbProjection.lastProjectionFailure ? (
+                    <p style={{ ...styles.compactFlags, margin: "2px 0", color: "#f87171" }}>
+                      Projection failed: {rejectionAudit.mlbProjection.lastProjectionFailure.stage} — reason = "
+                      {rejectionAudit.mlbProjection.lastProjectionFailure.reason}"
+                    </p>
+                  ) : null}
+                  {Array.isArray(rejectionAudit.mlbProjection.projectionErrors) &&
+                  rejectionAudit.mlbProjection.projectionErrors.length ? (
+                    <div>
+                      <p style={{ ...styles.compactFlags, marginBottom: 4 }}>Projection errors:</p>
+                      {rejectionAudit.mlbProjection.projectionErrors.slice(0, 8).map((row, index) => (
+                        <p key={`${row.stage}-${index}`} style={{ ...styles.compactFlags, margin: "2px 0" }}>
+                          {row.stage}: {row.reason}
+                        </p>
+                      ))}
+                    </div>
+                  ) : null}
+                  {rejectionAudit.mlbProjection.statsFetchTimedOut ? " · stats timed out" : ""}
+                  {rejectionAudit.mlbProjection.testMode ? " · test thresholds" : ""}
                   {rejectionAudit.mlbProjection.rejections &&
                   Object.keys(rejectionAudit.mlbProjection.rejections).length ? (
                     Object.entries(rejectionAudit.mlbProjection.rejections)

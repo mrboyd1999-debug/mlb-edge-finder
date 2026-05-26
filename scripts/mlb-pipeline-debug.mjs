@@ -3,6 +3,7 @@ import { buildMlbStatProfileFromLogs } from "../src/services/playerStats.js";
 import { MLB_FAILURE } from "../src/services/mlbPropPipelineTrace.js";
 
 const TEST_PLAYERS = [
+  { name: "Spencer Strider", line: 6.5 },
   { name: "Gerrit Cole", line: 6.5 },
   { name: "Tarik Skubal", line: 6.5 },
   { name: "Zack Wheeler", line: 7.5 },

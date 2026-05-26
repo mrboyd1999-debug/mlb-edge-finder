@@ -10,7 +10,7 @@ import { resolveSourceHealthState, resolveFetchHealthBadge, summarizeSourceCount
 import { enrichLineMovementWithTags } from "./services/lineMovementTrust.js";
 import { fetchSportsbookComparison } from "./services/sportsbookOdds";
 import { fetchOddsApiDisplayProps } from "./services/oddsApiPlayerProps.js";
-import { fetchPlayerStats, findStatProfile, statProfileKey } from "./services/playerStats";
+import { fetchPlayerStats, findStatProfile, statProfileKey, buildMlbStatProfileFromLogs } from "./services/playerStats";
 import { playerNamesMatch } from "./utils/playerNames.js";
 import { PRIZEPICKS_HTML_BANNER } from "./services/prizepicks";
 import { fetchInjuryNews } from "./services/injuryNews";
@@ -190,8 +190,13 @@ import {
   buildMlbProjectionDiagnostics,
   markStatsFetchTimedOut,
   markProjectionsComplete,
+  resetProjectionPipelineErrors,
   PIPELINE_STAGES,
 } from "./services/mlbProjectionPipelineLog.js";
+import {
+  isEmergencyProjectionDiagnosticEnabled,
+  runEmergencyProjectionDiagnostic,
+} from "./services/mlbEmergencyProjectionDiagnostic.js";
 import { logPipelineStage } from "./utils/mlbPipelineDebug.js";
 import {
   mergeProviderRawProps,
@@ -1957,7 +1962,41 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   scoringContext.historyRows = historyRows;
   const historyWeights = buildHistoryAccuracyWeights(historyRows);
   reportProgress("PROJECT");
+  resetProjectionPipelineErrors();
+  let emergencyDiagnostic = null;
+  if (MLB_ONLY_MODE && isEmergencyProjectionDiagnosticEnabled()) {
+    try {
+      emergencyDiagnostic = await runEmergencyProjectionDiagnostic({
+        buildProfile: buildMlbStatProfileFromLogs,
+        scoreDFSProp,
+        scoringContext: {
+          ...background,
+          lineComparisonMap,
+          sportsbookComparisonMap,
+          lineMovementMap,
+          historyWeights,
+          historyRows,
+        },
+      });
+      console.info("[MLB Emergency Diagnostic] canary finished", {
+        success: emergencyDiagnostic?.success,
+        errors: emergencyDiagnostic?.errors?.length ?? 0,
+        projection: emergencyDiagnostic?.forcedVerifiedProp?.projection ?? null,
+      });
+    } catch (error) {
+      emergencyDiagnostic = {
+        success: false,
+        errors: [{ stage: "emergency_diagnostic", reason: error.message }],
+        stages: [],
+      };
+      console.error("[MLB Emergency Diagnostic] unexpected failure", error);
+    }
+  }
+
   const scoredProps = [];
+  if (emergencyDiagnostic?.success && emergencyDiagnostic.forcedVerifiedProp) {
+    scoredProps.push(emergencyDiagnostic.forcedVerifiedProp);
+  }
   const scoreCache = new Map();
   for (let index = 0; index < workingNormalProps.length; index += 75) {
     const batch = workingNormalProps.slice(index, index + 75);
@@ -2006,14 +2045,26 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   const mlbProjectionDiagnostics = buildMlbProjectionDiagnostics({
     scoredProps,
     statsMap: background.stats,
+    emergencyDiagnostic,
   });
   markProjectionsComplete(!statsTimedOut);
   logPipelineExecutionSummary("Post-scoring pipeline summary");
   debugInfo.mlbProjectionDiagnostics = mlbProjectionDiagnostics;
   debugInfo.verifiedProps = mlbProjectionDiagnostics.verifiedProps;
   debugInfo.verifiedPropsCount = mlbProjectionDiagnostics.verifiedPropsCount;
+  debugInfo.emergencyProjectionDiagnostic = emergencyDiagnostic;
+  debugInfo.projectionErrors = mlbProjectionDiagnostics.projectionErrors;
 
   allDisplayProps = mergeScoredIntoDisplayProps(allDisplayProps, scoredProps);
+  if (emergencyDiagnostic?.success && emergencyDiagnostic.forcedVerifiedProp) {
+    const canary = emergencyDiagnostic.forcedVerifiedProp;
+    const hasCanary = allDisplayProps.some(
+      (row) => row.id === canary.id || row.isEmergencyCanary
+    );
+    if (!hasCanary) {
+      allDisplayProps = [canary, ...allDisplayProps];
+    }
+  }
   workingNormalProps = mergeScoredIntoDisplayProps(workingNormalProps, scoredProps);
   workingActiveProps = mergeScoredIntoDisplayProps(workingActiveProps, scoredProps);
 
@@ -2096,11 +2147,15 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       ...debugInfo.rejectionAudit,
       mlbProjection: {
         stages: diag.stages,
+        liveDebug: diag.liveDebug,
         verifiedPropsCount: diag.verifiedPropsCount,
         rejections: diag.rejectionCounts,
         testMode: diag.testMode,
         projectionsComplete: diag.projectionsComplete,
         statsFetchTimedOut: diag.statsFetchTimedOut,
+        emergencyCanary: diag.emergencyCanary,
+        projectionErrors: diag.projectionErrors,
+        lastProjectionFailure: diag.lastProjectionFailure,
       },
       reasons: {
         ...(debugInfo.rejectionAudit?.reasons || {}),

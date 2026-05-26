@@ -38,6 +38,37 @@ const filterCounters = {
 
 let projectionsComplete = true;
 let statsFetchTimedOut = false;
+let projectionErrors = [];
+let lastEmergencyDiagnostic = null;
+
+export function resetProjectionPipelineErrors() {
+  projectionErrors = [];
+  lastEmergencyDiagnostic = null;
+}
+
+export function recordProjectionPipelineError(stage = "", reason = "", detail = {}) {
+  const entry = {
+    stage: String(stage || "unknown"),
+    reason: String(reason || "unknown error"),
+    detail,
+    at: new Date().toISOString(),
+  };
+  projectionErrors.push(entry);
+  console.error("[MLB Projection Pipeline ERROR]", entry);
+  return entry;
+}
+
+export function getProjectionPipelineErrors() {
+  return [...projectionErrors];
+}
+
+export function setLastEmergencyDiagnostic(result = null) {
+  lastEmergencyDiagnostic = result;
+}
+
+export function getLastEmergencyDiagnostic() {
+  return lastEmergencyDiagnostic;
+}
 
 export function resetPipelineExecutionCounters() {
   Object.keys(pipelineStages).forEach((key) => {
@@ -45,6 +76,8 @@ export function resetPipelineExecutionCounters() {
   });
   projectionsComplete = true;
   statsFetchTimedOut = false;
+  projectionErrors = [];
+  lastEmergencyDiagnostic = null;
 }
 
 export function setPipelineStageCount(stage, value) {
@@ -262,11 +295,22 @@ export function buildMlbProjectionDiagnostics({
   scoredProps = [],
   statsMap = new Map(),
   testMode = MLB_PROJECTION_TEST_MODE,
+  emergencyDiagnostic = null,
 } = {}) {
   const { verified, rejectionCounts, thresholds } = collectVerifiedScoredProps(scoredProps, { testMode });
   const stageCounts = getPipelineStageCounts();
+  const emergency = emergencyDiagnostic || getLastEmergencyDiagnostic();
+  const projectionErrors = getProjectionPipelineErrors();
   return {
     stages: stageCounts,
+    liveDebug: {
+      propsFetched: stageCounts.FETCHED_PROPS_COUNT,
+      propsNormalized: stageCounts.NORMALIZED_PROPS_COUNT,
+      playerMatches: stageCounts.MATCHED_PLAYERS_COUNT,
+      gameLogsFetched: stageCounts.GAME_LOGS_FOUND_COUNT,
+      projectionsCreated: stageCounts.PROJECTIONS_GENERATED_COUNT,
+      verifiedProps: stageCounts.VERIFIED_PROPS_COUNT,
+    },
     verifiedPropsCount: verified.length,
     verifiedProps: verified.slice(0, 15).map((prop) => ({
       playerName: prop.playerName,
@@ -276,6 +320,7 @@ export function buildMlbProjectionDiagnostics({
       confidence: prop.confidenceScore ?? prop.confidence,
       edge: prop.edge,
       sampleSize: prop.sampleSize,
+      isEmergencyCanary: Boolean(prop.isEmergencyCanary),
     })),
     rejectionCounts,
     thresholds,
@@ -283,5 +328,24 @@ export function buildMlbProjectionDiagnostics({
     projectionsComplete: areProjectionsComplete(),
     statsFetchTimedOut,
     statsProfilesLoaded: statsMap instanceof Map ? statsMap.size : 0,
+    emergencyCanary: emergency
+      ? {
+          success: Boolean(emergency.success),
+          player: emergency.prop?.playerName || EMERGENCY_CANARY_LABEL,
+          projection: emergency.model?.projection ?? emergency.forcedVerifiedProp?.projection ?? null,
+          stages: emergency.stages || [],
+          errors: emergency.errors || [],
+          forcedInjected: Boolean(emergency.forcedVerifiedProp),
+        }
+      : null,
+    projectionErrors,
+    lastProjectionFailure:
+      projectionErrors.length > 0
+        ? projectionErrors[projectionErrors.length - 1]
+        : emergency?.success === false && emergency.errors?.length
+          ? emergency.errors[emergency.errors.length - 1]
+          : null,
   };
 }
+
+const EMERGENCY_CANARY_LABEL = "Spencer Strider";
