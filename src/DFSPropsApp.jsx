@@ -11,6 +11,8 @@ import { enrichLineMovementWithTags } from "./services/lineMovementTrust.js";
 import { fetchSportsbookComparison } from "./services/sportsbookOdds";
 import { fetchOddsApiDisplayProps } from "./services/oddsApiPlayerProps.js";
 import { fetchPlayerStats, findStatProfile, statProfileKey, buildMlbStatProfileFromLogs } from "./services/playerStats";
+import { fetchPlayerSeasonStats } from "./services/sportsDataService.js";
+import { logSportsDataSample } from "../api/lib/sportsDataMlbStatProjection.js";
 import { playerNamesMatch } from "./utils/playerNames.js";
 import { PRIZEPICKS_HTML_BANNER } from "./services/prizepicks";
 import { fetchInjuryNews } from "./services/injuryNews";
@@ -1784,6 +1786,19 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       timedOut: statsTimedOut,
     });
 
+    try {
+      const seasonStatsResult = await fetchPlayerSeasonStats();
+      const seasonStatsData = seasonStatsResult?.data || [];
+      logSportsDataSample(seasonStatsData);
+      background.sportsDataSeasonStats = seasonStatsData;
+      debugInfo.sportsDataSeasonStats = seasonStatsData;
+      debugInfo.sportsDataSeasonStatsCount = seasonStatsData.length;
+    } catch (seasonError) {
+      console.warn("[MLB Projection Pipeline] SportsDataIO season stats fetch failed", seasonError?.message);
+      background.sportsDataSeasonStats = [];
+      debugInfo.sportsDataSeasonStats = [];
+    }
+
     const secondaryCapMs = Math.min(enrichmentTimeoutMs, 8000);
     const secondaryJobs = [
       { label: "sportsbook", run: () => fetchSportsbookComparison({ props: workingNormalProps }) },
@@ -3017,6 +3032,7 @@ export default function DFSPropsApp() {
       sourceStatus,
       lastUpdated,
       debugInfo,
+      sportsDataSeasonStats: debugInfo?.sportsDataSeasonStats || [],
       fetchFailureReasons,
       liveFetchFailed: loadedPropCount === 0,
       fetchTimedOut: /timed?\s*out|board fetch timed out/i.test(String(error || "")),

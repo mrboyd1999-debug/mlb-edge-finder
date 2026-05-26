@@ -5,6 +5,7 @@
 import { getSportsDataApiKey } from "../config/apiConfig.js";
 import { normalizePlayerName } from "../utils/playerNames.js";
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
+import { computePerGameProjectionFromSeasonRow, resolveSportsDataPropLabel } from "../../api/lib/sportsDataMlbStatProjection.js";
 import { fetchSlateSnapshot } from "./sportsDataService.js";
 import { recordProviderResponse } from "../utils/rawResponseDebug.js";
 import { ENRICHMENT_TIMEOUT_MESSAGE, getApiTimeoutMs, withFetchTimeout } from "../utils/apiTimeout.js";
@@ -109,12 +110,11 @@ function roundHalf(value) {
   return Math.round(Number(value) * 2) / 2;
 }
 
-function perGameProjection(row = {}, field = "") {
-  const raw = Number(row?.[field]);
-  if (!Number.isFinite(raw) || raw <= 0) return NaN;
-  const games = Number(row?.Games ?? row?.GamesPlayed ?? row?.Started ?? 0);
-  if (Number.isFinite(games) && games > 0) return raw / games;
-  return raw;
+function perGameProjection(row = {}, statType = "") {
+  const propLabel = resolveSportsDataPropLabel({ statType, prop: statType });
+  if (!propLabel) return NaN;
+  const { projection } = computePerGameProjectionFromSeasonRow(row, propLabel);
+  return Number.isFinite(projection) ? projection : NaN;
 }
 
 function buildProjectionRows(snapshot = {}) {
@@ -139,8 +139,8 @@ function buildProjectionRows(snapshot = {}) {
   return { rows: [], source: "none", warnings: ["SportsDataIO returned no projection rows."] };
 }
 
-function projectionValueForMarket(row = {}, field = "", source = "projections") {
-  if (source === "season-stats") return perGameProjection(row, field);
+function projectionValueForMarket(row = {}, field = "", source = "projections", statType = "") {
+  if (source === "season-stats") return perGameProjection(row, statType || field);
   return Number(row?.[field]);
 }
 
@@ -192,7 +192,7 @@ export async function generateMlbPropsFromSportsData({ limit = 48 } = {}) {
     const team = row.Team || "";
     const opponent = inferOpponent(row, games);
     SDIO_FALLBACK_MARKETS.forEach((market) => {
-      const projection = projectionValueForMarket(row, market.field, rowSource);
+      const projection = projectionValueForMarket(row, market.field, rowSource, market.statType);
       if (!Number.isFinite(projection) || projection <= 0) return;
       const line = Math.max(0.5, roundHalf(projection * market.lineFactor));
       props.push({

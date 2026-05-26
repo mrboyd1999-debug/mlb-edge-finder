@@ -38,6 +38,7 @@ import {
   areProjectionsComplete,
   syncBestPlaysFilterAudit,
 } from "../services/mlbProjectionPipelineLog.js";
+import { enrichPropsWithSportsDataMlbProjections } from "../services/bestPlaysSportsDataEnrichment.js";
 
 export const TOP_MLB_PLAYS_LIMIT = HIGHEST_PROBABILITY_MAX_PLAYS;
 export const SECTION_BEST_PLAYS = HIGHEST_PROBABILITY_MAX_PLAYS;
@@ -302,17 +303,25 @@ export function resolveTopMlbPlaySections(
   });
 
   const candidatePool = buildBestPlaysCandidatePool(displayProps, rawProps, parsedUnderdogProps);
+  const projectedPool = enrichPropsWithSportsDataMlbProjections(
+    candidatePool,
+    options.sportsDataSeasonStats || []
+  );
+  console.log(
+    "WITH PROJECTIONS:",
+    projectedPool.filter((p) => Number(p.projection ?? p.projectedValue) > 0).length
+  );
   const strictPool = buildTopMlbPlayPool(displayProps, rawProps, parsedUnderdogProps, { relaxed: false });
-  const qualityAudit = strictPool._qualityAudit || auditQualityMlbProps(candidatePool);
+  const qualityAudit = strictPool._qualityAudit || auditQualityMlbProps(projectedPool);
   resetProjectionFilterCounters();
-  const playAudit = auditHighestProbabilityProps(candidatePool);
+  const playAudit = auditHighestProbabilityProps(projectedPool);
   syncBestPlaysFilterAudit(playAudit);
   const filterDiagnostics = {
     ...playAudit,
     qualityFilter: qualityAudit,
   };
   const strictEligible = playAudit.eligible || 0;
-  const selection = selectHighestProbabilityPlays(candidatePool, HIGHEST_PROBABILITY_MAX_PLAYS, {
+  const selection = selectHighestProbabilityPlays(projectedPool, HIGHEST_PROBABILITY_MAX_PLAYS, {
     withMeta: true,
   });
   let highestPicks = (selection.picks || []).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));

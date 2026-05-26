@@ -3,6 +3,13 @@
  */
 
 import axios from "axios";
+import {
+  computeProjectionForProp,
+  findSeasonStatRow,
+  logSportsDataSample,
+  resetProjectionDebugCount,
+  resolveSportsDataPropLabel,
+} from "./sportsDataMlbStatProjection.js";
 
 const ODDS_API_BASE = "https://api.the-odds-api.com";
 const SPORTSDATA_MLB_BASE = "https://api.sportsdata.io/v3/mlb";
@@ -41,27 +48,6 @@ const MARKET_LABELS = {
 function num(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
-}
-
-function round(value, digits = 4) {
-  const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
-}
-
-function normalizeName(name = "") {
-  return String(name || "")
-    .toLowerCase()
-    .replace(/[^a-z\s]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function sanitizeProjection(projection) {
-  const value = Number(projection);
-  if (Number.isNaN(value) || !Number.isFinite(value) || value <= 0) {
-    return null;
-  }
-  return round(value, 2);
 }
 
 function resolveOddsApiKey() {
@@ -109,9 +95,6 @@ function extractPropRowsFromOddsPayload(payload = []) {
   const rows = [];
 
   for (const event of events) {
-    const homeTeam = event.home_team || "";
-    const awayTeam = event.away_team || "";
-
     for (const bookmaker of event.bookmakers || []) {
       for (const market of bookmaker.markets || []) {
         if (!isPlayerPropMarketKey(market.key)) continue;
@@ -121,28 +104,21 @@ function extractPropRowsFromOddsPayload(payload = []) {
           const line = num(outcome.point);
           if (line == null || line <= 0) continue;
 
-          const sideName = String(outcome.name || "").trim().toLowerCase();
           const playerId = resolveOutcomePlayerId(outcome);
           const playerName = resolvePlayerName(outcome);
           if (!playerId && !playerName) continue;
 
-          const side = sideName.includes("under") ? "under" : sideName.includes("over") ? "over" : "over";
           const dedupeKey = [playerId || playerName, market.key, line].join("|").toLowerCase();
           const existing = grouped.get(dedupeKey) || {
             playerId,
             player: playerName,
             prop: MARKET_LABELS[market.key] || market.key,
+            statType: MARKET_LABELS[market.key] || market.key,
             marketKey: market.key,
             line,
-            team: "",
-            homeTeam,
-            awayTeam,
           };
 
           if (!existing.player && playerName) existing.player = playerName;
-          if (!existing.playerId && playerId) existing.playerId = playerId;
-          if (side === "over") existing.overLine = line;
-          if (side === "under") existing.underLine = line;
           grouped.set(dedupeKey, existing);
         }
 
@@ -175,7 +151,7 @@ async function fetchOddsPlayerProps(apiKey) {
       if (parsed.length) return parsed;
     }
   } catch {
-    // fall through to event-based fetch
+    // fall through
   }
 
   return fetchOddsPlayerPropsViaEvents(apiKey);
@@ -249,164 +225,66 @@ async function fetchPlayerSeasonStats(apiKey) {
   }
 }
 
-function resolveGamesPlayed(statRow = {}) {
-  return (
-    num(statRow.Games) ??
-    num(statRow.GamesPlayed) ??
-    num(statRow.Appearances) ??
-    num(statRow.Started) ??
-    0
-  );
-}
-
-function computePerGameByPropType(statRow = {}, propType = "", marketKey = "") {
-  const games = resolveGamesPlayed(statRow);
-  if (!games || games <= 0) return null;
-
-  const label = String(propType || MARKET_LABELS[marketKey] || marketKey || "").toLowerCase();
-
-  if (/strikeout/.test(label)) {
-    const total = num(statRow.PitchingStrikeouts) ?? num(statRow.Strikeouts);
-    return total != null ? total / games : null;
-  }
-  if (/total bases/.test(label)) {
-    const total = num(statRow.TotalBases);
-    return total != null ? total / games : null;
-  }
-  if (/home run/.test(label)) {
-    const total = num(statRow.HomeRuns);
-    return total != null ? total / games : null;
-  }
-  if (/rbi/.test(label)) {
-    const total = num(statRow.RunsBattedIn) ?? num(statRow.RBI);
-    return total != null ? total / games : null;
-  }
-  if (/^runs$|runs scored/.test(label)) {
-    const total = num(statRow.Runs);
-    return total != null ? total / games : null;
-  }
-  if (/hits allowed/.test(label)) {
-    const total = num(statRow.PitchingHits);
-    return total != null ? total / games : null;
-  }
-  if (/walk/.test(label)) {
-    const total = num(statRow.PitchingWalks) ?? num(statRow.Walks);
-    return total != null ? total / games : null;
-  }
-  if (/hit/.test(label)) {
-    const total = num(statRow.Hits);
-    return total != null ? total / games : null;
-  }
-
-  return null;
-}
-
-function computeProjectionByPropType(statRow = {}, propType = "", marketKey = "") {
-  const perGame = computePerGameByPropType(statRow, propType, marketKey);
-  if (perGame == null) return null;
-
-  const games = resolveGamesPlayed(statRow);
-  const sampleFactor = 0.6 + 0.4 * Math.min(games / 25, 1);
-  return sanitizeProjection(perGame * sampleFactor);
-}
-
-function buildStatsIndex(seasonStats = []) {
-  const byPlayerId = new Map();
-  for (const row of seasonStats) {
-    const playerId = num(row.PlayerID);
-    if (playerId != null) byPlayerId.set(playerId, row);
-  }
-  return byPlayerId;
-}
-
-function findStatRow(seasonStats = [], { playerId = null, playerName = "" } = {}, statsByPlayerId = new Map()) {
-  if (playerId != null && statsByPlayerId.has(playerId)) {
-    return statsByPlayerId.get(playerId);
-  }
-
-  const query = normalizeName(playerName);
-  if (!query) return null;
-
-  let stat = seasonStats.find((row) => normalizeName(row.Name) === query);
-  if (stat) return stat;
-
-  stat = seasonStats.find((row) => {
-    const candidate = normalizeName(row.Name);
-    return candidate.includes(query) || query.includes(candidate);
-  });
-  return stat || null;
-}
-
-function resolveInvalidReason(row = {}) {
-  if (!row.player) return "missing player";
-  if (!row.line || row.line <= 0) return "missing line";
-  if (row.projection == null) return row.matchReason || "missing projection";
-  return "";
-}
-
-function enrichPropRows(propRows = [], seasonStats = [], statsByPlayerId = new Map()) {
+function enrichPropRows(propRows = [], seasonStats = []) {
+  resetProjectionDebugCount();
   const enriched = [];
 
   for (const row of propRows) {
-    const statRow = findStatRow(
-      seasonStats,
-      { playerId: num(row.playerId), playerName: row.player },
-      statsByPlayerId
-    );
+    const propLabel =
+      resolveSportsDataPropLabel(row) ||
+      resolveSportsDataPropLabel({ statType: row.marketKey, prop: row.prop });
+    const stat = findSeasonStatRow(seasonStats, {
+      playerName: row.player,
+      playerId: row.playerId,
+    });
 
-    const projection = statRow
-      ? computeProjectionByPropType(statRow, row.prop, row.marketKey)
-      : null;
+    let projection = null;
+    let rawStat = null;
+    let games = null;
+    let matchReason = "no stat row match";
+
+    if (stat && propLabel) {
+      const computed = computeProjectionForProp(
+        { ...row, playerName: row.player, statType: propLabel, prop: propLabel },
+        seasonStats
+      );
+      projection = computed.projection;
+      rawStat = computed.rawStat;
+      games = computed.games;
+      matchReason = computed.matchReason;
+    } else if (!propLabel) {
+      matchReason = "unknown prop type";
+    }
 
     enriched.push({
       player: row.player,
-      prop: row.prop,
-      propType: row.prop,
+      prop: propLabel || row.prop,
       line: row.line,
-      team: statRow ? String(statRow.Team || row.team || "").trim() : row.team || "",
+      team: stat?.Team || "",
       projection,
-      games: statRow ? resolveGamesPlayed(statRow) : 0,
-      matched: Boolean(statRow),
-      matchReason: statRow ? "matched" : "no stat row match",
+      rawStat,
+      games,
+      matchReason,
       direction:
-        projection != null && row.line
+        projection != null && row.line != null
           ? projection >= row.line
             ? "OVER"
             : "UNDER"
           : null,
-      invalidReason: "",
+      invalidReason:
+        !row.player
+          ? "missing player"
+          : !row.line
+            ? "missing line"
+            : projection == null
+              ? matchReason
+              : "",
     });
-  }
-
-  for (const row of enriched) {
-    row.invalidReason = resolveInvalidReason(row);
-    if (row.projection != null && row.line) {
-      const diff = row.projection - row.line;
-      const percentEdge = diff / row.line;
-      const games = row.games || 0;
-      const confidenceWeight = games > 20 ? 1.2 : games > 10 ? 1.0 : 0.7;
-      const stability = Math.min(games / 25, 1);
-      row.edgeScore = round(percentEdge * confidenceWeight * stability, 4);
-      row.verifiedProbability = Math.max(
-        50,
-        Math.min(95, Math.round(50 + Math.abs(row.edgeScore) * 100))
-      );
-      row.verified = row.verifiedProbability >= 65;
-      row.confidence = games >= 20 ? "HIGH" : games >= 8 ? "MED" : "LOW";
-    } else {
-      row.edgeScore = 0;
-      row.verifiedProbability = 50;
-      row.verified = false;
-      row.confidence = "LOW";
-    }
   }
 
   return enriched;
 }
 
-/**
- * Fetch live MLB props, merge with season stats, rank by edge magnitude, return top 10.
- */
 export async function buildBestPlays() {
   const oddsKey = resolveOddsApiKey();
   const sportsKey = resolveSportsDataKey();
@@ -417,26 +295,24 @@ export async function buildBestPlays() {
   ]);
 
   console.log("RAW ODDS:", propRows.length);
+  logSportsDataSample(seasonStats);
 
-  const statsByPlayerId = buildStatsIndex(seasonStats);
-  const enriched = enrichPropRows(propRows, seasonStats, statsByPlayerId);
+  const enriched = enrichPropRows(propRows, seasonStats);
 
   console.log("NORMALIZED:", enriched.length);
   console.log(
     "WITH PROJECTIONS:",
-    enriched.filter((p) => Number(p.projection) > 0).length
+    enriched.filter((p) => p.projection != null && p.projection > 0).length
   );
 
-  const filtered = enriched.filter((p) => p.player && p.line && p.projection);
+  const filtered = enriched.filter((p) => p.projection !== null);
   console.log("AFTER FILTER:", filtered.length);
 
-  const ranked = [...filtered].sort(
-    (a, b) => Number(b.verifiedProbability ?? 0) - Number(a.verifiedProbability ?? 0)
-  );
+  const ranked = [...filtered].sort((a, b) => Number(b.projection) - Number(a.projection));
   const topPlays = ranked.slice(0, TOP_N);
   const sample = enriched.slice(0, DEBUG_SAMPLE_SIZE);
   const invalidReasons = enriched.reduce((acc, row) => {
-    const reason = row.invalidReason || "unknown";
+    const reason = row.invalidReason || (row.projection != null ? "eligible" : "missing projection");
     acc[reason] = (acc[reason] || 0) + 1;
     return acc;
   }, {});

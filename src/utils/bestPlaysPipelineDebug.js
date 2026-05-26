@@ -41,7 +41,7 @@ export function passesMinimalBestPlaysFilter(prop = {}) {
   const player = resolveBestPlayPlayerName(prop);
   const line = Number(prop.line);
   const projection = resolveBestPlayProjection(prop);
-  return Boolean(player) && Number.isFinite(line) && line > 0 && projection != null;
+  return Boolean(player) && Number.isFinite(line) && line > 0 && projection !== null;
 }
 
 export function resolveBestPlayInvalidReason(prop = {}) {
