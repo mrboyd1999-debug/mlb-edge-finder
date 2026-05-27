@@ -6,6 +6,7 @@ import { resolveProjectionValue, computeAbsoluteProjectionEdge } from "./project
 import { playerRoleStatMismatchReason } from "./propPlayerRole.js";
 import { MIN_MLB_CONFIDENCE } from "./mlbWeightedConfidence.js";
 import { buildPropDedupeKey } from "./displayPropScoring.js";
+import { PROJECTION_JOIN_DEBUG } from "./bestPlaysPipelineDebug.js";
 
 function finiteOr(value, fallback = NaN) {
   const num = Number(value);
@@ -35,6 +36,7 @@ export function isBelowMinimumConfidence(prop = {}, floor = MIN_MLB_CONFIDENCE) 
 
 export function validateMlbPropQualityRejectReason(prop = {}) {
   if (!prop?.playerName && !prop?.player) return "Rejected: missing player";
+  if (PROJECTION_JOIN_DEBUG) return "";
   if (isStaleLine(prop)) return "Rejected: stale line";
   if (hasInsufficientStats(prop)) return "Rejected: insufficient stats";
   if (isBelowMinimumConfidence(prop)) return "Rejected: confidence below floor";

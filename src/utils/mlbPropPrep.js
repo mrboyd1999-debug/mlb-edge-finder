@@ -40,15 +40,25 @@ export function ensureMatchupFields(prop = {}) {
 export function prepareLiveProp(prop = {}) {
   const withSport = normalizePropSportFields(prop);
   const withMatchup = ensureMatchupFields(withSport);
-  const existing = resolveProjectionValue(withMatchup);
+  const existing =
+    resolveProjectionValue(withMatchup) ??
+    (Number.isFinite(Number(withMatchup.last5Average)) && Number(withMatchup.last5Average) > 0
+      ? Number(withMatchup.last5Average)
+      : null) ??
+    (Number.isFinite(Number(withMatchup.seasonAverage)) && Number(withMatchup.seasonAverage) > 0
+      ? Number(withMatchup.seasonAverage)
+      : null);
 
   return annotateProjectionFields({
     ...withMatchup,
-    projection: existing ?? null,
-    projectedValue: existing ?? null,
-    projectionSource: withMatchup.projectionSource || (existing ? withMatchup.projectionSource : "missing"),
+    projection: existing ?? withMatchup.projection ?? null,
+    projectedValue: existing ?? withMatchup.projectedValue ?? null,
+    projectionSource:
+      withMatchup.projectionSource ||
+      (existing ? withMatchup.projectionSource || "merged" : "missing"),
     estimatedProjection: Boolean(withMatchup.estimatedProjection),
     isLiveLine: !withMatchup.isDemoData,
+    projectionUnavailable: !(Number.isFinite(existing) && existing > 0),
   });
 }
 

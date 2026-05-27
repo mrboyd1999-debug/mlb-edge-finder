@@ -220,7 +220,9 @@ export function enrichMlbPropsBatch(props = [], context = {}) {
   const playerLookup = context.playerLookup || buildMlbPlayerLookup(seasonStats);
   const sharedContext = { ...context, seasonStats, playerLookup };
 
-  const preMerged = mergeProjectionsOntoProps(props, sharedContext);
+  const preMerged = context.skipInitialMerge
+    ? { props, debug: context.initialMergeDebug || {} }
+    : mergeProjectionsOntoProps(props, sharedContext);
   const mergeDebug = preMerged.debug;
 
   const enriched = (preMerged.props || []).map((prop) => {

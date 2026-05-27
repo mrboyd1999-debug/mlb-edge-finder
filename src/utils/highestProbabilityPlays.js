@@ -17,6 +17,7 @@ import {
   resolveBestPlayPlayerName,
   resolveBestPlayProjection,
   sanitizeProjectionValue,
+  PROJECTION_JOIN_DEBUG,
 } from "./bestPlaysPipelineDebug.js";
 import {
   buildMarketContextNote,
@@ -92,7 +93,12 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   }).length;
   logBestPlaysPipelineStage("WITH PROJECTIONS:", withProjections);
 
-  const filtered = enriched.filter((p) => passesVerifiedBestPlaysFilter(p));
+  const filtered = PROJECTION_JOIN_DEBUG
+    ? enriched.filter((p) => {
+        const proj = resolveBestPlayProjection(p);
+        return proj != null && proj > 0 && passesMinimalBestPlaysFilter(p);
+      })
+    : enriched.filter((p) => passesVerifiedBestPlaysFilter(p));
   logBestPlaysPipelineStage("AFTER FILTER:", filtered.length);
 
   const invalidReasons = summarizeInvalidReasons(enriched);

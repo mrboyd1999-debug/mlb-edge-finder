@@ -10,7 +10,7 @@ import { resolveSourceHealthState, resolveFetchHealthBadge, summarizeSourceCount
 import { enrichLineMovementWithTags } from "./services/lineMovementTrust.js";
 import { fetchSportsbookComparison } from "./services/sportsbookOdds";
 import { fetchOddsApiDisplayProps } from "./services/oddsApiPlayerProps.js";
-import { fetchPlayerStats, findStatProfile, statProfileKey, buildMlbStatProfileFromLogs } from "./services/playerStats";
+import { fetchPlayerStats, findStatProfile, statProfileKey, buildMlbStatProfileFromLogs, pickUniquePropsForStatsFetch } from "./services/playerStats";
 import { fetchPlayerSeasonStats } from "./services/sportsDataService.js";
 import { logSportsDataSample } from "../api/lib/sportsDataMlbStatProjection.js";
 import { playerNamesMatch } from "./utils/playerNames.js";
@@ -1802,8 +1802,12 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
   if (MLB_ONLY_MODE) {
     const statsCapMs = Math.min(enrichmentTimeoutMs, 25000);
+    const statsFetchProps = pickUniquePropsForStatsFetch(
+      allDisplayProps.length ? allDisplayProps : workingNormalProps
+    );
+    debugInfo.statsFetchPropCount = statsFetchProps.length;
     const statsResult = await withFetchTimeout(
-      () => fetchPlayerStats({ props: workingNormalProps }),
+      () => fetchPlayerStats({ props: statsFetchProps }),
       statsCapMs,
       {
         label: "stats",
@@ -1843,8 +1847,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
     debugInfo.statsMap = background.stats;
 
-    const canMergeProjections =
-      allDisplayProps.length && (seasonStatsData.length > 0 || background.stats?.size > 0);
+    const canMergeProjections = allDisplayProps.length > 0;
     if (canMergeProjections) {
       const mergeContext = {
         seasonStats: seasonStatsData,
@@ -1855,6 +1858,13 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       workingNormalProps = mergeProjectionsOntoProps(workingNormalProps, mergeContext).props;
       workingActiveProps = mergeProjectionsOntoProps(workingActiveProps, mergeContext).props;
       debugInfo.projectionMerge = merged.debug;
+      console.info("[MLB Projection Pipeline] fetch-stage merge", {
+        rawCount: merged.debug.rawCount,
+        matchCount: merged.debug.matchCount,
+        withProjections: merged.props.filter((p) => Number(p.projection ?? p.projectedValue) > 0).length,
+        missingTeam: merged.props.filter((p) => !String(p.team || "").trim()).length,
+        matchedSample: merged.debug.matchedSample,
+      });
     }
 
     const secondaryCapMs = Math.min(enrichmentTimeoutMs, 8000);

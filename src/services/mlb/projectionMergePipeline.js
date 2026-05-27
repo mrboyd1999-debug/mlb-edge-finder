@@ -51,9 +51,15 @@ function resolveProfileProjectionRow(profile = {}, prop = {}) {
 
   if (!Number.isFinite(projection) || projection <= 0) return null;
 
+  const sourceKey = String(profile.projectionSource || "").toLowerCase();
+  const projectionSource =
+    sourceKey && !/missing|failed|no stat|unavailable/.test(sourceKey)
+      ? profile.projectionSource
+      : "stats-map";
+
   return {
     projection,
-    projectionSource: profile.projectionSource || profile.source || "stats-map",
+    projectionSource,
     team: profile.team || prop.team,
     playerId: profile.playerId ?? extractPlayerId(prop),
     confidence: profile.confidence ?? profile.confidenceScore,
@@ -371,4 +377,40 @@ export function joinPropsWithProjectionRows(props = [], projectionRows = []) {
   });
 
   return { props: merged, matchCount, unmatchedSample: unmatched.slice(0, 5), matchedSample: matchedSamples };
+}
+
+export function buildPipelineMergeDiagnostics(props = [], mergeDebug = {}) {
+  const withProjection = (props || []).filter((prop) => {
+    const value = Number(prop.projection ?? prop.projectedValue ?? prop.last5Average ?? prop.seasonAverage);
+    return Number.isFinite(value) && value > 0;
+  });
+  const missingProjection = (props || []).filter((prop) => {
+    const value = Number(prop.projection ?? prop.projectedValue ?? prop.last5Average ?? prop.seasonAverage);
+    return !Number.isFinite(value) || value <= 0;
+  });
+  const missingTeam = (props || []).filter((prop) => !String(prop.team || "").trim());
+
+  return {
+    rawCount: props.length,
+    normalizedCount: props.length,
+    projectionLookupCount: mergeDebug.projectionLookupCount ?? 0,
+    matchCount: mergeDebug.matchCount ?? withProjection.length,
+    withProjections: withProjection.length,
+    missingProjectionCount: missingProjection.length,
+    missingTeamCount: missingTeam.length,
+    unmatchedSample: mergeDebug.unmatchedSample ?? [],
+    matchedSample: mergeDebug.matchedSample ?? withProjection.slice(0, 5).map((prop) => ({
+      playerName: prop.playerName,
+      statType: prop.statType,
+      projection: prop.projection ?? prop.projectedValue,
+      team: prop.team,
+      projectionSource: prop.projectionSource,
+    })),
+  };
+}
+
+export function logPipelineMergeDiagnostics(label, props = [], mergeDebug = {}) {
+  const diagnostics = buildPipelineMergeDiagnostics(props, mergeDebug);
+  console.info(label, diagnostics);
+  return diagnostics;
 }
