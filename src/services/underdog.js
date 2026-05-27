@@ -748,6 +748,8 @@ function normalizeUnderdogLine(line, players, games, appearances, teams, lineSou
     sport: sport || inferSportFromText(statType) || "",
     league: normalizeLeague(game.sport_id || game.league || sport),
     playerName,
+    playerId: playerId != null ? String(playerId) : "",
+    platformPlayerId: playerId != null ? String(playerId) : "",
     team,
     opponent,
     playerImage,

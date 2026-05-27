@@ -740,6 +740,8 @@ function normalizePrizePicksProjection(
     sport: sport || inferSportFromText(statType, { description: attributes.description }) || "",
     league: league?.attributes?.name || attributes.league || sport,
     playerName,
+    playerId: playerRelId != null ? String(playerRelId) : "",
+    platformPlayerId: playerRelId != null ? String(playerRelId) : "",
     team,
     opponent,
     playerImage,

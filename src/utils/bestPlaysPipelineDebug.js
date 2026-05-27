@@ -8,6 +8,7 @@ import { resolveEdgeMagnitude } from "./bestPlayRanking.js";
 
 export const BEST_PLAYS_DEBUG_MODE = false;
 export const BEST_PLAYS_DEBUG_SAMPLE_SIZE = 0;
+export const PROJECTION_JOIN_DEBUG = import.meta.env?.DEV === true;
 
 export const VERIFIED_MIN_PROJECTION = 0.01;
 export const VERIFIED_MIN_CONFIDENCE = 65;
@@ -64,13 +65,15 @@ export function passesMinimalBestPlaysFilter(prop = {}) {
 export function passesVerifiedBestPlaysFilter(prop = {}) {
   if (!passesMinimalBestPlaysFilter(prop)) return false;
   if (resolvePropSport(prop) !== "MLB") return false;
-  const projection = resolveBestPlayProjection(prop);
-  if (projection == null || projection <= VERIFIED_MIN_PROJECTION) return false;
-  const confidence = resolveNumericConfidence(prop);
-  if (!Number.isFinite(confidence) || confidence < VERIFIED_MIN_CONFIDENCE) return false;
-  const edge = resolveEdgeMagnitude(prop);
-  if (!Number.isFinite(edge) || edge < VERIFIED_MIN_EDGE) return false;
-  if (prop.projectionUnavailable || prop.unverifiedGradeBlocked) return false;
+  if (!PROJECTION_JOIN_DEBUG) {
+    const projection = resolveBestPlayProjection(prop);
+    if (projection == null || projection <= VERIFIED_MIN_PROJECTION) return false;
+    const confidence = resolveNumericConfidence(prop);
+    if (!Number.isFinite(confidence) || confidence < VERIFIED_MIN_CONFIDENCE) return false;
+    const edge = resolveEdgeMagnitude(prop);
+    if (!Number.isFinite(edge) || edge < VERIFIED_MIN_EDGE) return false;
+    if (prop.projectionUnavailable || prop.unverifiedGradeBlocked) return false;
+  }
   return true;
 }
 

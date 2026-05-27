@@ -1,38 +1,30 @@
 /** Merge scoreDFSProp outputs back onto display props so projections reach Best Plays. */
 
-import { buildPropMergeKey, normalizeMergeId } from "./propMergeKeys.js";
-
-function lookupKey(prop = {}) {
-  return buildPropMergeKey(prop, { includeLine: true });
-}
-
-function playerStatKey(prop = {}) {
-  return buildPropMergeKey(prop, { includeLine: false });
-}
+import { buildPropLookupKeys, buildPlayerStatKey, extractPlayerId, normalizeMergeId } from "./propMergeKeys.js";
 
 export function mergeScoredIntoDisplayProps(displayProps = [], scoredProps = []) {
   if (!Array.isArray(scoredProps) || !scoredProps.length) return displayProps || [];
+
   const lookup = new Map();
   scoredProps.forEach((scored) => {
     if (!scored) return;
     const keys = [
-      scored.id,
-      lookupKey(scored),
-      playerStatKey(scored),
-      normalizeMergeId(scored.playerId ?? scored.PlayerID),
+      ...buildPropLookupKeys(scored),
+      buildPlayerStatKey(scored.playerName, scored.statType, extractPlayerId(scored)),
+      normalizeMergeId(scored.sourceId),
     ].filter(Boolean);
     keys.forEach((key) => lookup.set(String(key).toLowerCase(), scored));
   });
 
   let matchCount = 0;
   const unmatched = [];
+  const matchedSamples = [];
 
   const merged = (displayProps || []).map((prop) => {
     const keys = [
-      prop.id,
-      lookupKey(prop),
-      playerStatKey(prop),
-      normalizeMergeId(prop.playerId ?? prop.PlayerID),
+      ...buildPropLookupKeys(prop),
+      buildPlayerStatKey(prop.playerName, prop.statType, extractPlayerId(prop)),
+      normalizeMergeId(prop.sourceId),
     ].filter(Boolean);
 
     let scored = null;
@@ -42,12 +34,12 @@ export function mergeScoredIntoDisplayProps(displayProps = [], scoredProps = [])
     }
 
     if (!scored) {
-      unmatched.push(playerStatKey(prop));
+      unmatched.push(buildPlayerStatKey(prop.playerName, prop.statType, extractPlayerId(prop)));
       return prop;
     }
 
     matchCount += 1;
-    return {
+    const next = {
       ...prop,
       ...scored,
       id: prop.id || scored.id,
@@ -60,6 +52,14 @@ export function mergeScoredIntoDisplayProps(displayProps = [], scoredProps = [])
       projection: scored.projection ?? prop.projection,
       projectedValue: scored.projectedValue ?? prop.projectedValue,
     };
+    if (matchedSamples.length < 5) {
+      matchedSamples.push({
+        playerName: next.playerName,
+        statType: next.statType,
+        projection: next.projection,
+      });
+    }
+    return next;
   });
 
   console.info("[MLB Scored Merge]", {
@@ -67,6 +67,7 @@ export function mergeScoredIntoDisplayProps(displayProps = [], scoredProps = [])
     scoredCount: scoredProps.length,
     matchCount,
     unmatchedSample: unmatched.slice(0, 5),
+    matchedSample: matchedSamples,
   });
 
   return merged;
