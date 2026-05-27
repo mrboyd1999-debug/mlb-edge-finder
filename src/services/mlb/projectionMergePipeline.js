@@ -254,11 +254,58 @@ export function logProjectionSchemaSamples(props = [], context = {}) {
   console.info("[MLB Projection Schema] first 5 statsMap profiles", projectionSample);
 }
 
+/** Debug-only: print first runtime projection object after fetch/lookup build. */
+export function logRuntimeProjectionSample(context = {}) {
+  const seasonLookup = buildSeasonProjectionLookup(context.seasonStats || []);
+  const statsLookup = buildStatsMapProjectionLookup(context.statsMap);
+  const projections = [];
+
+  if (statsLookup?.byKey instanceof Map) {
+    statsLookup.byKey.forEach((row, lookupKey) => {
+      projections.push({ __source: "statsMap-lookup", __lookupKey: lookupKey, ...row });
+    });
+  }
+  if (seasonLookup?.byKey instanceof Map) {
+    seasonLookup.byKey.forEach((row, lookupKey) => {
+      projections.push({ __source: "season-lookup", __lookupKey: lookupKey, ...row });
+    });
+  }
+  if (!projections.length && context.statsMap instanceof Map) {
+    context.statsMap.forEach((profile) => {
+      if (profile) projections.push({ __source: "statsMap-profile", ...profile });
+    });
+  }
+  if (!projections.length && Array.isArray(context.seasonStats)) {
+    context.seasonStats.forEach((row) => {
+      if (row) projections.push({ __source: "season-stat-row", ...row });
+    });
+  }
+
+  console.log("PROJECTIONS TOTAL COUNT:", projections.length);
+
+  if (!projections.length) {
+    console.log("PROJECTION SAMPLE:", undefined);
+    console.log("PROJECTION FULL JSON:", null);
+    console.log("PROJECTION KEYS:", []);
+    return;
+  }
+
+  console.log("PROJECTION SAMPLE:", projections[0]);
+  try {
+    console.log("PROJECTION FULL JSON:", JSON.stringify(projections[0], null, 2));
+  } catch (error) {
+    console.log("PROJECTION FULL JSON:", String(error?.message || error));
+  }
+  console.log("PROJECTION KEYS:", Object.keys(projections[0]));
+}
+
 export function mergeProjectionsOntoProps(props = [], context = {}) {
   const seasonStats = context.seasonStats || [];
   const lookup = buildSeasonProjectionLookup(seasonStats);
   lookup.seasonStats = seasonStats;
   const statsLookup = buildStatsMapProjectionLookup(context.statsMap);
+
+  logRuntimeProjectionSample(context);
 
   logProjectionSchemaSamples(props, context);
 
