@@ -4,6 +4,7 @@
 
 import { resolveMLBTeam, buildPlayerMapFromSeasonStats } from "./mlbPlayerDatabase.js";
 import { projectMlbProp } from "./mlbProjectionEngine.js";
+import { mergeProjectionsOntoProps } from "./projectionMergePipeline.js";
 import { resolveBestPlayProjection } from "../../utils/bestPlaysPipelineDebug.js";
 import { resolveMlbPlayerRow, buildMlbPlayerLookup } from "./playerNormalization.js";
 import { findSeasonStatRow, resolveSportsDataPropLabel } from "../../../api/lib/sportsDataMlbStatProjection.js";
@@ -137,21 +138,26 @@ function attachStatsToProp(prop = {}, context = {}) {
 
 function mergeProjectionOntoProp(prop = {}, row = {}) {
   const projection = row.projection ?? row.projectedValue;
-  const confidence = row.confidence ?? row.meta?.confidenceDetail?.confidence;
+  const confidence = row.confidence ?? row.confidenceScore ?? row.meta?.confidenceDetail?.confidence;
+  const projectionSource = row.projectionSource || row.meta?.projectionSource || prop.projectionSource;
   return {
     ...prop,
     team: prop.team || row.team || "",
     opponent: prop.opponent || row.opponent || "",
+    playerId: prop.playerId ?? row.playerId ?? prop.sportsDataPlayerId,
+    sportsDataPlayerId: prop.sportsDataPlayerId ?? row.playerId,
     projection: projection ?? prop.projection,
     projectedValue: projection ?? prop.projectedValue,
     edge: row.edge ?? prop.edge,
     confidenceScore: confidence ?? prop.confidenceScore,
-    confidence: confidence ?? prop.confidence,
-    verifiedProbability: prop.verifiedProbability ?? confidence,
-    projectionSource: row.meta?.projectionSource || row.projectionSource || prop.projectionSource,
-    projectionMissingReason: row.meta?.invalidReason || prop.projectionMissingReason || "",
-    isVerifiedProjection: Boolean(projection > 0 && row.meta?.projectionSource === "mlb-verified-engine"),
-    simulation: row.meta?.simulation || prop.simulation,
+    confidence: typeof confidence === "number" ? confidence : prop.confidence,
+    verifiedProbability: prop.verifiedProbability ?? (typeof confidence === "number" ? confidence : undefined),
+    projectionSource,
+    projectionMissingReason: row.meta?.invalidReason || row.invalidReason || prop.projectionMissingReason || "",
+    isVerifiedProjection: Boolean(
+      projection > 0 && (projectionSource === "mlb-verified-engine" || prop.isVerifiedProjection)
+    ),
+    simulation: row.meta?.simulation || row.simulation || prop.simulation,
     enrichmentStage: ENRICHMENT_STAGES.GENERATE_PROJECTION,
   };
 }
@@ -214,14 +220,31 @@ export function enrichMlbPropsBatch(props = [], context = {}) {
   const playerLookup = context.playerLookup || buildMlbPlayerLookup(seasonStats);
   const sharedContext = { ...context, seasonStats, playerLookup };
 
-  const enriched = (props || []).map((prop) => {
+  const preMerged = mergeProjectionsOntoProps(props, sharedContext);
+  const mergeDebug = preMerged.debug;
+
+  const enriched = (preMerged.props || []).map((prop) => {
+    const existing = resolveBestPlayProjection(prop);
+    if (existing != null && existing > 0) {
+      return prop;
+    }
     const result = enrichMlbProp(prop, sharedContext);
     return result.prop;
   });
 
-  const debug = getEnrichmentPipelineDebug();
+  pipelineDebug.projected = enriched.filter((prop) => {
+    const proj = resolveBestPlayProjection(prop);
+    return proj != null && proj > 0;
+  }).length;
+
+  const debug = {
+    ...getEnrichmentPipelineDebug(),
+    merge: mergeDebug,
+  };
   console.info("[MLB Enrichment] pipeline summary", {
     input: props.length,
+    mergeMatchCount: mergeDebug?.matchCount ?? 0,
+    mergeLookupCount: mergeDebug?.projectionLookupCount ?? 0,
     enriched: debug.enriched,
     projected: debug.projected,
     verified: debug.verified,

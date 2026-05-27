@@ -311,6 +311,15 @@ export function resolveTopMlbPlaySections(
     options: options.projectionOptions || {},
   });
   const enrichedPool = enrichment.props || candidatePool;
+  const mergeDebug = enrichment.debug?.merge;
+
+  console.info("[MLB Best Plays] projection merge", {
+    rawCount: candidatePool.length,
+    projectionLookupCount: mergeDebug?.projectionLookupCount ?? 0,
+    matchCount: mergeDebug?.matchCount ?? enrichedPool.filter((p) => resolveBestPlayProjection(p) != null).length,
+    withProjections: enrichedPool.filter((p) => resolveBestPlayProjection(p) != null).length,
+    unmatchedSample: mergeDebug?.unmatchedSample ?? [],
+  });
 
   console.log(
     "WITH PROJECTIONS:",

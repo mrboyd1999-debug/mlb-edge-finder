@@ -3,12 +3,11 @@
  * No fabricated projections — stat-based only; null when unmatched.
  */
 
+import { normalizePlayerName, playerNamesMatch } from "../../src/utils/playerNames.js";
+import { normalizeMergeId } from "../../src/utils/propMergeKeys.js";
+
 export function normalizeMatchName(name = "") {
-  return String(name || "")
-    .toLowerCase()
-    .replace(/[^a-z\s]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return normalizePlayerName(name);
 }
 
 function finiteNumber(value) {
@@ -187,8 +186,9 @@ export function computePerGameProjectionFromSeasonRow(stat = {}, propLabel = "",
 export function findSeasonStatRow(seasonStats = [], { playerName = "", playerId = null } = {}) {
   if (!Array.isArray(seasonStats) || !seasonStats.length) return null;
 
-  if (playerId != null) {
-    const byId = seasonStats.find((row) => Number(row?.PlayerID) === Number(playerId));
+  const normalizedId = normalizeMergeId(playerId);
+  if (normalizedId) {
+    const byId = seasonStats.find((row) => normalizeMergeId(row?.PlayerID) === normalizedId);
     if (byId) return byId;
   }
 
@@ -196,6 +196,9 @@ export function findSeasonStatRow(seasonStats = [], { playerName = "", playerId 
   if (!query) return null;
 
   let stat = seasonStats.find((row) => normalizeMatchName(row?.Name) === query);
+  if (stat) return stat;
+
+  stat = seasonStats.find((row) => playerNamesMatch(query, row?.Name));
   if (stat) return stat;
 
   stat = seasonStats.find((row) => {

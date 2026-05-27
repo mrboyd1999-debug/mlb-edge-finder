@@ -206,6 +206,7 @@ import {
   hasAnyProviderProps,
 } from "./services/providerOrchestration.js";
 import { enrichPropsWithSportsData } from "./services/propSportsDataEnrichment.js";
+import { mergeProjectionsOntoProps } from "./services/mlb/projectionMergePipeline.js";
 import { buildLiveRenderBoard, filterPlatformProps, isFakeOrFallbackProp } from "./utils/livePropRender.js";
 import { resolveIngestionFallback } from "./services/ingestionFallback.js";
 import { writeLastGoodBoard, readLastGoodBoard, boardFromLastGood } from "./services/lastGoodBoardCache.js";
@@ -1825,18 +1826,35 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       timedOut: statsTimedOut,
     });
 
+    let seasonStatsData = [];
     try {
       const seasonStatsResult = await fetchPlayerSeasonStats();
-      const seasonStatsData = seasonStatsResult?.data || [];
+      seasonStatsData = seasonStatsResult?.data || [];
       logSportsDataSample(seasonStatsData);
       background.sportsDataSeasonStats = seasonStatsData;
       debugInfo.sportsDataSeasonStats = seasonStatsData;
       debugInfo.sportsDataSeasonStatsCount = seasonStatsData.length;
-      debugInfo.statsMap = background.stats;
     } catch (seasonError) {
       console.warn("[MLB Projection Pipeline] SportsDataIO season stats fetch failed", seasonError?.message);
       background.sportsDataSeasonStats = [];
       debugInfo.sportsDataSeasonStats = [];
+      debugInfo.sportsDataSeasonStatsCount = 0;
+    }
+
+    debugInfo.statsMap = background.stats;
+
+    const canMergeProjections =
+      allDisplayProps.length && (seasonStatsData.length > 0 || background.stats?.size > 0);
+    if (canMergeProjections) {
+      const mergeContext = {
+        seasonStats: seasonStatsData,
+        statsMap: background.stats,
+      };
+      const merged = mergeProjectionsOntoProps(allDisplayProps, mergeContext);
+      allDisplayProps = merged.props;
+      workingNormalProps = mergeProjectionsOntoProps(workingNormalProps, mergeContext).props;
+      workingActiveProps = mergeProjectionsOntoProps(workingActiveProps, mergeContext).props;
+      debugInfo.projectionMerge = merged.debug;
     }
 
     const secondaryCapMs = Math.min(enrichmentTimeoutMs, 8000);
