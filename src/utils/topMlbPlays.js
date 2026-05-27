@@ -373,8 +373,8 @@ export function resolveTopMlbPlaySections(
   const sections = [
     {
       id: "highest-probability",
-      title: "Highest Probability Props",
-      eyebrow: "Top MLB prop edges ranked by verified probability · MED confidence allowed",
+      title: "MLB Projection Candidates",
+      eyebrow: "Verified MLB props with real projections · confidence and edge above threshold",
       picks: highestPicks.filter(Boolean),
     },
   ];

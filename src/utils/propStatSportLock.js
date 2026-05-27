@@ -62,8 +62,25 @@ export function isMlbOnlyStatType(statType = "") {
   );
 }
 
-/** Returns "NBA", "WNBA", "MLB", or "" — basketball checked before MLB when both could apply. */
+/** NFL-only markets — if matched, sport MUST be NFL. */
+export function isNflOnlyStatType(statType = "") {
+  const text = statText(statType);
+  if (!text) return false;
+  if (/\bseason\s+pass\s+yards\b/.test(text)) return true;
+  if (/\bseason\s+(receiving|rushing)\s+yards\b/.test(text)) return true;
+  if (/\bpass\s+yards\b/.test(text) && !/\bpitch/.test(text)) return true;
+  if (/\b(receiving|rushing)\s+yards\b/.test(text)) return true;
+  if (/\bpass\s+touchdowns?\b/.test(text)) return true;
+  if (/\bpass\s+completions?\b/.test(text)) return true;
+  if (/\binterceptions?\b/.test(text) && /\bpass/.test(text)) return true;
+  if (/\brushing\s+attempts?\b/.test(text)) return true;
+  if (/\breceptions?\b/.test(text) && !/\bmlb\b/.test(text)) return true;
+  return false;
+}
+
+/** Returns "NBA", "WNBA", "MLB", "NFL", or "" */
 export function lockSportFromStatType(statType = "") {
+  if (isNflOnlyStatType(statType)) return "NFL";
   if (isNbaOnlyStatType(statType)) {
     const text = statText(statType);
     if (/\bwnba\b/.test(text)) return "WNBA";
@@ -87,5 +104,7 @@ export function sportStatMismatchReason(sport = "", statType = "") {
   if (lock === "MLB" && (sport === "NBA" || sport === "WNBA")) return "Rejected: MLB stat under NBA";
   if (lock === "WNBA" && sport === "MLB") return "Rejected: WNBA stat under MLB";
   if (lock === "MLB" && sport === "WNBA") return "Rejected: MLB stat under WNBA";
+  if (lock === "NFL" && sport === "MLB") return "Rejected: NFL stat under MLB";
+  if (lock === "MLB" && sport === "NFL") return "Rejected: MLB stat under NFL";
   return "Rejected: invalid sport/stat combo";
 }

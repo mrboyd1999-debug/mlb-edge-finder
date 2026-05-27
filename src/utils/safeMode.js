@@ -1,8 +1,8 @@
 /**
  * Emergency recovery flag — bypasses advanced filtering/enrichment that can block the board.
- * Flip to false once the pipeline is stable again.
+ * Disabled for production MLB-only mode; enable only for local pipeline debugging.
  */
-export const SAFE_MODE = true;
+export const SAFE_MODE = false;
 
 export function isSafeModeEnabled() {
   return SAFE_MODE;

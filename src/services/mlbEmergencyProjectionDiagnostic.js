@@ -29,13 +29,10 @@ export const EMERGENCY_CANARY_PROP = {
 };
 
 export function isEmergencyProjectionDiagnosticEnabled() {
-  if (typeof import.meta !== "undefined" && import.meta.env?.VITE_MLB_EMERGENCY_DIAGNOSTIC === "0") {
-    return false;
-  }
   if (typeof import.meta !== "undefined" && import.meta.env?.VITE_MLB_EMERGENCY_DIAGNOSTIC === "1") {
     return true;
   }
-  return MLB_ONLY_MODE || isDevEnvironment();
+  return false;
 }
 
 function canaryPropId(prop = {}) {

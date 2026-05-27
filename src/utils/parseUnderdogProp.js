@@ -69,13 +69,7 @@ export function isMlbPickemRecord(raw = {}, lookup = {}) {
 
 export function filterMlbPickemRecords(rawRecords = [], lookup = {}) {
   if (!MLB_ONLY_MODE) return rawRecords;
-  const filtered = (rawRecords || []).filter((raw) => isMlbPickemRecord(raw, lookup));
-  if (filtered.length) return filtered;
-  return (rawRecords || []).filter((raw) => {
-    const line = resolveLineFromRaw(raw);
-    const player = resolvePlayerFromRaw(raw, lookup);
-    return Number.isFinite(line) && player.length >= 2;
-  });
+  return (rawRecords || []).filter((raw) => isMlbPickemRecord(raw, lookup));
 }
 
 export function extractRawUnderdogRecords(payload) {

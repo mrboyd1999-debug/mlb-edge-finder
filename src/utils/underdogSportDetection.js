@@ -308,14 +308,14 @@ export function filterResolvedSportProps(props = [], sport = "MLB", { selectedSp
     const statLock = lockSportFromStatType(statType);
     const label = resolvePropSportLabel({ ...prop, selectedSportTab });
 
-    if (statLock === "NBA" || statLock === "WNBA") {
+    if (statLock === "NBA" || statLock === "WNBA" || statLock === "NFL") {
       return want === statLock;
     }
     if (statLock === "MLB") {
       return want === "MLB";
     }
     if (label) {
-      if (want === "MLB" && (label === "NBA" || label === "WNBA")) return false;
+      if (want === "MLB" && (label === "NBA" || label === "WNBA" || label === "NFL" || label === "NCAAF")) return false;
       return label === want;
     }
     if (want === "MLB" && selectedSportTab === "MLB" && hasMlbStatIndicator(statType)) {

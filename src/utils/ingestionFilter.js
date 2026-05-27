@@ -130,9 +130,8 @@ export function buildContextFromProp(prop = {}) {
   if (!sport || sport === "Other") {
     const statType = prop.statType || prop.market || prop.propType || "";
     const fromStat = lockSportFromStatType(statType);
-    if (fromStat === APP_SPORTS.MLB || hasMlbStatIndicator(statType)) sport = APP_SPORTS.MLB;
-    const platform = String(prop.platform || prop.source || "").toLowerCase();
-    if (!sport && /prizepicks|underdog/.test(platform)) sport = APP_SPORTS.MLB;
+    if (fromStat) sport = fromStat;
+    else if (hasMlbStatIndicator(statType)) sport = APP_SPORTS.MLB;
   }
   return {
     platform: prop.platform,
@@ -305,9 +304,13 @@ export function rejectIngestionAtSource(context, audit, recordFilterReason, rawR
 
 export function filterIngestionProps(props = [], audit = null, recordFilterReason = null) {
   const accepted = [];
+  let rejectedNonMlb = 0;
   props.forEach((prop) => {
     const reason = getIngestionPropRejectReason(prop);
     if (reason) {
+      if (/non-priority sport|unsupported sport|unapproved soccer/i.test(reason)) {
+        rejectedNonMlb += 1;
+      }
       if (!shouldSilenceIngestionReject(reason, prop) && audit && typeof recordFilterReason === "function") {
         recordFilterReason(audit, reason, prop);
       }
@@ -315,6 +318,13 @@ export function filterIngestionProps(props = [], audit = null, recordFilterReaso
     }
     accepted.push(prop);
   });
+  if (MLB_ONLY_MODE && rejectedNonMlb > 0) {
+    console.info("[MLB Pipeline] filtered non-MLB at ingestion", {
+      rejected: rejectedNonMlb,
+      accepted: accepted.length,
+      total: props.length,
+    });
+  }
   return accepted;
 }
 

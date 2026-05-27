@@ -75,6 +75,8 @@ const DISABLED_SPORTS = new Set([
   APP_SPORTS.WTA,
   APP_SPORTS.Soccer,
   APP_SPORTS.NHL,
+  APP_SPORTS.NFL,
+  APP_SPORTS.NCAAF,
 ]);
 
 export function resolvePropSport(prop = {}) {
@@ -83,8 +85,10 @@ export function resolvePropSport(prop = {}) {
       resolvePropSportLabel(prop) || prop.classifiedSport || prop.sport || prop.league || "",
       prop.league || ""
     ) || normalizeSportLabel(prop.sport || "", prop.league || "");
-  if (labeled === MLB_SPORT) return MLB_SPORT;
   const statType = prop.statType || prop.market || prop.propType || "";
+  const statLock = lockSportFromStatType(statType);
+  if (statLock && statLock !== MLB_SPORT) return statLock;
+  if (labeled && labeled !== MLB_SPORT) return labeled;
   if (lockSportFromStatType(statType) === MLB_SPORT || hasMlbStatIndicator(statType)) return MLB_SPORT;
   return labeled || normalizeSportLabel(prop.sport || "", prop.league || "");
 }

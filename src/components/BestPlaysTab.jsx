@@ -10,7 +10,6 @@ function BestPlaysTab({ sections = [], loading = false, onOpen, filterDiagnostic
     const sectionPicks = section?.picks || [];
     const counts = filterDiagnostics?.pipelineCounts;
     const invalidReasons = filterDiagnostics?.invalidReasons;
-    const debugMode = filterDiagnostics?.debugMode;
 
     let banner = null;
     if (counts || invalidReasons) {
@@ -22,10 +21,9 @@ function BestPlaysTab({ sections = [], loading = false, onOpen, filterDiagnostic
         : "";
       banner = [
         counts
-          ? `Pipeline: ${counts.rawProps ?? 0} raw · ${counts.normalized ?? 0} normalized · ${counts.withProjections ?? 0} with projections · ${counts.filtered ?? 0} filtered · ${sectionPicks.length} shown`
+          ? `Pipeline: ${counts.rawProps ?? 0} raw · ${counts.normalized ?? 0} normalized · ${counts.withProjections ?? 0} with projections · ${counts.filtered ?? 0} verified · ${sectionPicks.length} shown`
           : null,
-        reasonText ? `Invalid: ${reasonText}` : null,
-        debugMode ? "Debug mode: showing sample props even when below normal thresholds." : null,
+        reasonText ? `Rejected: ${reasonText}` : null,
       ]
         .filter(Boolean)
         .join(" | ");
@@ -35,7 +33,7 @@ function BestPlaysTab({ sections = [], loading = false, onOpen, filterDiagnostic
   }, [sections, filterDiagnostics]);
 
   if (loading) {
-    return <p className="compact-empty">Loading highest probability props…</p>;
+    return <p className="compact-empty">Loading MLB projection candidates…</p>;
   }
 
   return (
@@ -46,15 +44,12 @@ function BestPlaysTab({ sections = [], loading = false, onOpen, filterDiagnostic
         </p>
       ) : null}
       {!picks.length ? (
-        <p className="compact-empty">
-          No renderable MLB props in the current sample. Check Developer Debug pipeline counts — feed props may be
-          missing projections or player matches.
-        </p>
+        <p className="compact-empty">No verified MLB props available yet.</p>
       ) : (
         <section className="compact-section">
           <div className="compact-section__head">
-            <h2>Highest Probability Props</h2>
-            <p>Debug view — ranked props with pipeline visibility (edge filtering temporarily disabled)</p>
+            <h2>MLB Projection Candidates</h2>
+            <p>Verified MLB props with real projections, edge, and confidence above threshold.</p>
           </div>
           <div className="compact-card-list">
             {picks.map((prop, index) => (

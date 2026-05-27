@@ -1,5 +1,5 @@
 /**
- * Highest Probability Props — debug-first Best Plays qualification.
+ * MLB Projection Candidates — strict verified qualification only.
  */
 
 import { resolveProjectionValue } from "./projectionQuality.js";
@@ -7,9 +7,9 @@ import { normalizeSource } from "./normalizeSource.js";
 import { buildPropDedupeKey } from "./displayPropScoring.js";
 import { isFakeOrFallbackProp } from "./livePropRender.js";
 import { isMinimalRenderableProp } from "./normalizeProp.js";
+import { resolvePropSport } from "./mlbOnlyMode.js";
 import {
   BEST_PLAYS_DEBUG_MODE,
-  BEST_PLAYS_DEBUG_SAMPLE_SIZE,
   logBestPlaysPipelineStage,
   passesMinimalBestPlaysFilter,
   passesVerifiedBestPlaysFilter,
@@ -27,12 +27,13 @@ import {
 
 export const HIGHEST_PROBABILITY_MIN_CONFIDENCE = 65;
 export const HIGHEST_PROBABILITY_MIN_EDGE = 0.015;
-export const HIGHEST_PROBABILITY_MAX_PLAYS = BEST_PLAYS_DEBUG_MODE ? 25 : 10;
+export const HIGHEST_PROBABILITY_MAX_PLAYS = 10;
 export const HIGHEST_PROBABILITY_TARGET_PLAYS = 5;
 export const HIGHEST_PROBABILITY_MIN_VERIFIED_TO_SHOW = 1;
 
 function isRenderableCandidate(prop = {}) {
   if (!prop || prop.isDemoData || isFakeOrFallbackProp(prop)) return false;
+  if (resolvePropSport(prop) !== "MLB") return false;
   return isMinimalRenderableProp(prop);
 }
 
@@ -47,20 +48,11 @@ export function sortHighestProbabilityPlays(props = []) {
       const probA = Number(a.verifiedProbability ?? 0);
       const probB = Number(b.verifiedProbability ?? 0);
       if (probB !== probA) return probB - probA;
-      const withProjA = resolveBestPlayProjection(a) != null ? 1 : 0;
-      const withProjB = resolveBestPlayProjection(b) != null ? 1 : 0;
-      if (withProjB !== withProjA) return withProjB - withProjA;
+      const edgeA = resolveEdgeMagnitude(a);
+      const edgeB = resolveEdgeMagnitude(b);
+      if (edgeB !== edgeA) return edgeB - edgeA;
       return Number(b.line || 0) - Number(a.line || 0);
     });
-}
-
-function buildDebugSample(enriched = [], max = BEST_PLAYS_DEBUG_SAMPLE_SIZE) {
-  return enriched.slice(0, max).map((prop) => ({
-    ...enrichBestPlayRankingFields(prop),
-    verified: false,
-    debugMode: true,
-    invalidReason: resolveBestPlayInvalidReason(prop),
-  }));
 }
 
 function summarizeInvalidReasons(enriched = []) {
@@ -69,6 +61,20 @@ function summarizeInvalidReasons(enriched = []) {
     acc[reason] = (acc[reason] || 0) + 1;
     return acc;
   }, {});
+}
+
+function logRejectionSummary(enriched = []) {
+  const reasons = summarizeInvalidReasons(enriched);
+  const nonMlb = enriched.filter((p) => resolvePropSport(p) !== "MLB").length;
+  const zeroProjection = enriched.filter((p) => {
+    const proj = resolveBestPlayProjection(p);
+    return proj == null || proj <= 0;
+  }).length;
+  console.info("[MLB Pipeline] verified plays rejection summary", {
+    nonMlb,
+    zeroProjection,
+    reasons,
+  });
 }
 
 export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABILITY_MAX_PLAYS, options = {}) {
@@ -80,18 +86,20 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   logBestPlaysPipelineStage("NORMALIZED:", normalized.length);
 
   const enriched = normalized.map(enrichBestPlayCandidate);
-  logBestPlaysPipelineStage(
-    "WITH PROJECTIONS:",
-    enriched.filter((p) => resolveBestPlayProjection(p) != null).length
-  );
+  const withProjections = enriched.filter((p) => {
+    const proj = resolveBestPlayProjection(p);
+    return proj != null && proj > 0;
+  }).length;
+  logBestPlaysPipelineStage("WITH PROJECTIONS:", withProjections);
 
   const filtered = enriched.filter((p) => passesVerifiedBestPlaysFilter(p));
   logBestPlaysPipelineStage("AFTER FILTER:", filtered.length);
 
   const invalidReasons = summarizeInvalidReasons(enriched);
   logBestPlaysPipelineStage("INVALID REASONS:", invalidReasons);
+  logRejectionSummary(enriched);
 
-  const ranked = sortHighestProbabilityPlays(filtered.length ? filtered : enriched);
+  const ranked = sortHighestProbabilityPlays(filtered);
   const seen = new Set();
   const picks = [];
 
@@ -100,41 +108,20 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
     const key = buildPropDedupeKey(prop);
     if (seen.has(key)) continue;
     seen.add(key);
-    picks.push(prop);
-  }
-
-  if (!picks.length && BEST_PLAYS_DEBUG_MODE && enriched.length) {
-    const sample = buildDebugSample(enriched, max);
-    logBestPlaysPipelineStage("DEBUG SAMPLE:", sample.length);
-    if (options.withMeta) {
-      return {
-        picks: sample,
-        usedVerifiedFallback: true,
-        strictEligible: 0,
-        debugMode: true,
-        invalidReasons,
-        pipelineCounts: {
-          rawProps: rawProps.length,
-          normalized: normalized.length,
-          withProjections: enriched.filter((p) => resolveBestPlayProjection(p) != null).length,
-          filtered: filtered.length,
-        },
-      };
-    }
-    return sample;
+    picks.push({ ...prop, verified: true });
   }
 
   if (options.withMeta) {
     return {
       picks,
-      usedVerifiedFallback: picks.length > 0 && !picks.some((row) => row.verified),
-      strictEligible: picks.filter((row) => row.verified).length,
+      usedVerifiedFallback: false,
+      strictEligible: picks.length,
       debugMode: BEST_PLAYS_DEBUG_MODE,
       invalidReasons,
       pipelineCounts: {
         rawProps: rawProps.length,
         normalized: normalized.length,
-        withProjections: enriched.filter((p) => sanitizeProjectionValue(p.projection) != null).length,
+        withProjections,
         filtered: filtered.length,
       },
     };
@@ -148,6 +135,9 @@ export function validateHighestProbabilityRejectReason(prop = {}, options = {}) 
   if (!isRenderableCandidate(prop)) return "Rejected: not renderable";
   if (!passesMinimalBestPlaysFilter(prop)) {
     return `Rejected: ${resolveBestPlayInvalidReason(prop) || "invalid prop"}`;
+  }
+  if (!passesVerifiedBestPlaysFilter(prop)) {
+    return `Rejected: ${resolveBestPlayInvalidReason(prop) || "failed verified filter"}`;
   }
   return "";
 }
@@ -188,7 +178,15 @@ export function auditHighestProbabilityProps(props = [], options = {}) {
     if (/projection/.test(reason)) {
       counters.filteredMissingProjection += 1;
       counters.missingProjection += 1;
-    } else if (/line/.test(reason)) {
+    } else if (/confidence/.test(reason)) {
+      counters.filteredLowConfidence += 1;
+      counters.lowConfidence += 1;
+    } else if (/edge/.test(reason)) {
+      counters.filteredWeakEdge += 1;
+      counters.lowEdge += 1;
+    } else if (/line|stat|team|player/.test(reason)) {
+      counters.filteredOther += 1;
+    } else if (/non-MLB|sport/.test(reason)) {
       counters.filteredOther += 1;
     } else if (/player/.test(reason)) {
       counters.filteredBadMatch += 1;
@@ -215,8 +213,7 @@ export function buildHighestProbabilityQualifyReason(prop = {}) {
   const probability = prop.verifiedProbability;
   const verifiedNote = Number.isFinite(probability) ? `${probability}%` : "";
   const leanNote = lean && lean !== "PASS" ? `${lean} · ${edgeMag.toFixed(1)} pt edge` : "";
-  const debugNote = prop.invalidReason ? `debug: ${prop.invalidReason}` : "";
-  return [debugNote, verifiedNote, leanNote, market, base].filter(Boolean).join(" · ");
+  return [verifiedNote, leanNote, market, base].filter(Boolean).join(" · ");
 }
 
 export function formatHighestProbabilitySource(prop = {}) {

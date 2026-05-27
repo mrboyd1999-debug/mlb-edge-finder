@@ -5,7 +5,7 @@
 
 import { normalizeDisplayProp, buildAllDisplayProps, enrichDisplayPropsPipeline } from "./allDisplayProps.js";
 import { normalizePropsWithSource } from "./normalizeSource.js";
-import { attachSportsbookVerifiedFields, isSupportedSportsbookSource } from "./propValidation.js";
+import { attachSportsbookVerifiedFields } from "./propValidation.js";
 import { normalizeSportLabel } from "./sportMappings.js";
 import { lockSportFromStatType } from "./propStatSportLock.js";
 import { hasMlbStatIndicator } from "./underdogSportDetection.js";
@@ -14,14 +14,14 @@ import { normalizePropShape } from "./propShape.js";
 
 export function inferMlbSportForProp(prop = {}) {
   const fromLabel = normalizeSportLabel(prop.sport || prop.classifiedSport || "", prop.league || "");
-  if (fromLabel === MLB_SPORT) return MLB_SPORT;
   const statType = prop.statType || prop.market || prop.propType || "";
-  if (lockSportFromStatType(statType) === MLB_SPORT || hasMlbStatIndicator(statType)) return MLB_SPORT;
-  if (isSupportedSportsbookSource(prop)) return MLB_SPORT;
+  const statLock = lockSportFromStatType(statType);
+  if (statLock === MLB_SPORT || hasMlbStatIndicator(statType)) return MLB_SPORT;
+  if (fromLabel === MLB_SPORT) return MLB_SPORT;
   return fromLabel || String(prop.sport || prop.league || "").trim();
 }
 
-/** Normalize sport/league on provider props before MLB tab filtering. */
+/** Normalize sport/league on provider props without forcing non-MLB lines to MLB. */
 export function ensureMlbSportOnProp(prop = {}) {
   if (!prop || typeof prop !== "object") return prop;
   const sport = inferMlbSportForProp(prop);
@@ -29,21 +29,17 @@ export function ensureMlbSportOnProp(prop = {}) {
   const shaped = normalizePropShape(
     {
       ...prop,
-      sport: sport || prop.sport || MLB_SPORT,
-      league: prop.league || sport || MLB_SPORT,
-      projectionSource: prop.projectionSource || (prop.projection ? prop.projectionSource : "base-feed"),
-      baseFeedProjection: prop.projection == null && !prop.projectedValue,
-      projectionLabel:
-        prop.projectionLabel ||
-        (prop.projection == null && !prop.projectedValue ? "Base Feed Projection" : prop.projectionLabel),
+      sport: sport || prop.sport || "",
+      league: prop.league || sport || prop.league || "",
+      projectionSource: prop.projectionSource || (prop.projection ? prop.projectionSource : undefined),
     },
     { platform, source: platform || prop.source }
   );
   return attachSportsbookVerifiedFields(
     {
       ...shaped,
-      sport: sport || MLB_SPORT,
-      league: shaped.league || sport || MLB_SPORT,
+      sport: sport || shaped.sport || "",
+      league: shaped.league || sport || "",
       lineSourceBadge: prop.lineSourceBadge || "LIVE",
     },
     platform || shaped.platform

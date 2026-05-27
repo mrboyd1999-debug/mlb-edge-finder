@@ -52,7 +52,7 @@ export function validateTopMlbPlayRejectReason(prop = {}) {
   if (base) return base;
 
   const projection = resolveProjectionValue(prop);
-  if (projection == null) return "";
+  if (projection == null || projection <= 0) return "Rejected: missing projection";
 
   const projectionReject = validateProjectionRejectReason(prop);
   if (projectionReject && !prop.estimatedProjection && !prop.isDemoData) return projectionReject;
@@ -84,7 +84,7 @@ export function validateRelaxedRankableRejectReason(prop = {}) {
   if (base && !/unverified/.test(base)) return base;
 
   const projection = resolveProjectionValue(prop);
-  if (projection == null) return "";
+  if (projection == null || projection <= 0) return "Rejected: missing projection";
 
   const evaluation = prop.sideEvaluation || evaluateBothSides(prop);
   if (evaluation.pass || evaluation.recommendedSide === "PASS") {

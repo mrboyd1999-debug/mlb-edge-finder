@@ -211,8 +211,8 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all" } = 
         return {
           source: "Underdog",
           status: rawCount > 0 ? "Connected" : "Empty",
-          props: parsedProps.length ? parsedProps : props,
-          parsedProps: parsedProps.length ? parsedProps : props,
+          props: [],
+          parsedProps,
           warnings: [parserMessage],
           health: parsedProps.length ? "LIVE" : "EMPTY",
           lineSourceBadge: parsedProps.length ? "LIVE" : "EMPTY",
@@ -278,7 +278,9 @@ function buildCachedUnderdogResult({ sport, statType, attempts, reason = "fetch-
   const savedAt = readCachedPayloadSavedAt();
   const { props: parsedProps, audit } = parseUnderdogPayload(cachedPayload, "CACHED");
   logPipelineAudit("Underdog-cached", audit);
-  const props = parsedProps.filter((prop) => matchesFilter(prop, sport, statType));
+  const props = MLB_ONLY_MODE
+    ? filterResolvedSportProps(parsedProps, sport === "all" ? "MLB" : sport, { selectedSportTab: "MLB" })
+    : parsedProps.filter((prop) => matchesFilter(prop, sport, statType));
   if (!props.length) return null;
   markSourceCached(SOURCE_IDS.UNDERDOG, savedAt);
   const rateLimited = reason === "rate-limit" || reason === "cooldown" || attempts.some((item) => item.status === 429);

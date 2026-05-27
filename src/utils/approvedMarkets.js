@@ -10,7 +10,6 @@ import {
   resolvePropSport,
 } from "./mlbOnlyMode.js";
 import { inferMlbSportForProp } from "./baseFeedPipeline.js";
-import { isSupportedSportsbookSource } from "./propValidation.js";
 
 /** Human-readable approved markets (reference). Keys are canonical marketKey values. */
 export const APPROVED_MARKETS = MLB_ONLY_MODE
@@ -76,14 +75,6 @@ export function marketKeyForProp(prop = {}) {
 export function isApprovedMarket(prop = {}) {
   const resolvedSport = resolvePropSport(prop) || inferMlbSportForProp(prop);
   if (MLB_ONLY_MODE && !isSportActiveInApp(resolvedSport)) return false;
-  if (
-    MLB_ONLY_MODE &&
-    resolvedSport === "MLB" &&
-    isSupportedSportsbookSource(prop) &&
-    Boolean(prop.statType || prop.market || prop.propType)
-  ) {
-    return true;
-  }
   const sport = resolveSportBucket(resolvedSport);
   const registry = APPROVED_MARKET_KEYS[sport];
   if (!registry) return false;
