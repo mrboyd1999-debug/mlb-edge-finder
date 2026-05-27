@@ -13,6 +13,16 @@ export const VERIFIED_MIN_PROJECTION = 0.01;
 export const VERIFIED_MIN_CONFIDENCE = 65;
 export const VERIFIED_MIN_EDGE = 0.015;
 
+function resolveNumericConfidence(prop = {}) {
+  const score = Number(prop.confidenceScore);
+  if (Number.isFinite(score)) return score;
+  const verified = Number(prop.verifiedProbability);
+  if (Number.isFinite(verified)) return verified;
+  const raw = Number(prop.confidence);
+  if (Number.isFinite(raw)) return raw;
+  return NaN;
+}
+
 export function normalizeMatchName(name = "") {
   return String(name || "")
     .toLowerCase()
@@ -56,7 +66,7 @@ export function passesVerifiedBestPlaysFilter(prop = {}) {
   if (resolvePropSport(prop) !== "MLB") return false;
   const projection = resolveBestPlayProjection(prop);
   if (projection == null || projection <= VERIFIED_MIN_PROJECTION) return false;
-  const confidence = Number(prop.confidence ?? prop.confidenceScore ?? prop.verifiedProbability);
+  const confidence = resolveNumericConfidence(prop);
   if (!Number.isFinite(confidence) || confidence < VERIFIED_MIN_CONFIDENCE) return false;
   const edge = resolveEdgeMagnitude(prop);
   if (!Number.isFinite(edge) || edge < VERIFIED_MIN_EDGE) return false;
@@ -77,7 +87,7 @@ export function resolveBestPlayInvalidReason(prop = {}) {
   if (projection == null || projection <= 0) {
     return prop.projectionMissingReason || prop.sportsDataMatchReason || "missing projection";
   }
-  const confidence = Number(prop.confidence ?? prop.confidenceScore ?? prop.verifiedProbability);
+  const confidence = resolveNumericConfidence(prop);
   if (!Number.isFinite(confidence) || confidence < VERIFIED_MIN_CONFIDENCE) return "low confidence";
   const edge = resolveEdgeMagnitude(prop);
   if (!Number.isFinite(edge) || edge < VERIFIED_MIN_EDGE) return "weak edge";

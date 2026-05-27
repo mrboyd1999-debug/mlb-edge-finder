@@ -1814,6 +1814,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     markStatsFetchTimedOut(statsTimedOut);
     backgroundWarnings.push(...(statsResult.warnings || []));
     debugInfo.statsLoadedCount = background.stats.size;
+    debugInfo.statsMap = background.stats;
     const { matchedPlayers, gameLogsFound } = summarizeStatsMap(background.stats);
     setPipelineStageCount(PIPELINE_STAGES.MATCHED_PLAYERS_COUNT, matchedPlayers);
     setPipelineStageCount(PIPELINE_STAGES.GAME_LOGS_FOUND_COUNT, gameLogsFound);
@@ -1831,6 +1832,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       background.sportsDataSeasonStats = seasonStatsData;
       debugInfo.sportsDataSeasonStats = seasonStatsData;
       debugInfo.sportsDataSeasonStatsCount = seasonStatsData.length;
+      debugInfo.statsMap = background.stats;
     } catch (seasonError) {
       console.warn("[MLB Projection Pipeline] SportsDataIO season stats fetch failed", seasonError?.message);
       background.sportsDataSeasonStats = [];
@@ -1959,6 +1961,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       if (label === "stats") {
         background.stats = result.value.stats || new Map();
         debugInfo.statsLoadedCount = background.stats.size;
+        debugInfo.statsMap = background.stats;
         if (result.value.timedOut) {
           statsTimedOut = true;
           markStatsFetchTimedOut(true);
@@ -3073,6 +3076,7 @@ export default function DFSPropsApp() {
         lastUpdated,
         debugInfo,
         sportsDataSeasonStats: debugInfo?.sportsDataSeasonStats || [],
+        statsMap: debugInfo?.statsMap || scoringContextRef.current?.stats || null,
         fetchFailureReasons,
         liveFetchFailed: loadedPropCount === 0,
         fetchTimedOut: /timed?\s*out|board fetch timed out/i.test(String(error || "")),

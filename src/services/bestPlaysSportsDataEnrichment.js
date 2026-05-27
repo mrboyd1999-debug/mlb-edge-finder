@@ -7,6 +7,7 @@ import {
   logSportsDataSample,
   resetProjectionDebugCount,
 } from "../../api/lib/sportsDataMlbStatProjection.js";
+import { resolveMLBTeam } from "./mlb/mlbPlayerDatabase.js";
 import { sanitizeProjectionValue } from "../utils/bestPlaysPipelineDebug.js";
 
 export function enrichPropsWithSportsDataMlbProjections(props = [], seasonStats = []) {
@@ -18,13 +19,16 @@ export function enrichPropsWithSportsDataMlbProjections(props = [], seasonStats 
   resetProjectionDebugCount();
 
   return props.map((prop) => {
-    const existing = sanitizeProjectionValue(prop.projection ?? prop.projectedValue);
-    if (existing != null) return prop;
+    const teamResolved = resolveMLBTeam(prop.playerName || prop.player, { prop, seasonStats });
+    const withTeam = teamResolved.team ? { ...prop, team: teamResolved.team, teamSource: teamResolved.source } : prop;
 
-    const computed = computeProjectionForProp(prop, seasonStats || []);
-    if (computed.projection == null) {
+    const existing = sanitizeProjectionValue(withTeam.projection ?? withTeam.projectedValue);
+    if (existing != null) return withTeam;
+
+    const computed = computeProjectionForProp(withTeam, seasonStats || []);
+    if (computed.projection == null || computed.projection <= 0) {
       return {
-        ...prop,
+        ...withTeam,
         sportsDataMatchReason: computed.matchReason,
         sportsDataPropLabel: computed.propLabel,
         projectionMissingReason: computed.matchReason,
@@ -32,15 +36,15 @@ export function enrichPropsWithSportsDataMlbProjections(props = [], seasonStats 
     }
 
     return {
-      ...prop,
+      ...withTeam,
       projection: computed.projection,
       projectedValue: computed.projection,
-      projectionSource: prop.projectionSource || computed.projectionSource || "sportsdataio-season",
+      projectionSource: withTeam.projectionSource || computed.projectionSource || "sportsdataio-season",
       sportsDataPropLabel: computed.propLabel,
       sportsDataRawStat: computed.rawStat,
       sportsDataGames: computed.games,
-      games: prop.games ?? computed.games,
-      team: prop.team || computed.team || "",
+      games: withTeam.games ?? computed.games,
+      team: withTeam.team || computed.team || "",
       isSportsDataSeasonProjection: true,
     };
   });

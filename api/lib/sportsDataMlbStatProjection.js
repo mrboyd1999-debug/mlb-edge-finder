@@ -87,6 +87,37 @@ export function safeProjection(prop = {}, stat = null) {
     case "Strikeouts":
       projection = (stat?.PitchingStrikeouts || stat?.Strikeouts || 0) / safeGames;
       break;
+    case "Walks":
+      projection = (stat?.Walks || stat?.BaseOnBalls || 0) / safeGames;
+      break;
+    case "Fantasy Score":
+      projection =
+        (stat?.FantasyPointsDraftKings || stat?.FantasyPoints || stat?.FantasyPointsFanDuel || 0) / safeGames;
+      break;
+    case "Hits+Runs+RBIs":
+      projection =
+        ((stat?.Hits || 0) + (stat?.Runs || 0) + (stat?.RunsBattedIn || stat?.RBI || 0)) / safeGames;
+      break;
+    case "Pitcher Outs": {
+      const ip = stat?.InningsPitchedDecimal ?? stat?.InningsPitched ?? 0;
+      projection = (Number(ip) * 3) / safeGames;
+      break;
+    }
+    case "Earned Runs":
+      projection = (stat?.EarnedRuns || stat?.PitchingEarnedRuns || 0) / safeGames;
+      break;
+    case "Stolen Bases":
+      projection = (stat?.StolenBases || 0) / safeGames;
+      break;
+    case "Doubles":
+      projection = (stat?.Doubles || 0) / safeGames;
+      break;
+    case "Singles":
+      projection = (stat?.Singles || 0) / safeGames;
+      break;
+    case "Hits Allowed":
+      projection = (stat?.HitsAllowed || stat?.PitchingHits || 0) / safeGames;
+      break;
     default:
       projection = null;
   }
@@ -113,6 +144,24 @@ export function resolveRawStatFromSeasonRow(stat = {}, propLabel = "") {
       return pickField(stat, ["PitchingStrikeouts", "Strikeouts", "StrikeOuts"]);
     case "Total Bases":
       return pickField(stat, ["TotalBases", "TotalBase"]);
+    case "Walks":
+      return pickField(stat, ["Walks", "BaseOnBalls"]);
+    case "Fantasy Score":
+      return pickField(stat, ["FantasyPointsDraftKings", "FantasyPoints", "FantasyPointsFanDuel"]);
+    case "Hits+Runs+RBIs":
+      return pickField(stat, ["Hits", "Runs", "RunsBattedIn"]);
+    case "Pitcher Outs":
+      return pickField(stat, ["InningsPitchedDecimal", "InningsPitched"]);
+    case "Earned Runs":
+      return pickField(stat, ["EarnedRuns", "PitchingEarnedRuns"]);
+    case "Stolen Bases":
+      return pickField(stat, ["StolenBases"]);
+    case "Doubles":
+      return pickField(stat, ["Doubles"]);
+    case "Singles":
+      return pickField(stat, ["Singles"]);
+    case "Hits Allowed":
+      return pickField(stat, ["HitsAllowed", "PitchingHits"]);
     default:
       return null;
   }

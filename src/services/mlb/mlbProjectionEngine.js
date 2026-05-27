@@ -1,6 +1,6 @@
 /**
  * MLB-only projection engine facade.
- * Wraps verified modules/mlbProjectionEngine + SportsDataIO season rates.
+ * Wraps verified modules/mlbProjectionEngine + SportsDataIO season rates + stat fallback.
  */
 
 import { applyMlbProjectionToProp, isMlbVerifiedEngineMarket } from "../../modules/mlbProjectionService.js";
@@ -13,6 +13,8 @@ import { buildMlbPlayerLookup, resolveMlbPlayerRow } from "./playerNormalization
 import { createMlbProjection } from "../../models/mlb/projectionModel.js";
 import { computeTrueMlbConfidence } from "./trueConfidenceEngine.js";
 import { simulatePropOutcome } from "./simulationEngine.js";
+import { buildStatFallbackProjection } from "./statBasedFallbackProjection.js";
+import { resolveMLBTeam } from "./mlbPlayerDatabase.js";
 
 let debugCount = 0;
 
@@ -39,28 +41,50 @@ export function projectMlbProp(prop = {}, context = {}) {
   let projectionSource = "missing";
   let invalidReason = "";
   let statRow = resolveMlbPlayerRow(player, lookup, { playerId: prop.playerId });
+  const propLabel = resolveSportsDataPropLabel(prop);
+
+  const teamResolved = resolveMLBTeam(player, {
+    prop,
+    seasonStats,
+    statsMap: context.statsMap,
+  });
+  const team = prop.team || teamResolved.team || statRow?.Team || "";
 
   if (isMlbVerifiedEngineMarket(statType) && context.statsMap instanceof Map) {
-    const profile = findStatProfile(context.statsMap, prop);
+    const profile = findStatProfile(context.statsMap, { ...prop, team, sport: "MLB" });
     if (profile) {
-      const verified = applyMlbProjectionToProp(prop, profile, context.options || {});
-      if (verified?.isVerifiedProjection && Number.isFinite(Number(verified.projection))) {
+      const verified = applyMlbProjectionToProp({ ...prop, team }, profile, context.options || {});
+      if (verified?.isVerifiedProjection && Number.isFinite(Number(verified.projection)) && Number(verified.projection) > 0) {
         projection = Number(verified.projection);
         projectionSource = "mlb-verified-engine";
       } else {
         invalidReason = verified?.projectionUnavailableReason || verified?.statusMessage || "verified engine unavailable";
       }
+    } else {
+      invalidReason = invalidReason || "no stats profile for verified engine";
     }
   }
 
   if (projection == null && seasonStats.length) {
-    const sdio = computeProjectionForProp(prop, seasonStats, { logDebug: false });
-    if (sdio.projection != null) {
+    const sdio = computeProjectionForProp({ ...prop, team }, seasonStats, { logDebug: false });
+    if (sdio.projection != null && sdio.projection > 0) {
       projection = sdio.projection;
       projectionSource = sdio.projectionSource || "sportsdataio-season";
       statRow = statRow || resolveMlbPlayerRow(player, lookup, { playerId: prop.playerId });
     } else {
       invalidReason = invalidReason || sdio.matchReason || "no season stat match";
+      if (!propLabel) {
+        console.info("[MLB Projection] unsupported market", { player, statType, propLabel });
+        invalidReason = invalidReason || `unsupported market: ${statType}`;
+      }
+    }
+  }
+
+  if (projection == null && statRow) {
+    const fallback = buildStatFallbackProjection({ ...prop, team }, statRow, propLabel);
+    if (fallback?.projection != null && fallback.projection > 0) {
+      projection = fallback.projection;
+      projectionSource = fallback.projectionSource;
     }
   }
 
@@ -86,12 +110,13 @@ export function projectMlbProp(prop = {}, context = {}) {
       line,
       projectionSource,
       invalidReason,
+      team,
     });
   }
 
   return createMlbProjection({
     player,
-    team: prop.team || statRow?.Team || "",
+    team,
     opponent: prop.opponent || "",
     statType,
     line,
@@ -106,7 +131,7 @@ export function projectMlbProp(prop = {}, context = {}) {
       side,
       projectionSource,
       invalidReason,
-      propLabel: resolveSportsDataPropLabel(prop),
+      propLabel,
       simulation,
       confidenceDetail: confidenceResult,
     },

@@ -38,8 +38,7 @@ import {
   areProjectionsComplete,
   syncBestPlaysFilterAudit,
 } from "../services/mlbProjectionPipelineLog.js";
-import { enrichPropsWithSportsDataMlbProjections } from "../services/bestPlaysSportsDataEnrichment.js";
-import { projectMlbPropBatch, resetMlbProjectionDebugCount } from "../services/mlb/mlbProjectionEngine.js";
+import { enrichMlbPropsBatch } from "../services/mlb/mlbEnrichmentPipeline.js";
 import { resolveBestPlayProjection } from "./bestPlaysPipelineDebug.js";
 
 export const TOP_MLB_PLAYS_LIMIT = HIGHEST_PROBABILITY_MAX_PLAYS;
@@ -305,50 +304,31 @@ export function resolveTopMlbPlaySections(
   });
 
   const candidatePool = buildBestPlaysCandidatePool(displayProps, rawProps, parsedUnderdogProps);
-  resetMlbProjectionDebugCount();
-  let projectedRows = [];
-  try {
-    projectedRows = projectMlbPropBatch(candidatePool, {
-      seasonStats: options.sportsDataSeasonStats || [],
-      statsMap: options.statsMap || null,
-    });
-  } catch (projectionError) {
-    console.error("[Best Plays] projection batch failed", projectionError);
-    projectedRows = [];
-  }
-  const projectedPool = (candidatePool || []).map((prop, index) => {
-    const row = projectedRows?.[index];
-    if (!row || row.projection == null) {
-      const fallback = enrichPropsWithSportsDataMlbProjections([prop], options.sportsDataSeasonStats || [])?.[0];
-      return fallback || prop;
-    }
-    return {
-      ...prop,
-      projection: row.projection,
-      projectedValue: row.projection,
-      edge: row.edge,
-      confidence: row.confidence,
-      confidenceScore: row.confidence,
-      projectionSource: row.meta?.projectionSource,
-      projectionMissingReason: row.meta?.invalidReason || "",
-      isVerifiedProjection: row.meta?.projectionSource === "mlb-verified-engine",
-    };
+
+  const enrichment = enrichMlbPropsBatch(candidatePool, {
+    seasonStats: options.sportsDataSeasonStats || [],
+    statsMap: options.statsMap || null,
+    options: options.projectionOptions || {},
   });
+  const enrichedPool = enrichment.props || candidatePool;
+
   console.log(
     "WITH PROJECTIONS:",
-    projectedPool.filter((p) => resolveBestPlayProjection(p) != null).length
+    enrichedPool.filter((p) => resolveBestPlayProjection(p) != null).length
   );
+
   const strictPool = buildTopMlbPlayPool(displayProps, rawProps, parsedUnderdogProps, { relaxed: false });
-  const qualityAudit = strictPool._qualityAudit || auditQualityMlbProps(projectedPool);
+  const qualityAudit = strictPool._qualityAudit || auditQualityMlbProps(enrichedPool);
   resetProjectionFilterCounters();
-  const playAudit = auditHighestProbabilityProps(projectedPool);
+  const playAudit = auditHighestProbabilityProps(enrichedPool);
   syncBestPlaysFilterAudit(playAudit);
   const filterDiagnostics = {
     ...playAudit,
     qualityFilter: qualityAudit,
+    enrichmentDebug: enrichment.debug,
   };
   const strictEligible = playAudit.eligible || 0;
-  const selection = selectHighestProbabilityPlays(projectedPool, HIGHEST_PROBABILITY_MAX_PLAYS, {
+  const selection = selectHighestProbabilityPlays(enrichedPool, HIGHEST_PROBABILITY_MAX_PLAYS, {
     withMeta: true,
   });
   let highestPicks = (selection.picks || []).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
