@@ -2366,9 +2366,10 @@ export default function DFSPropsApp() {
   const [appView, setAppView] = useState(() => {
     try {
       const stored = window.localStorage.getItem(APP_VIEW_STORAGE_KEY);
-      if (stored === "bestPlays" || stored === "goblins" || stored === "demons" || stored === "saved" || stored === "prizepicks" || stored === "underdog" || stored === "manual") {
-        if (stored === "manual" || stored === "live") return "bestPlays";
-        return stored;
+      const validViews = new Set(["bestPlays", "prizepicks", "manual", "saved"]);
+      if (stored && validViews.has(stored)) return stored;
+      if (stored === "goblins" || stored === "demons" || stored === "underdog" || stored === "live") {
+        return "bestPlays";
       }
       return "bestPlays";
     } catch {
@@ -3059,33 +3060,43 @@ export default function DFSPropsApp() {
     [visibleHistory]
   );
   const topMlbPlayBoard = useMemo(() => {
-    const fetchFailureReasons = buildLiveFetchFailureSummary(debugInfo?.sources || {}, {
-      suppressWhenPrimaryLoaded: true,
-    });
-    const loadedPropCount = Math.max(
-      allDisplayProps.length,
-      (boardDisplayProps || []).filter((p) => !p.isDemoData).length
-    );
-    const board = resolveTopMlbPlaySections(boardDisplayProps, props, parsedUnderdogProps, {
-      sourceStatus,
-      lastUpdated,
-      debugInfo,
-      sportsDataSeasonStats: debugInfo?.sportsDataSeasonStats || [],
-      fetchFailureReasons,
-      liveFetchFailed: loadedPropCount === 0,
-      fetchTimedOut: /timed?\s*out|board fetch timed out/i.test(String(error || "")),
-      allSourcesEmpty: loadedPropCount === 0,
-    });
-    board.loadedPropCount = loadedPropCount;
-    if (board.pipelineDebug) {
-      board.pipelineDebug.apiKeys = {
-        PrizePicks: "configured",
-        Underdog: "configured",
-        OddsAPI: getOddsApiKey() ? "detected" : "missing",
-        SportsDataIO: getSportsDataApiKey() ? "detected" : "missing",
+    try {
+      const fetchFailureReasons = buildLiveFetchFailureSummary(debugInfo?.sources || {}, {
+        suppressWhenPrimaryLoaded: true,
+      });
+      const loadedPropCount = Math.max(
+        allDisplayProps.length,
+        (boardDisplayProps || []).filter((p) => !p.isDemoData).length
+      );
+      const board = resolveTopMlbPlaySections(boardDisplayProps, props, parsedUnderdogProps, {
+        sourceStatus,
+        lastUpdated,
+        debugInfo,
+        sportsDataSeasonStats: debugInfo?.sportsDataSeasonStats || [],
+        fetchFailureReasons,
+        liveFetchFailed: loadedPropCount === 0,
+        fetchTimedOut: /timed?\s*out|board fetch timed out/i.test(String(error || "")),
+        allSourcesEmpty: loadedPropCount === 0,
+      });
+      board.loadedPropCount = loadedPropCount;
+      if (board.pipelineDebug) {
+        board.pipelineDebug.apiKeys = {
+          PrizePicks: "configured",
+          Underdog: "configured",
+          OddsAPI: getOddsApiKey() ? "detected" : "missing",
+          SportsDataIO: getSportsDataApiKey() ? "detected" : "missing",
+        };
+      }
+      return board;
+    } catch (boardError) {
+      console.error("[Best Plays] board render failed", boardError);
+      return {
+        sections: [],
+        filterDiagnostics: { error: boardError?.message || "Best Plays board failed" },
+        pipelineDebug: null,
+        loadedPropCount: 0,
       };
     }
-    return board;
   }, [boardDisplayProps, props, parsedUnderdogProps, sourceStatus, lastUpdated, debugInfo, error, allDisplayProps.length]);
   const pipelineRenderCounts = useMemo(() => {
     const base = liveRenderBoard.counts;

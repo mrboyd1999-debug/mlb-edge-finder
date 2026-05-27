@@ -12,6 +12,7 @@ import {
   BEST_PLAYS_DEBUG_SAMPLE_SIZE,
   logBestPlaysPipelineStage,
   passesMinimalBestPlaysFilter,
+  passesVerifiedBestPlaysFilter,
   resolveBestPlayInvalidReason,
   resolveBestPlayPlayerName,
   resolveBestPlayProjection,

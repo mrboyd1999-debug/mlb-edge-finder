@@ -40,7 +40,7 @@ import {
 } from "../services/mlbProjectionPipelineLog.js";
 import { enrichPropsWithSportsDataMlbProjections } from "../services/bestPlaysSportsDataEnrichment.js";
 import { projectMlbPropBatch, resetMlbProjectionDebugCount } from "../services/mlb/mlbProjectionEngine.js";
-import { resolveBestPlayProjection, passesVerifiedBestPlaysFilter } from "./bestPlaysPipelineDebug.js";
+import { resolveBestPlayProjection } from "./bestPlaysPipelineDebug.js";
 
 export const TOP_MLB_PLAYS_LIMIT = HIGHEST_PROBABILITY_MAX_PLAYS;
 export const SECTION_BEST_PLAYS = HIGHEST_PROBABILITY_MAX_PLAYS;
@@ -306,14 +306,21 @@ export function resolveTopMlbPlaySections(
 
   const candidatePool = buildBestPlaysCandidatePool(displayProps, rawProps, parsedUnderdogProps);
   resetMlbProjectionDebugCount();
-  const projectedRows = projectMlbPropBatch(candidatePool, {
-    seasonStats: options.sportsDataSeasonStats || [],
-    statsMap: options.statsMap || null,
-  });
-  const projectedPool = candidatePool.map((prop, index) => {
-    const row = projectedRows[index];
+  let projectedRows = [];
+  try {
+    projectedRows = projectMlbPropBatch(candidatePool, {
+      seasonStats: options.sportsDataSeasonStats || [],
+      statsMap: options.statsMap || null,
+    });
+  } catch (projectionError) {
+    console.error("[Best Plays] projection batch failed", projectionError);
+    projectedRows = [];
+  }
+  const projectedPool = (candidatePool || []).map((prop, index) => {
+    const row = projectedRows?.[index];
     if (!row || row.projection == null) {
-      return enrichPropsWithSportsDataMlbProjections([prop], options.sportsDataSeasonStats || [])[0];
+      const fallback = enrichPropsWithSportsDataMlbProjections([prop], options.sportsDataSeasonStats || [])?.[0];
+      return fallback || prop;
     }
     return {
       ...prop,
