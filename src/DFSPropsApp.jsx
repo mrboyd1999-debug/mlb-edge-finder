@@ -170,7 +170,7 @@ import {
   sortBoardProps,
   BOARD_SORT_MODES,
 } from "./services/propPriority.js";
-import CuratedPicksScreen from "./components/CuratedPicksScreen.jsx";
+
 import SectionErrorBoundary from "./components/SectionErrorBoundary.jsx";
 import { normalizePropsWithSource } from "./utils/normalizeSource.js";
 import { DISPLAY_LIMITS, resolveCuratedGoblinDemonBoards, resolveMlbStreakPicks, countMlbDisplayProps, countUnderdogStreakProps, isManuallySavedPick, historyPickToDisplayProp, resolveUnderdogSectionFallbacks, shouldApplyUnderdogSectionFallbacks } from "./utils/curatedPicks.js";
@@ -227,17 +227,12 @@ import {
   withFetchTimeout,
 } from "./utils/apiTimeout.js";
 import { auditPropRejections, formatProviderStatusLabel as formatLiveProviderLabel } from "./utils/livePropUsability.js";
-import NearMissBoard from "./components/NearMissBoard.jsx";
 import RejectionAnalyticsPanel from "./components/RejectionAnalyticsPanel.jsx";
 import QualificationAnalyticsPanel from "./components/QualificationAnalyticsPanel.jsx";
 import CacheAnalyticsPanel from "./components/CacheAnalyticsPanel.jsx";
 import LazyDebugDetails from "./components/LazyDebugDetails.jsx";
-import VirtualCardList from "./components/VirtualCardList.jsx";
-import PropFilters from "./components/PropFilters.jsx";
 import PlayerPropCard from "./components/PlayerPropCard.jsx";
 import PickDetailModal from "./components/PickDetailModal.jsx";
-import AcceptedPropsPanel from "./components/AcceptedPropsPanel.jsx";
-import AccuracyReview from "./components/AccuracyReview.jsx";
 import SettingsPanel from "./components/SettingsPanel.jsx";
 import ProviderDebugDrawer from "./components/ProviderDebugDrawer.jsx";
 import { buildFeedHealthContext } from "./services/providerHealth.js";
@@ -301,7 +296,6 @@ import {
   sanitizeDebugInfoForMlbOnly,
 } from "./utils/mlbOnlyMode.js";
 import { runFilterPipeline, runUiPipeline } from "./utils/pipelineStages.js";
-import MobileQuickActionBar from "./components/MobileQuickActionBar.jsx";
 import DfsAnalyzerLayout from "./components/DfsAnalyzerLayout.jsx";
 import {
   analyzeManualProp,
@@ -310,8 +304,6 @@ import {
   makeManualPropId,
   normalizeManualFormInput,
 } from "./utils/manualPropBuilder.js";
-import MobileScrollFab from "./components/MobileScrollFab.jsx";
-import LazyBelowFold from "./components/LazyBelowFold.jsx";
 import { isHeavyDebugEnabled, isDebugModeEnabled, readShowDebugPanelsPreference, shouldLogVerbose, shouldTrackRejectedProps, writeShowDebugPanelsPreference } from "./utils/devMode.js";
 import { canonicalStatType } from "./utils/marketNormalization.js";
 import {
@@ -3748,8 +3740,6 @@ export default function DFSPropsApp() {
       onOpenProp={setSelectedEvaluation}
       onSavePick={saveThisPick}
       topMlbPlayBoard={topMlbPlayBoard}
-      curatedGoblinPicks={curatedGoblinPicks}
-      curatedDemonPicks={curatedDemonPicks}
       savedDisplayPicks={savedDisplayPicks}
       onRemoveSavedPick={removeSavedPick}
       onClearSavedPicks={clearHistory}
@@ -3763,7 +3753,6 @@ export default function DFSPropsApp() {
       mlbPipelineStatus={mlbPipelineStatus}
       pipelineRenderCounts={pipelineRenderCounts}
       prizePicksFeedProps={prizePicksFeedProps}
-      underdogFeedProps={underdogFeedProps}
     />
 
       {selectedEvaluation && (

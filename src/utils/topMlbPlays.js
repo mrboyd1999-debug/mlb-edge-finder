@@ -39,7 +39,8 @@ import {
   syncBestPlaysFilterAudit,
 } from "../services/mlbProjectionPipelineLog.js";
 import { enrichPropsWithSportsDataMlbProjections } from "../services/bestPlaysSportsDataEnrichment.js";
-import { resolveBestPlayProjection } from "./bestPlaysPipelineDebug.js";
+import { projectMlbPropBatch, resetMlbProjectionDebugCount } from "../services/mlb/mlbProjectionEngine.js";
+import { resolveBestPlayProjection, passesVerifiedBestPlaysFilter } from "./bestPlaysPipelineDebug.js";
 
 export const TOP_MLB_PLAYS_LIMIT = HIGHEST_PROBABILITY_MAX_PLAYS;
 export const SECTION_BEST_PLAYS = HIGHEST_PROBABILITY_MAX_PLAYS;
@@ -304,10 +305,28 @@ export function resolveTopMlbPlaySections(
   });
 
   const candidatePool = buildBestPlaysCandidatePool(displayProps, rawProps, parsedUnderdogProps);
-  const projectedPool = enrichPropsWithSportsDataMlbProjections(
-    candidatePool,
-    options.sportsDataSeasonStats || []
-  );
+  resetMlbProjectionDebugCount();
+  const projectedRows = projectMlbPropBatch(candidatePool, {
+    seasonStats: options.sportsDataSeasonStats || [],
+    statsMap: options.statsMap || null,
+  });
+  const projectedPool = candidatePool.map((prop, index) => {
+    const row = projectedRows[index];
+    if (!row || row.projection == null) {
+      return enrichPropsWithSportsDataMlbProjections([prop], options.sportsDataSeasonStats || [])[0];
+    }
+    return {
+      ...prop,
+      projection: row.projection,
+      projectedValue: row.projection,
+      edge: row.edge,
+      confidence: row.confidence,
+      confidenceScore: row.confidence,
+      projectionSource: row.meta?.projectionSource,
+      projectionMissingReason: row.meta?.invalidReason || "",
+      isVerifiedProjection: row.meta?.projectionSource === "mlb-verified-engine",
+    };
+  });
   console.log(
     "WITH PROJECTIONS:",
     projectedPool.filter((p) => resolveBestPlayProjection(p) != null).length

@@ -1,12 +1,10 @@
 import { memo } from "react";
 
+/** MLB-only navigation — verified plays, props feed, manual lookup, saved picks. */
 export const COMPACT_APP_TABS = [
-  { id: "bestPlays", label: "Best Plays" },
-  { id: "prizepicks", label: "PrizePicks" },
-  { id: "underdog", label: "Underdog" },
-  { id: "goblins", label: "Goblins" },
-  { id: "demons", label: "Demons" },
-  { id: "manual", label: "Manual" },
+  { id: "bestPlays", label: "Verified Plays" },
+  { id: "prizepicks", label: "MLB Props" },
+  { id: "manual", label: "Player Lookup" },
   { id: "saved", label: "Saved" },
 ];
 

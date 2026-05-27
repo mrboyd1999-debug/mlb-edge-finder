@@ -1,8 +1,7 @@
 /**
- * Temporary Best Plays debug helpers — minimal filtering + invalid reason tracking.
+ * Best Plays debug helpers — MLB-only, no fabricated projections.
  */
 
-import { computeLineRecoveryProjection } from "../../api/lib/sportsDataMlbStatProjection.js";
 import { resolveProjectionValue } from "./projectionQuality.js";
 
 export const BEST_PLAYS_DEBUG_MODE = true;
@@ -35,9 +34,7 @@ export function resolveBestPlayProjection(prop = {}) {
   if (last5 != null) return last5;
   const season = sanitizeProjectionValue(prop.seasonAverage);
   if (season != null) return season;
-  const resolved = sanitizeProjectionValue(resolveProjectionValue(prop));
-  if (resolved != null) return resolved;
-  return computeLineRecoveryProjection(prop);
+  return sanitizeProjectionValue(resolveProjectionValue(prop));
 }
 
 export function passesMinimalBestPlaysFilter(prop = {}) {
@@ -46,11 +43,18 @@ export function passesMinimalBestPlaysFilter(prop = {}) {
   return Boolean(player) && Number.isFinite(line) && line > 0;
 }
 
+export function passesVerifiedBestPlaysFilter(prop = {}) {
+  return passesMinimalBestPlaysFilter(prop) && resolveBestPlayProjection(prop) != null;
+}
+
 export function resolveBestPlayInvalidReason(prop = {}) {
   const player = resolveBestPlayPlayerName(prop);
   if (!player) return "missing player";
   const line = Number(prop.line);
   if (!Number.isFinite(line) || line <= 0) return "missing line";
+  if (resolveBestPlayProjection(prop) == null) {
+    return prop.projectionMissingReason || prop.sportsDataMatchReason || "missing projection";
+  }
   return "";
 }
 

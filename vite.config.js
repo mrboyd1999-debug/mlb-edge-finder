@@ -109,11 +109,6 @@ function dfsApiProxy() {
             return;
           }
 
-          if (pathname.startsWith("/api/api-football")) {
-            await proxyUpstream(req, res, "https://v3.football.api-sports.io", (p) => p.replace(/^\/api\/api-football/, ""), apiFootballHeaders(), "API-Football");
-            return;
-          }
-
           next();
         } catch (error) {
           console.warn("[DFS proxy] handler error", error?.message || error);
@@ -145,8 +140,7 @@ function isApiRoute(pathname) {
     pathname.startsWith("/api/mlb") ||
     pathname.startsWith("/api/sportsbookOdds") ||
     pathname.startsWith("/api/sportsdataio") ||
-    pathname.startsWith("/api/sportsdata") ||
-    pathname.startsWith("/api/api-football")
+    pathname.startsWith("/api/sportsdata")
   );
 }
 

@@ -4,7 +4,6 @@
 
 import axios from "axios";
 import {
-  computeLineRecoveryProjection,
   computeProjectionForProp,
   logSportsDataSample,
   resetProjectionDebugCount,
@@ -238,7 +237,7 @@ function enrichPropRows(propRows = [], seasonStats = []) {
       { ...row, playerName: row.player, statType: propLabel || row.prop, prop: propLabel || row.prop },
       seasonStats
     );
-    const projection = computed.projection ?? computeLineRecoveryProjection(row);
+    const projection = computed.projection;
 
     enriched.push({
       player: row.player,
@@ -256,7 +255,13 @@ function enrichPropRows(propRows = [], seasonStats = []) {
             ? "OVER"
             : "UNDER"
           : null,
-      invalidReason: !row.player ? "missing player" : !row.line ? "missing line" : "",
+      invalidReason: !row.player
+        ? "missing player"
+        : !row.line
+          ? "missing line"
+          : projection == null
+            ? computed.matchReason || "missing projection"
+            : "",
     });
   }
 
@@ -283,7 +288,7 @@ export async function buildBestPlays() {
     enriched.filter((p) => p.projection != null && Number.isFinite(Number(p.projection))).length
   );
 
-  const filtered = enriched.filter((p) => p.player && p.line != null && Number.isFinite(Number(p.line)));
+  const filtered = enriched.filter((p) => p.projection != null && p.player && p.line != null);
   console.log("AFTER FILTER:", filtered.length);
 
   const ranked = [...filtered].sort((a, b) => Number(b.projection) - Number(a.projection));

@@ -1,6 +1,6 @@
 /**
  * SportsDataIO MLB season-stat → per-game projection helpers.
- * Recovery mode: every valid prop gets a projection (stat-based or line * 0.95).
+ * No fabricated projections — stat-based only; null when unmatched.
  */
 
 export function normalizeMatchName(name = "") {
@@ -37,6 +37,9 @@ export function resolveSportsDataPropLabel(prop = {}) {
   if (/hit/.test(lower) && !/allowed|pitch/.test(lower)) return "Hits";
   if (/walk/.test(lower)) return "Walks";
   if (/hits allowed/.test(lower)) return "Hits Allowed";
+  if (/earned run/.test(lower)) return "Earned Runs";
+  if (/fantasy/.test(lower)) return "Fantasy Score";
+  if (/pitcher out|outs recorded/.test(lower)) return "Pitcher Outs";
 
   switch (label) {
     case "Hits":
@@ -57,9 +60,46 @@ export function resolveSportsDataPropLabel(prop = {}) {
   }
 }
 
-export function resolveRawStatFromSeasonRow(stat = {}, propLabel = "") {
+export function safeProjection(prop = {}, stat = null) {
+  const propLabel = resolveSportsDataPropLabel(prop);
   if (!stat || !propLabel) return null;
 
+  const games = stat?.Games ?? stat?.GamesPlayed ?? 0;
+  const safeGames = games > 0 ? games : 1;
+  let projection = null;
+
+  switch (propLabel) {
+    case "Hits":
+      projection = (stat?.Hits || 0) / safeGames;
+      break;
+    case "Home Runs":
+      projection = (stat?.HomeRuns || 0) / safeGames;
+      break;
+    case "RBIs":
+      projection = (stat?.RunsBattedIn || 0) / safeGames;
+      break;
+    case "Runs":
+      projection = (stat?.Runs || 0) / safeGames;
+      break;
+    case "Total Bases":
+      projection = (stat?.TotalBases || 0) / safeGames;
+      break;
+    case "Strikeouts":
+      projection = (stat?.PitchingStrikeouts || stat?.Strikeouts || 0) / safeGames;
+      break;
+    default:
+      projection = null;
+  }
+
+  if (projection == null || Number.isNaN(projection) || !Number.isFinite(projection)) {
+    return null;
+  }
+
+  return Number(projection.toFixed(2));
+}
+
+export function resolveRawStatFromSeasonRow(stat = {}, propLabel = "") {
+  if (!stat || !propLabel) return null;
   switch (propLabel) {
     case "Hits":
       return pickField(stat, ["Hits", "Hit"]);
@@ -73,12 +113,6 @@ export function resolveRawStatFromSeasonRow(stat = {}, propLabel = "") {
       return pickField(stat, ["PitchingStrikeouts", "Strikeouts", "StrikeOuts"]);
     case "Total Bases":
       return pickField(stat, ["TotalBases", "TotalBase"]);
-    case "Hits+Runs+RBIs":
-      return pickField(stat, ["HitsRunsRBIs", "HitsPlusRunsPlusRBIs"]);
-    case "Walks":
-      return pickField(stat, ["PitchingWalks", "Walks", "WalksAllowed"]);
-    case "Hits Allowed":
-      return pickField(stat, ["PitchingHits", "HitsAllowed"]);
     default:
       return null;
   }
@@ -89,50 +123,6 @@ export function resolveSeasonGames(stat = {}) {
   return games != null && games > 0 ? games : 1;
 }
 
-export function computeLineRecoveryProjection(prop = {}) {
-  const line = Number(prop.line ?? prop.line_score ?? prop.lineScore);
-  if (!Number.isFinite(line) || line <= 0) return null;
-  return Number((line * 0.95).toFixed(2));
-}
-
-export function safeProjection(prop = {}, stat = null) {
-  const propLabel = resolveSportsDataPropLabel(prop);
-  const games = stat?.Games ?? stat?.GamesPlayed ?? 0;
-  const safeGames = games > 0 ? games : 1;
-  let projection = null;
-
-  if (stat && propLabel) {
-    switch (propLabel) {
-      case "Hits":
-        projection = (stat?.Hits || 0) / safeGames;
-        break;
-      case "Home Runs":
-        projection = (stat?.HomeRuns || 0) / safeGames;
-        break;
-      case "RBIs":
-        projection = (stat?.RunsBattedIn || 0) / safeGames;
-        break;
-      case "Runs":
-        projection = (stat?.Runs || 0) / safeGames;
-        break;
-      case "Total Bases":
-        projection = (stat?.TotalBases || 0) / safeGames;
-        break;
-      case "Strikeouts":
-        projection = (stat?.PitchingStrikeouts || stat?.Strikeouts || 0) / safeGames;
-        break;
-      default:
-        projection = null;
-    }
-  }
-
-  if (projection == null || Number.isNaN(projection) || !Number.isFinite(projection)) {
-    return computeLineRecoveryProjection(prop);
-  }
-
-  return Number(projection.toFixed(2));
-}
-
 export function computePerGameProjectionFromSeasonRow(stat = {}, propLabel = "", prop = {}) {
   const projection = safeProjection({ prop: propLabel, statType: propLabel, ...prop }, stat);
   const rawStat = resolveRawStatFromSeasonRow(stat, propLabel);
@@ -141,7 +131,7 @@ export function computePerGameProjectionFromSeasonRow(stat = {}, propLabel = "",
     projection,
     rawStat,
     games,
-    projectionSource: rawStat != null ? "sportsdataio-season" : "line-recovery",
+    projectionSource: projection != null ? "sportsdataio-season" : "missing",
   };
 }
 
@@ -176,26 +166,19 @@ export function resetProjectionDebugCount() {
 export function computeProjectionForProp(prop = {}, seasonStats = [], { logDebug = true } = {}) {
   const propLabel = resolveSportsDataPropLabel(prop);
   const playerName = String(prop.playerName || prop.player || "").trim();
-  const line = Number(prop.line ?? prop.line_score);
   const stat = findSeasonStatRow(seasonStats, {
     playerName,
     playerId: prop.playerId ?? prop.sportsDataPlayerId,
   });
 
-  let projection = safeProjection({ ...prop, prop: propLabel, statType: propLabel || prop.statType }, stat);
-  let matchReason = "matched";
-
-  if (projection == null) {
-    projection = computeLineRecoveryProjection(prop);
-    matchReason = stat ? "line-recovery-after-stat" : "line-recovery-no-stat";
-  } else if (!stat || !propLabel) {
-    matchReason = !stat ? "line-recovery-no-stat-row" : "line-recovery-unknown-prop";
-  } else if (resolveRawStatFromSeasonRow(stat, propLabel) == null) {
-    matchReason = "line-recovery-missing-raw-stat";
-  }
-
+  const projection = safeProjection({ ...prop, prop: propLabel, statType: propLabel || prop.statType }, stat);
   const rawStat = stat && propLabel ? resolveRawStatFromSeasonRow(stat, propLabel) : null;
   const games = stat ? resolveSeasonGames(stat) : null;
+
+  let matchReason = "matched";
+  if (!stat) matchReason = "no stat row match";
+  else if (!propLabel) matchReason = "unknown prop type";
+  else if (projection == null) matchReason = "stat field missing for prop type";
 
   if (logDebug && projectionDebugCount < 20) {
     projectionDebugCount += 1;
@@ -205,7 +188,6 @@ export function computeProjectionForProp(prop = {}, seasonStats = [], { logDebug
       statExists: Boolean(stat),
       rawStat: stat || null,
       projection,
-      line,
       matchReason,
     });
   }
@@ -217,7 +199,7 @@ export function computeProjectionForProp(prop = {}, seasonStats = [], { logDebug
     propLabel,
     team: stat?.Team || prop.team || "",
     matchReason,
-    projectionSource: rawStat != null ? "sportsdataio-season" : "line-recovery",
+    projectionSource: projection != null ? "sportsdataio-season" : "missing",
   };
 }
 

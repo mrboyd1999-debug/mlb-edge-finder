@@ -7,12 +7,10 @@ import PropPipelineCounters from "./PropPipelineCounters.jsx";
 import ManualPropsPanel from "./ManualPropsPanel.jsx";
 import BestPlaysTab from "./BestPlaysTab.jsx";
 import PlatformFeedTab from "./PlatformFeedTab.jsx";
-import CompactPayoutTab from "./CompactPayoutTab.jsx";
 import SavedPicksTab from "./SavedPicksTab.jsx";
 import SettingsPanel from "./SettingsPanel.jsx";
 import DeveloperDebugPanel from "./DeveloperDebugPanel.jsx";
 import { readSettingsMeta } from "../services/runtimeSettings.js";
-import { GOBLIN_EMPTY_MESSAGE } from "../utils/goblinDemonPairs.js";
 import { isDebugModeEnabled } from "../utils/devMode.js";
 
 function DfsAnalyzerLayout({
@@ -32,10 +30,7 @@ function DfsAnalyzerLayout({
   onOpenProp,
   onSavePick,
   topMlbPlayBoard,
-  curatedGoblinPicks,
-  curatedDemonPicks,
   prizePicksFeedProps,
-  underdogFeedProps,
   pipelineRenderCounts,
   savedDisplayPicks,
   onRemoveSavedPick,
@@ -87,7 +82,7 @@ function DfsAnalyzerLayout({
       {learningSaveNotice ? <p className="compact-form-notice">{learningSaveNotice}</p> : null}
 
       {appView === "bestPlays" ? (
-        <SectionErrorBoundary name="Best Plays" onError={onSectionError}>
+        <SectionErrorBoundary name="Verified Plays" onError={onSectionError}>
           <BestPlaysTab
             sections={topMlbPlayBoard?.sections || []}
             loading={loading}
@@ -99,7 +94,7 @@ function DfsAnalyzerLayout({
       ) : null}
 
       {appView === "manual" ? (
-        <SectionErrorBoundary name="Manual Analyzer" onError={onSectionError}>
+        <SectionErrorBoundary name="Player Lookup" onError={onSectionError}>
           <ManualPropsPanel
             props={manualAnalyzerProps}
             loading={loading}
@@ -114,51 +109,13 @@ function DfsAnalyzerLayout({
       ) : null}
 
       {appView === "prizepicks" ? (
-        <SectionErrorBoundary name="PrizePicks" onError={onSectionError}>
+        <SectionErrorBoundary name="MLB Props" onError={onSectionError}>
           <PlatformFeedTab
-            platformLabel="PrizePicks"
+            platformLabel="MLB Props"
             picks={prizePicksFeedProps || []}
             loading={loading}
             onOpen={onOpenProp}
             onSave={onSavePick}
-          />
-        </SectionErrorBoundary>
-      ) : null}
-
-      {appView === "underdog" ? (
-        <SectionErrorBoundary name="Underdog" onError={onSectionError}>
-          <PlatformFeedTab
-            platformLabel="Underdog"
-            picks={underdogFeedProps || []}
-            loading={loading}
-            onOpen={onOpenProp}
-            onSave={onSavePick}
-          />
-        </SectionErrorBoundary>
-      ) : null}
-
-      {appView === "goblins" ? (
-        <SectionErrorBoundary name="Goblins" onError={onSectionError}>
-          <CompactPayoutTab
-            role="goblin"
-            picks={curatedGoblinPicks || []}
-            loading={loading}
-            onOpen={onOpenProp}
-            onSave={onSavePick}
-            emptyMessage={GOBLIN_EMPTY_MESSAGE}
-          />
-        </SectionErrorBoundary>
-      ) : null}
-
-      {appView === "demons" ? (
-        <SectionErrorBoundary name="Demons" onError={onSectionError}>
-          <CompactPayoutTab
-            role="demon"
-            picks={curatedDemonPicks || []}
-            loading={loading}
-            onOpen={onOpenProp}
-            onSave={onSavePick}
-            emptyMessage="No demon lines ranked yet. Refresh live props when connected."
           />
         </SectionErrorBoundary>
       ) : null}

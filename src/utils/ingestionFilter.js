@@ -9,19 +9,8 @@ import {
   sportFromUnderdogGame,
 } from "./sportMappings.js";
 
-/** Sports allowed into the pipeline at ingestion. */
-export const INGESTION_ALLOWED_SPORTS = MLB_ONLY_MODE
-  ? new Set([APP_SPORTS.MLB])
-  : new Set([
-      APP_SPORTS.MLB,
-      APP_SPORTS.NBA,
-      APP_SPORTS.WNBA,
-      APP_SPORTS.ATP,
-      APP_SPORTS.WTA,
-      APP_SPORTS.Tennis,
-      APP_SPORTS.NHL,
-      APP_SPORTS.Soccer,
-    ]);
+/** MLB-only ingestion gate. */
+export const INGESTION_ALLOWED_SPORTS = new Set([APP_SPORTS.MLB]);
 
 /** PrizePicks league ids that must never enter the pipeline. */
 export const BLOCKED_PRIZEPICKS_LEAGUE_IDS = new Set([
