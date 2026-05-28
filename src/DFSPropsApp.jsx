@@ -208,6 +208,7 @@ import {
 import { enrichPropsWithSportsData } from "./services/propSportsDataEnrichment.js";
 import { mergeProjectionsOntoProps } from "./services/mlb/projectionMergePipeline.js";
 import { emitVisibleProjectionDebug } from "./utils/projectionRuntimeDebug.js";
+import ProjectionSchemaDebugPanel from "./components/ProjectionSchemaDebugPanel.jsx";
 import { buildLiveRenderBoard, filterPlatformProps, isFakeOrFallbackProp } from "./utils/livePropRender.js";
 import { resolveIngestionFallback } from "./services/ingestionFallback.js";
 import { writeLastGoodBoard, readLastGoodBoard, boardFromLastGood } from "./services/lastGoodBoardCache.js";
@@ -1862,6 +1863,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
     const canMergeProjections = allDisplayProps.length > 0;
     if (canMergeProjections) {
+      const preMergeNormalizedSample = allDisplayProps[0] ? { ...allDisplayProps[0] } : null;
       const mergeContext = {
         seasonStats: seasonStatsData,
         statsMap: background.stats,
@@ -1871,6 +1873,14 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       workingNormalProps = mergeProjectionsOntoProps(workingNormalProps, mergeContext).props;
       workingActiveProps = mergeProjectionsOntoProps(workingActiveProps, mergeContext).props;
       debugInfo.projectionMerge = merged.debug;
+      debugInfo.projectionSchemaDebug = {
+        preMergeNormalizedSample,
+        mergedSample:
+          merged.props.find((p) => Number(p.projection ?? p.projectedValue) > 0) || merged.props[0] || null,
+        statsMapSize: background.stats?.size ?? 0,
+        seasonStatRows: seasonStatsData.length,
+        updatedAt: new Date().toISOString(),
+      };
       console.info("[MLB Projection Pipeline] fetch-stage merge", {
         rawCount: merged.debug.rawCount,
         matchCount: merged.debug.matchCount,
@@ -2958,6 +2968,48 @@ export default function DFSPropsApp() {
   }, [scoredDisplayProps, sport, platform, marketQuickFilter]);
   const liveRenderBoard = useMemo(() => buildLiveRenderBoard(allDisplayProps), [allDisplayProps]);
   const boardDisplayProps = useMemo(() => liveRenderBoard.props, [liveRenderBoard]);
+
+  const projectionSchemaSnapshot = useMemo(() => {
+    const projections = [];
+    const statsMap = debugInfo?.statsMap;
+    if (statsMap instanceof Map) {
+      statsMap.forEach((row) => {
+        if (row) projections.push(row);
+      });
+    }
+    const seasonRows = debugInfo?.sportsDataSeasonStats;
+    if (Array.isArray(seasonRows)) {
+      seasonRows.forEach((row) => {
+        if (row) projections.push(row);
+      });
+    }
+
+    const normalizedProp =
+      debugInfo?.projectionSchemaDebug?.preMergeNormalizedSample ||
+      allDisplayProps.find((prop) => {
+        const value = Number(prop?.projection ?? prop?.projectedValue);
+        return !Number.isFinite(value) || value <= 0;
+      }) ||
+      allDisplayProps[0] ||
+      null;
+
+    const mergedProp =
+      debugInfo?.projectionSchemaDebug?.mergedSample ||
+      allDisplayProps.find((prop) => {
+        const value = Number(prop?.projection ?? prop?.projectedValue);
+        return Number.isFinite(value) && value > 0;
+      }) ||
+      allDisplayProps[0] ||
+      null;
+
+    return {
+      projections,
+      normalizedProp,
+      mergedProp,
+      updatedAt: debugInfo?.projectionSchemaDebug?.updatedAt || lastUpdated || "",
+    };
+  }, [debugInfo, allDisplayProps, lastUpdated]);
+
   const prizePicksFeedProps = useMemo(
     () => filterPlatformProps(boardDisplayProps, "prizepicks"),
     [boardDisplayProps]
@@ -3810,6 +3862,8 @@ export default function DFSPropsApp() {
       pipelineRenderCounts={pipelineRenderCounts}
       prizePicksFeedProps={prizePicksFeedProps}
     />
+
+      <ProjectionSchemaDebugPanel snapshot={projectionSchemaSnapshot} />
 
       {selectedEvaluation && (
         <PickDetailModal
