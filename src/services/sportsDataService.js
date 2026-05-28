@@ -14,6 +14,7 @@ import { getSportsDataApiKey } from "../config/apiConfig.js";
 import { cleanApiKey } from "../utils/cleanApiKey.js";
 import { ENRICHMENT_MAX_RETRIES, getSportsDataTimeoutMs } from "../utils/apiTimeout.js";
 import { fetchJsonSafe, getCacheTtlMs } from "./fetchUtil.js";
+import { emitProjectionDebug } from "../utils/projectionRuntimeDebug.js";
 import {
   SOURCE_IDS,
   cachedLinesMessage,
@@ -110,6 +111,11 @@ async function fetchSportsDataEndpoint(cacheKey, url) {
   if (!apiKey) {
     const cached = readCache(cacheKey);
     if (cached) return cachedResult(cached, { reason: "SportsDataIO key not configured — serving cache." });
+    emitProjectionDebug(`fetchSportsDataEndpoint:${cacheKey}`, [], {
+      origin: `src/services/sportsDataService.js :: fetchSportsDataEndpoint (no API key, cacheKey=${cacheKey})`,
+      rawResponse: { ok: false, status: "not_configured", message: "SportsDataIO key not configured" },
+      meta: { cacheKey, url: url.toString() },
+    });
     return emptyResult({ reason: "SportsDataIO key not configured." });
   }
 
@@ -148,9 +154,28 @@ async function fetchSportsDataEndpoint(cacheKey, url) {
             markSourceCached(SOURCE_IDS.SPORTSDATA, cached.savedAt);
             return cachedResult(cached, { reason: result.error || SPORTSDATA_UNAVAILABLE_MESSAGE });
           }
+          emitProjectionDebug(`fetchSportsDataEndpoint:${cacheKey}`, [], {
+            origin: `src/services/sportsDataService.js :: fetchSportsDataEndpoint (request failed, cacheKey=${cacheKey})`,
+            rawResponse: {
+              ok: result.ok,
+              error: result.error,
+              status: result.response?.status,
+              preview: result.preview,
+              text: result.text,
+              data: result.data,
+            },
+            meta: { url: url.toString(), cacheKey },
+          });
           return emptyResult({ reason: result.error || SPORTSDATA_UNAVAILABLE_MESSAGE });
         }
         const data = Array.isArray(result.data) ? result.data : result.data ? [result.data] : [];
+        if (!data.length) {
+          emitProjectionDebug(`fetchSportsDataEndpoint:${cacheKey}`, data, {
+            origin: `src/services/sportsDataService.js :: fetchSportsDataEndpoint (empty parsed data, cacheKey=${cacheKey})`,
+            rawResponse: result.data ?? result,
+            meta: { url: url.toString(), cacheKey, responseOk: result.ok },
+          });
+        }
         writeCache(cacheKey, data);
         recordSourceSuccess(SOURCE_IDS.SPORTSDATA);
         return {
@@ -351,7 +376,21 @@ export async function fetchPlayerGameStats(date = new Date()) {
 }
 
 export async function fetchPlayerSeasonStats(season = currentSeason()) {
-  return fetchSportsDataEndpoint(`season-stats-${season}`, buildUrl(`/stats/json/PlayerSeasonStats/${season}`));
+  const result = await fetchSportsDataEndpoint(
+    `season-stats-${season}`,
+    buildUrl(`/stats/json/PlayerSeasonStats/${season}`)
+  );
+  emitProjectionDebug("fetchPlayerSeasonStats", result?.data || [], {
+    origin: "src/services/sportsDataService.js :: fetchPlayerSeasonStats (SDIO PlayerSeasonStats after fetch resolves)",
+    rawResponse: result,
+    meta: {
+      season,
+      cached: Boolean(result?.cached),
+      warningCount: (result?.warnings || []).length,
+      rateLimited: Boolean(result?.rateLimited),
+    },
+  });
+  return result;
 }
 
 export async function fetchBattingAverages(season = currentSeason()) {

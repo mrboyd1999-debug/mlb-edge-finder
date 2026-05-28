@@ -207,6 +207,7 @@ import {
 } from "./services/providerOrchestration.js";
 import { enrichPropsWithSportsData } from "./services/propSportsDataEnrichment.js";
 import { mergeProjectionsOntoProps } from "./services/mlb/projectionMergePipeline.js";
+import { emitProjectionDebug } from "./utils/projectionRuntimeDebug.js";
 import { buildLiveRenderBoard, filterPlatformProps, isFakeOrFallbackProp } from "./utils/livePropRender.js";
 import { resolveIngestionFallback } from "./services/ingestionFallback.js";
 import { writeLastGoodBoard, readLastGoodBoard, boardFromLastGood } from "./services/lastGoodBoardCache.js";
@@ -1820,6 +1821,18 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     backgroundWarnings.push(...(statsResult.warnings || []));
     debugInfo.statsLoadedCount = background.stats.size;
     debugInfo.statsMap = background.stats;
+    emitProjectionDebug("DFSPropsApp.statsResult", background.stats, {
+      origin: "src/DFSPropsApp.jsx :: fetchDFSProps (after fetchPlayerStats resolves)",
+      rawResponse: {
+        timedOut: statsTimedOut,
+        warnings: statsResult.warnings || [],
+        statsFetchPropCount: statsFetchProps.length,
+      },
+      meta: {
+        statsMapSize: background.stats.size,
+        timedOut: statsTimedOut,
+      },
+    });
     const { matchedPlayers, gameLogsFound } = summarizeStatsMap(background.stats);
     setPipelineStageCount(PIPELINE_STAGES.MATCHED_PLAYERS_COUNT, matchedPlayers);
     setPipelineStageCount(PIPELINE_STAGES.GAME_LOGS_FOUND_COUNT, gameLogsFound);
@@ -1838,8 +1851,20 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       background.sportsDataSeasonStats = seasonStatsData;
       debugInfo.sportsDataSeasonStats = seasonStatsData;
       debugInfo.sportsDataSeasonStatsCount = seasonStatsData.length;
+      emitProjectionDebug("DFSPropsApp.seasonStatsResult", seasonStatsData, {
+        origin: "src/DFSPropsApp.jsx :: fetchDFSProps (after fetchPlayerSeasonStats resolves)",
+        rawResponse: seasonStatsResult,
+        meta: {
+          seasonCount: seasonStatsData.length,
+          cached: Boolean(seasonStatsResult?.cached),
+        },
+      });
     } catch (seasonError) {
       console.warn("[MLB Projection Pipeline] SportsDataIO season stats fetch failed", seasonError?.message);
+      emitProjectionDebug("DFSPropsApp.seasonStatsError", [], {
+        origin: "src/DFSPropsApp.jsx :: fetchDFSProps (fetchPlayerSeasonStats threw)",
+        rawResponse: { message: seasonError?.message, stack: seasonError?.stack },
+      });
       background.sportsDataSeasonStats = [];
       debugInfo.sportsDataSeasonStats = [];
       debugInfo.sportsDataSeasonStatsCount = 0;

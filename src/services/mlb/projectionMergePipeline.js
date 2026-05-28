@@ -14,6 +14,7 @@ import {
   normalizeMergeId,
   normalizeMergeStatType,
 } from "../../utils/propMergeKeys.js";
+import { emitProjectionDebug } from "../../utils/projectionRuntimeDebug.js";
 
 export const PROJECTION_JOIN_DEBUG = import.meta.env?.DEV === true;
 
@@ -281,22 +282,15 @@ export function logRuntimeProjectionSample(context = {}) {
     });
   }
 
-  console.log("PROJECTIONS TOTAL COUNT:", projections.length);
-
-  if (!projections.length) {
-    console.log("PROJECTION SAMPLE:", undefined);
-    console.log("PROJECTION FULL JSON:", null);
-    console.log("PROJECTION KEYS:", []);
-    return;
-  }
-
-  console.log("PROJECTION SAMPLE:", projections[0]);
-  try {
-    console.log("PROJECTION FULL JSON:", JSON.stringify(projections[0], null, 2));
-  } catch (error) {
-    console.log("PROJECTION FULL JSON:", String(error?.message || error));
-  }
-  console.log("PROJECTION KEYS:", Object.keys(projections[0]));
+  emitProjectionDebug("mergeProjectionsOntoProps.lookup", projections, {
+    origin: "src/services/mlb/projectionMergePipeline.js :: mergeProjectionsOntoProps (computed lookup rows)",
+    meta: {
+      statsMapSize: context.statsMap instanceof Map ? context.statsMap.size : 0,
+      seasonStatRows: (context.seasonStats || []).length,
+      statsLookupCount: statsLookup?.projectionCount ?? 0,
+      seasonLookupCount: seasonLookup?.projectionCount ?? 0,
+    },
+  });
 }
 
 export function mergeProjectionsOntoProps(props = [], context = {}) {
