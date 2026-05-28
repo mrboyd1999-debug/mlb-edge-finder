@@ -231,10 +231,24 @@ import { logSafeModePipelineCounts, resolveSafeMlbBoardPicks, resolveSafeMlbStre
 import {
   ENRICHMENT_TIMEOUT_MESSAGE,
   getApiTimeoutMs,
+  getLineFeedTimeoutMs,
+  getMlbStatsFetchTimeoutMs,
   getSportsDataTimeoutMs,
   isAbortOrTimeoutError,
   withFetchTimeout,
 } from "./utils/apiTimeout.js";
+import {
+  emptyPrizePicksProviderResult,
+  emptySeasonStatsProviderResult,
+  emptyStatsProviderResult,
+  emptyUnderdogProviderResult,
+  fetchProviderIsolated,
+  logProviderFetchPerformance,
+  skippedProviderResult,
+  unwrapProviderSettled,
+  PRIZEPICKS_PROVIDER_TIMEOUT_MS,
+  UNDERDOG_PROVIDER_TIMEOUT_MS,
+} from "./utils/providerFetch.js";
 import { auditPropRejections, formatProviderStatusLabel as formatLiveProviderLabel } from "./utils/livePropUsability.js";
 import RejectionAnalyticsPanel from "./components/RejectionAnalyticsPanel.jsx";
 import QualificationAnalyticsPanel from "./components/QualificationAnalyticsPanel.jsx";
@@ -1240,43 +1254,155 @@ async function injectSportsDataIfProvidersEmpty() {
 
 const MLB_STATS_ENRICHMENT_FAILED = "MLB projection stats failed to load";
 
-async function fetchMlbProjectionStatsBlocking(props, debugInfo) {
-  const propCount = Array.isArray(props) ? props.length : 0;
-  console.error("STATS FETCH START");
-  let statsResult;
-  try {
-    statsResult = await fetchPlayerStats({ props });
-  } catch (error) {
-    debugInfo.statsEnrichmentFailed = true;
-    debugInfo.statsEnrichmentError = error?.message || MLB_STATS_ENRICHMENT_FAILED;
-    console.error("STATS FETCH END");
-    console.error("STATS TIMEOUT STATUS:", false);
-    console.error("STATS MAP SIZE:", 0);
-    throw error;
-  }
+function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderdog, fetchUnderdogFlag }) {
+  let resolveStatsProps;
+  const statsPropsDeferred = new Promise((resolve) => {
+    resolveStatsProps = resolve;
+  });
+
+  const ppFetch = wantsPrizePicks
+    ? fetchProviderIsolated({
+        label: "PrizePicks",
+        timeoutMs: PRIZEPICKS_PROVIDER_TIMEOUT_MS,
+        fetchFn: () => fetchPrizePicksProps({ sport: fetchSport, statType: "all" }),
+        emptyResult: ({ timedOut, message }) =>
+          emptyPrizePicksProviderResult({
+            timedOut,
+            message: message || (timedOut ? "PrizePicks timed out" : "PrizePicks fetch failed"),
+          }),
+      })
+    : skippedProviderResult("PrizePicks");
+
+  const udFetch = fetchUnderdogFlag
+    ? fetchProviderIsolated({
+        label: "Underdog",
+        timeoutMs: UNDERDOG_PROVIDER_TIMEOUT_MS,
+        fetchFn: () => fetchUnderdogProviderProps({ sport: fetchSport, statType: "all" }),
+        emptyResult: ({ timedOut, message }) =>
+          emptyUnderdogProviderResult({
+            timedOut,
+            message: message || (timedOut ? "Underdog timed out" : "Underdog fetch failed"),
+          }),
+      })
+    : skippedProviderResult("Underdog");
+
+  const oddsFetch = fetchProviderIsolated({
+    label: "Odds API",
+    timeoutMs: getLineFeedTimeoutMs(),
+    fetchFn: () =>
+      fetchOddsApiDisplayProps({ sport: fetchSport }).catch((error) =>
+        emptyOddsApiResult({
+          timedOut: isAbortOrTimeoutError(error),
+          warnings: [
+            isAbortOrTimeoutError(error) ? ENRICHMENT_TIMEOUT_MESSAGE : error?.message || "Odds API player props failed",
+          ],
+        })
+      ),
+    emptyResult: ({ timedOut }) => emptyOddsApiResult({ timedOut: true, warnings: [ENRICHMENT_TIMEOUT_MESSAGE] }),
+  });
+
+  const seasonFetch = fetchProviderIsolated({
+    label: "SeasonStats",
+    timeoutMs: getSportsDataTimeoutMs(),
+    fetchFn: () => fetchPlayerSeasonStats(),
+    emptyResult: ({ timedOut, message }) =>
+      emptySeasonStatsProviderResult({
+        timedOut,
+        message: message || (timedOut ? "Season stats timed out" : "Season stats fetch failed"),
+      }),
+  });
+
+  const statsFetch = statsPropsDeferred.then((props) => {
+    console.error("STATS FETCH START");
+    return fetchProviderIsolated({
+      label: "Stats",
+      timeoutMs: getMlbStatsFetchTimeoutMs(),
+      fetchFn: () => fetchPlayerStats({ props }),
+      emptyResult: ({ timedOut, message }) =>
+        emptyStatsProviderResult({
+          timedOut,
+          message: message || (timedOut ? `${MLB_STATS_ENRICHMENT_FAILED}: timed out` : MLB_STATS_ENRICHMENT_FAILED),
+        }),
+    });
+  });
+
+  void Promise.allSettled([ppFetch, udFetch]).then(([ppSettled, udSettled]) => {
+    const ppEntry = unwrapProviderSettled(ppSettled);
+    const udEntry = unwrapProviderSettled(udSettled);
+    const ppProps = ppEntry.result?.props || [];
+    const udProps = udEntry.result?.parsedProps || udEntry.result?.props || [];
+    const merged = mergeProviderRawProps({ underdogProps: udProps, prizePicksProps: ppProps });
+    const normalized = merged.length ? ensureMlbSportOnProps(merged) : [];
+    resolveStatsProps(pickUniquePropsForStatsFetch(normalized));
+  });
+
+  return {
+    ppFetch,
+    udFetch,
+    oddsFetch,
+    seasonFetch,
+    statsFetch,
+    awaitCoreFeeds: () => Promise.allSettled([ppFetch, udFetch, oddsFetch]),
+    awaitEnrichmentFeeds: () => Promise.allSettled([seasonFetch, statsFetch]),
+    awaitAllForPerf: () => Promise.allSettled([ppFetch, udFetch, oddsFetch, seasonFetch, statsFetch]),
+  };
+}
+
+function applyMlbStatsProviderResult(statsEntry, debugInfo) {
+  const statsResult = statsEntry?.result || emptyStatsProviderResult();
+  const statsMap = statsResult.stats instanceof Map ? statsResult.stats : new Map();
+  const failed = Boolean(statsEntry?.error || statsResult.error);
+  const timedOut = Boolean(statsEntry?.timedOut || statsResult.timedOut);
+
   console.error("STATS FETCH END");
-  console.error("STATS TIMEOUT STATUS:", false);
-  const statsMap = statsResult?.stats;
-  console.error("STATS MAP SIZE:", statsMap instanceof Map ? statsMap.size : 0);
+  console.error("STATS TIMEOUT STATUS:", timedOut);
+  console.error("STATS MAP SIZE:", statsMap.size);
 
-  if (propCount > 0) {
-    if (!(statsMap instanceof Map)) {
-      const message = `${MLB_STATS_ENRICHMENT_FAILED}: statsMap is not a Map after fetchPlayerStats`;
-      debugInfo.statsEnrichmentFailed = true;
-      debugInfo.statsEnrichmentError = message;
-      throw new Error(message);
-    }
-    if (statsMap.size === 0) {
-      const message = `${MLB_STATS_ENRICHMENT_FAILED}: statsMap empty after fetchPlayerStats`;
-      debugInfo.statsEnrichmentFailed = true;
-      debugInfo.statsEnrichmentError = message;
-      throw new Error(message);
-    }
+  if (failed || statsMap.size === 0) {
+    debugInfo.statsEnrichmentFailed = true;
+    debugInfo.statsEnrichmentError =
+      statsResult.warnings?.[0] || statsEntry?.result?.message || MLB_STATS_ENRICHMENT_FAILED;
+  } else {
+    debugInfo.statsEnrichmentFailed = false;
+    debugInfo.statsEnrichmentError = "";
   }
 
-  debugInfo.statsEnrichmentFailed = false;
-  debugInfo.statsEnrichmentError = "";
-  return statsResult;
+  return {
+    stats: statsMap,
+    warnings: statsResult.warnings || [],
+    timedOut,
+    failed,
+  };
+}
+
+function applySeasonStatsProviderResult(seasonEntry, debugInfo) {
+  const seasonResult = seasonEntry?.result || emptySeasonStatsProviderResult();
+  const seasonStatsData = Array.isArray(seasonResult.data) ? seasonResult.data : [];
+  debugInfo.sportsDataSeasonStats = seasonStatsData;
+  debugInfo.sportsDataSeasonStatsCount = seasonStatsData.length;
+  if (seasonStatsData.length > 0) {
+    logSportsDataSample(seasonStatsData);
+    emitVisibleProjectionDebug(
+      seasonStatsData,
+      "fetchDFSProps.seasonStats @ src/DFSPropsApp.jsx (parallel provider fetch)"
+    );
+  }
+  return seasonStatsData;
+}
+
+async function fetchMlbProjectionStatsBlocking(props, debugInfo) {
+  console.error("STATS FETCH START");
+  const statsEntry = await fetchProviderIsolated({
+    label: "Stats",
+    timeoutMs: getMlbStatsFetchTimeoutMs(),
+    fetchFn: () => fetchPlayerStats({ props }),
+    emptyResult: ({ timedOut, message }) =>
+      emptyStatsProviderResult({
+        timedOut,
+        message: message || (timedOut ? `${MLB_STATS_ENRICHMENT_FAILED}: timed out` : MLB_STATS_ENRICHMENT_FAILED),
+      }),
+  });
+  return applyMlbStatsProviderResult(statsEntry, debugInfo);
 }
 
 function enrichmentBackgroundFallback(label) {
@@ -1318,33 +1444,29 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   let oddsApiPlayerResult = emptyOddsApiResult();
   let pipelineFallback = false;
 
-  const oddsApiPromise = withFetchTimeout(
-    () =>
-      fetchOddsApiDisplayProps({ sport: fetchSport }).catch((error) =>
-        emptyOddsApiResult({
-          timedOut: isAbortOrTimeoutError(error),
-          warnings: [
-            isAbortOrTimeoutError(error) ? ENRICHMENT_TIMEOUT_MESSAGE : error?.message || "Odds API player props failed",
-          ],
-        })
-      ),
-    enrichmentTimeoutMs,
-    {
-      label: "Odds API",
-      fallback: () => emptyOddsApiResult({ timedOut: true }),
-    }
-  );
-
   const needsUnderdogBackup = wantsUnderdog;
-  const fetchUnderdog = needsUnderdogBackup || (wantsUnderdog && !wantsPrizePicks);
+  const fetchUnderdogFlag = needsUnderdogBackup || (wantsUnderdog && !wantsPrizePicks);
+  const providerWave = beginParallelProviderFetches({
+    fetchSport,
+    wantsPrizePicks,
+    wantsUnderdog,
+    fetchUnderdogFlag,
+  });
 
-  if (fetchUnderdog) {
-    try {
-      underdogResult = await fetchUnderdogProviderProps({ sport: fetchSport, statType: "all" });
+  const coreFeedSettled = await providerWave.awaitCoreFeeds();
+  const ppEntry = unwrapProviderSettled(coreFeedSettled[0]);
+  const udEntry = unwrapProviderSettled(coreFeedSettled[1]);
+  const oddsEntry = unwrapProviderSettled(coreFeedSettled[2]);
+
+  if (fetchUnderdogFlag && !udEntry.skipped) {
+    underdogResult = udEntry.result?.error ? udEntry.result : udEntry.result;
+    if (underdogResult && !underdogResult.error) {
       console.info("[DFS Source Audit] Underdog result", {
         status: underdogResult.status,
         props: underdogResult.props?.length || 0,
         lineSourceBadge: underdogResult.lineSourceBadge,
+        durationMs: udEntry.durationMs,
+        timedOut: udEntry.timedOut,
       });
       applySourceResult({
         label: "Underdog",
@@ -1372,29 +1494,33 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       } else if (underdogResult.debug?.underdogParser?.parserMismatch && !(underdogResult.parsedProps?.length || underdogResult.props?.length)) {
         sourceWarnings.push(buildUnderdogParserFailureMessage(underdogResult.debug));
       }
-    } catch (error) {
-      sourceStatus.Underdog = "Unavailable";
-      console.warn("[DFS Source Audit] Underdog load failed", error);
-      sourceWarnings.push(UNDERDOG_UNAVAILABLE_MESSAGE);
+    } else {
+      sourceStatus.Underdog = udEntry.timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "Unavailable";
+      console.warn("[DFS Source Audit] Underdog load failed or timed out", {
+        timedOut: udEntry.timedOut,
+        durationMs: udEntry.durationMs,
+      });
+      sourceWarnings.push(underdogResult?.warnings?.[0] || UNDERDOG_UNAVAILABLE_MESSAGE);
       debugInfo.sources.Underdog = {
         ...debugInfo.sources.Underdog,
-        ...(error?.debug || {}),
         status: "Unavailable",
         apiStatus: "Unavailable",
-        message: error?.debug?.message || UNDERDOG_UNAVAILABLE_MESSAGE,
+        message: underdogResult?.warnings?.[0] || UNDERDOG_UNAVAILABLE_MESSAGE,
         lineSourceBadge: "STALE",
       };
     }
   }
 
-  if (wantsPrizePicks) {
-    try {
-      prizePicksResult = await fetchPrizePicksProps({ sport: fetchSport, statType: "all" });
+  if (wantsPrizePicks && !ppEntry.skipped) {
+    prizePicksResult = ppEntry.result;
+    if (prizePicksResult && !prizePicksResult.error) {
       console.info("[DFS Source Audit] PrizePicks result", {
         status: prizePicksResult.status,
         props: prizePicksResult.props?.length || 0,
         lineSourceBadge: prizePicksResult.lineSourceBadge,
         rateLimited: prizePicksResult.rateLimited,
+        durationMs: ppEntry.durationMs,
+        timedOut: ppEntry.timedOut,
       });
       applySourceResult({
         label: "PrizePicks",
@@ -1405,25 +1531,37 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         sourceStatus,
         debugInfo,
       });
-    } catch (error) {
-      sourceStatus.PrizePicks = "Failed";
-      console.warn("[DFS Source Audit] PrizePicks load failed", error);
+    } else {
+      sourceStatus.PrizePicks = ppEntry.timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "Failed";
+      console.warn("[DFS Source Audit] PrizePicks load failed or timed out", {
+        timedOut: ppEntry.timedOut,
+        durationMs: ppEntry.durationMs,
+      });
       if (!rawProps.length) {
-        sourceFailures.push(sourceFailureMessage("Could not load PrizePicks lines.", error));
+        sourceFailures.push(
+          sourceFailureMessage(
+            prizePicksResult?.warnings?.[0] || "Could not load PrizePicks lines.",
+            new Error(prizePicksResult?.warnings?.[0] || "PrizePicks fetch failed")
+          )
+        );
       }
       debugInfo.sources.PrizePicks = {
         ...debugInfo.sources.PrizePicks,
         status: "Failed",
         apiStatus: "Failed",
-        message: getErrorMessage(error) || "Could not load PrizePicks lines.",
+        message: prizePicksResult?.warnings?.[0] || "Could not load PrizePicks lines.",
         lineSourceBadge: "",
       };
     }
   }
 
-  oddsApiPlayerResult = await oddsApiPromise.catch(() =>
-    emptyOddsApiResult({ timedOut: true, warnings: [ENRICHMENT_TIMEOUT_MESSAGE] })
-  );
+  oddsApiPlayerResult = oddsEntry.result?.error ? oddsEntry.result : oddsEntry.result || emptyOddsApiResult();
+  if (!oddsApiPlayerResult?.props) {
+    oddsApiPlayerResult = emptyOddsApiResult({
+      timedOut: oddsEntry.timedOut,
+      warnings: oddsApiPlayerResult?.warnings || [ENRICHMENT_TIMEOUT_MESSAGE],
+    });
+  }
   applyOddsApiSourceState(oddsApiPlayerResult, sourceStatus, debugInfo);
 
   if (!rawProps.length && oddsApiPlayerResult?.props?.length && !oddsApiPlayerResult.authDisabled) {
@@ -1861,20 +1999,25 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     debugInfo.statsFetchPropCount = statsFetchProps.length;
     traceProjectionExecutionPath("fetchDFSProps:stats-fetch-start", {
       statsFetchPropCount: statsFetchProps.length,
-      statsCapMs: "none (blocking)",
+      statsCapMs: getMlbStatsFetchTimeoutMs(),
       enrichmentTimeoutMs,
       mlbOnlyMode: MLB_ONLY_MODE,
     });
-    const statsResult = await fetchMlbProjectionStatsBlocking(statsFetchProps, debugInfo);
-    background.stats = statsResult.stats;
-    statsTimedOut = false;
-    markStatsFetchTimedOut(false);
-    backgroundWarnings.push(...(statsResult.warnings || []));
+
+    const enrichmentSettled = await providerWave.awaitEnrichmentFeeds();
+    const seasonEntry = unwrapProviderSettled(enrichmentSettled[0]);
+    const statsEntry = unwrapProviderSettled(enrichmentSettled[1]);
+
+    const statsApplied = applyMlbStatsProviderResult(statsEntry, debugInfo);
+    background.stats = statsApplied.stats;
+    statsTimedOut = statsApplied.timedOut;
+    markStatsFetchTimedOut(statsTimedOut);
+    backgroundWarnings.push(...(statsApplied.warnings || []));
     debugInfo.statsLoadedCount = background.stats.size;
     debugInfo.statsMap = background.stats;
     traceProjectionExecutionPath("fetchDFSProps:stats-fetch-done", {
       statsMapSize: background.stats.size,
-      statsTimedOut: false,
+      statsTimedOut,
       statsMapIsMap: background.stats instanceof Map,
     });
     if (!(background.stats instanceof Map)) {
@@ -1898,29 +2041,13 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       timedOut: statsTimedOut,
     });
 
-    let seasonStatsData = [];
-    try {
-      traceProjectionExecutionPath("fetchDFSProps:season-stats-start", {
-        endpoint: "/api/sportsdataio/stats/json/PlayerSeasonStats/{season}",
+    let seasonStatsData = applySeasonStatsProviderResult(seasonEntry, debugInfo);
+    background.sportsDataSeasonStats = seasonStatsData;
+    if (seasonEntry.error || seasonEntry.timedOut) {
+      console.warn("[MLB Projection Pipeline] SportsDataIO season stats fetch failed or timed out", {
+        timedOut: seasonEntry.timedOut,
+        durationMs: seasonEntry.durationMs,
       });
-      const seasonStatsResult = await fetchPlayerSeasonStats();
-      seasonStatsData = seasonStatsResult?.data || [];
-      logSportsDataSample(seasonStatsData);
-      background.sportsDataSeasonStats = seasonStatsData;
-      debugInfo.sportsDataSeasonStats = seasonStatsData;
-      debugInfo.sportsDataSeasonStatsCount = seasonStatsData.length;
-      if (seasonStatsData.length > 0) {
-        emitVisibleProjectionDebug(
-          seasonStatsData,
-          "fetchDFSProps.seasonStats @ src/DFSPropsApp.jsx (after fetchPlayerSeasonStats)"
-        );
-      }
-    } catch (seasonError) {
-      console.error("PROJECTION FETCH FAILED — season stats stage error", seasonError);
-      console.warn("[MLB Projection Pipeline] SportsDataIO season stats fetch failed", seasonError?.message);
-      background.sportsDataSeasonStats = [];
-      debugInfo.sportsDataSeasonStats = [];
-      debugInfo.sportsDataSeasonStatsCount = 0;
     }
 
     debugInfo.statsMap = background.stats;
@@ -2046,16 +2173,13 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     });
   } else {
   const statsFetchProps = pickUniquePropsForStatsFetch(workingNormalProps);
-  try {
-    const statsResult = await fetchMlbProjectionStatsBlocking(statsFetchProps, debugInfo);
-    background.stats = statsResult.stats;
-    debugInfo.statsLoadedCount = background.stats.size;
-    debugInfo.statsMap = background.stats;
-    backgroundWarnings.push(...(statsResult.warnings || []));
-  } catch (statsError) {
-    backgroundWarnings.push(statsError?.message || MLB_STATS_ENRICHMENT_FAILED);
-    throw statsError;
-  }
+  const statsApplied = await fetchMlbProjectionStatsBlocking(statsFetchProps, debugInfo);
+  background.stats = statsApplied.stats;
+  debugInfo.statsLoadedCount = background.stats.size;
+  debugInfo.statsMap = background.stats;
+  backgroundWarnings.push(...(statsApplied.warnings || []));
+  statsTimedOut = statsApplied.timedOut;
+  markStatsFetchTimedOut(statsTimedOut);
 
   const backgroundJobs = [
     { label: "sportsbook", run: () => fetchSportsbookComparison({ props: workingNormalProps }) },
@@ -2478,6 +2602,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   });
   dumpDebugGlobals("fetchDFSProps");
 
+  const perfSettled = await providerWave.awaitAllForPerf();
+  logProviderFetchPerformance(perfSettled.map((row) => unwrapProviderSettled(row)));
+
   reportProgress("RANK");
   return {
     props: uiPayload.props,
@@ -2745,26 +2872,21 @@ export default function DFSPropsApp() {
           }
         }
 
-        const result = await withFetchTimeout(
-          () =>
-            fetchDFSProps({
-              platform: "both",
-              sport: MLB_ONLY_MODE ? "MLB" : "all",
-              statType: "all",
-              onProgress: (stage) => setLoadingStage(stage),
-              onCoreReady: (coreBoard) => {
-                const hasProps =
-                  coreBoard.allDisplayProps?.length || coreBoard.props?.length || coreBoard.usableProps?.length;
-                if (!hasProps) return;
-                applyBoardState({ ...coreBoard, updatedAt: new Date().toISOString() }, "live");
-                if (!autoRefresh) setLoading(false);
-              },
-            }),
-          45000,
-          { fallback: null, label: "board-fetch" }
-        );
+        const result = await fetchDFSProps({
+          platform: "both",
+          sport: MLB_ONLY_MODE ? "MLB" : "all",
+          statType: "all",
+          onProgress: (stage) => setLoadingStage(stage),
+          onCoreReady: (coreBoard) => {
+            const hasProps =
+              coreBoard.allDisplayProps?.length || coreBoard.props?.length || coreBoard.usableProps?.length;
+            if (!hasProps) return;
+            applyBoardState({ ...coreBoard, updatedAt: new Date().toISOString() }, "live");
+            if (!autoRefresh) setLoading(false);
+          },
+        });
         if (!result) {
-          throw new Error("Board fetch timed out");
+          throw new Error("Board fetch returned no result");
         }
         scoringContextRef.current = result.scoringContext || null;
         const boardSourceStatus = finalizeSourceStatus(result.sourceStatus || DEFAULT_SOURCE_STATUS);
