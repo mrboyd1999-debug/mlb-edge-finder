@@ -9,7 +9,7 @@ const DEV_MIN_INTERVAL_MS = 4000;
 
 const memoryCache = new Map();
 const inFlightRequests = new Map();
-let lastRequestAt = 0;
+const lastRequestAtBySource = new Map();
 
 const USER_AGENTS = [
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -144,18 +144,21 @@ function logFetchEvent(source, event, details = {}) {
   console.info(`[DFS Fetch] ${source}`, { event, ...details });
 }
 
-async function waitForDevThrottle() {
+async function waitForDevThrottle(source = "API") {
   const throttleMs = getDevThrottleMs();
   if (!throttleMs) return;
+  const lastRequestAt = lastRequestAtBySource.get(source) || 0;
   const elapsed = Date.now() - lastRequestAt;
   if (elapsed < throttleMs) {
     await sleep(throttleMs - elapsed);
   }
-  lastRequestAt = Date.now();
+  lastRequestAtBySource.set(source, Date.now());
 }
 
-async function fetchWithTimeout(url, init, timeoutMs) {
+async function fetchWithTimeout(url, init, timeoutMs, externalSignal) {
   const controller = new AbortController();
+  const abortExternal = () => controller.abort();
+  externalSignal?.addEventListener("abort", abortExternal, { once: true });
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
@@ -166,6 +169,7 @@ async function fetchWithTimeout(url, init, timeoutMs) {
     throw error;
   } finally {
     clearTimeout(timer);
+    externalSignal?.removeEventListener("abort", abortExternal);
   }
 }
 
@@ -234,15 +238,24 @@ export async function resilientFetch(url, init = {}, options = {}) {
   }
 
   const run = (async () => {
-    await waitForDevThrottle();
+    await waitForDevThrottle(source);
     const startedAt = Date.now();
+    const externalSignal = init.signal || options.signal || null;
     let lastResponse = null;
     let retries = 0;
 
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      if (externalSignal?.aborted) {
+        throw new Error(`Request timed out after ${timeoutMs}ms`);
+      }
       const headers = buildRotatingHeaders(init.headers || {});
       try {
-        const response = await fetchWithTimeout(url, { ...init, headers }, timeoutMs);
+        const response = await fetchWithTimeout(
+          url,
+          { ...init, headers, signal: undefined },
+          timeoutMs,
+          externalSignal
+        );
         lastResponse = response;
         const skip429 = options.skip429Retry !== false && response.status === 429;
         const shouldRetry = retryStatuses.has(response.status) && attempt < maxRetries && !skip429;

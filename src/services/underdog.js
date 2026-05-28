@@ -3,6 +3,8 @@ import {
   getLineFeedTimeoutMs,
   LINE_FEED_MAX_RETRIES,
   LINE_FEED_RETRY_DELAY_MS,
+  UNDERDOG_PROVIDER_TIMEOUT_MS,
+  isAbortOrTimeoutError,
 } from "../utils/apiTimeout.js";
 import { safeParseJSON } from "../utils/safeParseJSON.js";
 import { normalizeGameStartTime, startTimeUncertainty } from "../utils/normalizeGameStartTime.js";
@@ -93,11 +95,16 @@ const WTA_NAME_HINTS = new Set([
   "yeon",
 ]);
 
-export async function fetchUnderdogProps({ sport = "all", statType = "all" } = {}) {
-  return withSourceRequestLock(SOURCE_IDS.UNDERDOG, () => fetchUnderdogPropsInternal({ sport, statType }));
+export async function fetchUnderdogProps({ sport = "all", statType = "all", signal } = {}) {
+  return withSourceRequestLock(
+    SOURCE_IDS.UNDERDOG,
+    ({ signal: lockSignal } = {}) =>
+      fetchUnderdogPropsInternal({ sport, statType, signal: signal || lockSignal }),
+    { signal }
+  );
 }
 
-async function fetchUnderdogPropsInternal({ sport = "all", statType = "all" } = {}) {
+async function fetchUnderdogPropsInternal({ sport = "all", statType = "all", signal } = {}) {
   const proxyAssessment = assessProxyUrl(getRawProxyUrl("underdog"));
   if (proxyAssessment.invalid) {
     console.error(UNDERDOG_PROXY_DISABLED_LOG);
@@ -118,10 +125,11 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all" } = 
   const attempts = [];
 
   for (const endpoint of underdogEndpoints()) {
+    if (signal?.aborted) break;
     const apiUrl = absoluteUrl(endpoint);
     console.info(`${UNDERDOG_AUDIT_PREFIX} calling API/proxy URL`, apiUrl);
 
-    const parsed = await fetchUnderdogEndpoint(endpoint);
+    const parsed = await fetchUnderdogEndpoint(endpoint, { signal });
     attempts.push(parsed.attempt);
 
     if (!parsed.ok) {
@@ -321,17 +329,16 @@ function buildCachedUnderdogResult({ sport, statType, attempts, reason = "fetch-
   };
 }
 
-async function fetchUnderdogEndpoint(endpoint) {
-  // Soft retry queue: transient network/5xx failures retry with exponential
-  // backoff (~750ms → 1.5s → 3s → 6s) before bubbling up so the cache
-  // fallback only kicks in after we've genuinely failed. 429s short-circuit.
+async function fetchUnderdogEndpoint(endpoint, { signal } = {}) {
   return withSourceRetryQueue(
     SOURCE_IDS.UNDERDOG,
-    () => attemptUnderdogEndpoint(endpoint),
+    () => attemptUnderdogEndpoint(endpoint, { signal }),
     {
       maxAttempts: 3,
+      signal,
       isRetryable: (result, error) => {
-        if (error) return true;
+        if (signal?.aborted) return false;
+        if (error) return !isAbortOrTimeoutError(error);
         if (!result || result.ok) return false;
         if (result.rateLimited) return false;
         if (result.networkError) return true;
@@ -343,8 +350,8 @@ async function fetchUnderdogEndpoint(endpoint) {
   );
 }
 
-async function attemptUnderdogEndpoint(endpoint) {
-  const lineFeedTimeoutMs = getLineFeedTimeoutMs();
+async function attemptUnderdogEndpoint(endpoint, { signal } = {}) {
+  const lineFeedTimeoutMs = Math.min(getLineFeedTimeoutMs(), UNDERDOG_PROVIDER_TIMEOUT_MS);
   const attempt = {
     url: absoluteUrl(endpoint),
     status: null,
@@ -358,7 +365,7 @@ async function attemptUnderdogEndpoint(endpoint) {
   try {
     const response = await resilientFetch(
       endpoint,
-      { headers: lineFeedJsonHeaders(), cache: "no-store" },
+      { headers: lineFeedJsonHeaders(), cache: "no-store", signal },
       {
         source: "Underdog",
         ttlMs: 0,
@@ -366,6 +373,7 @@ async function attemptUnderdogEndpoint(endpoint) {
         maxRetries: LINE_FEED_MAX_RETRIES,
         retryDelayMs: LINE_FEED_RETRY_DELAY_MS,
         skip429Retry: true,
+        signal,
       }
     );
     attempt.status = response.status;

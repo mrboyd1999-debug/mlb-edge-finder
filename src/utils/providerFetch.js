@@ -2,11 +2,12 @@ import {
   ENRICHMENT_TIMEOUT_MESSAGE,
   getMlbStatsFetchTimeoutMs,
   getSportsDataTimeoutMs,
+  isAbortOrTimeoutError,
   MLB_STATS_FETCH_TIMEOUT_MS,
   PRIZEPICKS_PROVIDER_TIMEOUT_MS,
   UNDERDOG_PROVIDER_TIMEOUT_MS,
-  withFetchTimeout,
 } from "./apiTimeout.js";
+import { SOURCE_IDS, releaseSourceRequestLock } from "../services/sourceRateLimit.js";
 
 export {
   PRIZEPICKS_PROVIDER_TIMEOUT_MS,
@@ -14,43 +15,103 @@ export {
   MLB_STATS_FETCH_TIMEOUT_MS,
 };
 
+const PROVIDER_LOG_KEYS = {
+  PrizePicks: "PRIZEPICKS",
+  Underdog: "UNDERDOG",
+};
+
+const PROVIDER_SOURCE_IDS = {
+  PrizePicks: SOURCE_IDS.PRIZEPICKS,
+  Underdog: SOURCE_IDS.UNDERDOG,
+};
+
+function providerLogKey(label = "") {
+  return PROVIDER_LOG_KEYS[label] || String(label || "PROVIDER").toUpperCase().replace(/\s+/g, "_");
+}
+
+function resolveSourceId(label = "") {
+  return PROVIDER_SOURCE_IDS[label] || label;
+}
+
 /**
- * Fetch one provider with an independent timeout. Never throws — returns { result, error, timedOut, durationMs }.
+ * Fetch one provider with an independent AbortController + Promise.race timeout.
+ * Never throws — returns { result, error, timedOut, durationMs }.
  */
-export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyResult }) {
+export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyResult, sourceId = null }) {
+  const logKey = providerLogKey(label);
+  const lockSourceId = sourceId || resolveSourceId(label);
   const startedAt = Date.now();
+  const controller = new AbortController();
   let timedOut = false;
   let error = false;
-  let result = null;
+  let timer = null;
+
+  console.log(`${logKey} START`);
+
+  const failResult = (opts = {}) => {
+    error = true;
+    return typeof emptyResult === "function"
+      ? emptyResult({ timedOut: Boolean(opts.timedOut), error: true, message: opts.message || "" })
+      : { error: true, timedOut: Boolean(opts.timedOut), data: [] };
+  };
 
   try {
-    result = await withFetchTimeout(fetchFn, timeoutMs, {
-      label,
-      fallback: () => {
-        timedOut = true;
-        return typeof emptyResult === "function"
-          ? emptyResult({ timedOut: true, error: true })
-          : { error: true, timedOut: true, data: [] };
-      },
-    });
-    if (result?.error || result?.timedOut) {
-      error = true;
-    }
-  } catch (err) {
-    error = true;
-    result =
-      typeof emptyResult === "function"
-        ? emptyResult({ timedOut: false, error: true, message: err?.message })
-        : { error: true, data: [], message: err?.message };
-  }
+    const result = await Promise.race([
+      Promise.resolve().then(async () => {
+        const value = await fetchFn({ signal: controller.signal });
+        if (controller.signal.aborted) {
+          throw new DOMException("Aborted", "AbortError");
+        }
+        return value;
+      }),
+      new Promise((resolve) => {
+        timer = window.setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+          if (lockSourceId) releaseSourceRequestLock(lockSourceId);
+          console.log(`${logKey} TIMEOUT`);
+          resolve({ __providerTimeout: true });
+        }, timeoutMs);
+      }),
+    ]);
 
-  return {
-    label,
-    result,
-    durationMs: Date.now() - startedAt,
-    timedOut,
-    error,
-  };
+    if (timer != null) window.clearTimeout(timer);
+
+    if (result?.__providerTimeout || controller.signal.aborted) {
+      return {
+        label,
+        result: failResult({ timedOut: true }),
+        durationMs: Date.now() - startedAt,
+        timedOut: true,
+        error: true,
+      };
+    }
+
+    console.log(`${logKey} END`);
+    if (result?.error || result?.timedOut) error = true;
+    return {
+      label,
+      result,
+      durationMs: Date.now() - startedAt,
+      timedOut: false,
+      error,
+    };
+  } catch (err) {
+    if (timer != null) window.clearTimeout(timer);
+    const wasTimeout = timedOut || controller.signal.aborted || isAbortOrTimeoutError(err);
+    if (wasTimeout) {
+      if (!timedOut) console.log(`${logKey} TIMEOUT`);
+    } else {
+      console.log(`${logKey} END`);
+    }
+    return {
+      label,
+      result: failResult({ timedOut: wasTimeout, message: err?.message }),
+      durationMs: Date.now() - startedAt,
+      timedOut: wasTimeout,
+      error: true,
+    };
+  }
 }
 
 export function skippedProviderResult(label) {

@@ -1272,8 +1272,9 @@ function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderd
   const ppFetch = wantsPrizePicks
     ? fetchProviderIsolated({
         label: "PrizePicks",
+        sourceId: "PrizePicks",
         timeoutMs: PRIZEPICKS_PROVIDER_TIMEOUT_MS,
-        fetchFn: () => fetchPrizePicksProps({ sport: fetchSport, statType: "all" }),
+        fetchFn: ({ signal }) => fetchPrizePicksProps({ sport: fetchSport, statType: "all", signal }),
         emptyResult: ({ timedOut, message }) =>
           emptyPrizePicksProviderResult({
             timedOut,
@@ -1285,8 +1286,9 @@ function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderd
   const udFetch = fetchUnderdogFlag
     ? fetchProviderIsolated({
         label: "Underdog",
+        sourceId: "Underdog",
         timeoutMs: UNDERDOG_PROVIDER_TIMEOUT_MS,
-        fetchFn: () => fetchUnderdogProviderProps({ sport: fetchSport, statType: "all" }),
+        fetchFn: ({ signal }) => fetchUnderdogProviderProps({ sport: fetchSport, statType: "all", signal }),
         emptyResult: ({ timedOut, message }) =>
           emptyUnderdogProviderResult({
             timedOut,
@@ -1331,7 +1333,14 @@ function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderd
     udFetch,
     oddsFetch,
     seasonFetch,
-    awaitCoreFeeds: () => Promise.allSettled([ppFetch, udFetch, oddsFetch]),
+    awaitLineProviders: () => Promise.allSettled([ppFetch, udFetch]),
+    awaitCoreFeeds: async () => {
+      const [lineSettled, oddsSettled] = await Promise.all([
+        Promise.allSettled([ppFetch, udFetch]),
+        Promise.allSettled([oddsFetch]),
+      ]);
+      return [...lineSettled, ...oddsSettled];
+    },
     awaitEnrichmentFeeds: () => Promise.allSettled([seasonFetch]),
     awaitAllForPerf: () => Promise.allSettled([ppFetch, udFetch, oddsFetch, seasonFetch]),
   };

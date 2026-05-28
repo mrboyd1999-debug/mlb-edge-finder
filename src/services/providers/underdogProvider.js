@@ -110,8 +110,9 @@ function degradedResult(error, durationMs) {
 /** Provider entry — always resolves; never throws to caller. */
 export async function fetchUnderdogProviderProps(options = {}) {
   const startedAt = Date.now();
+  const { signal, ...rest } = options;
   try {
-    const result = await fetchUnderdogProps(options);
+    const result = await fetchUnderdogProps({ ...rest, signal });
     return normalizeProviderResult(result, Date.now() - startedAt);
   } catch (error) {
     console.warn("[Underdog Provider] fetch failed — partial degradation", error);

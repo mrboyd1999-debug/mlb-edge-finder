@@ -282,15 +282,33 @@ async function waitForSourceInterval(sourceId) {
   lastDispatchAt.set(sourceId, Date.now());
 }
 
-export async function withSourceRequestLock(sourceId, fn) {
+export function releaseSourceRequestLock(sourceId) {
+  inFlightPromises.delete(sourceId);
+}
+
+export async function withSourceRequestLock(sourceId, fn, { signal } = {}) {
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
   if (inFlightPromises.has(sourceId)) {
     return inFlightPromises.get(sourceId);
   }
   const promise = (async () => {
-    await waitForSourceInterval(sourceId);
-    return fn();
+    const onAbort = () => {
+      releaseSourceRequestLock(sourceId);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      await waitForSourceInterval(sourceId);
+      if (signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+      return await fn({ signal });
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
+    }
   })().finally(() => {
-    inFlightPromises.delete(sourceId);
+    releaseSourceRequestLock(sourceId);
   });
   inFlightPromises.set(sourceId, promise);
   return promise;
@@ -304,10 +322,11 @@ export async function withSourceRequestLock(sourceId, fn) {
  * pile-on after a 429.
  */
 export async function withSourceRetryQueue(sourceId, attempt, options = {}) {
-  const { isRetryable = () => false, maxAttempts = RETRY_QUEUE_BACKOFF_MS.length + 1 } = options;
+  const { isRetryable = () => false, maxAttempts = RETRY_QUEUE_BACKOFF_MS.length + 1, signal } = options;
   let lastResult = null;
   let lastError = null;
   for (let i = 0; i < maxAttempts; i += 1) {
+    if (signal?.aborted) break;
     if (isSourceInCooldown(sourceId)) break;
     try {
       const result = await attempt(i);

@@ -3,6 +3,7 @@ import {
   getLineFeedTimeoutMs,
   LINE_FEED_MAX_RETRIES,
   LINE_FEED_RETRY_DELAY_MS,
+  PRIZEPICKS_PROVIDER_TIMEOUT_MS,
 } from "../utils/apiTimeout.js";
 import { safeParseJSON } from "../utils/safeParseJSON.js";
 import { normalizeGameStartTime, startTimeUncertainty } from "../utils/normalizeGameStartTime.js";
@@ -110,11 +111,16 @@ const WTA_NAME_HINTS = new Set([
   "yeon",
 ]);
 
-export async function fetchPrizePicksProps({ sport = "all", statType = "all" } = {}) {
-  return withSourceRequestLock(SOURCE_IDS.PRIZEPICKS, () => fetchPrizePicksPropsInternal({ sport, statType }));
+export async function fetchPrizePicksProps({ sport = "all", statType = "all", signal } = {}) {
+  return withSourceRequestLock(
+    SOURCE_IDS.PRIZEPICKS,
+    ({ signal: lockSignal } = {}) =>
+      fetchPrizePicksPropsInternal({ sport, statType, signal: signal || lockSignal }),
+    { signal }
+  );
 }
 
-async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all" } = {}) {
+async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", signal } = {}) {
   const proxyAssessment = assessProxyUrl(getRawProxyUrl("prizepicks"));
   if (proxyAssessment.invalid) {
     console.error(PRIZEPICKS_PROXY_DISABLED_LOG);
@@ -146,7 +152,8 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all" } 
   };
 
   for (const endpoint of prizePicksEndpoints()) {
-    const parsed = await fetchPrizePicksEndpoint(endpoint, fetchInit);
+    if (signal?.aborted) break;
+    const parsed = await fetchPrizePicksEndpoint(endpoint, fetchInit, { signal });
     attempts.push(parsed.attempt);
 
     if (parsed.ok && parsed.payload) {
@@ -297,8 +304,8 @@ function buildCachedPrizePicksResult({ sport, statType, attempts, endpoint, reas
   };
 }
 
-async function fetchPrizePicksEndpoint(endpoint, init) {
-  const lineFeedTimeoutMs = getLineFeedTimeoutMs();
+async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
+  const lineFeedTimeoutMs = Math.min(getLineFeedTimeoutMs(), PRIZEPICKS_PROVIDER_TIMEOUT_MS);
   const attempt = {
     url: absoluteUrl(endpoint),
     status: null,
@@ -312,14 +319,18 @@ async function fetchPrizePicksEndpoint(endpoint, init) {
   const startedAt = Date.now();
 
   try {
-    const response = await resilientFetch(endpoint, init, {
+    const response = await resilientFetch(
+      endpoint,
+      { ...init, signal },
+      {
       source: "PrizePicks",
       ttlMs: PRIZEPICKS_CLIENT_STALE_MS,
       timeoutMs: lineFeedTimeoutMs,
       maxRetries: LINE_FEED_MAX_RETRIES,
       retryDelayMs: LINE_FEED_RETRY_DELAY_MS,
       skip429Retry: true,
-    });
+      }
+    );
     attempt.status = response.status;
     attempt.contentType = response.headers.get("content-type") || "";
     attempt.durationMs = Date.now() - startedAt;
