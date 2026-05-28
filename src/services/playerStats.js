@@ -18,7 +18,8 @@ import {
 import { buildMlbStatsApiUrl } from "./mlbStatsApiUrl.js";
 import { statProfileKey, findStatProfile, normalizePlayerName } from "../utils/playerNames.js";
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
-import { emitVisibleProjectionDebug } from "../utils/projectionRuntimeDebug.js";
+import { emitVisibleProjectionDebug, emitSportRoutingDebug } from "../utils/projectionRuntimeDebug.js";
+import { resolvePropSport } from "../utils/mlbOnlyMode.js";
 
 export { statProfileKey, findStatProfile };
 
@@ -36,7 +37,7 @@ export function pickUniquePropsForStatsFetch(props = [], max = MLB_STATS_FETCH_C
   for (const prop of props || []) {
     if (!prop?.playerName) continue;
     const key = [
-      String(prop.sport || "MLB").toLowerCase(),
+      String(resolvePropSport(prop) || prop.sport || "").toLowerCase(),
       normalizePlayerName(prop.playerName),
       canonicalMarketKey(prop.statType || prop.market || ""),
     ].join("|");
@@ -55,6 +56,17 @@ export async function fetchPlayerStats({ props = [] } = {}) {
   const stats = new Map();
   const warnings = [];
   const grouped = groupPropsBySport(props);
+  const routingPlan = Object.entries(grouped).map(([sport, sportProps]) => ({
+    sport,
+    league: sport,
+    endpoint: projectionEndpointForSport(sport),
+    propCount: sportProps.length,
+    samplePlayer: sportProps[0]?.playerName || "",
+  }));
+  if (routingPlan.length) {
+    emitSportRoutingDebug(routingPlan);
+  }
+
   const jobs = [
     { sport: "MLB", run: () => fetchMlbStats(grouped.MLB || []) },
     ...(shouldRunNonMlbStatFetch("NBA") ? [{ sport: "NBA", run: () => fetchNbaStats(grouped.NBA || []) }] : []),
@@ -74,9 +86,20 @@ export async function fetchPlayerStats({ props = [] } = {}) {
   const settled = await Promise.allSettled(jobs.map((job) => job.run()));
   settled.forEach((result, index) => {
     const sport = jobs[index].sport;
+    const sportProps = grouped[sport] || [];
     if (result.status === "fulfilled") {
       mergeStats(stats, result.value.stats);
       warnings.push(...(result.value.warnings || []));
+      emitSportRoutingDebug([
+        {
+          sport,
+          league: sport,
+          endpoint: projectionEndpointForSport(sport),
+          propCount: sportProps.length,
+          projectionCount: result.value.stats?.size ?? 0,
+          samplePlayer: sportProps[0]?.playerName || "",
+        },
+      ]);
       return;
     }
 
@@ -1334,11 +1357,20 @@ function espnStatsToGame(labels, values, row) {
 
 function groupPropsBySport(props) {
   return props.reduce((groups, prop) => {
-    const sport = sportGroup(prop.sport);
+    const sport = sportGroup(resolvePropSport(prop) || prop.sport);
     groups[sport] = groups[sport] || [];
     groups[sport].push(prop);
     return groups;
   }, {});
+}
+
+function projectionEndpointForSport(sport = "") {
+  if (sport === "MLB") return "/api/mlb (MLB StatsAPI)";
+  if (sport === "NBA") return "balldontlie /api/nba";
+  if (sport === "WNBA") return "balldontlie /api/wnba";
+  if (sport === "Soccer") return "/api/api-football";
+  if (sport === "Tennis") return "tennis stats provider";
+  return `${sport || "unknown"} stats provider`;
 }
 
 function sportGroup(sport) {

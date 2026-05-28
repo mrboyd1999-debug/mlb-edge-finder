@@ -3,6 +3,7 @@ import { canonicalMarketKey } from "./marketNormalization.js";
 import { normalizeSportLabel } from "./sportMappings.js";
 import { lockSportFromStatType } from "./propStatSportLock.js";
 import { hasMlbStatIndicator, resolvePropSportLabel } from "./underdogSportDetection.js";
+import { detectPropSport } from "./sportDetection.js";
 
 /**
  * Multi-sport decision engine (MLB primary, NBA/WNBA/Tennis/Soccer enabled).
@@ -80,6 +81,11 @@ const DISABLED_SPORTS = new Set([
 ]);
 
 export function resolvePropSport(prop = {}) {
+  const detected = detectPropSport(prop, {
+    selectedSport: prop.selectedSportTab || prop.selectedSport || "",
+  });
+  if (detected.sport) return detected.sport;
+
   const labeled =
     normalizeSportLabel(
       resolvePropSportLabel(prop) || prop.classifiedSport || prop.sport || prop.league || "",
@@ -87,10 +93,8 @@ export function resolvePropSport(prop = {}) {
     ) || normalizeSportLabel(prop.sport || "", prop.league || "");
   const statType = prop.statType || prop.market || prop.propType || "";
   const statLock = lockSportFromStatType(statType);
-  if (statLock && statLock !== MLB_SPORT) return statLock;
-  if (labeled && labeled !== MLB_SPORT) return labeled;
-  if (lockSportFromStatType(statType) === MLB_SPORT || hasMlbStatIndicator(statType)) return MLB_SPORT;
-  return labeled || normalizeSportLabel(prop.sport || "", prop.league || "");
+  if (statLock) return statLock;
+  return labeled || "";
 }
 
 export function isSportActiveInApp(sport = "") {

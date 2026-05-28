@@ -13,6 +13,9 @@ export function isNbaOnlyStatType(statType = "") {
   const text = statText(statType);
   if (!text) return false;
 
+  if (/\bdouble[\s-]?doubles?\b/.test(text)) return true;
+  if (/\btriple[\s-]?doubles?\b/.test(text)) return true;
+
   if (/\bpoints?\s*(\+|and|&)\s*rebounds?\b/.test(text)) return true;
   if (/\bpts?\s*(\+|and|&)\s*rebs?\b/.test(text)) return true;
   if (/\bpts?\s*(\+|and|&)\s*rebs?\s*(\+|and|&)\s*asts?\b/.test(text)) return true;
@@ -33,6 +36,8 @@ export function isNbaOnlyStatType(statType = "") {
 export function isMlbOnlyStatType(statType = "") {
   const text = statText(statType);
   if (!text) return false;
+
+  if (/\bdouble[\s-]?double\b/.test(text) || /\btriple[\s-]?double\b/.test(text)) return false;
 
   if (/\bhits?\s*(\+|and|&)\s*runs?\s*(\+|and|&)\s*rbis?\b/.test(text)) return true;
   if (/\bhits?\s*(\+|and|&)\s*runs?\b/.test(text)) return true;

@@ -1,13 +1,14 @@
 /** Canonical prop shape + usability checks for source health. */
 
 import { lockSportFromStatType } from "./propStatSportLock.js";
-import { hasMlbStatIndicator } from "./underdogSportDetection.js";
+import { detectPropSport } from "./sportDetection.js";
 
 export function normalizePropShape(prop = {}, defaults = {}) {
   const platform = String(prop.platform || prop.feedSource || defaults.platform || defaults.source || "").trim();
   const market = String(prop.market || prop.statType || prop.propType || "").trim();
   const playerName = String(prop.playerName || "").trim();
-  const sport = String(prop.sport || defaults.sport || "").trim();
+  const detected = detectPropSport(prop);
+  const sport = String(detected.sport || prop.sport || defaults.sport || "").trim();
   const line = Number(prop.line);
   const id =
     prop.id ||
@@ -42,10 +43,7 @@ export function isUsableParsedProp(prop = {}) {
   const line = Number(shaped.line);
   let sportOrLeague = shaped.sport || shaped.league;
   if (!sportOrLeague) {
-    const statType = shaped.market || shaped.statType || "";
-    if (lockSportFromStatType(statType) === "MLB" || hasMlbStatIndicator(statType)) {
-      sportOrLeague = "MLB";
-    }
+    sportOrLeague = detectPropSport(shaped).sport || lockSportFromStatType(shaped.market || shaped.statType || "");
   }
   return (
     shaped.playerName.length >= 2 &&

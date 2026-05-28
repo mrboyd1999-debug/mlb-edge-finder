@@ -1,7 +1,8 @@
 import { withPlayerImageUrl } from "./playerImageFields.js";
 import { withNormalizedSource } from "./normalizeSource.js";
 import { fullMarketDisplayLabel } from "./marketNormalization.js";
-import { normalizeSportLabel, sportLabelsMatch } from "./sportMappings.js";
+import { sportLabelsMatch } from "./sportMappings.js";
+import { applyDetectedSport } from "./sportDetection.js";
 import { isDevEnvironment } from "../services/fetchUtil.js";
 import {
   dedupeDisplayProps,
@@ -52,17 +53,19 @@ function resolveDisplaySide(raw = {}, prop = {}, line, projection) {
 }
 
 /** Normalize any parsed prop — never reject for missing optional fields. */
-export function normalizeDisplayProp(prop = {}, { selectedSport = "MLB", source = "PrizePicks", status = "live" } = {}) {
+export function normalizeDisplayProp(prop = {}, { selectedSport = "", source = "PrizePicks", status = "live" } = {}) {
   const raw = prop?.raw && typeof prop.raw === "object" ? prop.raw : prop;
   const line = finiteOr(raw.line ?? prop.line, 0);
   const projection = finiteOr(raw.projection ?? raw.projectedValue ?? prop.projection ?? prop.projectedValue, NaN);
   const hasProjection = Number.isFinite(projection);
   const side = resolveDisplaySide(raw, prop, line, hasProjection ? projection : line);
-  const sportNorm =
-    normalizeSportLabel(raw.sport || prop.sport, raw.league || prop.league) ||
-    String(raw.sport || prop.sport || selectedSport || "MLB").trim() ||
-    "MLB";
-  const league = String(raw.league || prop.league || sportNorm).trim() || sportNorm;
+  const detected = applyDetectedSport({ ...prop, raw }, { selectedSport });
+  const sportNorm = String(detected.sport || "").trim();
+  const priorSport = String(prop.sport || raw.sport || "").trim();
+  const league =
+    sportNorm && priorSport && priorSport !== sportNorm
+      ? sportNorm
+      : String(detected.league || raw.league || prop.league || sportNorm).trim() || sportNorm;
   const statType = String(raw.statType || raw.market || prop.statType || prop.market || prop.propType || "").trim() || "Unknown Prop";
   const player = String(raw.playerName || raw.player || prop.playerName || prop.player || "").trim() || "Unknown Player";
   const src = normalizeSourceLabel(source || raw.source || raw.platform || prop.source || prop.platform);

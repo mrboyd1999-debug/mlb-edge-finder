@@ -52,6 +52,7 @@ import {
 import { normalizeGameStartTime } from "./utils/normalizeGameStartTime.js";
 import { safeParseJSON } from "./utils/safeParseJSON.js";
 import { inferSportFromText } from "./utils/sportMappings.js";
+import { applyDetectedSport, detectPropSport, emitSportDetectionDebug } from "./utils/sportDetection.js";
 import { hasMlbStatIndicator } from "./utils/underdogSportDetection.js";
 import {
   APP_SPORTS,
@@ -1881,6 +1882,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         seasonStatRows: seasonStatsData.length,
         updatedAt: new Date().toISOString(),
       };
+      if (import.meta.env.DEV && preMergeNormalizedSample) {
+        emitSportDetectionDebug(preMergeNormalizedSample);
+      }
       console.info("[MLB Projection Pipeline] fetch-stage merge", {
         rawCount: merged.debug.rawCount,
         matchCount: merged.debug.matchCount,
@@ -6381,38 +6385,11 @@ function isBasketballSport(sport) {
 }
 
 function canonicalizeSportProp(prop) {
-  const sport = canonicalSportFromProp(prop);
-  return sport === prop.sport ? prop : { ...prop, sport };
+  return applyDetectedSport(prop);
 }
 
 function canonicalSportFromProp(prop) {
-  if (prop?.classifiedSport) return prop.classifiedSport;
-  const league = normalize(prop?.league);
-  const sportText = normalize(prop?.sport);
-  const inferred = inferSportFromText(`${prop?.league || ""} ${prop?.sport || ""} ${prop?.statType || ""}`, {
-    description: prop?.opponent || prop?.description,
-    playerName: prop?.playerName,
-    opponent: prop?.opponent,
-    statType: prop?.statType,
-  });
-  if (inferred) return inferred;
-  if (league.includes("wnba") || sportText === "wnba" || sportText.includes("women")) return "WNBA";
-  if (
-    (league === "nba" || league.includes("nationalbasketballassociation") || sportText === "nba") &&
-    !league.includes("wnba") &&
-    !sportText.includes("wnba")
-  ) {
-    return "NBA";
-  }
-  if (league.includes("mlb") || sportText === "mlb" || sportText.includes("baseball")) return "MLB";
-  if (sportText.includes("soccer") || league.includes("soccer") || league.includes("epl") || league.includes("mls")) {
-    return "Soccer";
-  }
-  if (prop?.sport && prop.sport !== "Other") return prop.sport;
-  const platform = String(prop?.platform || prop?.source || "").toLowerCase();
-  if (/prizepicks|underdog/.test(platform)) return "MLB";
-  if (hasMlbStatIndicator(prop?.statType || prop?.market || "")) return "MLB";
-  return APP_SPORTS.Unsupported;
+  return detectPropSport(prop).sport || prop?.classifiedSport || APP_SPORTS.Unsupported;
 }
 
 function ensurePropStartTime(prop) {

@@ -15,6 +15,7 @@ import {
   normalizeMergeStatType,
 } from "../../utils/propMergeKeys.js";
 import { emitVisibleProjectionDebug } from "../../utils/projectionRuntimeDebug.js";
+import { resolvePropSport } from "../../utils/mlbOnlyMode.js";
 
 export const PROJECTION_JOIN_DEBUG = import.meta.env?.DEV === true;
 
@@ -85,7 +86,7 @@ export function buildStatsMapProjectionLookup(statsMap = null) {
       playerName: profile.playerName,
       statType: profile.statType || profile.market,
       playerId: profile.playerId,
-      sport: profile.sport || "MLB",
+      sport: profile.sport || resolvePropSport(propLike) || "",
       line: profile.line,
     };
     const row = resolveProfileProjectionRow(profile, propLike);
@@ -208,7 +209,7 @@ function resolveStatsMapProjection(prop = {}, statsMap = null, statsLookup = nul
   if (fromIndex) return fromIndex;
 
   if (!(statsMap instanceof Map)) return null;
-  const profile = findStatProfile(statsMap, { ...prop, sport: "MLB" });
+  const profile = findStatProfile(statsMap, { ...prop, sport: resolvePropSport(prop) || prop.sport || "" });
   return resolveProfileProjectionRow(profile, prop);
 }
 

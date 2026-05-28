@@ -2,6 +2,7 @@ import { fetchPrizePicksProps } from "./prizepicks.js";
 import { fetchUnderdogProps } from "./underdog.js";
 import { mergeProviderRawProps } from "./providerOrchestration.js";
 import { normalizePropShape } from "../utils/propShape.js";
+import { applyDetectedSport } from "../utils/sportDetection.js";
 import { filterResolvedSportProps } from "../utils/underdogSportDetection.js";
 import { isMlbVerifiedEngineMarket } from "../modules/mlbProjectionService.js";
 import { isVerifiedRecommendableProp } from "../modules/propSideEngine.js";
@@ -18,11 +19,13 @@ export const MIN_SCAN_EDGE = 0.35;
 export const MIN_SCAN_CONFIDENCE = 58;
 
 export function normalizeLiveProp(prop = {}) {
-  return normalizePropShape(prop, {
-    platform: prop.platform || prop.source,
-    source: prop.source || prop.platform,
-    sport: prop.sport || "MLB",
-  });
+  return applyDetectedSport(
+    normalizePropShape(prop, {
+      platform: prop.platform || prop.source,
+      source: prop.source || prop.platform,
+      sport: prop.sport || "",
+    })
+  );
 }
 
 export function normalizeLiveProps(props = []) {

@@ -91,3 +91,20 @@ export function emitProjectionDebug(label = "projection", projections, options =
 
   return { origin, count: arr.length, first: arr[0] };
 }
+
+/** Log sport routing decisions and projection fetch results per league. */
+export function emitSportRoutingDebug(rows = []) {
+  const plan = Array.isArray(rows) ? rows : [rows];
+  if (!plan.length) return;
+
+  console.error("########## SPORT ROUTING DEBUG START ##########");
+  plan.forEach((row) => {
+    console.error("DETECTED SPORT:", row.sport || "—");
+    console.error("DETECTED LEAGUE:", row.league || row.sport || "—");
+    console.error("PROJECTION ENDPOINT:", row.endpoint || "—");
+    console.error("PROP COUNT:", row.propCount ?? "—");
+    console.error("PROJECTION RESPONSE COUNT:", row.projectionCount ?? "—");
+    if (row.samplePlayer) console.error("SAMPLE PLAYER:", row.samplePlayer);
+  });
+  console.error("########## SPORT ROUTING DEBUG END ##########");
+}
