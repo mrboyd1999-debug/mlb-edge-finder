@@ -14,7 +14,7 @@ import {
   normalizeMergeId,
   normalizeMergeStatType,
 } from "../../utils/propMergeKeys.js";
-import { emitProjectionDebug } from "../../utils/projectionRuntimeDebug.js";
+import { emitVisibleProjectionDebug } from "../../utils/projectionRuntimeDebug.js";
 
 export const PROJECTION_JOIN_DEBUG = import.meta.env?.DEV === true;
 
@@ -282,15 +282,12 @@ export function logRuntimeProjectionSample(context = {}) {
     });
   }
 
-  emitProjectionDebug("mergeProjectionsOntoProps.lookup", projections, {
-    origin: "src/services/mlb/projectionMergePipeline.js :: mergeProjectionsOntoProps (computed lookup rows)",
-    meta: {
-      statsMapSize: context.statsMap instanceof Map ? context.statsMap.size : 0,
-      seasonStatRows: (context.seasonStats || []).length,
-      statsLookupCount: statsLookup?.projectionCount ?? 0,
-      seasonLookupCount: seasonLookup?.projectionCount ?? 0,
-    },
-  });
+  if (projections.length > 0) {
+    emitVisibleProjectionDebug(
+      projections,
+      "mergeProjectionsOntoProps @ src/services/mlb/projectionMergePipeline.js"
+    );
+  }
 }
 
 export function mergeProjectionsOntoProps(props = [], context = {}) {

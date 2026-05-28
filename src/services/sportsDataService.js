@@ -14,7 +14,7 @@ import { getSportsDataApiKey } from "../config/apiConfig.js";
 import { cleanApiKey } from "../utils/cleanApiKey.js";
 import { ENRICHMENT_MAX_RETRIES, getSportsDataTimeoutMs } from "../utils/apiTimeout.js";
 import { fetchJsonSafe, getCacheTtlMs } from "./fetchUtil.js";
-import { emitProjectionDebug } from "../utils/projectionRuntimeDebug.js";
+import { emitProjectionDebug, emitVisibleProjectionDebug } from "../utils/projectionRuntimeDebug.js";
 import {
   SOURCE_IDS,
   cachedLinesMessage,
@@ -380,16 +380,12 @@ export async function fetchPlayerSeasonStats(season = currentSeason()) {
     `season-stats-${season}`,
     buildUrl(`/stats/json/PlayerSeasonStats/${season}`)
   );
-  emitProjectionDebug("fetchPlayerSeasonStats", result?.data || [], {
-    origin: "src/services/sportsDataService.js :: fetchPlayerSeasonStats (SDIO PlayerSeasonStats after fetch resolves)",
-    rawResponse: result,
-    meta: {
-      season,
-      cached: Boolean(result?.cached),
-      warningCount: (result?.warnings || []).length,
-      rateLimited: Boolean(result?.rateLimited),
-    },
-  });
+  if (Array.isArray(result?.data) && result.data.length > 0) {
+    emitVisibleProjectionDebug(
+      result.data,
+      "fetchPlayerSeasonStats @ src/services/sportsDataService.js"
+    );
+  }
   return result;
 }
 

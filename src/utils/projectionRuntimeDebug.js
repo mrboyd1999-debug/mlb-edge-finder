@@ -29,14 +29,36 @@ function previewRawResponse(rawResponse, maxLen = 2000) {
   }
 }
 
+/** Exact banner format — call only after a successful fetch with data. */
+export function emitVisibleProjectionDebug(rawProjections, label = "") {
+  const projections = toProjectionArray(rawProjections);
+  if (!projections.length) return { count: 0, first: null };
+
+  if (label) {
+    console.error(`[${label}]`);
+  }
+  console.error("########## PROJECTION DEBUG START ##########");
+  console.error("PROJECTION COUNT:", projections?.length);
+  console.error("FIRST PROJECTION:", projections?.[0]);
+  console.error("FIRST PROJECTION JSON:", JSON.stringify(projections?.[0], null, 2));
+  console.error("########## PROJECTION DEBUG END ##########");
+
+  return { count: projections.length, first: projections[0] };
+}
+
 /**
  * @param {string} label - debug channel label
  * @param {unknown} projections - array, Map, or single projection object
- * @param {{ origin?: string, rawResponse?: unknown, meta?: Record<string, unknown> }} [options]
+ * @param {{ origin?: string, rawResponse?: unknown, meta?: Record<string, unknown>, successOnly?: boolean }} [options]
  */
 export function emitProjectionDebug(label = "projection", projections, options = {}) {
-  const { origin = "unknown", rawResponse, meta = {} } = options;
+  const { origin = "unknown", rawResponse, meta = {}, successOnly = false } = options;
   const arr = toProjectionArray(projections);
+
+  if (successOnly && arr.length > 0) {
+    emitVisibleProjectionDebug(arr, `${label} @ ${origin}`);
+    return { origin, count: arr.length, first: arr[0] };
+  }
 
   console.error("========== PROJECTION DEBUG ==========");
   console.error(`[${label}] ORIGIN FILE/FUNCTION:`, origin);
@@ -63,11 +85,9 @@ export function emitProjectionDebug(label = "projection", projections, options =
     return { origin, count: 0, first: null };
   }
 
-  const first = arr[0];
-  console.error(`[${label}] PROJECTION SAMPLE:`, first);
-  console.error(`[${label}] PROJECTION FULL JSON:`, safeStringify(first));
-  console.error(`[${label}] PROJECTION KEYS:`, Object.keys(first || {}));
+  emitVisibleProjectionDebug(arr, `${label} @ ${origin}`);
+  console.error(`[${label}] PROJECTION KEYS:`, Object.keys(arr[0] || {}));
   console.error("========== END PROJECTION DEBUG ==========");
 
-  return { origin, count: arr.length, first };
+  return { origin, count: arr.length, first: arr[0] };
 }

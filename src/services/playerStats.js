@@ -18,7 +18,7 @@ import {
 import { buildMlbStatsApiUrl } from "./mlbStatsApiUrl.js";
 import { statProfileKey, findStatProfile, normalizePlayerName } from "../utils/playerNames.js";
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
-import { emitProjectionDebug } from "../utils/projectionRuntimeDebug.js";
+import { emitVisibleProjectionDebug } from "../utils/projectionRuntimeDebug.js";
 
 export { statProfileKey, findStatProfile };
 
@@ -50,9 +50,6 @@ export function pickUniquePropsForStatsFetch(props = [], max = MLB_STATS_FETCH_C
 
 export async function fetchPlayerStats({ props = [] } = {}) {
   if (!props.length) {
-    emitProjectionDebug("fetchPlayerStats", [], {
-      origin: "src/services/playerStats.js :: fetchPlayerStats (early exit — no input props)",
-    });
     return { source: "Player stats", stats: new Map(), warnings: [] };
   }
   const stats = new Map();
@@ -97,14 +94,9 @@ export async function fetchPlayerStats({ props = [] } = {}) {
   });
 
   const projectionProfiles = [...stats.values()];
-  emitProjectionDebug("fetchPlayerStats", projectionProfiles, {
-    origin: "src/services/playerStats.js :: fetchPlayerStats (statsMap profiles after MLB Stats API fetch)",
-    meta: {
-      inputPropCount: props.length,
-      statsMapSize: stats.size,
-      warningCount: unique(warnings).filter(Boolean).length,
-    },
-  });
+  if (projectionProfiles.length > 0) {
+    emitVisibleProjectionDebug(projectionProfiles, "fetchPlayerStats @ src/services/playerStats.js");
+  }
 
   return {
     source: "Player stats",
