@@ -160,10 +160,11 @@ export function emptySeasonStatsProviderResult({ timedOut = false, message = "" 
 export function emptyStatsProviderResult({ timedOut = false, message = "" } = {}) {
   return {
     source: "Player stats",
-    stats: new Map(),
+    stats: null,
     warnings: [message || (timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "Stats fetch failed")],
     error: true,
     timedOut,
+    failed: true,
   };
 }
 

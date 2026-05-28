@@ -64,8 +64,16 @@ export async function fetchPlayerStats({ props = [] } = {}) {
   });
 
   if (!props.length) {
-    traceProjectionExecutionPath("fetchPlayerStats:skip", { reason: "zero props passed to fetchPlayerStats" });
-    return { source: "Player stats", stats: new Map(), warnings: [] };
+    const message = "fetchPlayerStats called with zero props — cannot build statsMap";
+    traceProjectionExecutionPath("fetchPlayerStats:skip", { reason: message });
+    logProjectionFetchResult("fetchPlayerStats", {
+      endpoint: "MLB StatsAPI + optional SportsDataIO",
+      status: "empty",
+      data: [],
+      count: 0,
+      error: message,
+    });
+    throw new Error(message);
   }
   const stats = new Map();
   const warnings = [];
@@ -183,10 +191,16 @@ async function fetchMlbStats(props) {
   });
 
   if (!supportedProps.length) {
-    traceProjectionExecutionPath("fetchMlbStats:skip", {
-      reason: "no supported MLB stat types after isSupportedMlbStat filter",
+    const message =
+      props.length > 0
+        ? `No supported MLB stat types among ${props.length} props after isSupportedMlbStat filter`
+        : "no supported MLB stat types";
+    console.error("[MLB StatsAPI] fetchMlbStats failed", {
+      incoming: props.length,
+      sampleStatTypes: props.slice(0, 8).map((p) => p.statType),
     });
-    return { stats: new Map(), warnings: ["no supported MLB stat types"] };
+    traceProjectionExecutionPath("fetchMlbStats:skip", { reason: message });
+    throw new Error(message);
   }
 
   const fetched = await fetchMlbDataForProps(supportedProps, {

@@ -3,6 +3,7 @@
  */
 
 import { getSportsDataApiKey } from "../config/apiConfig.js";
+import { PROJECTION_DATA_UNAVAILABLE_MESSAGE } from "./projectionAvailability.js";
 
 const state = {
   attempts: [],
@@ -81,7 +82,7 @@ function resolveUnavailableReason({
   if (mergedWithProjection > 0 && !statsEnrichmentFailed) return "";
 
   if (statsEnrichmentFailed) {
-    return statsEnrichmentError || "MLB projection stats failed to load";
+    return statsEnrichmentError || PROJECTION_DATA_UNAVAILABLE_MESSAGE;
   }
 
   const seasonAttempt = [...attempts].reverse().find((row) => /season/i.test(row.provider));

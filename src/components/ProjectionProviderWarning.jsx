@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { PROJECTION_DATA_UNAVAILABLE_MESSAGE } from "../utils/projectionAvailability.js";
 
 function AttemptRow({ attempt }) {
   if (!attempt) return null;
@@ -21,7 +22,7 @@ function ProjectionProviderWarning({ status = null }) {
   if (!status?.unavailable && !statsFailed) return null;
 
   const title = statsFailed
-    ? "MLB projection stats failed to load"
+    ? PROJECTION_DATA_UNAVAILABLE_MESSAGE
     : "Projection provider unavailable";
 
   return (
@@ -37,7 +38,9 @@ function ProjectionProviderWarning({ status = null }) {
       }}
     >
       <div style={{ fontWeight: 700, color: "#fca5a5", marginBottom: 4 }}>{title}</div>
-      <div style={{ fontSize: 13, lineHeight: 1.45 }}>{status.reason || "No real player projections were returned."}</div>
+      <div style={{ fontSize: 13, lineHeight: 1.45 }}>
+        {status.reason || PROJECTION_DATA_UNAVAILABLE_MESSAGE}
+      </div>
       <div style={{ fontSize: 12, marginTop: 8, color: "#fda4af" }}>
         Stats profiles: {status.statsMapSize ?? 0} · with projection: {status.withProfileProjection ?? 0} · season rows:{" "}
         {status.seasonStatRows ?? 0} · merged: {status.mergedWithProjection ?? 0}
