@@ -45,6 +45,7 @@ import {
   recordMlbStatsFetch,
 } from "./mlbPipelineStatus.js";
 import { buildMlbStatsApiUrl, logMlbStatsApiCall, mlbStatsApiPathLabel } from "./mlbStatsApiUrl.js";
+import { traceProjectionExecutionPath } from "../utils/projectionSourceTrace.js";
 
 const profileInflight = new Map();
 const opponentInflight = new Map();
@@ -922,6 +923,11 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
 }
 
 export async function fetchMlbDataForProps(props = [], { buildProfile = null } = {}) {
+  traceProjectionExecutionPath("fetchMlbDataForProps:enter", {
+    propCount: props.length,
+    playerCap: MLB_DATA_FETCH_LIMIT,
+  });
+
   const stats = new Map();
   const warnings = [];
   const players = [...new Set((props || []).map((prop) => String(prop.playerName || "").trim()).filter(Boolean))].slice(
@@ -962,6 +968,11 @@ export async function fetchMlbDataForProps(props = [], { buildProfile = null } =
   );
 
   logMlbData("batch.done", { profiles: stats.size, warnings: warnings.length });
+  traceProjectionExecutionPath("fetchMlbDataForProps:complete", {
+    profiles: stats.size,
+    warnings: warnings.length,
+    playersRequested: players.length,
+  });
   return { stats, warnings: [...new Set(warnings.filter(Boolean))] };
 }
 

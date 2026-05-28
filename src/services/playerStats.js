@@ -20,6 +20,12 @@ import { statProfileKey, findStatProfile, normalizePlayerName } from "../utils/p
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
 import { emitVisibleProjectionDebug, emitSportRoutingDebug } from "../utils/projectionRuntimeDebug.js";
 import { recordProjectionFetchAttempt } from "../utils/projectionFetchDebug.js";
+import {
+  assertProjectionDatasetNotEmpty,
+  logProjectionFetchResult,
+  logProjectionFetchStart,
+  traceProjectionExecutionPath,
+} from "../utils/projectionSourceTrace.js";
 import { resolvePropSport } from "../utils/mlbOnlyMode.js";
 
 export { statProfileKey, findStatProfile };
@@ -51,12 +57,27 @@ export function pickUniquePropsForStatsFetch(props = [], max = MLB_STATS_FETCH_C
 }
 
 export async function fetchPlayerStats({ props = [] } = {}) {
+  traceProjectionExecutionPath("fetchPlayerStats:enter", {
+    propCount: props.length,
+    mlbOnlyMode: MLB_ONLY_MODE,
+    nonMlbStatsEnabled: shouldRunNonMlbStatFetch("NBA"),
+  });
+
   if (!props.length) {
+    traceProjectionExecutionPath("fetchPlayerStats:skip", { reason: "zero props passed to fetchPlayerStats" });
     return { source: "Player stats", stats: new Map(), warnings: [] };
   }
   const stats = new Map();
   const warnings = [];
   const grouped = groupPropsBySport(props);
+  traceProjectionExecutionPath("fetchPlayerStats:grouped", {
+    MLB: grouped.MLB?.length ?? 0,
+    NBA: grouped.NBA?.length ?? 0,
+    WNBA: grouped.WNBA?.length ?? 0,
+    Soccer: grouped.Soccer?.length ?? 0,
+    Tennis: grouped.Tennis?.length ?? 0,
+    Other: grouped.Other?.length ?? 0,
+  });
   const routingPlan = Object.entries(grouped).map(([sport, sportProps]) => ({
     sport,
     league: sport,
@@ -118,8 +139,26 @@ export async function fetchPlayerStats({ props = [] } = {}) {
   });
 
   const projectionProfiles = [...stats.values()];
+  traceProjectionExecutionPath("fetchPlayerStats:complete", {
+    statsMapSize: stats.size,
+    profilesWithProjection: projectionProfiles.filter((row) => Number(row?.projection) > 0).length,
+    warnings: warnings.length,
+  });
   if (projectionProfiles.length > 0) {
     emitVisibleProjectionDebug(projectionProfiles, "fetchPlayerStats @ src/services/playerStats.js");
+  } else {
+    logProjectionFetchResult("fetchPlayerStats", {
+      endpoint: "MLB StatsAPI + optional SportsDataIO",
+      status: "empty",
+      data: [],
+      count: 0,
+      error: "fetchPlayerStats finished with zero stat profiles",
+    });
+    assertProjectionDatasetNotEmpty(stats, {
+      label: "fetchPlayerStats",
+      endpoint: "MLB StatsAPI + optional SportsDataIO",
+      status: "empty",
+    });
   }
 
   return {
@@ -130,8 +169,25 @@ export async function fetchPlayerStats({ props = [] } = {}) {
 }
 
 async function fetchMlbStats(props) {
+  logProjectionFetchStart("MLB StatsAPI game logs", {
+    endpoint: "/api/mlb (player game logs + profiles)",
+    propCount: props.length,
+  });
+
   const supportedProps = props.filter((prop) => isSupportedMlbStat(prop.statType));
-  if (!supportedProps.length) return { stats: new Map(), warnings: [] };
+  traceProjectionExecutionPath("fetchMlbStats:filter", {
+    incoming: props.length,
+    supported: supportedProps.length,
+    droppedUnsupportedStat: props.length - supportedProps.length,
+    sampleStatTypes: props.slice(0, 5).map((p) => p.statType),
+  });
+
+  if (!supportedProps.length) {
+    traceProjectionExecutionPath("fetchMlbStats:skip", {
+      reason: "no supported MLB stat types after isSupportedMlbStat filter",
+    });
+    return { stats: new Map(), warnings: ["no supported MLB stat types"] };
+  }
 
   const fetched = await fetchMlbDataForProps(supportedProps, {
     buildProfile: (bundle, statType, line) => profileForMlbProp(bundle, statType, line),
@@ -178,6 +234,22 @@ async function fetchMlbStats(props) {
     warnings: fetched.warnings || [],
     rawSample: [...stats.values()].slice(0, 2),
   });
+
+  logProjectionFetchResult("MLB StatsAPI game logs", {
+    endpoint: "/api/mlb (player game logs + profiles)",
+    status: stats.size ? 200 : 204,
+    data: [...stats.values()].slice(0, 2),
+    count: stats.size,
+    error: stats.size ? null : "No MLB stat profiles built from game logs",
+  });
+
+  if (!stats.size) {
+    assertProjectionDatasetNotEmpty(stats, {
+      label: "MLB StatsAPI game logs",
+      endpoint: "/api/mlb (player game logs + profiles)",
+      status: 204,
+    });
+  }
 
   return {
     stats,

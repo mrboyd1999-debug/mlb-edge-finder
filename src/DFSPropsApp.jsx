@@ -57,6 +57,7 @@ import {
   buildProjectionProviderSummary,
   resetProjectionFetchDebug,
 } from "./utils/projectionFetchDebug.js";
+import { traceProjectionExecutionPath } from "./utils/projectionSourceTrace.js";
 import { hasMlbStatIndicator } from "./utils/underdogSportDetection.js";
 import {
   APP_SPORTS,
@@ -1814,6 +1815,12 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       allDisplayProps.length ? allDisplayProps : workingNormalProps
     );
     debugInfo.statsFetchPropCount = statsFetchProps.length;
+    traceProjectionExecutionPath("fetchDFSProps:stats-fetch-start", {
+      statsFetchPropCount: statsFetchProps.length,
+      statsCapMs,
+      enrichmentTimeoutMs,
+      mlbOnlyMode: MLB_ONLY_MODE,
+    });
     const statsResult = await withFetchTimeout(
       () => fetchPlayerStats({ props: statsFetchProps }),
       statsCapMs,
@@ -1828,6 +1835,23 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     backgroundWarnings.push(...(statsResult.warnings || []));
     debugInfo.statsLoadedCount = background.stats.size;
     debugInfo.statsMap = background.stats;
+    traceProjectionExecutionPath("fetchDFSProps:stats-fetch-done", {
+      statsMapSize: background.stats.size,
+      statsTimedOut,
+      statsMapIsMap: background.stats instanceof Map,
+    });
+    if (statsTimedOut && background.stats.size === 0) {
+      console.error("PROJECTION FETCH FAILED — stats fetch timed out before profiles loaded", {
+        statsCapMs,
+        enrichmentTimeoutMs,
+        statsFetchPropCount: statsFetchProps.length,
+      });
+    }
+    if (!(background.stats instanceof Map)) {
+      console.error("PROJECTION FETCH FAILED — statsMap is not a Map after fetch", {
+        typeofStats: typeof background.stats,
+      });
+    }
     if (!statsTimedOut && background.stats.size > 0) {
       emitVisibleProjectionDebug(
         background.stats,
@@ -1846,6 +1870,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
     let seasonStatsData = [];
     try {
+      traceProjectionExecutionPath("fetchDFSProps:season-stats-start", {
+        endpoint: "/api/sportsdataio/stats/json/PlayerSeasonStats/{season}",
+      });
       const seasonStatsResult = await fetchPlayerSeasonStats();
       seasonStatsData = seasonStatsResult?.data || [];
       logSportsDataSample(seasonStatsData);
@@ -1859,6 +1886,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         );
       }
     } catch (seasonError) {
+      console.error("PROJECTION FETCH FAILED — season stats stage error", seasonError);
       console.warn("[MLB Projection Pipeline] SportsDataIO season stats fetch failed", seasonError?.message);
       background.sportsDataSeasonStats = [];
       debugInfo.sportsDataSeasonStats = [];
