@@ -159,11 +159,17 @@ function seededVariance(seed = "", min = 0.5, max = 2) {
   return min + t * (max - min);
 }
 
+/** Dev-only: do not fabricate line-based placeholder projections. */
+export const DISABLE_SYNTHETIC_PROJECTIONS = import.meta.env?.DEV === true;
+
 export function ensureDisplayProjection(prop = {}) {
   const line = finiteOr(prop.line, 0);
   const side = String(prop.side || prop.bestPick || "over").toLowerCase();
   const existing = finiteOr(prop.projection ?? prop.projectedValue, NaN);
-  if (Number.isFinite(existing) && Math.abs(existing - line) >= 0.1) return existing;
+  if (Number.isFinite(existing) && existing > 0 && Math.abs(existing - line) >= 0.1) return existing;
+  if (DISABLE_SYNTHETIC_PROJECTIONS) {
+    return Number.isFinite(existing) && existing > 0 ? existing : null;
+  }
   const seed = prop.id || buildPropDedupeKey(prop);
   const variance = seededVariance(seed, 0.15, 1.1);
   if (side.includes("under")) return round1(line - variance);
@@ -378,6 +384,24 @@ export function scoreDisplayProp(prop = {}) {
   const projection = ensureDisplayProjection(prop);
   const line = finiteOr(prop.line, 0);
   const side = String(prop.side || prop.bestPick || "over").toLowerCase();
+  if (DISABLE_SYNTHETIC_PROJECTIONS && (!Number.isFinite(projection) || projection <= 0)) {
+    const edge = 0;
+    const confidence = BASE_CONFIDENCE;
+    return attachRankScore(
+      withPlayerImageUrl({
+        ...prop,
+        projection: null,
+        projectedValue: null,
+        projectionSource: "missing",
+        edge,
+        confidence,
+        confidenceScore: confidence,
+        displayResearchOnly: true,
+        isDisplayPlayable: false,
+        bettingLabel: "Projection unavailable",
+      })
+    );
+  }
   const edge = computeDisplayEdgeValue({ ...prop, projection, side });
   const { confidence, boostLabels, penaltyLabels } = computeWeightedConfidence(prop, projection, line, edge);
   const analyticsReason = buildAnalyticsReason({ ...prop, projection, edge, confidence });

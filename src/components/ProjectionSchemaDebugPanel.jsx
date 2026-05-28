@@ -46,17 +46,20 @@ function DebugSection({ title, value }) {
   );
 }
 
-function ProjectionSchemaDebugPanel({ snapshot = null }) {
+function ProjectionSchemaDebugPanel({ snapshot = null, providerStatus = null }) {
   const data = useMemo(() => {
     const projections = Array.isArray(snapshot?.projections) ? snapshot.projections : [];
+    const profilesWithProjection = projections.filter((row) => Number(row?.projection) > 0).length;
     return {
       projectionCount: projections.length,
+      profilesWithProjection,
       firstProjection: projections[0] ?? null,
       firstNormalizedProp: snapshot?.normalizedProp ?? null,
       firstMergedProp: snapshot?.mergedProp ?? null,
       updatedAt: snapshot?.updatedAt ?? null,
+      providerStatus,
     };
-  }, [snapshot]);
+  }, [snapshot, providerStatus]);
 
   if (!import.meta.env.DEV) return null;
 
@@ -95,10 +98,19 @@ function ProjectionSchemaDebugPanel({ snapshot = null }) {
         </span>
       </div>
 
-      <div style={{ fontSize: 12, marginBottom: 10, color: "#fcd34d" }}>
+      <div style={{ fontSize: 12, marginBottom: 10, color: data.providerStatus?.unavailable ? "#fca5a5" : "#fcd34d" }}>
         projection count: {data.projectionCount ?? 0}
+        {Number.isFinite(data.profilesWithProjection) ? ` · with value: ${data.profilesWithProjection}` : ""}
       </div>
 
+      {data.providerStatus?.unavailable ? (
+        <div style={{ fontSize: 11, color: "#fca5a5", marginBottom: 10, lineHeight: 1.45 }}>
+          Provider unavailable: {data.providerStatus.reason || "unknown"}
+        </div>
+      ) : null}
+
+      <DebugSection title="projectionProvider" value={data.providerStatus} />
+      <DebugSection title="fetchAttempts[last]" value={(data.providerStatus?.attempts || []).slice(-2)} />
       <DebugSection title="projections[0]" value={data.firstProjection} />
       <DebugSection title="normalizedProps[0]" value={data.firstNormalizedProp} />
       <DebugSection title="mergedProps[0]" value={data.firstMergedProp} />

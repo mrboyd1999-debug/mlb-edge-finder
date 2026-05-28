@@ -15,6 +15,7 @@ import { cleanApiKey } from "../utils/cleanApiKey.js";
 import { ENRICHMENT_MAX_RETRIES, getSportsDataTimeoutMs } from "../utils/apiTimeout.js";
 import { fetchJsonSafe, getCacheTtlMs } from "./fetchUtil.js";
 import { emitProjectionDebug, emitVisibleProjectionDebug } from "../utils/projectionRuntimeDebug.js";
+import { recordProjectionFetchAttempt } from "../utils/projectionFetchDebug.js";
 import {
   SOURCE_IDS,
   cachedLinesMessage,
@@ -111,6 +112,16 @@ async function fetchSportsDataEndpoint(cacheKey, url) {
   if (!apiKey) {
     const cached = readCache(cacheKey);
     if (cached) return cachedResult(cached, { reason: "SportsDataIO key not configured — serving cache." });
+    recordProjectionFetchAttempt({
+      provider: `SportsDataIO-${cacheKey}`,
+      endpoint: url.toString(),
+      sport: "MLB",
+      ok: false,
+      statusCode: 401,
+      responseCount: 0,
+      error: "SportsDataIO key not configured",
+      rawSample: { ok: false, status: "not_configured" },
+    });
     emitProjectionDebug(`fetchSportsDataEndpoint:${cacheKey}`, [], {
       origin: `src/services/sportsDataService.js :: fetchSportsDataEndpoint (no API key, cacheKey=${cacheKey})`,
       rawResponse: { ok: false, status: "not_configured", message: "SportsDataIO key not configured" },
@@ -154,6 +165,21 @@ async function fetchSportsDataEndpoint(cacheKey, url) {
             markSourceCached(SOURCE_IDS.SPORTSDATA, cached.savedAt);
             return cachedResult(cached, { reason: result.error || SPORTSDATA_UNAVAILABLE_MESSAGE });
           }
+          recordProjectionFetchAttempt({
+            provider: `SportsDataIO-${cacheKey}`,
+            endpoint: url.toString(),
+            sport: "MLB",
+            ok: false,
+            statusCode: result.status ?? 502,
+            responseCount: 0,
+            error: result.error || SPORTSDATA_UNAVAILABLE_MESSAGE,
+            rawSample: {
+              ok: result.ok,
+              error: result.error,
+              status: result.response?.status,
+              preview: result.preview,
+            },
+          });
           emitProjectionDebug(`fetchSportsDataEndpoint:${cacheKey}`, [], {
             origin: `src/services/sportsDataService.js :: fetchSportsDataEndpoint (request failed, cacheKey=${cacheKey})`,
             rawResponse: {
@@ -169,6 +195,17 @@ async function fetchSportsDataEndpoint(cacheKey, url) {
           return emptyResult({ reason: result.error || SPORTSDATA_UNAVAILABLE_MESSAGE });
         }
         const data = Array.isArray(result.data) ? result.data : result.data ? [result.data] : [];
+        recordProjectionFetchAttempt({
+          provider: `SportsDataIO-${cacheKey}`,
+          endpoint: url.toString(),
+          sport: "MLB",
+          ok: result.ok && data.length > 0,
+          statusCode: result.status ?? (result.ok ? 200 : 502),
+          responseCount: data.length,
+          error: result.ok ? (data.length ? "" : "Empty projection response array") : result.error || "request failed",
+          warnings: result.ok ? [] : [result.error].filter(Boolean),
+          rawSample: data.slice(0, 2),
+        });
         if (!data.length) {
           emitProjectionDebug(`fetchSportsDataEndpoint:${cacheKey}`, data, {
             origin: `src/services/sportsDataService.js :: fetchSportsDataEndpoint (empty parsed data, cacheKey=${cacheKey})`,

@@ -19,6 +19,7 @@ import { buildMlbStatsApiUrl } from "./mlbStatsApiUrl.js";
 import { statProfileKey, findStatProfile, normalizePlayerName } from "../utils/playerNames.js";
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
 import { emitVisibleProjectionDebug, emitSportRoutingDebug } from "../utils/projectionRuntimeDebug.js";
+import { recordProjectionFetchAttempt } from "../utils/projectionFetchDebug.js";
 import { resolvePropSport } from "../utils/mlbOnlyMode.js";
 
 export { statProfileKey, findStatProfile };
@@ -167,10 +168,30 @@ async function fetchMlbStats(props) {
     }
   });
 
+  recordProjectionFetchAttempt({
+    provider: "MLB StatsAPI",
+    endpoint: "/api/mlb (player game logs + profiles)",
+    sport: "MLB",
+    ok: countProfilesWithRealProjection(stats) > 0,
+    responseCount: stats.size,
+    error: stats.size ? "" : "No MLB stat profiles built from game logs",
+    warnings: fetched.warnings || [],
+    rawSample: [...stats.values()].slice(0, 2),
+  });
+
   return {
     stats,
     warnings: unique([...(fetched.warnings || []), ...(sportsDataEnrichment.warnings || [])]).filter(Boolean),
   };
+}
+
+function countProfilesWithRealProjection(stats = new Map()) {
+  let count = 0;
+  stats.forEach((profile) => {
+    if (!profile || profile.sparse || profile.fallback) return;
+    if (Number(profile.projection) > 0) count += 1;
+  });
+  return count;
 }
 
 export function buildMlbStatProfileFromLogs(bundle, statType, line) {

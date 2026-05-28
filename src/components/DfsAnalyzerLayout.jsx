@@ -10,6 +10,7 @@ import PlatformFeedTab from "./PlatformFeedTab.jsx";
 import SavedPicksTab from "./SavedPicksTab.jsx";
 import SettingsPanel from "./SettingsPanel.jsx";
 import DeveloperDebugPanel from "./DeveloperDebugPanel.jsx";
+import ProjectionProviderWarning from "./ProjectionProviderWarning.jsx";
 import { readSettingsMeta } from "../services/runtimeSettings.js";
 import { isDebugModeEnabled } from "../utils/devMode.js";
 
@@ -76,6 +77,8 @@ function DfsAnalyzerLayout({
         mlbPipelineStatus={mlbPipelineStatus}
         connectionReport={connectionReport}
       />
+
+      <ProjectionProviderWarning status={debugInfo?.projectionProvider} />
 
       <PropPipelineCounters counts={pipelineRenderCounts} />
 

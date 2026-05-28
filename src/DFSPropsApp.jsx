@@ -53,6 +53,10 @@ import { normalizeGameStartTime } from "./utils/normalizeGameStartTime.js";
 import { safeParseJSON } from "./utils/safeParseJSON.js";
 import { inferSportFromText } from "./utils/sportMappings.js";
 import { applyDetectedSport, detectPropSport, emitSportDetectionDebug } from "./utils/sportDetection.js";
+import {
+  buildProjectionProviderSummary,
+  resetProjectionFetchDebug,
+} from "./utils/projectionFetchDebug.js";
 import { hasMlbStatIndicator } from "./utils/underdogSportDetection.js";
 import {
   APP_SPORTS,
@@ -1804,6 +1808,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   let statsTimedOut = false;
 
   if (MLB_ONLY_MODE) {
+    resetProjectionFetchDebug();
     const statsCapMs = Math.min(enrichmentTimeoutMs, 25000);
     const statsFetchProps = pickUniquePropsForStatsFetch(
       allDisplayProps.length ? allDisplayProps : workingNormalProps
@@ -1885,12 +1890,27 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       if (import.meta.env.DEV && preMergeNormalizedSample) {
         emitSportDetectionDebug(preMergeNormalizedSample);
       }
+      debugInfo.projectionProvider = buildProjectionProviderSummary({
+        statsMap: background.stats,
+        seasonStats: seasonStatsData,
+        mergeDebug: merged.debug,
+        mergedProps: merged.props,
+        statsTimedOut,
+      });
       console.info("[MLB Projection Pipeline] fetch-stage merge", {
         rawCount: merged.debug.rawCount,
         matchCount: merged.debug.matchCount,
         withProjections: merged.props.filter((p) => Number(p.projection ?? p.projectedValue) > 0).length,
         missingTeam: merged.props.filter((p) => !String(p.team || "").trim()).length,
         matchedSample: merged.debug.matchedSample,
+      });
+    } else {
+      debugInfo.projectionProvider = buildProjectionProviderSummary({
+        statsMap: background.stats,
+        seasonStats: seasonStatsData,
+        mergeDebug: null,
+        mergedProps: [],
+        statsTimedOut,
       });
     }
 
@@ -3867,7 +3887,10 @@ export default function DFSPropsApp() {
       prizePicksFeedProps={prizePicksFeedProps}
     />
 
-      <ProjectionSchemaDebugPanel snapshot={projectionSchemaSnapshot} />
+      <ProjectionSchemaDebugPanel
+        snapshot={projectionSchemaSnapshot}
+        providerStatus={debugInfo?.projectionProvider}
+      />
 
       {selectedEvaluation && (
         <PickDetailModal
