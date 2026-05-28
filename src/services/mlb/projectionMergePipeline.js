@@ -14,10 +14,7 @@ import {
   normalizeMergeId,
   normalizeMergeStatType,
 } from "../../utils/propMergeKeys.js";
-import { emitVisibleProjectionDebug } from "../../utils/projectionRuntimeDebug.js";
 import { resolvePropSport } from "../../utils/mlbOnlyMode.js";
-
-export const PROJECTION_JOIN_DEBUG = import.meta.env?.DEV === true;
 
 function attachProjectionFields(prop = {}, projectionRow = {}) {
   const projection = Number(projectionRow.projection ?? projectionRow.projectedValue);
@@ -213,93 +210,15 @@ function resolveStatsMapProjection(prop = {}, statsMap = null, statsLookup = nul
   return resolveProfileProjectionRow(profile, prop);
 }
 
-export function logProjectionSchemaSamples(props = [], context = {}) {
-  const rawSample = (props || []).slice(0, 5).map((prop) => ({
-    keys: Object.keys(prop || {}).sort(),
-    playerName: prop.playerName,
-    playerId: extractPlayerId(prop),
-    statType: prop.statType,
-    line: prop.line,
-    lineId: prop.id,
-    sourceId: prop.sourceId,
-    lookupKeys: buildPropLookupKeys(prop).slice(0, 6),
-  }));
+export function logProjectionSchemaSamples(_props = [], _context = {}) {}
 
-  const seasonStats = context.seasonStats || [];
-  const seasonSample = seasonStats.slice(0, 5).map((row) => ({
-    keys: Object.keys(row || {}).sort(),
-    Name: row?.Name,
-    PlayerID: row?.PlayerID,
-    Team: row?.Team,
-  }));
-
-  const statsProfiles =
-    context.statsMap instanceof Map ? [...context.statsMap.values()].slice(0, 5) : [];
-  const projectionSample = statsProfiles.map((profile) => ({
-    keys: Object.keys(profile || {}).sort(),
-    playerName: profile?.playerName,
-    statType: profile?.statType,
-    projection: profile?.projection,
-    last5Average: profile?.last5Average,
-    seasonAverage: profile?.seasonAverage,
-    sparse: profile?.sparse,
-    lookupKeys: buildPropLookupKeys({
-      playerName: profile?.playerName,
-      statType: profile?.statType,
-      playerId: profile?.playerId,
-      sport: profile?.sport,
-    }).slice(0, 4),
-  }));
-
-  console.info("[MLB Projection Schema] first 5 raw props", rawSample);
-  console.info("[MLB Projection Schema] first 5 season stat rows", seasonSample);
-  console.info("[MLB Projection Schema] first 5 statsMap profiles", projectionSample);
-}
-
-/** Debug-only: print first runtime projection object after fetch/lookup build. */
-export function logRuntimeProjectionSample(context = {}) {
-  const seasonLookup = buildSeasonProjectionLookup(context.seasonStats || []);
-  const statsLookup = buildStatsMapProjectionLookup(context.statsMap);
-  const projections = [];
-
-  if (statsLookup?.byKey instanceof Map) {
-    statsLookup.byKey.forEach((row, lookupKey) => {
-      projections.push({ __source: "statsMap-lookup", __lookupKey: lookupKey, ...row });
-    });
-  }
-  if (seasonLookup?.byKey instanceof Map) {
-    seasonLookup.byKey.forEach((row, lookupKey) => {
-      projections.push({ __source: "season-lookup", __lookupKey: lookupKey, ...row });
-    });
-  }
-  if (!projections.length && context.statsMap instanceof Map) {
-    context.statsMap.forEach((profile) => {
-      if (profile) projections.push({ __source: "statsMap-profile", ...profile });
-    });
-  }
-  if (!projections.length && Array.isArray(context.seasonStats)) {
-    context.seasonStats.forEach((row) => {
-      if (row) projections.push({ __source: "season-stat-row", ...row });
-    });
-  }
-
-  if (projections.length > 0) {
-    emitVisibleProjectionDebug(
-      projections,
-      "mergeProjectionsOntoProps @ src/services/mlb/projectionMergePipeline.js"
-    );
-  }
-}
+export function logRuntimeProjectionSample(_context = {}) {}
 
 export function mergeProjectionsOntoProps(props = [], context = {}) {
   const seasonStats = context.seasonStats || [];
   const lookup = buildSeasonProjectionLookup(seasonStats);
   lookup.seasonStats = seasonStats;
   const statsLookup = buildStatsMapProjectionLookup(context.statsMap);
-
-  logRuntimeProjectionSample(context);
-
-  logProjectionSchemaSamples(props, context);
 
   const unmatchedKeys = [];
   const matchedSamples = [];
@@ -355,14 +274,6 @@ export function mergeProjectionsOntoProps(props = [], context = {}) {
     matchedSample: matchedSamples.slice(0, 5),
   };
 
-  console.info("[MLB Projection Merge]", debug);
-  if (debug.unmatchedSample.length) {
-    console.info("[MLB Projection Merge] first unmatched keys", debug.unmatchedSample);
-  }
-  if (debug.matchedSample.length) {
-    console.info("[MLB Projection Merge] matched samples", debug.matchedSample);
-  }
-
   return { props: merged, debug, lookup, statsLookup };
 }
 
@@ -405,14 +316,6 @@ export function joinPropsWithProjectionRows(props = [], projectionRows = []) {
       });
     }
     return next;
-  });
-
-  console.info("[MLB Projection Join]", {
-    rawCount: props.length,
-    projectionRows: projectionRows.length,
-    matchCount,
-    unmatchedSample: unmatched.slice(0, 5),
-    matchedSample: matchedSamples,
   });
 
   return { props: merged, matchCount, unmatchedSample: unmatched.slice(0, 5), matchedSample: matchedSamples };

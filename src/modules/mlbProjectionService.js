@@ -1,4 +1,4 @@
-import { canonicalMarketKey } from "../utils/marketNormalization.js";
+import { computeStandardEdgePercent, computeStandardProbabilityScore } from "../utils/standardPropMetrics.js";
 import {
   isMlbHitterPhase2Market,
   isMlbPitcherMarket,
@@ -216,7 +216,8 @@ export function buildMlbPropProjection(prop = {}, profile = {}, context = {}) {
     rawEdge,
     edge,
     volatilityAdjustedEdge,
-    edgePercent: Number.isFinite(line) && line > 0 ? round((Math.abs(edge) / line) * 100, 1) : null,
+    edgePercent: computeStandardEdgePercent(rawEdge, line),
+    probabilityScore: computeStandardProbabilityScore(projection, line),
     recommendedSide: passPlay ? null : recommendedSide,
     modelSide,
     modelPickLabel,

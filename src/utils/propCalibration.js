@@ -1,5 +1,7 @@
 /** Confidence floors, consensus, risk, playability, flags, and premium copy. */
 
+import { computeStandardEdgePercent, computeStandardPropMetrics } from "./standardPropMetrics.js";
+
 function finiteOr(value, fallback = NaN) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
@@ -19,9 +21,8 @@ function normalizeSport(prop = {}) {
 
 export function computeEdgePercent(prop = {}, edge = null) {
   const e = finiteOr(edge ?? prop.edge, NaN);
-  const projection = finiteOr(prop.projection ?? prop.projectedValue, NaN);
-  if (!Number.isFinite(e) || !Number.isFinite(projection) || projection <= 0) return null;
-  return Math.round((e / projection) * 100);
+  const line = finiteOr(prop.line, NaN);
+  return computeStandardEdgePercent(e, line);
 }
 
 export function hasMajorRiskFlags(prop = {}) {
@@ -273,6 +274,7 @@ export function applyPropCalibrationBundle(prop = {}) {
   const playabilityScore = computePlayabilityScore({ ...prop, riskLevel }, confidence);
   const displayResearchOnly = isDisplayResearchOnly({ ...prop, confidence, confidenceScore: confidence });
   const edgePct = computeEdgePercent(prop, edge);
+  const standardMetrics = computeStandardPropMetrics({ projection, line: finiteOr(prop.line, NaN), edge });
 
   return {
     ...prop,
@@ -280,6 +282,7 @@ export function applyPropCalibrationBundle(prop = {}) {
     projectedValue: projection,
     edge,
     edgePercent: edgePct,
+    probabilityScore: standardMetrics.probabilityScore,
     confidence,
     confidenceScore: confidence,
     riskLevel,

@@ -1,7 +1,12 @@
 import { APP_SPORTS } from "./marketClassification.js";
 import { MLB_ONLY_MODE, shouldSilenceIngestionReject } from "./mlbOnlyMode.js";
-import { lockSportFromStatType } from "./propStatSportLock.js";
-import { detectPropSport } from "./sportDetection.js";
+import {
+  ALLOWED_SCORING_SPORTS,
+  getBlockedSportRejectReason,
+  getScoringSportRejectReason,
+  getTrustedSportFromProp,
+  normalizeScoringSportLabel,
+} from "./standardPropMetrics.js";
 import {
   PRIZEPICKS_LEAGUE_SPORTS,
   inferSportFromText,
@@ -9,8 +14,8 @@ import {
   sportFromUnderdogGame,
 } from "./sportMappings.js";
 
-/** MLB-only ingestion gate. */
-export const INGESTION_ALLOWED_SPORTS = new Set([APP_SPORTS.MLB]);
+/** Scoring pipeline allowlist — filter before projection/scoring. */
+export const INGESTION_ALLOWED_SPORTS = ALLOWED_SCORING_SPORTS;
 
 /** PrizePicks league ids that must never enter the pipeline. */
 export const BLOCKED_PRIZEPICKS_LEAGUE_IDS = new Set([
@@ -85,23 +90,34 @@ export function isApprovedSoccerLeague(context = {}) {
 }
 
 export function resolveIngestionSport(context = {}) {
-  if (context.sport && INGESTION_ALLOWED_SPORTS.has(context.sport)) return context.sport;
-  if (context.sport && context.sport !== "Other" && context.sport !== APP_SPORTS.Unsupported) {
-    if (INGESTION_ALLOWED_SPORTS.has(context.sport)) return context.sport;
-  }
+  const fromContext = normalizeScoringSportLabel(context.sport);
+  if (fromContext && INGESTION_ALLOWED_SPORTS.has(fromContext)) return fromContext;
 
   if (context.leagueId) {
     const fromLeagueId = PRIZEPICKS_LEAGUE_SPORTS[String(context.leagueId)];
-    if (fromLeagueId) return fromLeagueId;
+    const fromLeague = normalizeScoringSportLabel(fromLeagueId);
+    if (fromLeague && INGESTION_ALLOWED_SPORTS.has(fromLeague)) return fromLeague;
   }
 
-  const inferred = inferSportFromText(buildIngestionText(context), {
+  const leagueText = [
+    context.platform,
+    context.sport,
+    context.league,
+    context.leagueName,
+    context.leagueId,
+    context.competitionName,
+    context.statType,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const inferred = inferSportFromText(leagueText, {
     description: context.description,
-    playerName: context.playerName,
     opponent: context.opponent,
     statType: context.statType,
   });
-  return inferred || context.sport || "";
+  const normalized = normalizeScoringSportLabel(inferred);
+  if (normalized && INGESTION_ALLOWED_SPORTS.has(normalized)) return normalized;
+  return "";
 }
 
 export function getIngestionRejectReason(context = {}) {
@@ -110,12 +126,8 @@ export function getIngestionRejectReason(context = {}) {
   }
 
   const sport = resolveIngestionSport(context);
-  if (!sport || NON_PRIORITY_SPORTS.has(sport)) {
-    return sport ? `non-priority sport blocked at ingestion: ${sport}` : "unknown league/sport blocked at ingestion";
-  }
-
-  if (sport === APP_SPORTS.Soccer && !isApprovedSoccerLeague(context)) {
-    return "unapproved soccer league";
+  if (!sport) {
+    return "unknown league/sport blocked at ingestion";
   }
 
   if (!INGESTION_ALLOWED_SPORTS.has(sport)) {
@@ -126,16 +138,7 @@ export function getIngestionRejectReason(context = {}) {
 }
 
 export function buildContextFromProp(prop = {}) {
-  let sport = prop.sport || prop.classifiedSport;
-  if (!sport || sport === "Other") {
-    const statType = prop.statType || prop.market || prop.propType || "";
-    const fromStat = lockSportFromStatType(statType);
-    if (fromStat) sport = fromStat;
-    else {
-      const detected = detectPropSport(prop);
-      if (detected.sport) sport = detected.sport;
-    }
-  }
+  const sport = getTrustedSportFromProp(prop) || prop.sport || prop.classifiedSport || "";
   return {
     platform: prop.platform,
     sport,
@@ -157,6 +160,8 @@ export function buildContextFromProp(prop = {}) {
 }
 
 export function getIngestionPropRejectReason(prop = {}) {
+  const blocked = getBlockedSportRejectReason(prop);
+  if (blocked) return blocked;
   return getIngestionRejectReason(buildContextFromProp(prop));
 }
 

@@ -179,20 +179,7 @@ export function ensureDisplayProjection(prop = {}) {
 export function computeDisplayEdgeValue(prop = {}) {
   const line = finiteOr(prop.line, 0);
   const projection = finiteOr(prop.projection ?? prop.projectedValue, NaN);
-  const side = String(prop.side || prop.bestPick || prop.pick || "").toLowerCase();
-  if (!Number.isFinite(line)) return 0;
-  if (!Number.isFinite(projection) || projection <= 0) {
-    if ((side.includes("under") || side.includes("less") || side.includes("lower")) && line > 0) {
-      return round1(line);
-    }
-    return 0;
-  }
-  if (side.includes("under") || side.includes("less") || side.includes("lower")) {
-    return round1(line - projection);
-  }
-  if (side.includes("over") || side.includes("more") || side.includes("higher")) {
-    return round1(projection - line);
-  }
+  if (!Number.isFinite(line) || !Number.isFinite(projection)) return 0;
   return round1(projection - line);
 }
 

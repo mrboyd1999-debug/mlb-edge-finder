@@ -255,10 +255,4 @@ export function computeProjectionForProp(prop = {}, seasonStats = [], { logDebug
   };
 }
 
-export function logSportsDataSample(seasonStats = []) {
-  if (!Array.isArray(seasonStats) || !seasonStats.length) {
-    console.log("SPORTSIO PLAYER SAMPLE:", "empty");
-    return;
-  }
-  console.log("SPORTSIO PLAYER SAMPLE:", JSON.stringify(seasonStats[0], null, 2));
-}
+export function logSportsDataSample(_seasonStats = []) {}

@@ -79,8 +79,6 @@ function buildNormalizedBestPlaysPool(displayProps = [], rawProps = [], parsedUn
 function buildBestPlaysCandidatePool(displayProps = [], rawProps = [], parsedUnderdogProps = []) {
   const pool = buildNormalizedBestPlaysPool(displayProps, rawProps, parsedUnderdogProps);
   logPipelineStage("pool.bestPlaysCandidates", { count: pool.length, live: countLiveVerifiedProps(pool) });
-  console.log("RAW ODDS:", pool.length);
-  console.log("NORMALIZED:", pool.length);
   return pool;
 }
 
@@ -333,20 +331,7 @@ export function resolveTopMlbPlaySections(
     const proj = resolveBestPlayProjection(p);
     return proj != null && proj > 0;
   }).length;
-
-  console.info("[MLB Best Plays] projection merge", {
-    rawCount: normalizedPool.length,
-    normalizedCount: normalizedPool.length,
-    projectionLookupCount: mergeDebug?.projectionLookupCount ?? 0,
-    matchCount: mergeDebug?.matchCount ?? withProjections,
-    withProjections,
-    missingProjectionCount: mergeDiagnostics.missingProjectionCount,
-    missingTeamCount: mergeDiagnostics.missingTeamCount,
-    unmatchedSample: mergeDebug?.unmatchedSample ?? [],
-    matchedSample: mergeDebug?.matchedSample ?? [],
-  });
-
-  console.log("WITH PROJECTIONS:", withProjections);
+  void withProjections;
 
   const preparedPool = preparePropsForRanking(enrichedPool);
 

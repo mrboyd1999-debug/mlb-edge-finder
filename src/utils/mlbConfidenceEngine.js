@@ -1,6 +1,7 @@
 /** Realistic MLB confidence calibration — avoids inflated uniform scores. */
 
 import { isDebugModeEnabled } from "./devMode.js";
+import { computeStandardEdgePercent } from "./standardPropMetrics.js";
 
 export const MIN_DISPLAY_CONFIDENCE = 45;
 export const MIN_BEST_PLAY_CONFIDENCE = 58;
@@ -104,10 +105,10 @@ export function computeVolatilityAdjustedEdge(edge, volatility = {}) {
 }
 
 function computeEdgePercentLocal(prop = {}, edge = null) {
-  const e = Math.abs(finiteOr(edge ?? prop.edge, 0));
-  const projection = finiteOr(prop.projection ?? prop.projectedValue, NaN);
-  if (!Number.isFinite(projection) || projection <= 0) return 0;
-  return Math.round((e / projection) * 100);
+  const e = finiteOr(edge ?? prop.edge, 0);
+  const line = finiteOr(prop.line, NaN);
+  if (!Number.isFinite(line) || line <= 0) return 0;
+  return computeStandardEdgePercent(e, line) ?? 0;
 }
 
 function hasMajorRisk(prop = {}) {

@@ -361,7 +361,7 @@ export function deriveEdgeFromProjection(prop, projection, line) {
   if (!Number.isFinite(proj) || !Number.isFinite(ln)) return { edge: Number(prop.edge) || 0, bestPick: prop.bestPick || "" };
   const diff = proj - ln;
   if (Math.abs(diff) < 0.05) return { edge: 0, bestPick: "" };
-  return { edge: Math.abs(diff), bestPick: diff > 0 ? "More" : "Less" };
+  return { edge: round(diff), bestPick: diff > 0 ? "More" : "Less" };
 }
 
 /** Resolve side/edge from projection, sportsbook market, or cross-platform line gap. */
@@ -584,8 +584,9 @@ export function rescoredPropFields(prop, context = {}) {
     strongData: confidenceResult.strongData,
     verifiedHistory: confidenceResult.verifiedHistory,
     modelProbability: estimateModelProbability({
-      edge,
+      projection,
       line,
+      edge,
       confidenceScore: confidenceResult.score,
       dataQualityScore: dq,
       volatility: profile.volatility,

@@ -108,6 +108,7 @@ export function inferSportFromText(text = "", context = {}) {
     .toLowerCase();
 
   if (/\b(esports?|e-sports|cs2|csgo|valorant|dota|lol\b|map ?\d|clutch|lazyfeel|clozer)\b/i.test(blob)) return "Esports";
+  if (/\b(pga|lpga|golf|liv golf|dp world|pga tour)\b/i.test(blob)) return "Unsupported";
   if (/\b(cricket|ipl|t20|odi|test cricket|wicket|innings?|royal challengers|sunrisers|kolkata|delhi capitals)\b/i.test(blob)) {
     return "Unsupported";
   }

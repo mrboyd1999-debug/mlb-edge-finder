@@ -1,5 +1,6 @@
 import { compactMarketKey, canonicalMarketKey } from "./marketNormalization.js";
 import { resolvePickSide } from "./pickRecommendation.js";
+import { computeStandardProbabilityScore } from "./standardPropMetrics.js";
 import { estimateModelProbability } from "../services/projectionEngine.js";
 import { isUnderdogProp, isPrizePicksProp } from "./underdogStreakPool.js";
 import { resolvePropSportLabel, isNbaUnderdogProp } from "./underdogSportDetection.js";
@@ -215,14 +216,21 @@ function modelHigherProbability(prop = {}) {
   }
 
   const edge = projection - line;
+
+  const baseScore = computeStandardProbabilityScore(projection, line);
+  if (baseScore != null) {
+    return edge >= 0 ? baseScore : 100 - baseScore;
+  }
+
   const confidenceScore = Number(prop.confidenceScore ?? prop.confidence);
   const dataQualityScore = Number(prop.dataQualityScore ?? prop.modelSignal?.dataQualityScore ?? 50);
   const volatility = Number(prop.volatility ?? prop.marketVolatility);
 
   if (edge !== 0) {
     const modelProb = estimateModelProbability({
-      edge: Math.abs(edge),
+      projection,
       line,
+      edge,
       confidenceScore: Number.isFinite(confidenceScore) ? confidenceScore : 55,
       dataQualityScore,
       volatility,

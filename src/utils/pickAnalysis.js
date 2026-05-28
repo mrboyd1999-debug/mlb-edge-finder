@@ -10,6 +10,7 @@ import {
   formatSignedPercent,
   unique,
 } from "./formatters.js";
+import { computeStandardEdgePercent } from "./standardPropMetrics.js";
 import { displaySport } from "./propLabels.js";
 
 export function edgePercentForProp(prop) {
@@ -17,9 +18,9 @@ export function edgePercentForProp(prop) {
     return Number(prop.edgePercent);
   }
   const edge = Number(prop.edge ?? prop.projectionEdge);
-  const projection = Number(prop.projection ?? prop.projectedValue);
-  if (!Number.isFinite(edge) || !Number.isFinite(projection) || projection <= 0) return null;
-  return Math.round((edge / projection) * 100);
+  const line = Number(prop.line);
+  if (!Number.isFinite(edge) || !Number.isFinite(line) || line <= 0) return null;
+  return computeStandardEdgePercent(edge, line);
 }
 
 export function dataSourcesUsed(prop) {

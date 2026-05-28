@@ -1,3 +1,5 @@
+import { computeStandardProbabilityScore } from "../utils/standardPropMetrics.js";
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -294,14 +296,14 @@ export function computeRankScore(prop = {}) {
   );
 }
 
-export function estimateModelProbability({ edge, line, confidenceScore, dataQualityScore, volatility }) {
-  if (!Number.isFinite(edge) || edge <= 0) return null;
-  const lineScale = Math.max(1, Math.abs(Number(line) || 1));
-  const edgeComponent = clamp((edge / lineScale) * 0.18, 0, 0.16);
-  const confidenceComponent = clamp((confidenceScore - 55) * 0.0035, -0.04, 0.1);
-  const qualityComponent = clamp((dataQualityScore - 50) * 0.0015, -0.03, 0.05);
-  const volatilityPenalty = Number.isFinite(volatility) ? clamp(volatility * 0.006, 0, 0.06) : 0.025;
-  return round(clamp(0.5 + edgeComponent + confidenceComponent + qualityComponent - volatilityPenalty, 0.5, 0.78));
+export function estimateModelProbability({ projection, line, edge, confidenceScore, dataQualityScore, volatility }) {
+  void edge;
+  void confidenceScore;
+  void dataQualityScore;
+  void volatility;
+  const score = computeStandardProbabilityScore(projection, line);
+  if (score == null) return null;
+  return round(score / 100, 3);
 }
 
 export function buildPickExplanation(prop = {}) {

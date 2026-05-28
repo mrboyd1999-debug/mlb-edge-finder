@@ -1,5 +1,5 @@
 /**
- * Runtime projection provider tracing — endpoints, responses, failures.
+ * Runtime projection provider tracing — state only (no console output).
  */
 
 import { getSportsDataApiKey } from "../config/apiConfig.js";
@@ -9,16 +9,6 @@ const state = {
   attempts: [],
   summary: null,
 };
-
-function safeSample(value, maxLen = 1200) {
-  if (value == null) return null;
-  try {
-    const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-    return text.length > maxLen ? `${text.slice(0, maxLen)}…[truncated]` : text;
-  } catch {
-    return String(value).slice(0, maxLen);
-  }
-}
 
 export function resetProjectionFetchDebug() {
   state.attempts = [];
@@ -39,19 +29,6 @@ export function recordProjectionFetchAttempt(row = {}) {
     rawSample: row.rawSample ?? null,
   };
   state.attempts.push(entry);
-
-  console.error("########## PROJECTION FETCH DEBUG START ##########");
-  console.error("PROVIDER:", entry.provider);
-  console.error("SPORT:", entry.sport);
-  console.error("ENDPOINT:", entry.endpoint || "—");
-  console.error("SUCCESS:", entry.ok);
-  console.error("STATUS CODE:", entry.statusCode ?? "—");
-  console.error("RESPONSE COUNT:", entry.responseCount ?? "—");
-  if (entry.error) console.error("FETCH ERROR:", entry.error);
-  if (entry.warnings.length) console.error("WARNINGS:", entry.warnings);
-  if (entry.rawSample != null) console.error("RAW RESPONSE SAMPLE:", safeSample(entry.rawSample));
-  console.error("########## PROJECTION FETCH DEBUG END ##########");
-
   return entry;
 }
 
@@ -153,17 +130,6 @@ export function buildProjectionProviderSummary({
     attempts: [...state.attempts],
     updatedAt: new Date().toISOString(),
   };
-
-  console.error("########## PROJECTION PROVIDER SUMMARY START ##########");
-  console.error("FETCH SUCCESS:", !unavailable);
-  console.error("UNAVAILABLE:", unavailable);
-  console.error("REASON:", reason || "projections loaded");
-  console.error("STATS MAP SIZE:", state.summary.statsMapSize);
-  console.error("PROFILES WITH PROJECTION:", withProfileProjection);
-  console.error("SEASON STAT ROWS:", seasonStatRows);
-  console.error("MERGED WITH PROJECTION:", mergedWithProjection);
-  console.error("MERGE MATCH COUNT:", state.summary.mergeMatchCount ?? "—");
-  console.error("########## PROJECTION PROVIDER SUMMARY END ##########");
 
   return state.summary;
 }

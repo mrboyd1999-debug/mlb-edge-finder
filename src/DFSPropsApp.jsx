@@ -13,7 +13,6 @@ import { fetchOddsApiDisplayProps } from "./services/oddsApiPlayerProps.js";
 import { isOddsApiKeyUsable, ODDS_API_INVALID_KEY_MESSAGE, sanitizeOddsApiUiMessage } from "./services/oddsApiClient.js";
 import { fetchPlayerStats, findStatProfile, statProfileKey, buildMlbStatProfileFromLogs, pickUniquePropsForStatsFetch } from "./services/playerStats";
 import { fetchPlayerSeasonStats } from "./services/sportsDataService.js";
-import { logSportsDataSample } from "../api/lib/sportsDataMlbStatProjection.js";
 import { playerNamesMatch } from "./utils/playerNames.js";
 import { PRIZEPICKS_HTML_BANNER } from "./services/prizepicks";
 import { fetchInjuryNews } from "./services/injuryNews";
@@ -215,8 +214,6 @@ import {
 } from "./services/providerOrchestration.js";
 import { enrichPropsWithSportsData } from "./services/propSportsDataEnrichment.js";
 import { mergeProjectionsOntoProps } from "./services/mlb/projectionMergePipeline.js";
-import { emitVisibleProjectionDebug } from "./utils/projectionRuntimeDebug.js";
-import ProjectionSchemaDebugPanel from "./components/ProjectionSchemaDebugPanel.jsx";
 import { buildLiveRenderBoard, filterPlatformProps, isFakeOrFallbackProp } from "./utils/livePropRender.js";
 import { resolveIngestionFallback } from "./services/ingestionFallback.js";
 import { writeLastGoodBoard, readLastGoodBoard, boardFromLastGood } from "./services/lastGoodBoardCache.js";
@@ -307,6 +304,15 @@ import {
   isUpcomingSlateProp,
 } from "./utils/slateFilter.js";
 import { dataSourcesUsed } from "./utils/pickAnalysis.js";
+import {
+  computeStandardEdge,
+  computeStandardPropMetrics,
+  getScoringSportRejectReason,
+  getTrustedSportFromProp,
+  normalizeScoringSportLabel,
+  ALLOWED_SCORING_SPORTS,
+} from "./utils/standardPropMetrics.js";
+import { buildContextFromProp, resolveIngestionSport } from "./utils/ingestionFilter.js";
 import { isParserMergeComboBug } from "./utils/comboMarkets.js";
 import {
   MAX_ANALYSIS_PROPS,
@@ -1343,18 +1349,6 @@ function applyMlbStatsProviderResult(statsEntry, debugInfo) {
   const statsMap = statsResult?.stats instanceof Map ? statsResult.stats : null;
   const statsMapSize = statsMap?.size ?? 0;
 
-  console.error("STATS FETCH END");
-  console.error("STATS TIMEOUT STATUS:", timedOut);
-  console.error("STATS MAP SIZE:", statsMapSize);
-  if (failed || statsMapSize === 0) {
-    console.error("MLB STATS FETCH FAILED — full provider result", {
-      timedOut,
-      warnings: statsResult?.warnings,
-      durationMs: statsEntry?.durationMs,
-      propCount: debugInfo.statsFetchPropCount,
-    });
-  }
-
   const enrichmentFailed = failed || statsMapSize === 0;
   if (enrichmentFailed) {
     debugInfo.statsEnrichmentFailed = true;
@@ -1394,28 +1388,18 @@ function applySeasonStatsProviderResult(seasonEntry, debugInfo) {
     : "";
 
   if (seasonFailed) {
-    console.error("SEASON STATS FETCH FAILED", {
+    console.warn("[MLB Projection] season stats unavailable", {
       timedOut: seasonEntry?.timedOut,
-      durationMs: seasonEntry?.durationMs,
       warnings: seasonResult.warnings,
-      configured: Boolean(getSportsDataApiKey()),
     });
-  } else if (seasonStatsData.length > 0) {
-    logSportsDataSample(seasonStatsData);
-    emitVisibleProjectionDebug(
-      seasonStatsData,
-      "fetchDFSProps.seasonStats @ src/DFSPropsApp.jsx (parallel provider fetch)"
-    );
   }
   return seasonStatsData;
 }
 
 async function fetchMlbProjectionStatsBlocking(props, debugInfo) {
-  console.error("STATS FETCH START");
   debugInfo.statsFetchPropCount = Array.isArray(props) ? props.length : 0;
 
   if (!props?.length) {
-    console.error("STATS FETCH ABORTED — zero props passed to MLB stats enrichment");
     return applyMlbStatsProviderResult(
       {
         label: "Stats",
@@ -2062,25 +2046,14 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       statsMapIsMap: statsApplied.stats instanceof Map,
     });
     if (statsApplied.stats instanceof Map && statsApplied.stats.size > 0) {
-      emitVisibleProjectionDebug(
-        statsApplied.stats,
-        "fetchDFSProps.statsMap @ src/DFSPropsApp.jsx (after fetchPlayerStats)"
-      );
       const { matchedPlayers, gameLogsFound } = summarizeStatsMap(statsApplied.stats);
       setPipelineStageCount(PIPELINE_STAGES.MATCHED_PLAYERS_COUNT, matchedPlayers);
       setPipelineStageCount(PIPELINE_STAGES.GAME_LOGS_FOUND_COUNT, gameLogsFound);
-      console.info("[MLB Projection Pipeline] stats fetch complete", {
-        profiles: statsApplied.stats.size,
-        matchedPlayers,
-        gameLogsFound,
-        timedOut: statsTimedOut,
-      });
     } else {
-      console.error("[MLB Projection Pipeline] stats fetch produced no profiles", {
+      console.warn("[MLB Projection Pipeline] stats fetch produced no profiles", {
         statsFetchPropCount: statsFetchProps.length,
         displayPropCount: allDisplayProps.length,
         timedOut: statsTimedOut,
-        error: debugInfo.statsEnrichmentError,
       });
     }
 
@@ -2104,7 +2077,6 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       seasonStats: seasonStatsData,
     });
     if (canMergeProjections && hasProjectionSources) {
-      const preMergeNormalizedSample = allDisplayProps[0] ? { ...allDisplayProps[0] } : null;
       const mergeContext = {
         seasonStats: seasonStatsData,
         statsMap: statsApplied.stats,
@@ -2114,16 +2086,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       workingNormalProps = mergeProjectionsOntoProps(workingNormalProps, mergeContext).props;
       workingActiveProps = mergeProjectionsOntoProps(workingActiveProps, mergeContext).props;
       debugInfo.projectionMerge = merged.debug;
-      debugInfo.projectionSchemaDebug = {
-        preMergeNormalizedSample,
-        mergedSample:
-          merged.props.find((p) => Number(p.projection ?? p.projectedValue) > 0) || merged.props[0] || null,
-        statsMapSize: background.stats?.size ?? 0,
-        seasonStatRows: seasonStatsData.length,
-        updatedAt: new Date().toISOString(),
-      };
-      if (import.meta.env.DEV && preMergeNormalizedSample) {
-        emitSportDetectionDebug(preMergeNormalizedSample);
+      if (import.meta.env.DEV && allDisplayProps[0]) {
+        emitSportDetectionDebug(allDisplayProps[0]);
       }
       debugInfo.projectionProvider = buildProjectionProviderSummary({
         statsMap: background.stats,
@@ -2133,13 +2097,6 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         statsTimedOut: false,
         statsEnrichmentFailed: Boolean(debugInfo.statsEnrichmentFailed),
         statsEnrichmentError: debugInfo.statsEnrichmentError || "",
-      });
-      console.info("[MLB Projection Pipeline] fetch-stage merge", {
-        rawCount: merged.debug.rawCount,
-        matchCount: merged.debug.matchCount,
-        withProjections: merged.props.filter((p) => Number(p.projection ?? p.projectedValue) > 0).length,
-        missingTeam: merged.props.filter((p) => !String(p.team || "").trim()).length,
-        matchedSample: merged.debug.matchedSample,
       });
       if (typeof onCoreReady === "function" && allDisplayProps.length) {
         try {
@@ -3263,47 +3220,6 @@ export default function DFSPropsApp() {
   const liveRenderBoard = useMemo(() => buildLiveRenderBoard(allDisplayProps), [allDisplayProps]);
   const boardDisplayProps = useMemo(() => liveRenderBoard.props, [liveRenderBoard]);
 
-  const projectionSchemaSnapshot = useMemo(() => {
-    const projections = [];
-    const statsMap = debugInfo?.statsMap;
-    if (statsMap instanceof Map) {
-      statsMap.forEach((row) => {
-        if (row) projections.push(row);
-      });
-    }
-    const seasonRows = debugInfo?.sportsDataSeasonStats;
-    if (Array.isArray(seasonRows)) {
-      seasonRows.forEach((row) => {
-        if (row) projections.push(row);
-      });
-    }
-
-    const normalizedProp =
-      debugInfo?.projectionSchemaDebug?.preMergeNormalizedSample ||
-      allDisplayProps.find((prop) => {
-        const value = Number(prop?.projection ?? prop?.projectedValue);
-        return !Number.isFinite(value) || value <= 0;
-      }) ||
-      allDisplayProps[0] ||
-      null;
-
-    const mergedProp =
-      debugInfo?.projectionSchemaDebug?.mergedSample ||
-      allDisplayProps.find((prop) => {
-        const value = Number(prop?.projection ?? prop?.projectedValue);
-        return Number.isFinite(value) && value > 0;
-      }) ||
-      allDisplayProps[0] ||
-      null;
-
-    return {
-      projections,
-      normalizedProp,
-      mergedProp,
-      updatedAt: debugInfo?.projectionSchemaDebug?.updatedAt || lastUpdated || "",
-    };
-  }, [debugInfo, allDisplayProps, lastUpdated]);
-
   const prizePicksFeedProps = useMemo(
     () => filterPlatformProps(boardDisplayProps, "prizepicks"),
     [boardDisplayProps]
@@ -4157,11 +4073,6 @@ export default function DFSPropsApp() {
       prizePicksFeedProps={prizePicksFeedProps}
     />
 
-      <ProjectionSchemaDebugPanel
-        snapshot={projectionSchemaSnapshot}
-        providerStatus={debugInfo?.projectionProvider}
-      />
-
       {selectedEvaluation && (
         <PickDetailModal
           prop={selectedEvaluation}
@@ -4215,6 +4126,7 @@ function scoreDFSProp(prop, context) {
   const scopedProp = guardMlbOnlyProp(prop);
   if (!scopedProp) return null;
   prop = scopedProp;
+  if (getScoringSportRejectReason(prop)) return null;
   const manualStats = context.manualStatsMap?.[prop.id] || prop.manualStats || null;
   let baseProfile = findStatProfile(context.stats, prop) || context.stats.get(statLookupKey(prop));
   if ((!baseProfile || baseProfile.sparse || baseProfile.fallback) && context.stats instanceof Map) {
@@ -4690,7 +4602,17 @@ function scoreDFSProp(prop, context) {
   const sportsbookImpliedProbability = sportsbookImpliedForPick(bestPick, sportsbookComparison);
   const sportsbookAveragePrice = sportsbookPriceForPick(bestPick, sportsbookComparison);
   const impliedProbability = Number.isFinite(sportsbookImpliedProbability) ? sportsbookImpliedProbability : 0.5;
-  const modelProbability = estimateModelProbability({ edge, line, confidenceScore, dataQualityScore, volatility });
+  const standardMetrics = hasProjection
+    ? computeStandardPropMetrics({ projection, line, edge: computeStandardEdge(projection, line) })
+    : { edge: null, edgePercent: null, probabilityScore: null };
+  const modelProbability = estimateModelProbability({
+    projection,
+    line,
+    edge: standardMetrics.edge,
+    confidenceScore,
+    dataQualityScore,
+    volatility,
+  });
   const probabilityEdge = Number.isFinite(modelProbability) ? round(modelProbability - impliedProbability) : null;
   const riskLevel = computeProjectionRiskLevel({
     confidenceScore,
@@ -4889,7 +4811,8 @@ function scoreDFSProp(prop, context) {
       : mlbVerifiedModel?.projectionDebugReason || null,
     whyThisPick: mlbVerifiedModel?.whyThisPick || qualificationReason,
     analyticsReason: mlbVerifiedModel?.analyticsReason || reasoningSummary,
-    edgePercent: mlbVerifiedModel?.edgePercent ?? prop.edgePercent ?? null,
+    edgePercent: mlbGradeBlocked ? null : standardMetrics.edgePercent,
+    probabilityScore: mlbGradeBlocked ? null : standardMetrics.probabilityScore,
     manualVolatilityScore: mlbVerifiedModel?.volatility?.score ?? null,
     volatilityLabel: mlbVerifiedModel?.volatilityLabel || null,
     riskLevel: mlbVerifiedModel?.risk || riskLevel,
@@ -4930,7 +4853,8 @@ function scoreDFSProp(prop, context) {
     historicalHitRateNote: historicalHitRateSignal.note,
     edgeScore,
     edgeRating: edgeRatingFinal,
-    edge: mlbGradeBlocked || edge == null ? null : round(edge),
+    edge: mlbGradeBlocked || standardMetrics.edge == null ? null : round(standardMetrics.edge),
+    sport: getTrustedSportFromProp(prop) || prop.sport,
     sportsbookEdge: edgeResult.sportsbookEdge,
     dfsEdge: edgeResult.dfsEdge,
     dataQualityScore: Math.round(dataQualityScore),
@@ -5412,7 +5336,9 @@ function getBaseActiveFilterReason(prop, options = {}) {
 }
 
 function getPreScoringFilterReason(prop, options = {}) {
-  const sport = canonicalSportFromProp(prop);
+  const sportReject = getScoringSportRejectReason(prop);
+  if (sportReject) return sportReject;
+  const sport = getTrustedSportFromProp(prop) || canonicalSportFromProp(prop);
   if (!isSupportedAppSport({ ...prop, sport })) return `unsupported sport: ${sport || prop.sport || "Unknown"}`;
   if (!isApprovedMarket({ ...prop, sport })) return `unapproved market: ${prop.marketLabel || prop.statType || "Unknown"}`;
   if (!options.includeUncertain && isAdjustedOddsProp(prop)) return "adjusted odds prop handled by Streak Finder";
@@ -5891,19 +5817,24 @@ function statEdgeForSide(projection, line, side) {
   return normalizedSide === "Lower" ? round(propLine - projected) : round(projected - propLine);
 }
 
-function edgePercentFromValues(edge, projection) {
+function edgePercentFromValues(edge, line) {
   const numericEdge = Number(edge);
-  const numericProjection = Number(projection);
-  if (!Number.isFinite(numericEdge) || !Number.isFinite(numericProjection) || numericProjection <= 0) return null;
-  return Math.round((numericEdge / numericProjection) * 100);
+  const numericLine = Number(line);
+  if (!Number.isFinite(numericEdge) || !Number.isFinite(numericLine) || numericLine <= 0) return null;
+  return Math.round(Math.max(-50, Math.min(50, (numericEdge / numericLine) * 100)));
 }
 
 function edgePercentForProp(prop) {
+  if (prop.edgePercent != null && Number.isFinite(Number(prop.edgePercent))) {
+    return Number(prop.edgePercent);
+  }
   if (prop.edgePercentage != null && Number.isFinite(Number(prop.edgePercentage))) {
     return Number(prop.edgePercentage);
   }
   const projection = prop.projection ?? prop.projectedValue;
-  return edgePercentFromValues(streakStatEdge(prop) ?? prop.edge, projection);
+  const line = prop.line;
+  const edge = streakStatEdge(prop) ?? prop.edge ?? (Number.isFinite(Number(projection)) && Number.isFinite(Number(line)) ? Number(projection) - Number(line) : null);
+  return edgePercentFromValues(edge, line);
 }
 
 function isStaleOrStarted(prop) {
@@ -6308,11 +6239,17 @@ function enrichStreakCandidate(prop, history) {
       ? signal.lineMovement
       : null;
   const projection = Number(signal.projection ?? prop.projection);
-  const statEdge = statEdgeForSide(projection, prop.line, prop.side);
-  const edgePercentage = edgePercentFromValues(statEdge, projection);
+  const line = Number(prop.line);
+  const streakMetrics = computeStandardPropMetrics({
+    projection,
+    line,
+    edge: Number.isFinite(projection) && Number.isFinite(line) ? projection - line : null,
+  });
+  const edgePercentage = streakMetrics.edgePercent;
+  const probabilityScore = streakMetrics.probabilityScore;
   const highMultiplierPenalty = multiplier > 1 ? -12 : 0;
   const multiplierScore = clamp((1 - multiplier) * 55, 0, 18);
-  const probabilityScore = Number.isFinite(Number(prop.rawProbability))
+  const streakProbContribution = Number.isFinite(Number(prop.rawProbability))
     ? clamp((Number(prop.rawProbability) - 0.5) * 35, -5, 8)
     : 0;
   const modelScore = hasModelSignal ? clamp((Number(signal.confidenceScore) - 55) * 0.55, -6, 18) : -10;
@@ -6340,7 +6277,7 @@ function enrichStreakCandidate(prop, history) {
       ? Number(signal.confidenceScore)
       : computeStreakConfidence({
           multiplierScore,
-          probabilityScore,
+          probabilityScore: streakProbContribution,
           modelScore,
           sideScore,
           hitRateScore,
@@ -6362,7 +6299,9 @@ function enrichStreakCandidate(prop, history) {
   const impliedProbability = Number.isFinite(multiplier) ? round(1 / (1 + multiplier)) : null;
   const modelProbability = Number.isFinite(signalModelProbability)
     ? signalModelProbability
-    : round(clamp(confidenceScore / 100, 0.45, 0.78));
+    : probabilityScore != null
+      ? round(probabilityScore / 100, 3)
+      : round(clamp(confidenceScore / 100, 0.45, 0.78));
   const probabilityEdge =
     Number.isFinite(modelProbability) && Number.isFinite(impliedProbability)
       ? round(modelProbability - impliedProbability)
@@ -6427,8 +6366,10 @@ function enrichStreakCandidate(prop, history) {
     ...prop,
     multiplier,
     projection: Number.isFinite(projection) ? projection : prop.projection,
-    edge: Number.isFinite(statEdge) ? round(statEdge) : signal.edge ?? prop.edge,
+    edge: streakMetrics.edge ?? signal.edge ?? prop.edge,
     edgePercentage,
+    probabilityScore,
+    sport: getTrustedSportFromProp(prop) || prop.sport,
     bestPick: streakPickSide,
     sampleSize,
     recentHitRate,
@@ -6678,7 +6619,15 @@ function isBasketballSport(sport) {
 }
 
 function canonicalizeSportProp(prop) {
-  return applyDetectedSport(prop);
+  const trusted = getTrustedSportFromProp(prop);
+  if (trusted) {
+    return { ...prop, sport: trusted, classifiedSport: trusted };
+  }
+  const fromLeague = normalizeScoringSportLabel(resolveIngestionSport(buildContextFromProp(prop)));
+  if (fromLeague && ALLOWED_SCORING_SPORTS.has(fromLeague)) {
+    return { ...prop, sport: fromLeague, classifiedSport: fromLeague, sportDetectionSource: "league-metadata" };
+  }
+  return prop;
 }
 
 function canonicalSportFromProp(prop) {
