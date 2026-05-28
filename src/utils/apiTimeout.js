@@ -7,7 +7,7 @@ export const DESKTOP_TIMEOUT_MS = 8_000;
 export const LINE_FEED_TIMEOUT_MS = 30_000;
 export const SPORTSDATA_TIMEOUT_MS = 30_000;
 /** MLB player stat profiles — must complete before projections merge. */
-export const MLB_STATS_FETCH_TIMEOUT_MS = 60_000;
+export const MLB_STATS_FETCH_TIMEOUT_MS = 90_000;
 /** Per-provider caps — independent; do not use global mobile/desktop caps. */
 export const PRIZEPICKS_PROVIDER_TIMEOUT_MS = 20_000;
 export const UNDERDOG_PROVIDER_TIMEOUT_MS = 20_000;

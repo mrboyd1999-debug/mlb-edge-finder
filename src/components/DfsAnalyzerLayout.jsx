@@ -11,6 +11,7 @@ import SavedPicksTab from "./SavedPicksTab.jsx";
 import SettingsPanel from "./SettingsPanel.jsx";
 import DeveloperDebugPanel from "./DeveloperDebugPanel.jsx";
 import ProjectionProviderWarning from "./ProjectionProviderWarning.jsx";
+import ApiSetupBanner from "./ApiSetupBanner.jsx";
 import { readSettingsMeta } from "../services/runtimeSettings.js";
 import { isDebugModeEnabled } from "../utils/devMode.js";
 
@@ -77,6 +78,8 @@ function DfsAnalyzerLayout({
         mlbPipelineStatus={mlbPipelineStatus}
         connectionReport={connectionReport}
       />
+
+      <ApiSetupBanner onOpenSettings={() => setAppView("settings")} />
 
       <ProjectionProviderWarning status={debugInfo?.projectionProvider} />
 

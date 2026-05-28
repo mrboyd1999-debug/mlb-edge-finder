@@ -10,6 +10,7 @@ import { resolveSourceHealthState, resolveFetchHealthBadge, summarizeSourceCount
 import { enrichLineMovementWithTags } from "./services/lineMovementTrust.js";
 import { fetchSportsbookComparison } from "./services/sportsbookOdds";
 import { fetchOddsApiDisplayProps } from "./services/oddsApiPlayerProps.js";
+import { isOddsApiKeyUsable, ODDS_API_INVALID_KEY_MESSAGE, sanitizeOddsApiUiMessage } from "./services/oddsApiClient.js";
 import { fetchPlayerStats, findStatProfile, statProfileKey, buildMlbStatProfileFromLogs, pickUniquePropsForStatsFetch } from "./services/playerStats";
 import { fetchPlayerSeasonStats } from "./services/sportsDataService.js";
 import { logSportsDataSample } from "../api/lib/sportsDataMlbStatProjection.js";
@@ -124,6 +125,7 @@ import {
   READY_MIN_DATA_QUALITY,
   resolvePickEdge,
 } from "./services/pickScoring.js";
+import { shouldRouteMlbHitterToResearch } from "./services/mlbHitterConfidence.js";
 import { CONFIDENCE_THRESHOLDS } from "./services/confidenceEngine.js";
 import {
   calculateProjectionConfidence,
@@ -1171,12 +1173,13 @@ function applySourceResult({
   return usableCount > 0;
 }
 
-function emptyOddsApiResult({ timedOut = false, warnings = [] } = {}) {
+function emptyOddsApiResult({ timedOut = false, warnings = [], authDisabled = false } = {}) {
   return {
     props: [],
     warnings: timedOut ? [ENRICHMENT_TIMEOUT_MESSAGE, ...warnings].filter(Boolean) : warnings,
     parsedCount: 0,
     timedOut,
+    authDisabled,
   };
 }
 
@@ -1286,20 +1289,25 @@ function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderd
       })
     : skippedProviderResult("Underdog");
 
-  const oddsFetch = fetchProviderIsolated({
-    label: "Odds API",
-    timeoutMs: getLineFeedTimeoutMs(),
-    fetchFn: () =>
-      fetchOddsApiDisplayProps({ sport: fetchSport }).catch((error) =>
-        emptyOddsApiResult({
-          timedOut: isAbortOrTimeoutError(error),
-          warnings: [
-            isAbortOrTimeoutError(error) ? ENRICHMENT_TIMEOUT_MESSAGE : error?.message || "Odds API player props failed",
-          ],
-        })
-      ),
-    emptyResult: ({ timedOut }) => emptyOddsApiResult({ timedOut: true, warnings: [ENRICHMENT_TIMEOUT_MESSAGE] }),
-  });
+  const oddsFetch = isOddsApiKeyUsable()
+    ? fetchProviderIsolated({
+        label: "Odds API",
+        timeoutMs: getLineFeedTimeoutMs(),
+        fetchFn: () =>
+          fetchOddsApiDisplayProps({ sport: fetchSport }).catch((error) =>
+            emptyOddsApiResult({
+              timedOut: isAbortOrTimeoutError(error),
+              authDisabled: /invalid odds api key|unauthorized|401|403/i.test(String(error?.message || "")),
+              warnings: [
+                isAbortOrTimeoutError(error)
+                  ? ENRICHMENT_TIMEOUT_MESSAGE
+                  : sanitizeOddsApiUiMessage(error?.message) || "Odds API player props failed",
+              ],
+            })
+          ),
+        emptyResult: ({ timedOut }) => emptyOddsApiResult({ timedOut: true, warnings: [ENRICHMENT_TIMEOUT_MESSAGE] }),
+      })
+    : skippedProviderResult("Odds API");
 
   const seasonFetch = fetchProviderIsolated({
     label: "SeasonStats",
@@ -1586,6 +1594,12 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   }
 
   oddsApiPlayerResult = oddsEntry.result?.error ? oddsEntry.result : oddsEntry.result || emptyOddsApiResult();
+  if (oddsEntry.skipped && !isOddsApiKeyUsable()) {
+    oddsApiPlayerResult = emptyOddsApiResult({
+      authDisabled: Boolean(getOddsApiKey()),
+      warnings: getOddsApiKey() ? [sanitizeOddsApiUiMessage(ODDS_API_INVALID_KEY_MESSAGE)] : [],
+    });
+  }
   if (!oddsApiPlayerResult?.props) {
     oddsApiPlayerResult = emptyOddsApiResult({
       timedOut: oddsEntry.timedOut,
@@ -1719,12 +1733,6 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     oddsApi: [],
   });
 
-  oddsApiPlayerResult = await oddsApiPromise.catch(() =>
-    emptyOddsApiResult({ timedOut: true, warnings: [ENRICHMENT_TIMEOUT_MESSAGE] })
-  );
-  if (!sourceStatus["The Odds API"] || sourceStatus["The Odds API"] === "Pending") {
-    applyOddsApiSourceState(oddsApiPlayerResult, sourceStatus, debugInfo);
-  }
   if (!allDisplayProps.length && oddsApiPlayerResult?.props?.length) {
     allDisplayProps = normalizePropsWithSource(
       buildAllDisplayProps({

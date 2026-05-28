@@ -75,7 +75,7 @@ export function calculateProjectionConfidence(prop = {}, options = {}) {
   const calibration = calibrateConfidence(prop, score, historyRows, options.calibrationMap);
   const calibratedConfidence = calibration.calibratedConfidence;
   const lineTrust = lineMovementTrustScore(prop, prop.lineMovement);
-  const movementTags = enrichLineMovementWithTags(prop.lineMovement, prop.bestPick);
+  const movementTags = enrichLineMovementWithTags(prop.lineMovement, prop.bestPick) || {};
   if (lineTrust.supportsPick) score = Math.min(100, score + 2);
   else if (lineTrust.againstPick) score = Math.max(hasLine ? 28 : 0, score - 3);
   if (movementTags.tag === "steamed" && lineTrust.againstPick) score = Math.max(hasLine ? 28 : 0, score - 4);

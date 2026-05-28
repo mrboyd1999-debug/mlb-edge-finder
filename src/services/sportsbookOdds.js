@@ -4,6 +4,7 @@ import { canonicalStatType } from "../utils/marketNormalization.js";
 import {
   buildOddsApiProxyUrl,
   getTrimmedOddsApiKey,
+  isOddsApiKeyUsable,
   logOddsApiExchange,
   ODDS_API_INVALID_KEY_MESSAGE,
   parseOddsApiAuthFailure,
@@ -56,11 +57,13 @@ async function fetchSportsbookComparisonInternal({ props = [] } = {}) {
       warnings: [],
     };
   }
-  if (!apiKey) {
+  if (!isOddsApiKeyUsable()) {
     return {
       source: "Sportsbook comparison",
       comparisons: [],
-      warnings: ["Missing API key."],
+      warnings: apiKey ? [ODDS_API_INVALID_KEY_MESSAGE] : ["Missing API key."],
+      authFailed: Boolean(apiKey),
+      authDisabled: true,
     };
   }
 

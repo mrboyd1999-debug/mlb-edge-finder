@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
+import { validateOddsApiKeyOnce } from "./services/oddsApiClient.js";
 import "./styles.css";
 
 function installGlobalErrorHandlers() {
@@ -33,6 +34,7 @@ function installGlobalErrorHandlers() {
 }
 
 installGlobalErrorHandlers();
+void validateOddsApiKeyOnce();
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>

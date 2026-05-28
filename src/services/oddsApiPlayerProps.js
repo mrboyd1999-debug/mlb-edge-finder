@@ -7,6 +7,7 @@ import { ENRICHMENT_MAX_RETRIES, getApiTimeoutMs } from "../utils/apiTimeout.js"
 import {
   buildOddsApiProxyUrl,
   getTrimmedOddsApiKey,
+  isOddsApiKeyUsable,
   logOddsApiExchange,
   ODDS_API_INVALID_KEY_MESSAGE,
   parseOddsApiAuthFailure,
@@ -77,8 +78,14 @@ export async function fetchOddsApiDisplayProps({ sport = "all" } = {}) {
 
 async function fetchOddsApiDisplayPropsInternal({ sport = "all" } = {}) {
   const apiKey = getTrimmedOddsApiKey();
-  if (!apiKey) {
-    return { props: [], warnings: ["Missing Odds API key."], parsedCount: 0 };
+  if (!isOddsApiKeyUsable()) {
+    return {
+      props: [],
+      warnings: apiKey ? [ODDS_API_INVALID_KEY_MESSAGE] : ["Missing Odds API key."],
+      authFailed: Boolean(apiKey),
+      authDisabled: true,
+      parsedCount: 0,
+    };
   }
 
   if (isSourceAuthBlocked(SOURCE_IDS.ODDS_API)) {
