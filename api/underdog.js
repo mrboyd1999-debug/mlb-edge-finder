@@ -1,3 +1,13 @@
+import {
+  fetchWithProxyTimeout,
+  normalizeProxyUrl,
+  PROVIDER_PROXY_FETCH_TIMEOUT_MS,
+  resolveFirstValidProxyUrl,
+  UNDERDOG_PROXY_DISABLED_LOG,
+} from "../src/utils/providerProxy.js";
+
+const UNDERDOG_DIRECT_URL = "https://api.underdogfantasy.com/beta/v5/over_under_lines";
+
 export default async function handler(req, res) {
   setCorsHeaders(res);
 
@@ -6,15 +16,22 @@ export default async function handler(req, res) {
   }
 
   try {
-    const providerUrl =
-      req.query?.proxyUrl ||
-      process.env.VITE_UNDERDOG_PROXY_URL ||
-      process.env.UNDERDOG_PROXY_URL;
+    const rawQueryProxy = String(req.query?.proxyUrl || "").trim();
+    if (rawQueryProxy && !normalizeProxyUrl(rawQueryProxy)) {
+      console.error(UNDERDOG_PROXY_DISABLED_LOG);
+    }
+
     const apifyToken = process.env.APIFY_TOKEN;
     const apifyActor = process.env.UNDERDOG_APIFY_ACTOR;
-    const url = providerUrl || apifyActorUrl(apifyActor, apifyToken) || "https://api.underdogfantasy.com/beta/v5/over_under_lines";
+    const providerUrl = resolveFirstValidProxyUrl([
+      req.query?.proxyUrl,
+      process.env.VITE_UNDERDOG_PROXY_URL,
+      process.env.UNDERDOG_PROXY_URL,
+      apifyActorUrl(apifyActor, apifyToken),
+    ]);
+    const url = providerUrl || UNDERDOG_DIRECT_URL;
 
-    const response = await fetch(url, { headers: underdogHeaders() });
+    const response = await fetchWithProxyTimeout(url, { headers: underdogHeaders() }, PROVIDER_PROXY_FETCH_TIMEOUT_MS);
     const text = await response.text();
     const parsed = parseJsonOrError(text, "Underdog");
 
@@ -52,11 +69,14 @@ export default async function handler(req, res) {
       appearances: root.appearances || [],
     });
   } catch (error) {
+    const timedOut = error?.name === "AbortError";
     return res.status(200).json({
       ok: false,
       source: "Underdog",
       status: "failed",
-      error: error.message || "upstream fetch failed",
+      error: timedOut
+        ? `Underdog fetch timed out after ${PROVIDER_PROXY_FETCH_TIMEOUT_MS}ms`
+        : error.message || "upstream fetch failed",
       props: [],
       data: [],
     });
@@ -87,7 +107,9 @@ function parseJsonOrError(text, source) {
 
 function apifyActorUrl(actor, token) {
   if (!actor || !token) return "";
-  return `https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}`;
+  return normalizeProxyUrl(
+    `https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}`
+  );
 }
 
 function underdogHeaders() {

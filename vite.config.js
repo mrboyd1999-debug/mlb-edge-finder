@@ -18,6 +18,7 @@ import {
   fetchPrizePicks,
   PRIZEPICKS_MLB_LEAGUE_ID,
 } from "./api/lib/prizepicksFetch.js";
+import { normalizeProxyUrl } from "./src/utils/providerProxy.js";
 
 const API_FOOTBALL_KEY = process.env.API_FOOTBALL_KEY || process.env.VITE_API_FOOTBALL_KEY || "";
 const ODDS_API_KEY = process.env.ODDS_API_KEY || process.env.VITE_ODDS_API_KEY || "";
@@ -398,7 +399,15 @@ function configuredProxyUrl(fullUrl, source) {
   try {
     const parsed = new URL(fullUrl, "http://localhost");
     const proxyUrl = parsed.searchParams.get("proxyUrl") || parsed.searchParams.get("providerUrl");
-    return proxyUrl ? new URL(proxyUrl) : null;
+    const normalized = normalizeProxyUrl(proxyUrl);
+    if (proxyUrl && !normalized) {
+      const log =
+        source === "PrizePicks"
+          ? "PRIZEPICKS PROXY NOT CONFIGURED - DISABLING PROVIDER"
+          : "UNDERDOG PROXY NOT CONFIGURED - DISABLING PROVIDER";
+      console.error(log);
+    }
+    return normalized ? new URL(normalized) : null;
   } catch {
     return null;
   }

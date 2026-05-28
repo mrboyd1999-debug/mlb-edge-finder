@@ -44,7 +44,11 @@ import {
   withSourceRequestLock,
   withSourceRetryQueue,
 } from "./sourceRateLimit.js";
-import { getProxyUrl } from "../config/apiConfig.js";
+import { getProxyUrl, getRawProxyUrl } from "../config/apiConfig.js";
+import {
+  assessProxyUrl,
+  UNDERDOG_PROXY_DISABLED_LOG,
+} from "../utils/providerProxy.js";
 import { MLB_ONLY_MODE, emptySourcePipelineAudit } from "../utils/mlbOnlyMode.js";
 import {
   parseUnderdogPayloadDedicated,
@@ -94,6 +98,12 @@ export async function fetchUnderdogProps({ sport = "all", statType = "all" } = {
 }
 
 async function fetchUnderdogPropsInternal({ sport = "all", statType = "all" } = {}) {
+  const proxyAssessment = assessProxyUrl(getRawProxyUrl("underdog"));
+  if (proxyAssessment.invalid) {
+    console.error(UNDERDOG_PROXY_DISABLED_LOG);
+    return disabledUnderdogProviderResult("Invalid Underdog proxy URL — provider disabled.");
+  }
+
   if (isSourceInCooldown(SOURCE_IDS.UNDERDOG)) {
     const cachedResult = buildCachedUnderdogResult({ sport, statType, attempts: [], reason: "cooldown" });
     if (cachedResult) return cachedResult;
@@ -422,10 +432,35 @@ async function attemptUnderdogEndpoint(endpoint) {
 
 function underdogEndpoints() {
   const proxyUrl = getProxyUrl("underdog");
-  if (!proxyUrl) return UNDERDOG_ENDPOINTS;
+  if (!proxyUrl) {
+    console.info("[Underdog] proxy url: not configured — using direct /api/underdog route");
+    return UNDERDOG_ENDPOINTS;
+  }
   const url = new URL("/api/underdog", window.location.origin);
   url.searchParams.set("proxyUrl", proxyUrl);
   return [url.pathname + url.search, ...UNDERDOG_ENDPOINTS];
+}
+
+function disabledUnderdogProviderResult(message) {
+  return {
+    source: "Underdog",
+    status: "Unavailable",
+    props: [],
+    parsedProps: [],
+    lineSourceBadge: "NOT CONFIGURED",
+    warnings: [message || "Underdog provider disabled."],
+    error: true,
+    disabled: true,
+    partialDegradation: true,
+    debug: underdogDebug({
+      apiUrl: "/api/underdog",
+      apiStatus: "Not configured",
+      endpointsTried: [],
+      rawPropsLoaded: 0,
+      parsedPropsCount: 0,
+      message: message || "Underdog provider disabled.",
+    }),
+  };
 }
 
 function formatUnderdogAttemptWarnings(attempts = []) {

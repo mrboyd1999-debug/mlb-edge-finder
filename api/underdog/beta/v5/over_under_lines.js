@@ -1,3 +1,10 @@
+import {
+  fetchWithProxyTimeout,
+  normalizeProxyUrl,
+  PROVIDER_PROXY_FETCH_TIMEOUT_MS,
+  UNDERDOG_PROXY_DISABLED_LOG,
+} from "../../../../src/utils/providerProxy.js";
+
 export default async function handler(req, res) {
   return proxyUnderdog(req, res, "v5");
 }
@@ -9,7 +16,12 @@ async function proxyUnderdog(req, res, version) {
     return res.status(200).end();
   }
 
-  const url = req.query?.proxyUrl || `https://api.underdogfantasy.com/beta/${version}/over_under_lines`;
+  const directUrl = `https://api.underdogfantasy.com/beta/${version}/over_under_lines`;
+  const rawQueryProxy = String(req.query?.proxyUrl || "").trim();
+  if (rawQueryProxy && !normalizeProxyUrl(rawQueryProxy)) {
+    console.error(UNDERDOG_PROXY_DISABLED_LOG);
+  }
+  const url = normalizeProxyUrl(rawQueryProxy) || directUrl;
   const result = await fetchJsonOnly(String(url), "Underdog");
 
   if (!result.ok) {
@@ -40,7 +52,7 @@ async function proxyUnderdog(req, res, version) {
 
 async function fetchJsonOnly(url, source) {
   try {
-    const response = await fetch(url, { headers: underdogHeaders() });
+    const response = await fetchWithProxyTimeout(url, { headers: underdogHeaders() }, PROVIDER_PROXY_FETCH_TIMEOUT_MS);
     const text = await response.text();
     const contentType = response.headers.get("content-type") || "";
     const preview = text.slice(0, 200);
@@ -56,7 +68,14 @@ async function fetchJsonOnly(url, source) {
     }
     return parseJsonOnly(text, source, contentType);
   } catch (error) {
-    return { ok: false, error: error.message || `${source} direct proxy failed.`, preview: "" };
+    const timedOut = error?.name === "AbortError";
+    return {
+      ok: false,
+      error: timedOut
+        ? `${source} fetch timed out after ${PROVIDER_PROXY_FETCH_TIMEOUT_MS}ms`
+        : error.message || `${source} direct proxy failed.`,
+      preview: "",
+    };
   }
 }
 

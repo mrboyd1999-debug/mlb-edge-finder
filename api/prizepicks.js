@@ -11,6 +11,13 @@ import {
   PRIZEPICKS_MLB_LEAGUE_ID,
 } from "./lib/prizepicksFetch.js";
 import { parsePrizePicksProjections } from "../src/utils/prizepicksParse.js";
+import {
+  fetchWithProxyTimeout,
+  normalizeProxyUrl,
+  PRIZEPICKS_PROXY_DISABLED_LOG,
+  PROVIDER_PROXY_FETCH_TIMEOUT_MS,
+  resolveFirstValidProxyUrl,
+} from "../src/utils/providerProxy.js";
 
 const APIFY_PRIZEPICKS_ACTOR = "zen-studio~prizepicks-player-props";
 
@@ -86,12 +93,18 @@ function fallbackMessageForStatus(status) {
 }
 
 async function fetchPrizePicksBoard(leagueId = "", proxyUrl = "") {
-  const providerUrl =
-    proxyUrl ||
-    process.env.VITE_PRIZEPICKS_PROXY_URL ||
-    process.env.PRIZEPICKS_PROXY_URL;
+  const rawQueryProxy = String(proxyUrl || "").trim();
+  if (rawQueryProxy && !normalizeProxyUrl(rawQueryProxy)) {
+    console.error(PRIZEPICKS_PROXY_DISABLED_LOG);
+  }
+
   const apifyToken = process.env.APIFY_TOKEN;
-  const configuredUrl = providerUrl || apifyActorUrl(APIFY_PRIZEPICKS_ACTOR, apifyToken);
+  const configuredUrl = resolveFirstValidProxyUrl([
+    proxyUrl,
+    process.env.VITE_PRIZEPICKS_PROXY_URL,
+    process.env.PRIZEPICKS_PROXY_URL,
+    apifyActorUrl(APIFY_PRIZEPICKS_ACTOR, apifyToken),
+  ]);
 
   if (configuredUrl) {
     return fetchConfiguredProxy(configuredUrl, leagueId);
@@ -117,8 +130,23 @@ async function fetchPrizePicksBoard(leagueId = "", proxyUrl = "") {
 }
 
 async function fetchConfiguredProxy(url, leagueId) {
+  const safeUrl = normalizeProxyUrl(url);
+  if (!safeUrl) {
+    console.error(PRIZEPICKS_PROXY_DISABLED_LOG);
+    return {
+      ok: false,
+      status: 0,
+      error: "PrizePicks proxy URL is missing or invalid.",
+      data: null,
+    };
+  }
+
   try {
-    const response = await fetch(url, { headers: prizePicksHeaders() });
+    const response = await fetchWithProxyTimeout(
+      safeUrl,
+      { headers: prizePicksHeaders() },
+      PROVIDER_PROXY_FETCH_TIMEOUT_MS
+    );
     const text = await response.text();
     const parsed = parseJsonOrError(text, "PrizePicks", response.headers.get("content-type") || "");
     console.info("[PrizePicks API] configured proxy", {
@@ -137,10 +165,13 @@ async function fetchConfiguredProxy(url, leagueId) {
       data: null,
     };
   } catch (error) {
+    const timedOut = error?.name === "AbortError";
     return {
       ok: false,
       status: 0,
-      error: error.message || "configured proxy failed",
+      error: timedOut
+        ? `PrizePicks proxy timed out after ${PROVIDER_PROXY_FETCH_TIMEOUT_MS}ms`
+        : error.message || "configured proxy failed",
       data: null,
     };
   }
@@ -213,7 +244,9 @@ function prizePicksHeaders() {
 
 function apifyActorUrl(actor, token) {
   if (!token) return "";
-  return `https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}`;
+  return normalizeProxyUrl(
+    `https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}`
+  );
 }
 
 function setCorsHeaders(res) {

@@ -44,7 +44,11 @@ import {
   markSourceCached,
   withSourceRequestLock,
 } from "./sourceRateLimit.js";
-import { getProxyUrl } from "../config/apiConfig.js";
+import { getProxyUrl, getRawProxyUrl } from "../config/apiConfig.js";
+import {
+  assessProxyUrl,
+  PRIZEPICKS_PROXY_DISABLED_LOG,
+} from "../utils/providerProxy.js";
 import { recordProviderResponse } from "../utils/rawResponseDebug.js";
 import {
   buildPlayerAttributeMap,
@@ -111,6 +115,12 @@ export async function fetchPrizePicksProps({ sport = "all", statType = "all" } =
 }
 
 async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all" } = {}) {
+  const proxyAssessment = assessProxyUrl(getRawProxyUrl("prizepicks"));
+  if (proxyAssessment.invalid) {
+    console.error(PRIZEPICKS_PROXY_DISABLED_LOG);
+    return disabledPrizePicksProviderResult("Invalid PrizePicks proxy URL — provider disabled.");
+  }
+
   if (isSourceInCooldown(SOURCE_IDS.PRIZEPICKS)) {
     const cachedResult = buildCachedPrizePicksResult({
       sport,
@@ -409,8 +419,25 @@ function prizePicksEndpoints() {
   const proxyUrl = getProxyUrl("prizepicks");
   const url = new URL("/api/prizepicks", window.location.origin);
   if (MLB_ONLY_MODE) url.searchParams.set("league_id", PRIZEPICKS_MLB_LEAGUE_ID);
-  if (proxyUrl) url.searchParams.set("proxyUrl", proxyUrl);
+  if (proxyUrl) {
+    url.searchParams.set("proxyUrl", proxyUrl);
+  } else {
+    console.info("[PrizePicks] proxy url: not configured — using direct /api/prizepicks route");
+  }
   return [url.pathname + url.search];
+}
+
+function disabledPrizePicksProviderResult(message) {
+  return {
+    source: "PrizePicks",
+    status: "Failed",
+    props: [],
+    lineSourceBadge: "NOT CONFIGURED",
+    warnings: [message || "PrizePicks provider disabled."],
+    error: true,
+    disabled: true,
+    debug: buildDebug("/api/prizepicks", "Not configured", 0, 0, message || "PrizePicks provider disabled.", []),
+  };
 }
 
 function formatAttemptWarnings(attempts = []) {

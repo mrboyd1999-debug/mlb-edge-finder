@@ -2,6 +2,7 @@
 
 import { clearSourceAuthBlock, SOURCE_IDS } from "./sourceRateLimit.js";
 import { cleanApiKey } from "../utils/cleanApiKey.js";
+import { normalizeProxyUrl } from "../utils/providerProxy.js";
 
 /** User-facing keys shown in Settings — live feeds (PP/UD) use built-in routes, not user keys. */
 export const USER_SETTING_DEFS = [
@@ -178,8 +179,15 @@ export function isSettingConfigured(key) {
 
 export function getProxyUrl(platform = "") {
   const normalized = String(platform || "").toLowerCase();
-  if (normalized.includes("prize")) return getEffectiveSetting("VITE_PRIZEPICKS_PROXY_URL");
-  if (normalized.includes("underdog")) return getEffectiveSetting("VITE_UNDERDOG_PROXY_URL");
+  if (normalized.includes("prize")) return normalizeProxyUrl(getEffectiveSetting("VITE_PRIZEPICKS_PROXY_URL"));
+  if (normalized.includes("underdog")) return normalizeProxyUrl(getEffectiveSetting("VITE_UNDERDOG_PROXY_URL"));
+  return "";
+}
+
+export function getRawProxyUrl(platform = "") {
+  const normalized = String(platform || "").toLowerCase();
+  if (normalized.includes("prize")) return String(getEffectiveSetting("VITE_PRIZEPICKS_PROXY_URL") || "").trim();
+  if (normalized.includes("underdog")) return String(getEffectiveSetting("VITE_UNDERDOG_PROXY_URL") || "").trim();
   return "";
 }
 
