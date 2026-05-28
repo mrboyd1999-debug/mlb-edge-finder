@@ -17,7 +17,12 @@ function AttemptRow({ attempt }) {
 }
 
 function ProjectionProviderWarning({ status = null }) {
-  if (!status?.unavailable) return null;
+  const statsFailed = Boolean(status?.statsEnrichmentFailed);
+  if (!status?.unavailable && !statsFailed) return null;
+
+  const title = statsFailed
+    ? "MLB projection stats failed to load"
+    : "Projection provider unavailable";
 
   return (
     <div
@@ -31,7 +36,7 @@ function ProjectionProviderWarning({ status = null }) {
         color: "#fecaca",
       }}
     >
-      <div style={{ fontWeight: 700, color: "#fca5a5", marginBottom: 4 }}>Projection provider unavailable</div>
+      <div style={{ fontWeight: 700, color: "#fca5a5", marginBottom: 4 }}>{title}</div>
       <div style={{ fontSize: 13, lineHeight: 1.45 }}>{status.reason || "No real player projections were returned."}</div>
       <div style={{ fontSize: 12, marginTop: 8, color: "#fda4af" }}>
         Stats profiles: {status.statsMapSize ?? 0} · with projection: {status.withProfileProjection ?? 0} · season rows:{" "}

@@ -1238,13 +1238,54 @@ async function injectSportsDataIfProvidersEmpty() {
   return null;
 }
 
+const MLB_STATS_ENRICHMENT_FAILED = "MLB projection stats failed to load";
+
+async function fetchMlbProjectionStatsBlocking(props, debugInfo) {
+  const propCount = Array.isArray(props) ? props.length : 0;
+  console.error("STATS FETCH START");
+  let statsResult;
+  try {
+    statsResult = await fetchPlayerStats({ props });
+  } catch (error) {
+    debugInfo.statsEnrichmentFailed = true;
+    debugInfo.statsEnrichmentError = error?.message || MLB_STATS_ENRICHMENT_FAILED;
+    console.error("STATS FETCH END");
+    console.error("STATS TIMEOUT STATUS:", false);
+    console.error("STATS MAP SIZE:", 0);
+    throw error;
+  }
+  console.error("STATS FETCH END");
+  console.error("STATS TIMEOUT STATUS:", false);
+  const statsMap = statsResult?.stats;
+  console.error("STATS MAP SIZE:", statsMap instanceof Map ? statsMap.size : 0);
+
+  if (propCount > 0) {
+    if (!(statsMap instanceof Map)) {
+      const message = `${MLB_STATS_ENRICHMENT_FAILED}: statsMap is not a Map after fetchPlayerStats`;
+      debugInfo.statsEnrichmentFailed = true;
+      debugInfo.statsEnrichmentError = message;
+      throw new Error(message);
+    }
+    if (statsMap.size === 0) {
+      const message = `${MLB_STATS_ENRICHMENT_FAILED}: statsMap empty after fetchPlayerStats`;
+      debugInfo.statsEnrichmentFailed = true;
+      debugInfo.statsEnrichmentError = message;
+      throw new Error(message);
+    }
+  }
+
+  debugInfo.statsEnrichmentFailed = false;
+  debugInfo.statsEnrichmentError = "";
+  return statsResult;
+}
+
 function enrichmentBackgroundFallback(label) {
   const warnings = [ENRICHMENT_TIMEOUT_MESSAGE];
+  if (label === "stats") {
+    throw new Error(`${MLB_STATS_ENRICHMENT_FAILED}: enrichment timed out`);
+  }
   if (label === "sportsbook") {
     return { comparisons: [], warnings, timedOut: true };
-  }
-  if (label === "stats") {
-    return { stats: new Map(), warnings, timedOut: true };
   }
   return { news: new Map(), warnings, timedOut: true };
 }
@@ -1464,7 +1505,11 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     filteredMlb: scopedCoreRawProps.length,
   });
 
-  if (typeof onCoreReady === "function" && (coreDisplayProps.length || scopedCoreRawProps.length)) {
+  if (
+    typeof onCoreReady === "function" &&
+    !MLB_ONLY_MODE &&
+    (coreDisplayProps.length || scopedCoreRawProps.length)
+  ) {
     try {
       onCoreReady(
         buildCoreBoardPreview({
@@ -1810,49 +1855,34 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
   if (MLB_ONLY_MODE) {
     resetProjectionFetchDebug();
-    const statsCapMs = Math.min(enrichmentTimeoutMs, 25000);
     const statsFetchProps = pickUniquePropsForStatsFetch(
       allDisplayProps.length ? allDisplayProps : workingNormalProps
     );
     debugInfo.statsFetchPropCount = statsFetchProps.length;
     traceProjectionExecutionPath("fetchDFSProps:stats-fetch-start", {
       statsFetchPropCount: statsFetchProps.length,
-      statsCapMs,
+      statsCapMs: "none (blocking)",
       enrichmentTimeoutMs,
       mlbOnlyMode: MLB_ONLY_MODE,
     });
-    const statsResult = await withFetchTimeout(
-      () => fetchPlayerStats({ props: statsFetchProps }),
-      statsCapMs,
-      {
-        label: "stats",
-        fallback: () => enrichmentBackgroundFallback("stats"),
-      }
-    );
-    background.stats = statsResult.stats || new Map();
-    statsTimedOut = Boolean(statsResult.timedOut);
-    markStatsFetchTimedOut(statsTimedOut);
+    const statsResult = await fetchMlbProjectionStatsBlocking(statsFetchProps, debugInfo);
+    background.stats = statsResult.stats;
+    statsTimedOut = false;
+    markStatsFetchTimedOut(false);
     backgroundWarnings.push(...(statsResult.warnings || []));
     debugInfo.statsLoadedCount = background.stats.size;
     debugInfo.statsMap = background.stats;
     traceProjectionExecutionPath("fetchDFSProps:stats-fetch-done", {
       statsMapSize: background.stats.size,
-      statsTimedOut,
+      statsTimedOut: false,
       statsMapIsMap: background.stats instanceof Map,
     });
-    if (statsTimedOut && background.stats.size === 0) {
-      console.error("PROJECTION FETCH FAILED — stats fetch timed out before profiles loaded", {
-        statsCapMs,
-        enrichmentTimeoutMs,
-        statsFetchPropCount: statsFetchProps.length,
-      });
-    }
     if (!(background.stats instanceof Map)) {
       console.error("PROJECTION FETCH FAILED — statsMap is not a Map after fetch", {
         typeofStats: typeof background.stats,
       });
     }
-    if (!statsTimedOut && background.stats.size > 0) {
+    if (background.stats.size > 0) {
       emitVisibleProjectionDebug(
         background.stats,
         "fetchDFSProps.statsMap @ src/DFSPropsApp.jsx (after fetchPlayerStats)"
@@ -1923,7 +1953,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         seasonStats: seasonStatsData,
         mergeDebug: merged.debug,
         mergedProps: merged.props,
-        statsTimedOut,
+        statsTimedOut: false,
+        statsEnrichmentFailed: Boolean(debugInfo.statsEnrichmentFailed),
+        statsEnrichmentError: debugInfo.statsEnrichmentError || "",
       });
       console.info("[MLB Projection Pipeline] fetch-stage merge", {
         rawCount: merged.debug.rawCount,
@@ -1932,13 +1964,29 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         missingTeam: merged.props.filter((p) => !String(p.team || "").trim()).length,
         matchedSample: merged.debug.matchedSample,
       });
+      if (typeof onCoreReady === "function" && allDisplayProps.length) {
+        try {
+          onCoreReady(
+            buildCoreBoardPreview({
+              rawProps: scopedRawProps,
+              allDisplayProps,
+              sourceStatus,
+              debugInfo,
+            })
+          );
+        } catch (error) {
+          console.warn("[DFS Pipeline] onCoreReady failed after stats merge", error);
+        }
+      }
     } else {
       debugInfo.projectionProvider = buildProjectionProviderSummary({
         statsMap: background.stats,
         seasonStats: seasonStatsData,
         mergeDebug: null,
         mergedProps: [],
-        statsTimedOut,
+        statsTimedOut: false,
+        statsEnrichmentFailed: Boolean(debugInfo.statsEnrichmentFailed),
+        statsEnrichmentError: debugInfo.statsEnrichmentError || "",
       });
     }
 
@@ -1997,9 +2045,20 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       if (label === "news") background.news = result.value.news || new Map();
     });
   } else {
+  const statsFetchProps = pickUniquePropsForStatsFetch(workingNormalProps);
+  try {
+    const statsResult = await fetchMlbProjectionStatsBlocking(statsFetchProps, debugInfo);
+    background.stats = statsResult.stats;
+    debugInfo.statsLoadedCount = background.stats.size;
+    debugInfo.statsMap = background.stats;
+    backgroundWarnings.push(...(statsResult.warnings || []));
+  } catch (statsError) {
+    backgroundWarnings.push(statsError?.message || MLB_STATS_ENRICHMENT_FAILED);
+    throw statsError;
+  }
+
   const backgroundJobs = [
     { label: "sportsbook", run: () => fetchSportsbookComparison({ props: workingNormalProps }) },
-    { label: "stats", run: () => fetchPlayerStats({ props: workingNormalProps }) },
     { label: "news", run: () => fetchInjuryNews({ props: workingNormalProps }) },
   ];
   const backgroundCapMs = Math.min(enrichmentTimeoutMs, 6000);
@@ -2061,15 +2120,6 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
               : debugInfo.sources["The Odds API"]?.lineSourceBadge || "EMPTY",
         };
       }
-      if (label === "stats") {
-        background.stats = result.value.stats || new Map();
-        debugInfo.statsLoadedCount = background.stats.size;
-        debugInfo.statsMap = background.stats;
-        if (result.value.timedOut) {
-          statsTimedOut = true;
-          markStatsFetchTimedOut(true);
-        }
-      }
       if (label === "news") background.news = result.value.news || new Map();
       return;
     }
@@ -2086,11 +2136,6 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         apiStatus: timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "Failed",
         message: timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "Sportsbook comparison unavailable.",
       };
-    }
-    if (label === "stats") {
-      backgroundWarnings.push("Could not load player stats.");
-      statsTimedOut = true;
-      markStatsFetchTimedOut(true);
     }
     if (label === "news") backgroundWarnings.push("Could not load injury/news data.");
   });

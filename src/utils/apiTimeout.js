@@ -6,6 +6,8 @@ export const MOBILE_TIMEOUT_MS = 5_000;
 export const DESKTOP_TIMEOUT_MS = 8_000;
 export const LINE_FEED_TIMEOUT_MS = 30_000;
 export const SPORTSDATA_TIMEOUT_MS = 30_000;
+/** MLB player stat profiles — must complete before projections merge. */
+export const MLB_STATS_FETCH_TIMEOUT_MS = 60_000;
 export const LINE_FEED_RETRY_DELAY_MS = 2_000;
 export const LINE_FEED_MAX_RETRIES = 2;
 
@@ -30,6 +32,11 @@ export function getSportsDataTimeoutMs() {
   return SPORTSDATA_TIMEOUT_MS;
 }
 
+/** MLB stats enrichment — blocking; do not use short mobile/desktop caps. */
+export function getMlbStatsFetchTimeoutMs() {
+  return MLB_STATS_FETCH_TIMEOUT_MS;
+}
+
 export function isAbortOrTimeoutError(error) {
   const message = String(error?.message || error || "");
   return error?.name === "AbortError" || /timed out|abort/i.test(message);
@@ -47,7 +54,7 @@ export async function withFetchTimeout(promiseOrFn, timeoutMs, { fallback, label
   let settled = false;
   let timer = null;
 
-  const timeoutResult =
+  const resolveTimeoutResult = () =>
     typeof fallback === "function"
       ? fallback({ timedOut: true, label })
       : fallback ?? { timedOut: true, warnings: [ENRICHMENT_TIMEOUT_MESSAGE] };
@@ -58,12 +65,15 @@ export async function withFetchTimeout(promiseOrFn, timeoutMs, { fallback, label
         settled = true;
         return value;
       }),
-      new Promise((resolve) => {
+      new Promise((resolve, reject) => {
         timer = window.setTimeout(() => {
-          if (!settled) {
-            console.warn(`[API Timeout] ${label} timed out after ${timeoutMs}ms`);
+          if (settled) return;
+          console.warn(`[API Timeout] ${label} timed out after ${timeoutMs}ms`);
+          try {
+            resolve(resolveTimeoutResult());
+          } catch (error) {
+            reject(error);
           }
-          resolve(timeoutResult);
         }, timeoutMs);
       }),
     ]);

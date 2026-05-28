@@ -71,12 +71,18 @@ function countMergedWithProjection(props = []) {
 function resolveUnavailableReason({
   sportsDataConfigured,
   statsTimedOut,
+  statsEnrichmentFailed,
+  statsEnrichmentError,
   withProfileProjection,
   seasonStatRows,
   mergedWithProjection,
   attempts,
 }) {
-  if (mergedWithProjection > 0) return "";
+  if (mergedWithProjection > 0 && !statsEnrichmentFailed) return "";
+
+  if (statsEnrichmentFailed) {
+    return statsEnrichmentError || "MLB projection stats failed to load";
+  }
 
   const seasonAttempt = [...attempts].reverse().find((row) => /season/i.test(row.provider));
   const mlbAttempt = [...attempts].reverse().find((row) => /MLB StatsAPI|mlb/i.test(row.provider));
@@ -109,16 +115,20 @@ export function buildProjectionProviderSummary({
   mergeDebug = null,
   mergedProps = [],
   statsTimedOut = false,
+  statsEnrichmentFailed = false,
+  statsEnrichmentError = "",
 } = {}) {
   const withProfileProjection = countProfilesWithProjection(statsMap);
   const mergedWithProjection = countMergedWithProjection(mergedProps);
   const seasonStatRows = Array.isArray(seasonStats) ? seasonStats.length : 0;
   const sportsDataConfigured = Boolean(getSportsDataApiKey());
-  const unavailable = mergedWithProjection === 0;
+  const unavailable = mergedWithProjection === 0 || statsEnrichmentFailed;
   const reason = unavailable
     ? resolveUnavailableReason({
         sportsDataConfigured,
         statsTimedOut,
+        statsEnrichmentFailed,
+        statsEnrichmentError,
         withProfileProjection,
         seasonStatRows,
         mergedWithProjection,
@@ -131,6 +141,8 @@ export function buildProjectionProviderSummary({
     reason,
     sportsDataConfigured,
     statsTimedOut,
+    statsEnrichmentFailed,
+    statsEnrichmentError,
     statsMapSize: statsMap instanceof Map ? statsMap.size : 0,
     withProfileProjection,
     seasonStatRows,
