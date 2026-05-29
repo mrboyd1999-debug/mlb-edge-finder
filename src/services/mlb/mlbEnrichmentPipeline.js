@@ -2,9 +2,10 @@
  * Staged MLB prop enrichment — team resolution, stats attachment, projection, verification.
  */
 
-import { resolveMLBTeam, buildPlayerMapFromSeasonStats } from "./mlbPlayerDatabase.js";
+import { buildPlayerMapFromSeasonStats } from "./mlbPlayerDatabase.js";
 import { projectMlbProp } from "./mlbProjectionEngine.js";
 import { mergeProjectionsOntoProps } from "./projectionMergePipeline.js";
+import { enrichPropWithTeamLookup } from "../../utils/teamEnrichment.js";
 import { resolveBestPlayProjection } from "../../utils/bestPlaysPipelineDebug.js";
 import { resolveMlbPlayerRow, buildMlbPlayerLookup } from "./playerNormalization.js";
 import { findSeasonStatRow, resolveSportsDataPropLabel } from "../../../api/lib/sportsDataMlbStatProjection.js";
@@ -88,21 +89,20 @@ function validatePlayer(prop = {}) {
 }
 
 function resolveTeamForProp(prop = {}, context = {}) {
-  const resolved = resolveMLBTeam(prop.playerName || prop.player, {
-    prop,
-    seasonStats: context.seasonStats,
-    statsMap: context.statsMap,
-  });
-  if (resolved.team) {
+  const enriched = enrichPropWithTeamLookup(prop, context);
+  if (enriched.team) {
     return {
-      ...prop,
-      team: resolved.team,
-      teamSource: resolved.source,
-      playerId: prop.playerId ?? resolved.playerId ?? prop.sportsDataPlayerId,
+      ...enriched,
+      teamSource: enriched.teamSource || "lookup",
+      playerId: enriched.playerId ?? prop.playerId ?? prop.sportsDataPlayerId,
     };
   }
+  if (enriched.teamConfidence === "LOW") {
+    recordStageFailure(ENRICHMENT_STAGES.RESOLVE_TEAM, prop, "team unresolved — marked LOW confidence");
+    return enriched;
+  }
   recordStageFailure(ENRICHMENT_STAGES.RESOLVE_TEAM, prop, "team unresolved after all lookups");
-  return prop;
+  return enriched;
 }
 
 function attachStatsToProp(prop = {}, context = {}) {
@@ -175,7 +175,7 @@ export function enrichMlbProp(prop = {}, context = {}) {
   working = attachStatsToProp(working, context);
   pipelineDebug.enriched += 1;
 
-  if (!String(working.team || "").trim()) {
+  if (!String(working.team || "").trim() && working.teamConfidence !== "LOW") {
     recordStageFailure(ENRICHMENT_STAGES.RESOLVE_TEAM, working, "team unresolved after all lookups");
   }
 

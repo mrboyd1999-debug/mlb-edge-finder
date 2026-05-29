@@ -37,27 +37,28 @@ export function ensureMatchupFields(prop = {}) {
 }
 
 /** Live prep — preserves platform line; never invents projection. */
-export function prepareLiveProp(prop = {}) {
+export function prepareLiveProp(prop = {}, context = {}) {
   const withSport = normalizePropSportFields(prop);
   const withMatchup = ensureMatchupFields(withSport);
+  const withTeam = enrichPropWithTeamLookup(withMatchup, context);
   const existing =
-    resolveProjectionValue(withMatchup) ??
-    (Number.isFinite(Number(withMatchup.last5Average)) && Number(withMatchup.last5Average) > 0
-      ? Number(withMatchup.last5Average)
+    resolveProjectionValue(withTeam) ??
+    (Number.isFinite(Number(withTeam.last5Average)) && Number(withTeam.last5Average) > 0
+      ? Number(withTeam.last5Average)
       : null) ??
-    (Number.isFinite(Number(withMatchup.seasonAverage)) && Number(withMatchup.seasonAverage) > 0
-      ? Number(withMatchup.seasonAverage)
+    (Number.isFinite(Number(withTeam.seasonAverage)) && Number(withTeam.seasonAverage) > 0
+      ? Number(withTeam.seasonAverage)
       : null);
 
   return annotateProjectionFields({
-    ...withMatchup,
-    projection: existing ?? withMatchup.projection ?? null,
-    projectedValue: existing ?? withMatchup.projectedValue ?? null,
+    ...withTeam,
+    projection: existing ?? withTeam.projection ?? null,
+    projectedValue: existing ?? withTeam.projectedValue ?? null,
     projectionSource:
-      withMatchup.projectionSource ||
-      (existing ? withMatchup.projectionSource || "merged" : "missing"),
-    estimatedProjection: Boolean(withMatchup.estimatedProjection),
-    isLiveLine: !withMatchup.isDemoData,
+      withTeam.projectionSource ||
+      (existing ? withTeam.projectionSource || "merged" : "missing"),
+    estimatedProjection: Boolean(withTeam.estimatedProjection),
+    isLiveLine: !withTeam.isDemoData,
     projectionUnavailable: !(Number.isFinite(existing) && existing > 0),
   });
 }
@@ -66,7 +67,7 @@ export function prepareLiveProps(props = []) {
   return (props || []).map(prepareLiveProp);
 }
 
-import { ensureDisplayProjection } from "./displayPropScoring.js";
+import { enrichPropWithTeamLookup } from "./teamEnrichment.js";
 
 /** @deprecated synthetic prep for emergency demo path only */
 export function preparePropsForRanking(props = [], { synthetic = false } = {}) {

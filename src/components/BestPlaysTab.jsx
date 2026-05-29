@@ -2,6 +2,7 @@ import { memo, useMemo } from "react";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
 import PlayerImage from "./PlayerImage.jsx";
 import PropPipelineCounters from "./PropPipelineCounters.jsx";
+import VerificationDashboard from "./VerificationDashboard.jsx";
 import { groupPicksByPlayer } from "../utils/playerPropGroups.js";
 import { passesVerifiedBestPlaysFilter } from "../utils/bestPlaysPipelineDebug.js";
 import { PICK_TIER_VERIFIED } from "../utils/conservativeProjection.js";
@@ -15,7 +16,9 @@ function BestPlaysTab({
   onOpen,
   filterDiagnostics = null,
 }) {
-  const { playerGroups, debugBanner } = useMemo(() => {
+  const usedVerifiedFallback = Boolean(filterDiagnostics?.usedVerifiedFallback);
+
+  const { playerGroups, debugBanner, sectionTitle, sectionSubtitle } = useMemo(() => {
     const section =
       (sections || []).find((row) => row.id === "highest-probability") ||
       (sections || []).find((row) => row.id === "best-plays") ||
@@ -42,14 +45,26 @@ function BestPlaysTab({
         .join(" | ");
     }
 
-    const verifiedPicks = sectionPicks.filter(
-      (prop) =>
-        passesVerifiedBestPlaysFilter(prop) &&
-        prop.pickTierLabel === PICK_TIER_VERIFIED &&
-        !prop.displayResearchOnly
-    );
-    return { playerGroups: groupPicksByPlayer(verifiedPicks), debugBanner: banner };
-  }, [sections, filterDiagnostics]);
+    const displayPicks = usedVerifiedFallback
+      ? sectionPicks
+      : sectionPicks.filter(
+          (prop) =>
+            passesVerifiedBestPlaysFilter(prop) &&
+            prop.pickTierLabel === PICK_TIER_VERIFIED &&
+            !prop.displayResearchOnly
+        );
+
+    return {
+      playerGroups: groupPicksByPlayer(displayPicks),
+      debugBanner: banner,
+      sectionTitle: section?.title || (usedVerifiedFallback ? "Top Projected Props" : "Verified Plays"),
+      sectionSubtitle:
+        section?.eyebrow ||
+        (usedVerifiedFallback
+          ? "Verified pool empty — showing top projected props by confidence and edge"
+          : "Verified Play tier only. Research candidates are on the MLB Props tab."),
+    };
+  }, [sections, filterDiagnostics, usedVerifiedFallback]);
 
   const failureReason =
     pipelineDiagnostics?.failureReason || loadError || filterDiagnostics?.error || "";
@@ -62,6 +77,7 @@ function BestPlaysTab({
         </p>
         {failureReason ? <p className="compact-form-notice">{failureReason}</p> : null}
         <PropPipelineCounters counts={pipelineDiagnostics} compact />
+        <VerificationDashboard dashboard={filterDiagnostics?.verificationDashboard} />
       </div>
     );
   }
@@ -71,6 +87,7 @@ function BestPlaysTab({
   return (
     <div className="compact-tab-panel">
       <PropPipelineCounters counts={pipelineDiagnostics} compact />
+      <VerificationDashboard dashboard={filterDiagnostics?.verificationDashboard} />
       {debugBanner ? (
         <p className="compact-form-notice" style={{ marginBottom: 12 }}>
           {debugBanner}
@@ -82,8 +99,8 @@ function BestPlaysTab({
       ) : (
         <section className="compact-section">
           <div className="compact-section__head">
-            <h2>Verified Plays</h2>
-            <p>Verified Play tier only. Research candidates are on the MLB Props tab.</p>
+            <h2>{sectionTitle}</h2>
+            <p>{sectionSubtitle}</p>
           </div>
           <div className="compact-card-list player-prop-group-list">
             {playerGroups.map((group) => (

@@ -40,6 +40,7 @@ import {
   syncBestPlaysFilterAudit,
 } from "../services/mlbProjectionPipelineLog.js";
 import { enrichMlbPropsBatch } from "../services/mlb/mlbEnrichmentPipeline.js";
+import { enrichPropsWithTeamLookup } from "./teamEnrichment.js";
 import {
   mergeProjectionsOntoProps,
   logPipelineMergeDiagnostics,
@@ -338,7 +339,11 @@ export function resolveTopMlbPlaySections(
   }).length;
   void withProjections;
 
-  const preparedPool = preparePropsForRanking(enrichedPool);
+  const preparedPool = enrichPropsWithTeamLookup(preparePropsForRanking(enrichedPool), {
+    seasonStats: mergeContext.seasonStats,
+    statsMap: mergeContext.statsMap,
+    fetchSport: "MLB",
+  });
 
   const strictPool = buildTopMlbPlayPool(displayProps, rawProps, parsedUnderdogProps, { relaxed: false });
   const qualityAudit = strictPool._qualityAudit || auditQualityMlbProps(preparedPool);
@@ -354,10 +359,14 @@ export function resolveTopMlbPlaySections(
   const strictEligible = playAudit.eligible || 0;
   const selection = selectHighestProbabilityPlays(preparedPool, HIGHEST_PROBABILITY_MAX_PLAYS, {
     withMeta: true,
+    seasonStats: mergeContext.seasonStats,
+    statsMap: mergeContext.statsMap,
+    fetchSport: "MLB",
   });
   let highestPicks = (selection.picks || []).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
 
   filterDiagnostics.usedVerifiedFallback = Boolean(selection.usedVerifiedFallback);
+  filterDiagnostics.verificationDashboard = selection.verificationDashboard || null;
 
   filterDiagnostics.selected = highestPicks.length;
   filterDiagnostics.eligible = strictEligible;
@@ -377,8 +386,10 @@ export function resolveTopMlbPlaySections(
   const sections = [
     {
       id: "highest-probability",
-      title: "Verified Plays",
-      eyebrow: "Verified Play tier only · probability, confidence, and data quality above threshold",
+      title: selection.usedVerifiedFallback ? "Top Projected Props" : "Verified Plays",
+      eyebrow: selection.usedVerifiedFallback
+        ? "Verified pool empty — showing top projected props by confidence and edge"
+        : "Verified Play tier only · probability, confidence, and data quality above threshold",
       picks: highestPicks.filter(Boolean),
     },
   ];

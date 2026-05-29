@@ -5,9 +5,9 @@ import { computeStandardEdge, computeStandardEdgePercent, computeStandardPropMet
 export const PICK_TIER_VERIFIED = "Verified Play";
 export const PICK_TIER_RESEARCH = "Research Candidate";
 
-const VERIFIED_MIN_CONFIDENCE = 65;
-const VERIFIED_MIN_PROBABILITY = 60;
-const VERIFIED_MIN_DATA_QUALITY = 75;
+const VERIFIED_MIN_CONFIDENCE = 50;
+const VERIFIED_MIN_PROBABILITY = 55;
+const VERIFIED_MIN_DATA_QUALITY = 50;
 const RESEARCH_MAX_RAW_CONFIDENCE = 50;
 const RESEARCH_MAX_PROBABILITY = 70;
 const ELITE_DATA_QUALITY = 85;

@@ -19,6 +19,8 @@ import {
   resolveBestPlayStatSpecificProjection,
   sanitizeProjectionValue,
 } from "./bestPlaysPipelineDebug.js";
+import { enrichPropsWithTeamLookup } from "./teamEnrichment.js";
+import { buildVerificationDashboard } from "./verificationDashboard.js";
 import { comparePickRank } from "./conservativeProjection.js";
 import {
   buildMarketContextNote,
@@ -27,8 +29,9 @@ import {
   resolveLeanDirection,
 } from "./bestPlayRanking.js";
 
-export const HIGHEST_PROBABILITY_MIN_CONFIDENCE = 65;
-export const HIGHEST_PROBABILITY_MIN_EDGE = 0.015;
+export const HIGHEST_PROBABILITY_MIN_CONFIDENCE = 50;
+export const HIGHEST_PROBABILITY_MIN_EDGE = 0.02;
+export const HIGHEST_PROBABILITY_FALLBACK_MAX = 10;
 export const HIGHEST_PROBABILITY_MAX_PLAYS = 10;
 export const HIGHEST_PROBABILITY_TARGET_PLAYS = 5;
 export const HIGHEST_PROBABILITY_MIN_VERIFIED_TO_SHOW = 1;
@@ -69,6 +72,26 @@ function logRejectionSummary(enriched = []) {
   });
 }
 
+export function selectTopProjectedFallback(props = [], max = HIGHEST_PROBABILITY_FALLBACK_MAX) {
+  return [...(props || [])]
+    .filter((prop) => {
+      const proj = resolveBestPlayStatSpecificProjection(prop);
+      return proj != null && proj > 0 && passesMinimalBestPlaysFilter(prop);
+    })
+    .sort((a, b) => {
+      const confA = Number(a.displayConfidenceScore ?? a.confidenceScore ?? a.confidence ?? 0);
+      const confB = Number(b.displayConfidenceScore ?? b.confidenceScore ?? b.confidence ?? 0);
+      if (confB !== confA) return confB - confA;
+      return resolveEdgeMagnitude(b) - resolveEdgeMagnitude(a);
+    })
+    .slice(0, max)
+    .map((prop) => ({
+      ...prop,
+      verifiedFallbackPick: true,
+      pickTierLabel: prop.pickTierLabel || "Research Candidate",
+    }));
+}
+
 export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABILITY_MAX_PLAYS, options = {}) {
   const rawProps = props || [];
 
@@ -77,7 +100,13 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   const normalized = rawProps.filter(isRenderableCandidate);
   logBestPlaysPipelineStage("NORMALIZED:", normalized.length);
 
-  const enriched = normalized.map(enrichBestPlayCandidate);
+  const teamEnriched = enrichPropsWithTeamLookup(normalized, {
+    seasonStats: options.seasonStats,
+    statsMap: options.statsMap,
+    fetchSport: options.fetchSport || "MLB",
+  });
+  const enriched = teamEnriched.map(enrichBestPlayCandidate);
+  const verificationDashboard = buildVerificationDashboard(enriched);
   const withProjections = enriched.filter((p) => {
     const proj = resolveBestPlayStatSpecificProjection(p);
     return proj != null && proj > 0;
@@ -110,13 +139,25 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
     picks.push({ ...prop, verified: prop.pickTierLabel === "Verified Play" || Boolean(prop.isDisplayPlayable) });
   }
 
+  let usedVerifiedFallback = false;
+  if (!picks.length) {
+    const fallbackPool = displayPool.length ? displayPool : enriched;
+    const fallbackPicks = selectTopProjectedFallback(fallbackPool, HIGHEST_PROBABILITY_FALLBACK_MAX);
+    if (fallbackPicks.length) {
+      picks.push(...fallbackPicks.slice(0, max));
+      usedVerifiedFallback = true;
+      logBestPlaysPipelineStage("VERIFIED FALLBACK:", fallbackPicks.length);
+    }
+  }
+
   if (options.withMeta) {
     return {
       picks,
-      usedVerifiedFallback: false,
+      usedVerifiedFallback,
       strictEligible: picks.length,
       debugMode: BEST_PLAYS_DEBUG_MODE,
       invalidReasons,
+      verificationDashboard,
       pipelineCounts: {
         rawProps: rawProps.length,
         normalized: normalized.length,
@@ -124,6 +165,8 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
         filtered: verifiedPool.length,
         displayPool: displayPool.length,
         researchPool: researchCount,
+        verifiedPasses: verificationDashboard.verifiedPasses,
+        verifiedFailures: verificationDashboard.verifiedFailures,
       },
     };
   }
@@ -185,7 +228,9 @@ export function auditHighestProbabilityProps(props = [], options = {}) {
     } else if (/edge/.test(reason)) {
       counters.filteredWeakEdge += 1;
       counters.lowEdge += 1;
-    } else if (/line|stat|team|player/.test(reason)) {
+    } else if (/team/.test(reason)) {
+      counters.filteredOther += 1;
+    } else if (/line|stat|player/.test(reason)) {
       counters.filteredOther += 1;
     } else if (/non-MLB|sport/.test(reason)) {
       counters.filteredOther += 1;
