@@ -11,6 +11,7 @@ import { riskAccentStyle } from "../utils/displayPropScoring.js";
 import MlbPipelineFailureBlock from "./MlbPipelineFailureBlock.jsx";
 import { isManualAnalyzerProp } from "../utils/manualPropBuilder.js";
 import { shouldShowMlbPipelineFailure } from "../utils/mlbPipelineFailureDisplay.js";
+import { resolveProjectionLeanDisplay } from "../utils/pickDirectionAudit.js";
 import {
   AWAITING_PROJECTION_STATUS,
   hasValidProjection,
@@ -132,6 +133,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
     (Number.isFinite(Number(prop.modelProbability)) ? Math.round(Number(prop.modelProbability) * 100) : null);
   const leanDisplay =
     prop.lean ||
+    resolveProjectionLeanDisplay(prop) ||
     (pickSide === "over" ? "Higher" : pickSide === "under" ? "Lower" : formatLeanSide(prop.bestPick || prop.side || "Watch"));
   const ready = playable && (Boolean(prop.isQualificationAccepted) || isReadyToBet(prop));
   const bettingLabel =

@@ -1,7 +1,13 @@
 import { normalize } from "./formatters.js";
+import { resolveProjectionPickSide, resolveProjectionValues } from "./pickDirectionAudit.js";
 
-/** Resolve OVER / UNDER / WATCH / PASS from evaluated side or projection. */
+/** Resolve OVER / UNDER / WATCH from projection vs line first, then evaluated side. */
 export function resolvePickSide(prop = {}) {
+  const { projection, line } = resolveProjectionValues(prop);
+  if (projection != null && line != null && line > 0) {
+    return resolveProjectionPickSide(prop);
+  }
+
   if (prop.recommendedSide === "PASS") return "WATCH";
   if (prop.recommendedSide === "OVER" || prop.recommendedSide === "UNDER") {
     return prop.recommendedSide;
@@ -11,12 +17,6 @@ export function resolvePickSide(prop = {}) {
   const key = normalize(raw);
   if (key === "more" || key === "over" || key === "higher") return "OVER";
   if (key === "less" || key === "under" || key === "lower") return "UNDER";
-
-  const line = Number(prop.line);
-  const projection = Number(prop.projectedValue ?? prop.projection);
-  if (Number.isFinite(line) && Number.isFinite(projection) && projection !== line) {
-    return projection > line ? "OVER" : "UNDER";
-  }
 
   const edge = Number(prop.edge ?? prop.projectionEdge);
   if (Number.isFinite(edge) && edge !== 0) {

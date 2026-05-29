@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useEffect } from "react";
 import PlayerImage from "./PlayerImage.jsx";
 import { styles } from "../theme/styles.js";
 import { formatNumber } from "../utils/formatters.js";
@@ -13,9 +13,18 @@ import { resolveProjectionValue } from "../utils/projectionQuality.js";
 import { formatHighestProbabilitySource } from "../utils/highestProbabilityPlays.js";
 import { formatEdgeDisplay } from "../utils/conservativeProjection.js";
 import { formatBestPlayProjectionSource } from "../utils/bestPlayExplanation.js";
+import {
+  formatHitRatePercent,
+  validatePickDirectionBeforeRender,
+} from "../utils/pickDirectionAudit.js";
 
 function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
   const enriched = withPlayerImageUrl(prop || {});
+
+  useEffect(() => {
+    validatePickDirectionBeforeRender(prop, "BestPlayRowCard");
+  }, [prop]);
+
   const side = resolvePickSide(enriched);
   const sidePalette = recommendationPalette(side);
   const platform = formatHighestProbabilitySource(enriched);
@@ -40,7 +49,11 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
   const rankingLabel = Number.isFinite(Number(rankingScore)) ? Number(rankingScore).toFixed(1) : "—";
   const projection = resolveProjectionValue(enriched);
   const projectionLabel = projection != null && projection > 0 ? formatNumber(projection) : "—";
-  const lean = enriched.lean || sideLabel;
+  const lean = enriched.lean || "Pass";
+  const last10HitRate = formatHitRatePercent(
+    enriched.last10HitRate ?? enriched.recentHitRate ?? enriched.last5HitRate
+  );
+  const seasonHitRate = formatHitRatePercent(enriched.seasonHitRate);
   const explanation = enriched.verifiedPlayExplanation;
   const projectionSource =
     explanation?.projectionSource ||
@@ -121,6 +134,10 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
           </div>
           <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 11 }}>
             Projection Source: <strong>{projectionSource}</strong>
+            {" · "}
+            L10 Hit: <strong>{last10HitRate}</strong>
+            {" · "}
+            Season Hit: <strong>{seasonHitRate}</strong>
           </p>
           {statsLine ? (
             <p style={{ ...styles.bestPlayRowSubline, color: "#cbd5e1", marginTop: 4, fontSize: 11 }}>

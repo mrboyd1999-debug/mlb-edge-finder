@@ -5,6 +5,14 @@ import { isReadyToBet, READY_MIN_CONFIDENCE, READY_MIN_DATA_QUALITY, PROJECTION_
 import { readManualStatsForProp } from "../services/pickStore.js";
 import DataQualityBadge from "./DataQualityBadge.jsx";
 import PlayerImage from "./PlayerImage.jsx";
+import {
+  formatHitRatePercent,
+  resolveBreakdownTitle,
+  resolveProjectionLeanDisplay,
+  validatePickDirectionBeforeRender,
+  isVerifiedHighestProbabilityPick,
+} from "../utils/pickDirectionAudit.js";
+import { formatBestPlayProjectionSource } from "../utils/bestPlayExplanation.js";
 import { confidenceBandDisplay, resolveBandScore } from "../utils/mlbConfidenceEngine.js";
 import {
   dataSourcesUsed,
@@ -86,13 +94,28 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
   const pickSide = noVerifiedPlay ? "" : normalizeManualPick(prop.bestPick || prop.side || prop.pick);
   const lean = noVerifiedPlay
     ? null
-    : pickSide === "over"
-      ? "Over"
-      : pickSide === "under"
-        ? "Under"
-        : formatLeanSide(prop.bestPick || prop.side || "Watch");
+    : breakdownMode
+      ? resolveProjectionLeanDisplay(prop)
+      : pickSide === "over"
+        ? "Over"
+        : pickSide === "under"
+          ? "Under"
+          : formatLeanSide(prop.bestPick || prop.side || "Watch");
   const ready = prop.isDisplayPlayable !== false && (Boolean(prop.isQualificationAccepted) || isReadyToBet(prop));
-  const bandLabel = confidenceBandDisplay(resolveBandScore(prop));
+  const verifiedPick = isVerifiedHighestProbabilityPick(prop);
+  const bandLabel = breakdownMode
+    ? verifiedPick
+      ? prop.verifiedTierLabel || prop.pickTierLabel || "Verified Play"
+      : prop.pickTierLabel === "Research Candidate" || prop.displayResearchOnly
+        ? "Research Candidate"
+        : confidenceBandDisplay(resolveBandScore(prop))
+    : confidenceBandDisplay(resolveBandScore(prop));
+  const breakdownTitle = breakdownMode ? resolveBreakdownTitle(prop) : null;
+  const projectionSourceLabel = formatBestPlayProjectionSource(prop);
+  const last10HitRate = formatHitRatePercent(
+    prop.last10HitRate ?? prop.recentHitRate ?? prop.last5HitRate
+  );
+  const seasonHitRate = formatHitRatePercent(prop.seasonHitRate);
   const badge = manualProp
     ? prop.dataQualityBadge || { label: prop.scoringModeLabel || "Offline scoring mode", tone: "info" }
     : prop.dataQualityBadge || dataQualityBadge(prop);
@@ -121,6 +144,12 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
     pitchCountNote: storedManual.pitchCountNote ?? "",
     injuryNote: storedManual.injuryNote ?? "",
   });
+
+  useEffect(() => {
+    if (breakdownMode) {
+      validatePickDirectionBeforeRender(prop, "PickDetailModal");
+    }
+  }, [breakdownMode, prop]);
 
   useEffect(() => {
     function handleKeyDown(event) {
@@ -162,14 +191,14 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
         style={{ ...styles.modalPanel, maxHeight: manualProp ? "76vh" : "80vh", padding: manualProp ? "4px 6px" : "6px 8px" }}
         role="dialog"
         aria-modal="true"
-        aria-label={breakdownMode ? "Highest Probability Pick Breakdown" : `${prop.playerName} evaluation`}
+        aria-label={breakdownMode ? breakdownTitle : `${prop.playerName} evaluation`}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="pick-detail-modal-sticky" style={{ ...styles.modalHeader, position: "sticky", top: 0, zIndex: 2, background: "#0f172a", paddingBottom: "4px", marginBottom: "4px", borderBottom: "1px solid #1e293b" }}>
           <div style={styles.modalPlayer}>
             <PlayerImage prop={prop} large />
             <div style={{ minWidth: 0 }}>
-              <p style={styles.platform}>{breakdownMode ? "Highest Probability Pick Breakdown" : prop.platform}</p>
+              <p style={styles.platform}>{breakdownMode ? breakdownTitle : prop.platform}</p>
               <h2 style={{ ...styles.modalTitle, fontSize: "15px" }}>{prop.playerName}</h2>
               {(prop.team || prop.opponent) ? (
                 <p style={{ ...styles.gameLine, fontSize: "11px", margin: "2px 0 0" }}>
@@ -291,6 +320,9 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
             </>
           ) : null}
           <MetricIf label="Prop" value={prop.statType} />
+          {breakdownMode ? <MetricIf label="Projection Source" value={projectionSourceLabel} /> : null}
+          {breakdownMode ? <MetricIf label="Last 10 Hit Rate" value={last10HitRate !== "—" ? last10HitRate : null} /> : null}
+          {breakdownMode ? <MetricIf label="Season Hit Rate" value={seasonHitRate !== "—" ? seasonHitRate : null} /> : null}
           {breakdownMode ? <MetricIf label="Source" value={prop.platform || prop.source} /> : null}
           {breakdownMode ? <MetricIf label="Line" value={formatNumber(prop.line)} strong /> : null}
           {breakdownMode ? (

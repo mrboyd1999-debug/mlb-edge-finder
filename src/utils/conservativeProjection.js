@@ -4,6 +4,7 @@ import { computeStandardEdge, computeStandardEdgePercent, computeStandardPropMet
 import { computeStatSpecificProbability } from "./mlbStatProbability.js";
 import { computeMlbPlayConfidence } from "./mlbPlayConfidence.js";
 import { classifyVerifiedTier } from "./verifiedTierSystem.js";
+import { resolveProjectionLeanDisplay, resolveProjectionLean } from "./pickDirectionAudit.js";
 
 export const PICK_TIER_VERIFIED = "Verified Play";
 export const PICK_TIER_RESEARCH = "Research Candidate";
@@ -36,9 +37,16 @@ export function resolveProjectionValue(prop = {}) {
   return proj;
 }
 
-export function resolveLeanFromEdge(edge) {
+export function resolveLeanFromEdge(edge, prop = {}) {
+  const { projection, line } = {
+    projection: finiteOr(prop?.projection ?? prop?.projectedValue, NaN),
+    line: finiteOr(prop?.line, NaN),
+  };
+  if (Number.isFinite(projection) && Number.isFinite(line) && line > 0) {
+    return resolveProjectionLeanDisplay(prop);
+  }
   const e = Number(edge);
-  if (!Number.isFinite(e) || Math.abs(e) < 0.01) return "Watch";
+  if (!Number.isFinite(e) || Math.abs(e) < 0.01) return "Pass";
   return e > 0 ? "Higher" : "Lower";
 }
 
@@ -225,7 +233,7 @@ export function computeConservativeProbability(prop = {}, metrics = {}, options 
   const dq = finiteOr(prop.dataQualityScore, 50);
   if (dq >= 80) probability += 3;
 
-  const lean = resolveLeanFromEdge(edge);
+  const lean = resolveLeanFromEdge(edge, prop);
   const hit = finiteOr(prop.recentHitRate ?? prop.last5HitRate, NaN);
   if (Number.isFinite(hit)) {
     const supports =
@@ -279,7 +287,7 @@ export function computeDisplayPropMetrics(prop = {}) {
     ...edgeDisplay,
     probabilityScore,
     adjustedConfidence,
-    lean: resolveLeanFromEdge(base.edge),
+    lean: resolveLeanFromEdge(base.edge, prop),
     projectionStatus: "ok",
   };
 }
@@ -378,11 +386,18 @@ export function comparePickRank(a = {}, b = {}) {
 }
 
 export function qualifiesAsHighestProbabilityPick(prop = {}) {
-  return classifyVerifiedTier(prop) != null || prop.pickTierLabel === PICK_TIER_VERIFIED;
+  return isVerifiedHighestProbabilityPick(prop);
+}
+
+function isVerifiedHighestProbabilityPick(prop = {}) {
+  const tier = prop.verifiedTier || classifyVerifiedTier(prop);
+  return Boolean(tier && prop.pickTierLabel === PICK_TIER_VERIFIED);
 }
 
 export function highestProbabilityLabel(prop = {}) {
   const tier = prop.verifiedTier || classifyVerifiedTier(prop);
-  if (tier) return `Verified Play · Tier ${tier}`;
-  return qualifiesAsHighestProbabilityPick(prop) ? "Highest Probability Pick" : "Top Research Candidate";
+  if (isVerifiedHighestProbabilityPick(prop)) {
+    return tier ? `Verified Play · Tier ${tier}` : "Verified Play";
+  }
+  return "Research Candidate";
 }

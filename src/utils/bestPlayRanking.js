@@ -25,6 +25,7 @@ import {
   compareWeightedBestPlays,
   computeWeightedBestPlayScore,
 } from "./bestPlayRankingScore.js";
+import { enrichPickDirectionFields, resolveProjectionLeanDisplay } from "./pickDirectionAudit.js";
 import { isPitcherStrikeoutMarket } from "./topMlbPlaysRanking.js";
 import { isMlbPitcherMarket } from "../modules/mlbPitcherData.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
@@ -83,13 +84,12 @@ export function resolvePlayConfidenceLabel(games = 0) {
   return "LOW";
 }
 
-/** OVER when projection > line; UNDER when projection < line. */
+/** OVER/UNDER/PASS from projection vs line — never from platform side. */
 export function resolveLeanDirection(prop = {}) {
-  const projection = resolveProjectionValue(prop);
-  const line = Number(prop.line);
-  if (projection == null || !Number.isFinite(line) || line <= 0) return null;
-  if (Math.abs(projection - line) < 0.04) return "PASS";
-  return projection > line ? "OVER" : "UNDER";
+  const lean = resolveProjectionLeanDisplay(prop);
+  if (lean === "Higher") return "OVER";
+  if (lean === "Lower") return "UNDER";
+  return "PASS";
 }
 
 /** Magnitude of projection vs line — always positive for playable leans. */
@@ -245,10 +245,17 @@ export function enrichBestPlayRankingFields(prop = {}) {
     verifiedTier,
     marketContext,
   });
+  const directed = enrichPickDirectionFields({
+    ...explained,
+    projection,
+    projectedValue: projection ?? prop.projectedValue,
+    edge,
+    edgePercent,
+  });
 
   const statSpecificMissing = projection == null && resolvePropSport(prop) === "MLB";
   return {
-    ...explained,
+    ...directed,
     projection,
     projectedValue: projection ?? prop.projectedValue,
     ...(statSpecificMissing
