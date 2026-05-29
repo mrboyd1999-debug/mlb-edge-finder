@@ -1,32 +1,45 @@
 import { memo } from "react";
 
-function PropPipelineCounters({ counts = null }) {
+function PropPipelineCounters({ counts = null, compact = false }) {
   if (!counts) return null;
   const {
-    fetched = 0,
+    raw = counts.fetched ?? 0,
     normalized = 0,
-    rendered = 0,
-    filteredOut = 0,
-    withProjections = 0,
+    projected = counts.withProjections ?? counts.projected ?? 0,
     verified = 0,
-    filteredMissingProjection = 0,
-    filteredLowConfidence = 0,
-    filteredWeakEdge = 0,
+    rendered = 0,
+    prizepicksFetch = 0,
+    underdogFetch = 0,
+    fallbackMode = null,
+    failureReason = "",
+    bottleneckStage = null,
   } = counts;
-  const hasBestPlaysAudit =
-    filteredMissingProjection + filteredLowConfidence + filteredWeakEdge > 0;
+
+  if (compact) {
+    return (
+      <p className="prop-pipeline-counters" aria-label="Prop pipeline counts">
+        Raw: {raw} · Normalized: {normalized} · Projected: {projected} · Verified: {verified} · Rendered:{" "}
+        {rendered}
+      </p>
+    );
+  }
+
   return (
-    <p className="prop-pipeline-counters" aria-label="Prop pipeline counts">
-      Props: {fetched} fetched · {normalized} normalized · {withProjections} with projections · {verified}{" "}
-      verified · {rendered} rendered · {filteredOut} filtered out
-      {hasBestPlaysAudit ? (
-        <>
-          {" "}
-          · Best Plays: {filteredMissingProjection} missing projection · {filteredLowConfidence} low confidence ·{" "}
-          {filteredWeakEdge} weak edge
-        </>
+    <div className="prop-pipeline-counters-block" aria-label="Prop pipeline counts">
+      <p className="prop-pipeline-counters">
+        Raw: {raw} · Normalized: {normalized} · Projected: {projected} · Verified: {verified} · Rendered: {rendered}
+      </p>
+      <p className="prop-pipeline-counters prop-pipeline-counters--meta">
+        Providers — PrizePicks: {prizepicksFetch} · Underdog: {underdogFetch}
+        {fallbackMode ? ` · Fallback: ${fallbackMode}` : ""}
+      </p>
+      {failureReason ? (
+        <p className="compact-form-notice prop-pipeline-counters__failure" role="status">
+          {bottleneckStage ? `[${bottleneckStage}] ` : ""}
+          {failureReason}
+        </p>
       ) : null}
-    </p>
+    </div>
   );
 }
 

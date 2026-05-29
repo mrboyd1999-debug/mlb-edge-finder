@@ -1,11 +1,20 @@
 import { memo, useMemo } from "react";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
 import PlayerImage from "./PlayerImage.jsx";
+import PropPipelineCounters from "./PropPipelineCounters.jsx";
 import { groupPicksByPlayer } from "../utils/playerPropGroups.js";
 import { passesVerifiedBestPlaysFilter } from "../utils/bestPlaysPipelineDebug.js";
 import { PICK_TIER_VERIFIED } from "../utils/conservativeProjection.js";
 
-function BestPlaysTab({ sections = [], loading = false, onOpen, filterDiagnostics = null }) {
+function BestPlaysTab({
+  sections = [],
+  loading = false,
+  loadingStage = "",
+  pipelineDiagnostics = null,
+  loadError = "",
+  onOpen,
+  filterDiagnostics = null,
+}) {
   const { playerGroups, debugBanner } = useMemo(() => {
     const section =
       (sections || []).find((row) => row.id === "highest-probability") ||
@@ -42,19 +51,32 @@ function BestPlaysTab({ sections = [], loading = false, onOpen, filterDiagnostic
     return { playerGroups: groupPicksByPlayer(verifiedPicks), debugBanner: banner };
   }, [sections, filterDiagnostics]);
 
+  const failureReason =
+    pipelineDiagnostics?.failureReason || loadError || filterDiagnostics?.error || "";
+
   if (loading) {
-    return <p className="compact-empty">Loading MLB projection candidates…</p>;
+    return (
+      <div className="compact-tab-panel">
+        <p className="compact-empty">
+          Loading MLB projection candidates…{loadingStage ? ` (${loadingStage})` : ""}
+        </p>
+        {failureReason ? <p className="compact-form-notice">{failureReason}</p> : null}
+        <PropPipelineCounters counts={pipelineDiagnostics} compact />
+      </div>
+    );
   }
 
   const totalPicks = playerGroups.reduce((sum, group) => sum + group.props.length, 0);
 
   return (
     <div className="compact-tab-panel">
+      <PropPipelineCounters counts={pipelineDiagnostics} compact />
       {debugBanner ? (
         <p className="compact-form-notice" style={{ marginBottom: 12 }}>
           {debugBanner}
         </p>
       ) : null}
+      {failureReason && !totalPicks ? <p className="compact-form-notice">{failureReason}</p> : null}
       {!totalPicks ? (
         <p className="compact-empty">No verified plays yet. Check MLB Props for research candidates.</p>
       ) : (

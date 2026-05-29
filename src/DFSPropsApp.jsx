@@ -212,10 +212,11 @@ import {
   buildUnderdogParserFailureMessage,
   hasAnyProviderProps,
 } from "./services/providerOrchestration.js";
-import { enrichPropsWithSportsData } from "./services/propSportsDataEnrichment.js";
+import { enrichPropsWithSportsData, generateMlbPropsFromSportsData } from "./services/propSportsDataEnrichment.js";
 import { mergeProjectionsOntoProps } from "./services/mlb/projectionMergePipeline.js";
 import { buildLiveRenderBoard, filterPlatformProps, isFakeOrFallbackProp } from "./utils/livePropRender.js";
-import { resolvePipelineProjectionStats } from "./utils/projectionPipelineStatus.js";
+import { resolvePipelineProjectionStats, countPropsWithProjections } from "./utils/projectionPipelineStatus.js";
+import { buildPipelineDiagnostics, logPipelineDiagnostics } from "./utils/propPipelineDiagnostics.js";
 import { PICK_TIER_RESEARCH, PICK_TIER_VERIFIED } from "./utils/conservativeProjection.js";
 import { resolveIngestionFallback } from "./services/ingestionFallback.js";
 import { writeLastGoodBoard, readLastGoodBoard, boardFromLastGood } from "./services/lastGoodBoardCache.js";
@@ -1374,8 +1375,27 @@ function buildCoreBoardPreview({ rawProps = [], allDisplayProps = [], sourceStat
   };
 }
 
-async function injectSportsDataIfProvidersEmpty() {
-  return null;
+async function injectSportsDataIfProvidersEmpty({ mergedCount = 0, sourceStatus, debugInfo } = {}) {
+  if (mergedCount > 0) return null;
+  const generated = await generateMlbPropsFromSportsData({ limit: 48 });
+  debugInfo.providerFetchCounts = {
+    ...(debugInfo.providerFetchCounts || {}),
+    sportsdataGenerated: generated.generatedCount || 0,
+  };
+  if (!generated.props?.length) {
+    debugInfo.sportsDataFallbackAttempt = {
+      count: 0,
+      warnings: generated.warnings || ["SportsDataIO returned no MLB props"],
+    };
+    return null;
+  }
+  sourceStatus.SportsDataIO = sourceStatus.SportsDataIO || "Connected";
+  debugInfo.ingestionFallback = "sportsdata-immediate";
+  debugInfo.sportsDataFallbackAttempt = {
+    count: generated.generatedCount,
+    warnings: generated.warnings || [],
+  };
+  return { rawProps: generated.props, source: "sportsdata-immediate" };
 }
 
 const MLB_STATS_ENRICHMENT_FAILED = "MLB projection stats failed to load";
@@ -1788,6 +1808,10 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     underdogProps: underdogResult?.parsedProps || underdogResult?.props || [],
     prizePicksProps: prizePicksResult?.props || [],
   });
+  debugInfo.providerFetchCounts = {
+    prizepicks: Number(prizePicksResult?.props?.length || 0),
+    underdog: Number(underdogResult?.parsedProps?.length || underdogResult?.props?.length || 0),
+  };
   if (mergedProviderProps.length) {
     rawProps.length = 0;
     rawProps.push(...ensureMlbSportOnProps(mergedProviderProps));
@@ -2636,7 +2660,10 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   if (!qualifiedReadyProps.length && allDisplayProps.length) {
     qualifiedReadyProps = allDisplayProps.slice(0, RENDER_LIMITS.readyToBet);
   }
-  const liveRenderResult = buildLiveRenderBoard(allDisplayProps);
+  const allowFallbackRender = Boolean(
+    pipelineFallback && /sportsdata/i.test(String(debugInfo.ingestionFallback || ""))
+  );
+  const liveRenderResult = buildLiveRenderBoard(allDisplayProps, { allowFallbackProps: allowFallbackRender });
   const acceptedPropsForRender = liveRenderResult.props;
   debugInfo.pipelineRenderCounts = liveRenderResult.counts;
   const modelSignalMap = buildModelSignalMap(filterVerifiedSportsbookProps(qualBoards.allDisplayable));
@@ -2799,6 +2826,21 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     ingestionSource: debugInfo.ingestionFallback || "live",
   });
   dumpDebugGlobals("fetchDFSProps");
+
+  const pipelineDiagnostics = buildPipelineDiagnostics({
+    rawProps,
+    allDisplayProps,
+    scoredProps: displayProps,
+    acceptedPropsForRender,
+    liveRenderCounts: liveRenderResult.counts,
+    pipelineAudit,
+    debugInfo,
+    prizePicksResult,
+    underdogResult,
+    pipelineFallback,
+  });
+  debugInfo.pipelineDiagnostics = pipelineDiagnostics;
+  logPipelineDiagnostics(pipelineDiagnostics);
 
   if (!MLB_ONLY_MODE) {
     const perfSettled = await providerWave.awaitAllForPerf();
@@ -2966,9 +3008,11 @@ export default function DFSPropsApp() {
     setPipelineStageCounts(scopedBoard.pipelineStageCounts || scopedBoard.debugInfo?.pipelineStageCounts || {});
     setWatchlist(scopedBoard.watchlist || []);
     setNearQualification(scopedBoard.nearQualification || []);
-    let renderAccepted = buildLiveRenderBoard(
-      masterProps.length ? masterProps : boardProps
-    ).props;
+    let renderAccepted = buildLiveRenderBoard(masterProps.length ? masterProps : boardProps, {
+      allowFallbackProps: Boolean(
+        scopedBoard.pipelineFallback && /sportsdata/i.test(String(scopedBoard.debugInfo?.ingestionFallback || ""))
+      ),
+    }).props;
     if (!renderAccepted.length && boardProps.length) {
       renderAccepted = boardProps.filter((prop) => !isFakeOrFallbackProp(prop)).slice(0, RENDER_LIMITS.readyToBet);
     }
@@ -3397,7 +3441,15 @@ export default function DFSPropsApp() {
     }
     return rows;
   }, [scoredDisplayProps, sport, platform, marketQuickFilter]);
-  const liveRenderBoard = useMemo(() => buildLiveRenderBoard(allDisplayProps), [allDisplayProps]);
+  const liveRenderBoard = useMemo(
+    () =>
+      buildLiveRenderBoard(allDisplayProps, {
+        allowFallbackProps: Boolean(
+          pipelineFallback && /sportsdata/i.test(String(debugInfo?.ingestionFallback || ""))
+        ),
+      }),
+    [allDisplayProps, pipelineFallback, debugInfo?.ingestionFallback]
+  );
   const boardDisplayProps = useMemo(() => liveRenderBoard.props, [liveRenderBoard]);
 
   const prizePicksFeedProps = useMemo(() => {
@@ -3600,18 +3652,55 @@ export default function DFSPropsApp() {
       debugPipelineCounts: debugInfo?.pipelineRenderCounts,
       liveRenderCounts: base,
     });
+    const diagnostics = debugInfo?.pipelineDiagnostics
+      ? {
+          ...debugInfo.pipelineDiagnostics,
+          verified: Number(
+            audit?.pipelineCounts?.filtered ??
+              debugInfo.pipelineDiagnostics.verified ??
+              projectionStats.verifiedCount
+          ),
+          rendered: Number(base.rendered ?? debugInfo.pipelineDiagnostics.rendered ?? 0),
+          projected: Number(
+            debugInfo.pipelineDiagnostics.projected ??
+              projectionStats.projectionCount ??
+              countPropsWithProjections(allDisplayProps)
+          ),
+        }
+      : buildPipelineDiagnostics({
+          rawProps: allDisplayProps,
+          allDisplayProps,
+          scoredProps: allDisplayProps,
+          acceptedPropsForRender: liveRenderBoard.props,
+          liveRenderCounts: base,
+          pipelineAudit,
+          debugInfo,
+          filterDiagnostics: audit,
+          pipelineFallback,
+        });
     return {
       ...base,
-      withProjections: projectionStats.projectionCount,
-      normalized: projectionStats.normalizedCount,
-      verified: projectionStats.verifiedCount,
+      ...diagnostics,
+      fetched: diagnostics.raw,
+      withProjections: diagnostics.projected,
+      normalized: diagnostics.normalized || projectionStats.normalizedCount,
+      verified: diagnostics.verified,
       projectionStats,
       filteredMissingProjection: audit?.filteredMissingProjection || 0,
       filteredLowConfidence: audit?.filteredLowConfidence || 0,
       filteredWeakEdge: audit?.filteredWeakEdge || 0,
       filteredOut: audit?.filteredOut || base.filteredOut,
     };
-  }, [liveRenderBoard, topMlbPlayBoard, allDisplayProps, debugInfo?.pipelineRenderCounts]);
+  }, [
+    liveRenderBoard,
+    topMlbPlayBoard,
+    allDisplayProps,
+    debugInfo?.pipelineRenderCounts,
+    debugInfo?.pipelineDiagnostics,
+    debugInfo,
+    pipelineAudit,
+    pipelineFallback,
+  ]);
   const curatedSportPicks = useMemo(() => {
     const primary = resolveMlbStreakPicks(
       streakSportBoards,
@@ -4241,6 +4330,9 @@ export default function DFSPropsApp() {
       setAppView={setAppView}
       apiHealth={apiHealth}
       loading={loading}
+      loadingStage={loadingStage}
+      pipelineDiagnostics={debugInfo?.pipelineDiagnostics || pipelineRenderCounts}
+      loadError={error}
       refreshBlocked={refreshBlocked}
       refreshCountdownSec={refreshCountdownSec}
       onRefresh={() => loadProps({ force: true })}

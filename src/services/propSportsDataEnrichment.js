@@ -99,11 +99,9 @@ export async function enrichPropsWithSportsData(props = []) {
 
 const SDIO_FALLBACK_MARKETS = [
   { statType: "Pitcher Strikeouts", field: "PitchingStrikeouts", lineFactor: 0.92, role: "pitcher" },
-  { statType: "Hits", field: "Hits", lineFactor: 0.88, role: "hitter" },
-  { statType: "Total Bases", field: "TotalBases", lineFactor: 0.9, role: "hitter" },
+  { statType: "Hits Allowed", field: "HitsAllowed", altField: "PitchingHits", lineFactor: 0.92, role: "pitcher" },
   { statType: "Hits+Runs+RBIs", field: "HitsRunsRBIs", lineFactor: 0.9, role: "hitter" },
-  { statType: "RBIs", field: "RunsBattedIn", lineFactor: 0.88, role: "hitter" },
-  { statType: "Runs", field: "Runs", lineFactor: 0.88, role: "hitter" },
+  { statType: "Total Bases", field: "TotalBases", lineFactor: 0.9, role: "hitter" },
 ];
 
 function roundHalf(value) {
@@ -139,9 +137,15 @@ function buildProjectionRows(snapshot = {}) {
   return { rows: [], source: "none", warnings: ["SportsDataIO returned no projection rows."] };
 }
 
-function projectionValueForMarket(row = {}, field = "", source = "projections", statType = "") {
+function projectionValueForMarket(row = {}, field = "", source = "projections", statType = "", altField = "") {
   if (source === "season-stats") return perGameProjection(row, statType || field);
-  return Number(row?.[field]);
+  const primary = Number(row?.[field]);
+  if (Number.isFinite(primary) && primary > 0) return primary;
+  if (altField) {
+    const alt = Number(row?.[altField]);
+    if (Number.isFinite(alt) && alt > 0) return alt;
+  }
+  return NaN;
 }
 
 function inferOpponent(row = {}, games = []) {
@@ -192,7 +196,7 @@ export async function generateMlbPropsFromSportsData({ limit = 48 } = {}) {
     const team = row.Team || "";
     const opponent = inferOpponent(row, games);
     SDIO_FALLBACK_MARKETS.forEach((market) => {
-      const projection = projectionValueForMarket(row, market.field, rowSource, market.statType);
+      const projection = projectionValueForMarket(row, market.field, rowSource, market.statType, market.altField);
       if (!Number.isFinite(projection) || projection <= 0) return;
       const line = Math.max(0.5, roundHalf(projection * market.lineFactor));
       props.push({

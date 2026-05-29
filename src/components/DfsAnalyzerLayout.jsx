@@ -20,6 +20,9 @@ function DfsAnalyzerLayout({
   setAppView,
   apiHealth,
   loading,
+  loadingStage,
+  pipelineDiagnostics,
+  loadError,
   refreshBlocked,
   refreshCountdownSec,
   onRefresh,
@@ -95,6 +98,9 @@ function DfsAnalyzerLayout({
           <BestPlaysTab
             sections={topMlbPlayBoard?.sections || []}
             loading={loading}
+            loadingStage={loadingStage}
+            pipelineDiagnostics={pipelineDiagnostics}
+            loadError={loadError}
             onOpen={onOpenProp}
             onSave={onSavePick}
             filterDiagnostics={topMlbPlayBoard?.filterDiagnostics}

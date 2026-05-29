@@ -32,9 +32,10 @@ export function preparePropForRender(prop = {}) {
   };
 }
 
-export function buildLiveRenderBoard(allDisplayProps = []) {
+export function buildLiveRenderBoard(allDisplayProps = [], options = {}) {
+  const allowFallback = Boolean(options.allowFallbackProps);
   const fetched = Array.isArray(allDisplayProps) ? allDisplayProps.length : 0;
-  const real = (allDisplayProps || []).filter((prop) => !isFakeOrFallbackProp(prop));
+  const real = (allDisplayProps || []).filter((prop) => allowFallback || !isFakeOrFallbackProp(prop));
   const mlb = filterResolvedSportProps(real, "MLB", { selectedSportTab: "MLB" });
   const prepared = mlb.map(preparePropForRender);
   const rendered = prepared.filter(isMinimalRenderableProp);
