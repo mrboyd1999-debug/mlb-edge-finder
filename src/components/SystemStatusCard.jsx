@@ -97,8 +97,12 @@ function resolveLineFeedStatus(feed = {}) {
     return { status: "Connected", detail: statusLabel || "Feed OK" };
   }
 
-  if (Number(feed.parsedCount) > 0 && active === 0) {
-    return { status: "Failed", detail: "Returned 0 usable props" };
+  if (Number(feed.rawCount) > 0 && Number(feed.parsedCount) > 0 && active === 0) {
+    return { status: "Degraded", detail: "API returned data but 0 usable MLB props after filters" };
+  }
+
+  if (Number(feed.rawCount) > 0 && active === 0) {
+    return { status: "Degraded", detail: "API returned data but parser produced 0 usable props" };
   }
 
   if (timedOut) {

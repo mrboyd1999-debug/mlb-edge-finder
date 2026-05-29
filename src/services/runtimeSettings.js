@@ -23,6 +23,20 @@ export const USER_SETTING_DEFS = [
     envKeys: ["VITE_SPORTSDATA_API_KEY", "SPORTSDATA_API_KEY"],
     legacyStorageKeys: [],
   },
+  {
+    key: "VITE_PRIZEPICKS_PROXY_URL",
+    label: "PrizePicks Proxy URL",
+    type: "url",
+    placeholder: "https://your-provider.example/prizepicks",
+    envKeys: [
+      "VITE_PRIZEPICKS_PROXY_URL",
+      "VITE_PRIZEPICKS_PROXY",
+      "PRIZEPICKS_PROXY_URL",
+      "PRIZEPICKS_API_PROXY",
+      "PROXY_BASE_URL",
+    ],
+    legacyStorageKeys: ["PRIZEPICKS_PROXY_URL"],
+  },
 ];
 
 /** Hidden from Settings UI — still resolved from env/localStorage for ingestion/debug. */
@@ -33,14 +47,6 @@ export const HIDDEN_SETTING_DEFS = [
     type: "secret",
     placeholder: "Optional — reserved for future stat enrichment",
     envKeys: ["VITE_STATMUSE_API_KEY"],
-  },
-  {
-    key: "VITE_PRIZEPICKS_PROXY_URL",
-    label: "PrizePicks Proxy URL",
-    type: "url",
-    placeholder: "https://your-provider.example/prizepicks",
-    envKeys: ["VITE_PRIZEPICKS_PROXY_URL", "VITE_PRIZEPICKS_PROXY", "PRIZEPICKS_PROXY_URL"],
-    legacyStorageKeys: ["PRIZEPICKS_PROXY_URL"],
   },
   {
     key: "VITE_UNDERDOG_PROXY_URL",

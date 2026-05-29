@@ -45,19 +45,28 @@ export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyRe
   if (typeof preflight === "function") {
     const pre = preflight();
     if (pre?.skip) {
-      console.log(`${logKey} FAILED`);
+      const notConfigured = Boolean(pre.notConfigured) || /not configured|proxy url missing/i.test(String(pre.reason || ""));
+      console.log(notConfigured ? `${logKey} NOT CONFIGURED` : `${logKey} SKIPPED`);
       console.log(`${logKey} TIME MS`, 0);
+      if (notConfigured) {
+        console.info(`${logKey} detail:`, pre.reason || "Not configured");
+      }
       return {
         label,
         skipped: true,
         result:
           typeof emptyResult === "function"
-            ? emptyResult({ timedOut: false, error: true, message: pre.reason || pre.status || "Not configured" })
+            ? emptyResult({
+                timedOut: false,
+                error: true,
+                notConfigured,
+                message: pre.reason || pre.status || "Not configured",
+              })
             : { error: true, notConfigured: true, status: pre.status || "Not configured", warnings: [pre.reason] },
         durationMs: 0,
         timedOut: false,
         error: true,
-        notConfigured: true,
+        notConfigured,
         statusReason: pre.reason || "",
       };
     }
@@ -199,7 +208,7 @@ export function emptyPrizePicksProviderResult({ timedOut = false, message = "", 
     status: notConfigured ? "Not configured" : "Failed",
     props: [],
     lineSourceBadge: "",
-    warnings: [message || (notConfigured ? "PrizePicks proxy URL missing or invalid." : timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "PrizePicks fetch failed")],
+    warnings: [message || (notConfigured ? "PrizePicks proxy URL missing" : timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "PrizePicks fetch failed")],
     error: true,
     timedOut,
     notConfigured,

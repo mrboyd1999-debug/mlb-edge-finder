@@ -1,3 +1,5 @@
+import { canonicalMarketKey } from "./marketNormalization.js";
+
 /** Normalize DFS player names for cross-source stat matching. */
 export function normalizePlayerName(name = "") {
   return String(name || "")
@@ -63,36 +65,36 @@ export function statProfileKey(prop) {
 /**
  * Resolve a stat profile from a Map keyed by statProfileKey or legacy keys.
  */
+function propStatCanonical(prop = {}) {
+  return canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
+}
+
+function profileStatCanonical(profile = {}) {
+  return canonicalMarketKey(profile.statType || profile.market || "");
+}
+
 export function findStatProfile(statsMap, prop) {
   if (!(statsMap instanceof Map) || !prop) return null;
 
+  const propStatKey = propStatCanonical(prop);
+  if (!propStatKey) return null;
+
   const primary = statProfileKey(prop);
   const direct = statsMap.get(primary);
-  if (direct && !direct.fallback && !direct.sparse) return direct;
+  if (direct && !direct.fallback && !direct.sparse && profileStatCanonical(direct) === propStatKey) {
+    return direct;
+  }
 
   let best = null;
   let bestScore = 0;
   const propSport = String(prop.sport || "").toLowerCase();
-  const propStat = String(prop.statType || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
 
   statsMap.forEach((profile) => {
     if (!profile || profile.fallback || profile.sparse) return;
+    if (profileStatCanonical(profile) !== propStatKey) return;
     const profileSport = String(profile.sport || "").toLowerCase();
     if (propSport && profileSport && profileSport !== propSport) return;
     if (!playerNamesMatch(prop.playerName, profile.playerName)) return;
-
-    const profileStat = String(profile.statType || profile.market || "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "");
-    const statMatch =
-      !propStat ||
-      !profileStat ||
-      profileStat === propStat ||
-      (profileStat.includes(propStat) && propStat.length >= 4) ||
-      (propStat.includes(profileStat) && profileStat.length >= 4);
-    if (!statMatch) return;
 
     const score =
       playerNameTokens(prop.playerName).length +
@@ -104,5 +106,5 @@ export function findStatProfile(statsMap, prop) {
     }
   });
 
-  return best || (direct && !direct.fallback ? direct : null);
+  return best;
 }

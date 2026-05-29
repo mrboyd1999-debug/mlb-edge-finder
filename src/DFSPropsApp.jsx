@@ -1043,6 +1043,23 @@ function applySourceResult({
   debugInfo,
 }) {
   const platform = label === "PrizePicks" ? "PrizePicks" : label === "Underdog" ? "Underdog" : label;
+
+  if (label === "PrizePicks" && (result.notConfigured || result.status === "Not configured")) {
+    const detail = result.warnings?.[0] || "PrizePicks proxy URL missing";
+    sourceStatus.PrizePicks = "Not configured";
+    if (!sourceWarnings.includes(detail)) sourceWarnings.push(detail);
+    debugInfo.sources.PrizePicks = {
+      ...debugInfo.sources.PrizePicks,
+      status: "Not configured",
+      connectionTier: CONNECTION_TIERS.DEGRADED,
+      apiStatus: "Not configured",
+      message: detail,
+      lineSourceBadge: HEALTH_STATES.NOT_CONFIGURED,
+      timedOut: false,
+    };
+    return false;
+  }
+
   const incoming = result.parsedProps?.length ? result.parsedProps : result.props;
   const props = (incoming || []).map((prop) =>
     normalizePropShape(
@@ -1295,7 +1312,7 @@ function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderd
             message:
               message ||
               (notConfigured
-                ? "PrizePicks proxy URL missing or invalid."
+                ? "PrizePicks proxy URL missing"
                 : timedOut
                   ? `PrizePicks timed out after ${PRIZEPICKS_PROVIDER_TIMEOUT_MS / 1000}s`
                   : "PrizePicks fetch failed"),
@@ -1570,9 +1587,22 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     }
   }
 
-  if (wantsPrizePicks && !ppEntry.skipped) {
+  if (wantsPrizePicks) {
     prizePicksResult = ppEntry.result;
-    if (prizePicksResult && !prizePicksResult.error) {
+    if (ppEntry.skipped && ppEntry.notConfigured) {
+      const detail = ppEntry.statusReason || prizePicksResult?.warnings?.[0] || "PrizePicks proxy URL missing";
+      sourceStatus.PrizePicks = "Not configured";
+      if (!sourceWarnings.includes(detail)) sourceWarnings.push(detail);
+      debugInfo.sources.PrizePicks = {
+        ...debugInfo.sources.PrizePicks,
+        status: "Not configured",
+        connectionTier: CONNECTION_TIERS.DEGRADED,
+        apiStatus: "Not configured",
+        message: detail,
+        lineSourceBadge: HEALTH_STATES.NOT_CONFIGURED,
+        timedOut: false,
+      };
+    } else if (prizePicksResult && !prizePicksResult.error && !prizePicksResult.notConfigured) {
       console.info("[DFS Source Audit] PrizePicks result", {
         status: prizePicksResult.status,
         props: prizePicksResult.props?.length || 0,
@@ -1591,25 +1621,30 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         debugInfo,
       });
     } else {
-      sourceStatus.PrizePicks = ppEntry.timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "Failed";
-      console.warn("[DFS Source Audit] PrizePicks load failed or timed out", {
+      const notConfigured = Boolean(prizePicksResult?.notConfigured || prizePicksResult?.status === "Not configured");
+      const detail =
+        prizePicksResult?.warnings?.[0] ||
+        ppEntry.statusReason ||
+        (ppEntry.timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "Could not load PrizePicks lines.");
+      sourceStatus.PrizePicks = notConfigured ? "Not configured" : ppEntry.timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "Failed";
+      console.warn("[DFS Source Audit] PrizePicks load issue", {
+        notConfigured,
         timedOut: ppEntry.timedOut,
         durationMs: ppEntry.durationMs,
+        detail,
       });
-      if (!rawProps.length) {
-        sourceFailures.push(
-          sourceFailureMessage(
-            prizePicksResult?.warnings?.[0] || "Could not load PrizePicks lines.",
-            new Error(prizePicksResult?.warnings?.[0] || "PrizePicks fetch failed")
-          )
-        );
+      if (!rawProps.length && !notConfigured) {
+        sourceFailures.push(sourceFailureMessage(detail, new Error(detail)));
       }
+      if (notConfigured && !sourceWarnings.includes(detail)) sourceWarnings.push(detail);
       debugInfo.sources.PrizePicks = {
         ...debugInfo.sources.PrizePicks,
-        status: "Failed",
-        apiStatus: "Failed",
-        message: prizePicksResult?.warnings?.[0] || "Could not load PrizePicks lines.",
-        lineSourceBadge: "",
+        status: notConfigured ? "Not configured" : "Failed",
+        connectionTier: notConfigured ? CONNECTION_TIERS.DEGRADED : CONNECTION_TIERS.FAILED,
+        apiStatus: notConfigured ? "Not configured" : "Failed",
+        message: detail,
+        lineSourceBadge: notConfigured ? HEALTH_STATES.NOT_CONFIGURED : "",
+        timedOut: Boolean(ppEntry.timedOut),
       };
     }
   }

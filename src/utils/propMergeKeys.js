@@ -3,6 +3,13 @@
 import { normalizePlayerName } from "./playerNames.js";
 import { canonicalMarketKey } from "./marketNormalization.js";
 
+/** True only when two stat labels resolve to the same canonical market (no cross-market reuse). */
+export function statTypesAlign(statA = "", statB = "") {
+  const left = canonicalMarketKey(statA);
+  const right = canonicalMarketKey(statB);
+  return Boolean(left && right && left === right);
+}
+
 export function normalizeMergeId(value = "") {
   return String(value ?? "")
     .trim()

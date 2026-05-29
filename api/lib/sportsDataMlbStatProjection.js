@@ -32,11 +32,12 @@ export function resolveSportsDataPropLabel(prop = {}) {
   if (/home run/.test(lower)) return "Home Runs";
   if (/\brbi/.test(lower)) return "RBIs";
   if (/hits?\s*\+\s*runs|hrr|hits runs rbis/.test(lower)) return "Hits+Runs+RBIs";
-  if (/(^|\s)runs(\s|$)|runs scored/.test(lower) && !/rbi/.test(lower)) return "Runs";
-  if (/hit/.test(lower) && !/allowed|pitch/.test(lower)) return "Hits";
-  if (/walk/.test(lower)) return "Walks";
   if (/hits allowed/.test(lower)) return "Hits Allowed";
-  if (/earned run/.test(lower)) return "Earned Runs";
+  if (/earned runs? allowed|earned run/.test(lower)) return "Earned Runs";
+  if (/walks allowed|walks? allowed/.test(lower)) return "Walks Allowed";
+  if (/(^|\s)runs(\s|$)|runs scored/.test(lower) && !/rbi|earned|allowed/.test(lower)) return "Runs";
+  if (/hit/.test(lower) && !/allowed|pitch/.test(lower)) return "Hits";
+  if (/walk/.test(lower) && !/allowed/.test(lower)) return "Walks";
   if (/fantasy/.test(lower)) return "Fantasy Score";
   if (/pitcher out|outs recorded/.test(lower)) return "Pitcher Outs";
 
@@ -87,6 +88,7 @@ export function safeProjection(prop = {}, stat = null) {
       projection = (stat?.PitchingStrikeouts || stat?.Strikeouts || 0) / safeGames;
       break;
     case "Walks":
+    case "Walks Allowed":
       projection = (stat?.Walks || stat?.BaseOnBalls || 0) / safeGames;
       break;
     case "Fantasy Score":
@@ -144,6 +146,7 @@ export function resolveRawStatFromSeasonRow(stat = {}, propLabel = "") {
     case "Total Bases":
       return pickField(stat, ["TotalBases", "TotalBase"]);
     case "Walks":
+    case "Walks Allowed":
       return pickField(stat, ["Walks", "BaseOnBalls"]);
     case "Fantasy Score":
       return pickField(stat, ["FantasyPointsDraftKings", "FantasyPoints", "FantasyPointsFanDuel"]);

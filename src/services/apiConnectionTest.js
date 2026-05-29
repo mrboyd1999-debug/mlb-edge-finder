@@ -1,4 +1,5 @@
-import { getOddsApiKey, getProxyUrl, getSportsDataApiKey, getStatmuseApiKey } from "../config/apiConfig.js";
+import { getOddsApiKey, getProxyUrl, getRawProxyUrl, getSportsDataApiKey, getStatmuseApiKey } from "../config/apiConfig.js";
+import { normalizeProxyUrl } from "../utils/providerProxy.js";
 import {
   buildOddsApiProxyUrl,
   logOddsApiExchange,
@@ -186,23 +187,53 @@ function classifyLineSourceProbe(result, { requiresKey = false, keyConfigured = 
 
 async function testPrizePicks() {
   const proxyUrl = getProxyUrl("prizepicks");
-  const routes = [withProxyRoute("/api/prizepicks", proxyUrl), "/api/prizepicks"];
-  let lastResult = null;
-  for (const route of routes) {
-    lastResult = await probeFetch(route);
-    if (lastResult.ok) break;
+  const rawProxy = getRawProxyUrl("prizepicks");
+  if (!proxyUrl) {
+    const invalid = Boolean(rawProxy) && !normalizeProxyUrl(rawProxy);
+    const message = invalid
+      ? "PrizePicks proxy URL is invalid. Set VITE_PRIZEPICKS_PROXY_URL in Settings."
+      : "PrizePicks proxy URL missing";
+    return {
+      provider: "PrizePicks",
+      route: "/api/prizepicks",
+      proxyConfigured: false,
+      ok: false,
+      timedOut: false,
+      status: CONNECTION_STATUS.NOT_CONFIGURED,
+      message,
+      settingsLine: CONNECTION_MESSAGES.NOT_CONFIGURED,
+      displayStatus: CONNECTION_MESSAGES.NOT_CONFIGURED,
+      preview: message,
+      lastError: message,
+    };
   }
+
+  const route = withProxyRoute("/api/prizepicks?league_id=2", proxyUrl);
+  console.info("[API Health] PrizePicks probe", { requestUrl: route });
+  const lastResult = await probeFetch(route);
   const classified = classifyLineSourceProbe(lastResult, { sourceId: SOURCE_IDS.PRIZEPICKS });
+  const rawCount = Array.isArray(lastResult.payload?.data) ? lastResult.payload.data.length : 0;
+  const parsedCount = Array.isArray(lastResult.payload?.props) ? lastResult.payload.props.length : 0;
+  console.info("[API Health] PrizePicks probe result", {
+    responseStatus: lastResult.status,
+    rawResponseCount: rawCount,
+    parserOutputCount: parsedCount,
+    ok: lastResult.ok,
+  });
   const state = getSourceState(SOURCE_IDS.PRIZEPICKS);
   return {
     provider: "PrizePicks",
-    route: routes[0],
-    proxyConfigured: Boolean(proxyUrl),
+    route,
+    proxyConfigured: true,
+    rawResponseCount: rawCount,
+    parsedCount,
     ...classified,
     ...lastResult,
     lastSuccessfulFetchAt: state.lastSuccessfulFetchAt || "",
     requestCount: state.requestCount || 0,
-    lastError: state.lastError || (classified.status === CONNECTION_STATUS.FAILED ? lastResult.preview : ""),
+    lastError:
+      state.lastError ||
+      (classified.status === CONNECTION_STATUS.FAILED ? lastResult.preview : classified.message || ""),
     cooldownRemainingMs: Math.max(0, Number(state.cooldownUntil || 0) - Date.now()),
   };
 }

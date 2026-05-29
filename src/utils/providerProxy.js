@@ -1,4 +1,6 @@
-import { getRawProxyUrl } from "../services/runtimeSettings.js";
+import { getProxyUrl, getRawProxyUrl } from "../services/runtimeSettings.js";
+
+export { getProxyUrl, getRawProxyUrl };
 
 /** Validate and normalize external provider proxy URLs (PrizePicks / Underdog). */
 
@@ -40,14 +42,41 @@ export function assessProxyUrl(rawValue = "") {
   };
 }
 
-/** Line-feed provider config — invalid URL blocks fetch; missing URL uses direct /api route. */
+/** PrizePicks ingestion requires a valid proxy URL — never hit /api when missing (avoids silent timeouts). */
+export function getPrizePicksPreflight() {
+  const envKeys = ["VITE_PRIZEPICKS_PROXY_URL", "PRIZEPICKS_PROXY_URL", "VITE_PRIZEPICKS_PROXY"];
+  const assessment = assessProxyUrl(getRawProxyUrl("PrizePicks"));
+
+  if (assessment.invalid) {
+    return {
+      skip: true,
+      notConfigured: true,
+      status: "Not configured",
+      reason: `PrizePicks proxy URL is invalid. Set ${envKeys[0]} in Settings.`,
+    };
+  }
+
+  if (!assessment.configured) {
+    return {
+      skip: true,
+      notConfigured: true,
+      status: "Not configured",
+      reason: "PrizePicks proxy URL missing",
+    };
+  }
+
+  return { skip: false, useDirect: false, proxyUrl: assessment.normalized };
+}
+
+/** Underdog: invalid URL blocks fetch; missing URL uses direct /api route. */
 export function getLineProviderPreflight(platform = "") {
   const key = String(platform || "").toLowerCase();
-  const envKeys =
-    key.includes("prize") || key.includes("pp")
-      ? ["VITE_PRIZEPICKS_PROXY_URL", "PRIZEPICKS_PROXY_URL"]
-      : ["VITE_UNDERDOG_PROXY_URL", "UNDERDOG_PROXY_URL"];
-  const label = key.includes("prize") ? "PrizePicks" : "Underdog";
+  if (key.includes("prize") || key.includes("pp")) {
+    return getPrizePicksPreflight();
+  }
+
+  const envKeys = ["VITE_UNDERDOG_PROXY_URL", "UNDERDOG_PROXY_URL"];
+  const label = "Underdog";
   const assessment = assessProxyUrl(getRawProxyUrl(label));
 
   if (assessment.invalid) {

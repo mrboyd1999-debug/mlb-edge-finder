@@ -46,10 +46,7 @@ import {
   withSourceRequestLock,
 } from "./sourceRateLimit.js";
 import { getProxyUrl, getRawProxyUrl } from "../config/apiConfig.js";
-import {
-  assessProxyUrl,
-  PRIZEPICKS_PROXY_DISABLED_LOG,
-} from "../utils/providerProxy.js";
+import { assessProxyUrl } from "../utils/providerProxy.js";
 import { recordProviderResponse } from "../utils/rawResponseDebug.js";
 import {
   buildPlayerAttributeMap,
@@ -121,10 +118,14 @@ export async function fetchPrizePicksProps({ sport = "all", statType = "all", si
 }
 
 async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", signal } = {}) {
+  const proxyUrl = getProxyUrl("prizepicks");
   const proxyAssessment = assessProxyUrl(getRawProxyUrl("prizepicks"));
-  if (proxyAssessment.invalid) {
-    console.error(PRIZEPICKS_PROXY_DISABLED_LOG);
-    return disabledPrizePicksProviderResult("Invalid PrizePicks proxy URL — provider disabled.");
+  if (!proxyUrl) {
+    const message = proxyAssessment.invalid
+      ? "PrizePicks proxy URL is invalid. Set VITE_PRIZEPICKS_PROXY_URL in Settings."
+      : "PrizePicks proxy URL missing";
+    console.info("[PrizePicks]", message, "— fetch skipped");
+    return notConfiguredPrizePicksProviderResult(message);
   }
 
   if (isSourceInCooldown(SOURCE_IDS.PRIZEPICKS)) {
@@ -151,12 +152,29 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
     headers: lineFeedJsonHeaders(),
   };
 
-  for (const endpoint of prizePicksEndpoints()) {
+  const endpoints = prizePicksEndpoints();
+  console.info("[PrizePicks] proxy configured — starting fetch", {
+    requestUrl: absoluteUrl(endpoints[0]),
+    proxyHost: (() => {
+      try {
+        return new URL(proxyUrl).host;
+      } catch {
+        return "(invalid)";
+      }
+    })(),
+  });
+
+  for (const endpoint of endpoints) {
     if (signal?.aborted) break;
     const parsed = await fetchPrizePicksEndpoint(endpoint, fetchInit, { signal });
     attempts.push(parsed.attempt);
 
     if (parsed.ok && parsed.payload) {
+      console.info("[PrizePicks] response", {
+        requestUrl: parsed.attempt?.url || absoluteUrl(endpoint),
+        responseStatus: parsed.attempt?.status ?? null,
+        rawResponseCount: rawPrizePicksRecordCount(parsed.payload),
+      });
       const isFallback = parsed.payload?.fallback === true;
       const isRateLimited = Boolean(
         parsed.rateLimited || (parsed.payload?.rateLimited && !isFallback) || parsed.payload?.upstreamStatus === 429
@@ -188,6 +206,15 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
       const badgeForParse = isFallback ? "CACHED" : "LIVE";
       const { props: normalizedProps, audit } = normalizePrizePicksPayload(parsed.payload, sport, statType, badgeForParse);
       const usableCount = countUsableProps(normalizedProps);
+      const usableMlbCount = MLB_ONLY_MODE
+        ? normalizedProps.filter((prop) => String(prop.sport || "").toUpperCase() === "MLB").length
+        : usableCount;
+      console.info("[PrizePicks] parser output", {
+        parserOutputCount: normalizedProps.length,
+        usablePropsCount: usableCount,
+        usableMlbPropsCount: usableMlbCount,
+        pipelineFetched: audit.fetched,
+      });
       const hasUsable = usableCount > 0;
       const lineSourceBadge = isFallback ? (hasUsable ? "CACHED" : "EMPTY") : hasUsable ? "LIVE" : "EMPTY";
 
@@ -201,6 +228,8 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
       }
 
       logPipelineAudit(isFallback ? "PrizePicks-cached" : "PrizePicks", audit);
+      const apiSucceeded = !parsed.payload?.error;
+      const rawCount = rawPrizePicksRecordCount(parsed.payload);
       const warnings = [];
       if (isFallback) {
         warnings.push(parsed.payload.message || PRIZEPICKS_RATE_LIMIT_MESSAGE);
@@ -209,7 +238,11 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
       } else if (setupWarning) {
         warnings.push(setupWarning);
       }
-      if (!hasUsable) warnings.push(EMPTY_SOURCE_MESSAGE);
+      if (!hasUsable && apiSucceeded && rawCount > 0) {
+        warnings.push(EMPTY_SOURCE_MESSAGE);
+      } else if (!hasUsable && !isFallback) {
+        warnings.push(rawCount > 0 ? EMPTY_SOURCE_MESSAGE : "PrizePicks returned no projection rows.");
+      }
       if (parsed.htmlError) warnings.push(PRIZEPICKS_HTML_BANNER);
 
       recordProviderResponse("prizepicks", {
@@ -222,9 +255,19 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
         message: warnings[0] || "",
       });
 
+      const pipelineStatus = isFallback
+        ? hasUsable
+          ? "Cached"
+          : "Empty"
+        : hasUsable
+          ? "Full"
+          : apiSucceeded && rawCount > 0
+            ? "Empty"
+            : "Empty";
+
       return {
         source: "PrizePicks",
-        status: isFallback ? (hasUsable ? "Cached" : "Empty") : hasUsable ? "Full" : "Empty",
+        status: pipelineStatus,
         props: normalizedProps,
         pipelineAudit: audit,
         warnings,
@@ -428,26 +471,25 @@ async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
 
 function prizePicksEndpoints() {
   const proxyUrl = getProxyUrl("prizepicks");
+  if (!proxyUrl) return [];
   const url = new URL("/api/prizepicks", window.location.origin);
   if (MLB_ONLY_MODE) url.searchParams.set("league_id", PRIZEPICKS_MLB_LEAGUE_ID);
-  if (proxyUrl) {
-    url.searchParams.set("proxyUrl", proxyUrl);
-  } else {
-    console.info("[PrizePicks] proxy url: not configured — using direct /api/prizepicks route");
-  }
+  url.searchParams.set("proxyUrl", proxyUrl);
   return [url.pathname + url.search];
 }
 
-function disabledPrizePicksProviderResult(message) {
+function notConfiguredPrizePicksProviderResult(message = "PrizePicks proxy URL missing") {
   return {
     source: "PrizePicks",
-    status: "Failed",
+    status: "Not configured",
     props: [],
     lineSourceBadge: "NOT CONFIGURED",
-    warnings: [message || "PrizePicks provider disabled."],
+    warnings: [message],
     error: true,
+    notConfigured: true,
     disabled: true,
-    debug: buildDebug("/api/prizepicks", "Not configured", 0, 0, message || "PrizePicks provider disabled.", []),
+    timedOut: false,
+    debug: buildDebug("", "Not configured", 0, 0, message, []),
   };
 }
 

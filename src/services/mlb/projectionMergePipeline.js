@@ -3,22 +3,41 @@
  */
 
 import { computeProjectionForProp, findSeasonStatRow, resolveSportsDataPropLabel } from "../../../api/lib/sportsDataMlbStatProjection.js";
-import { buildStatFallbackProjection, computeConservativeStatProjection } from "./statBasedFallbackProjection.js";
 import { findStatProfile } from "../playerStats.js";
 import { normalizePlayerName } from "../../utils/playerNames.js";
 import {
-  buildPropMergeKey,
   buildPlayerStatKey,
   buildPropLookupKeys,
   extractPlayerId,
   normalizeMergeId,
   normalizeMergeStatType,
+  statTypesAlign,
 } from "../../utils/propMergeKeys.js";
 import { resolvePropSport } from "../../utils/mlbOnlyMode.js";
+
+function propMergeKey(prop = {}) {
+  return buildPlayerStatKey(prop.playerName, prop.statType || prop.market, extractPlayerId(prop));
+}
 
 function attachProjectionFields(prop = {}, projectionRow = {}) {
   const projection = Number(projectionRow.projection ?? projectionRow.projectedValue);
   if (!Number.isFinite(projection) || projection <= 0) return prop;
+
+  const mergeKey = projectionRow.mergeKey || propMergeKey(prop);
+  const projectionForStatType =
+    projectionRow.propLabel || prop.statType || prop.market || prop.propType || "";
+
+  if (!statTypesAlign(prop.statType || prop.market, projectionForStatType)) {
+    return {
+      ...prop,
+      projection: null,
+      projectedValue: null,
+      projectionStatus: "missing",
+      projectionSource: "stat-type-mismatch",
+      projectionMerged: false,
+    };
+  }
+
   return {
     ...prop,
     projection,
@@ -27,27 +46,24 @@ function attachProjectionFields(prop = {}, projectionRow = {}) {
     playerId: prop.playerId ?? projectionRow.playerId ?? extractPlayerId(prop) ?? prop.sportsDataPlayerId,
     sportsDataPlayerId: prop.sportsDataPlayerId ?? projectionRow.playerId,
     projectionSource: projectionRow.projectionSource || prop.projectionSource || "merged",
+    projectionForStatType,
     edge:
       projectionRow.edge ??
       (Number.isFinite(Number(prop.line)) ? Number((projection - prop.line).toFixed(3)) : prop.edge),
     confidenceScore: projectionRow.confidence ?? prop.confidenceScore,
-    mergeKey: projectionRow.mergeKey || prop.mergeKey,
+    mergeKey,
     projectionMerged: true,
+    projectionStatus: "matched",
   };
 }
 
 function resolveProfileProjectionRow(profile = {}, prop = {}) {
   if (!profile) return null;
 
-  let projection = Number(profile.projection ?? profile.projectedValue);
-  if (!Number.isFinite(projection) || projection <= 0) {
-    projection = computeConservativeStatProjection({
-      last5Avg: profile.last5Average,
-      seasonAvg: profile.seasonAverage,
-      line: prop.line ?? profile.line,
-    });
-  }
+  const profileStat = profile.statType || profile.market || "";
+  if (!statTypesAlign(prop.statType || prop.market, profileStat)) return null;
 
+  const projection = Number(profile.projection ?? profile.projectedValue);
   if (!Number.isFinite(projection) || projection <= 0) return null;
 
   const sourceKey = String(profile.projectionSource || "").toLowerCase();
@@ -59,10 +75,11 @@ function resolveProfileProjectionRow(profile = {}, prop = {}) {
   return {
     projection,
     projectionSource,
+    propLabel: profileStat,
     team: profile.team || prop.team,
     playerId: profile.playerId ?? extractPlayerId(prop),
     confidence: profile.confidence ?? profile.confidenceScore,
-    mergeKey: buildPlayerStatKey(profile.playerName || prop.playerName, profile.statType || prop.statType, profile.playerId),
+    mergeKey: buildPlayerStatKey(profile.playerName || prop.playerName, profileStat, profile.playerId),
   };
 }
 
@@ -83,7 +100,7 @@ export function buildStatsMapProjectionLookup(statsMap = null) {
       playerName: profile.playerName,
       statType: profile.statType || profile.market,
       playerId: profile.playerId,
-      sport: profile.sport || resolvePropSport(propLike) || "",
+      sport: profile.sport || "MLB",
       line: profile.line,
     };
     const row = resolveProfileProjectionRow(profile, propLike);
@@ -96,15 +113,10 @@ export function buildStatsMapProjectionLookup(statsMap = null) {
 
 export function buildSeasonProjectionLookup(seasonStats = []) {
   const byKey = new Map();
-  const byPlayerId = new Map();
-  const byPlayerName = new Map();
 
   (seasonStats || []).forEach((row) => {
     if (!row?.Name) return;
-    const playerId = normalizeMergeId(row.PlayerID);
     const playerName = normalizePlayerName(row.Name);
-    byPlayerId.set(playerId, row);
-    if (!byPlayerName.has(playerName)) byPlayerName.set(playerName, row);
 
     const statLabels = [
       "Hits",
@@ -114,10 +126,12 @@ export function buildSeasonProjectionLookup(seasonStats = []) {
       "Total Bases",
       "Strikeouts",
       "Walks",
+      "Walks Allowed",
       "Fantasy Score",
       "Hits+Runs+RBIs",
       "Pitcher Outs",
       "Earned Runs",
+      "Earned Runs Allowed",
       "Stolen Bases",
       "Doubles",
       "Singles",
@@ -146,33 +160,36 @@ export function buildSeasonProjectionLookup(seasonStats = []) {
     });
   });
 
-  return { byKey, byPlayerId, byPlayerName, seasonCount: seasonStats.length, projectionCount: byKey.size };
+  return { byKey, seasonCount: seasonStats.length, projectionCount: byKey.size };
 }
 
 function resolveFromKeyMap(prop = {}, keyMap = null) {
   if (!(keyMap instanceof Map) || !keyMap.size) return null;
   for (const key of buildPropLookupKeys(prop)) {
     const row = keyMap.get(key);
-    if (row?.projection > 0) return row;
+    if (!row?.projection || row.projection <= 0) continue;
+    if (row.propLabel && !statTypesAlign(prop.statType || prop.market, row.propLabel)) continue;
+    if (row.mergeKey && row.mergeKey !== propMergeKey(prop) && row.propLabel) continue;
+    return row;
   }
   return null;
 }
 
 function resolveLookupRow(prop = {}, lookup = {}) {
+  const fromKey = resolveFromKeyMap(prop, lookup.byKey);
+  if (fromKey?.projection > 0) return fromKey;
+
   const playerName = prop.playerName || prop.player || "";
-  const playerId = extractPlayerId(prop);
-  const statKey = buildPlayerStatKey(playerName, prop.statType || prop.market, playerId);
+  const statKey = propMergeKey(prop);
+  const propLabel = resolveSportsDataPropLabel(prop);
+  if (!propLabel) return null;
 
-  if (lookup.byKey?.has(statKey)) return lookup.byKey.get(statKey);
-
-  const statRow =
-    (playerId && lookup.byPlayerId?.get(playerId)) ||
-    lookup.byPlayerName?.get(normalizePlayerName(playerName)) ||
-    findSeasonStatRow(lookup.seasonStats || [], { playerName, playerId: prop.playerId ?? prop.sportsDataPlayerId });
-
+  const statRow = findSeasonStatRow(lookup.seasonStats || [], {
+    playerName,
+    playerId: prop.playerId ?? prop.sportsDataPlayerId,
+  });
   if (!statRow) return null;
 
-  const propLabel = resolveSportsDataPropLabel(prop);
   const computed = computeProjectionForProp({ ...prop, team: prop.team || statRow.Team }, [statRow], {
     logDebug: false,
   });
@@ -182,18 +199,7 @@ function resolveLookupRow(prop = {}, lookup = {}) {
       projectionSource: computed.projectionSource || "sportsdataio-season",
       team: computed.team || statRow.Team,
       playerId: statRow.PlayerID,
-      propLabel,
-      mergeKey: statKey,
-    };
-  }
-
-  const fallback = buildStatFallbackProjection({ ...prop, team: prop.team || statRow.Team }, statRow, propLabel);
-  if (fallback?.projection > 0) {
-    return {
-      projection: fallback.projection,
-      projectionSource: fallback.projectionSource,
-      team: statRow.Team,
-      playerId: statRow.PlayerID,
+      propLabel: computed.propLabel || propLabel,
       mergeKey: statKey,
     };
   }
@@ -225,8 +231,16 @@ export function mergeProjectionsOntoProps(props = [], context = {}) {
   let matchCount = 0;
 
   const merged = (props || []).map((prop) => {
+    const mergeKey = propMergeKey(prop);
     const existing = Number(prop.projection ?? prop.projectedValue);
-    if (Number.isFinite(existing) && existing > 0) {
+    const existingOk =
+      prop.projectionMerged &&
+      Number.isFinite(existing) &&
+      existing > 0 &&
+      (!prop.mergeKey || prop.mergeKey === mergeKey) &&
+      statTypesAlign(prop.statType || prop.market, prop.projectionForStatType || prop.statType);
+
+    if (existingOk) {
       matchCount += 1;
       if (matchedSamples.length < 5) {
         matchedSamples.push({
@@ -234,32 +248,51 @@ export function mergeProjectionsOntoProps(props = [], context = {}) {
           statType: prop.statType,
           projection: existing,
           source: prop.projectionSource || "pre-existing",
-          mergeKey: buildPlayerStatKey(prop.playerName, prop.statType, extractPlayerId(prop)),
+          mergeKey,
         });
       }
       return prop;
     }
 
-    const fromStatsMap = resolveStatsMapProjection(prop, context.statsMap, statsLookup);
-    const row = fromStatsMap || resolveFromKeyMap(prop, lookup.byKey) || resolveLookupRow(prop, lookup);
+    const baseProp =
+      Number.isFinite(existing) && existing > 0 && !existingOk
+        ? {
+            ...prop,
+            projection: null,
+            projectedValue: null,
+            projectionMerged: false,
+            projectionSource: prop.projectionSource,
+          }
+        : prop;
+
+    const fromStatsMap = resolveStatsMapProjection(baseProp, context.statsMap, statsLookup);
+    const row = fromStatsMap || resolveLookupRow(baseProp, lookup);
     if (!row) {
-      unmatchedKeys.push(buildPlayerStatKey(prop.playerName, prop.statType, extractPlayerId(prop)));
-      return prop;
+      unmatchedKeys.push(mergeKey);
+      return {
+        ...baseProp,
+        projection: null,
+        projectedValue: null,
+        projectionStatus: "missing",
+        projectionMerged: false,
+      };
     }
 
     matchCount += 1;
-    const next = attachProjectionFields(prop, row);
+    const next = attachProjectionFields(baseProp, row);
     if (matchedSamples.length < 5) {
       matchedSamples.push({
         playerName: next.playerName,
         statType: next.statType,
         projection: next.projection,
         source: next.projectionSource,
-        mergeKey: row.mergeKey || buildPlayerStatKey(prop.playerName, prop.statType, extractPlayerId(prop)),
+        mergeKey: row.mergeKey || mergeKey,
       });
     }
     return next;
   });
+
+  logProjectionMergeDiagnostics(merged, { limit: 20 });
 
   const debug = {
     rawCount: props.length,
@@ -349,6 +382,20 @@ export function buildPipelineMergeDiagnostics(props = [], mergeDebug = {}) {
       projectionSource: prop.projectionSource,
     })),
   };
+}
+
+/** Debug: player, statType, projection source, value — first N merged props. */
+export function logProjectionMergeDiagnostics(props = [], { limit = 20 } = {}) {
+  const samples = (props || []).slice(0, limit).map((prop) => ({
+    player: prop.playerName || prop.player,
+    statType: prop.statType || prop.market,
+    projectionSource: prop.projectionSource || "none",
+    projection: prop.projection ?? prop.projectedValue ?? null,
+    mergeKey: prop.mergeKey || propMergeKey(prop),
+    projectionForStatType: prop.projectionForStatType || null,
+  }));
+  console.info("[projection-merge] first props", samples);
+  return samples;
 }
 
 export function logPipelineMergeDiagnostics(label, props = [], mergeDebug = {}) {

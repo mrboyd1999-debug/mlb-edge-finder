@@ -42,6 +42,7 @@ function cleanUserDraft(rawDraft = {}) {
     ...rawDraft,
     VITE_ODDS_API_KEY: cleanApiKey(rawDraft.VITE_ODDS_API_KEY),
     VITE_SPORTSDATA_API_KEY: cleanApiKey(rawDraft.VITE_SPORTSDATA_API_KEY),
+    VITE_PRIZEPICKS_PROXY_URL: String(rawDraft.VITE_PRIZEPICKS_PROXY_URL || "").trim(),
   };
 }
 
@@ -84,6 +85,7 @@ export default function SettingsPanel({
     const parts = ["API keys saved."];
     if (cleaned.VITE_ODDS_API_KEY) parts.push(`Odds key: ${cleaned.VITE_ODDS_API_KEY.length} chars`);
     if (cleaned.VITE_SPORTSDATA_API_KEY) parts.push(`SportsDataIO key: ${cleaned.VITE_SPORTSDATA_API_KEY.length} chars`);
+    if (cleaned.VITE_PRIZEPICKS_PROXY_URL) parts.push("PrizePicks proxy URL saved");
     const oddsWarning = getOddsKeyLengthWarning(cleaned.VITE_ODDS_API_KEY);
     if (oddsWarning) parts.push(oddsWarning);
     return parts.join(" ");
@@ -191,10 +193,12 @@ export default function SettingsPanel({
 
   const oddsDef = USER_SETTING_DEFS.find((def) => def.key === "VITE_ODDS_API_KEY");
   const sdDef = USER_SETTING_DEFS.find((def) => def.key === "VITE_SPORTSDATA_API_KEY");
+  const ppProxyDef = USER_SETTING_DEFS.find((def) => def.key === "VITE_PRIZEPICKS_PROXY_URL");
   const cleanedOddsDraft = cleanApiKey(draft[oddsDef.key]);
   const cleanedSdDraft = cleanApiKey(draft[sdDef.key]);
   const oddsSaved = Boolean(saved[oddsDef.key]?.trim());
   const sdSaved = Boolean(saved[sdDef.key]?.trim());
+  const ppProxySaved = Boolean(saved[ppProxyDef.key]?.trim());
   const oddsKeyWarning = getOddsKeyLengthWarning(cleanedOddsDraft);
   const sdRow = findProviderRow(connectionReport?.results || [], "SportsDataIO");
 
@@ -262,6 +266,28 @@ export default function SettingsPanel({
           endpointTests={sdRow?.endpointTests || []}
           fallbackNote={sdRow?.mlbStatsFallbackNote || ""}
         />
+
+        <div className="settings-api-row">
+          <label className="settings-api-row__field" style={styles.selectLabel}>
+            <span className="settings-api-row__head">
+              <span>{ppProxyDef.label}</span>
+              {ppProxySaved ? <span className="settings-api-row__saved">Saved</span> : null}
+            </span>
+            <input
+              style={styles.textInput}
+              type="url"
+              autoComplete="off"
+              value={draft[ppProxyDef.key] || ""}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, [ppProxyDef.key]: event.target.value }))
+              }
+              placeholder={ppProxyDef.placeholder}
+            />
+            <span className="settings-api-row__hint">
+              Required for PrizePicks lines. Env: VITE_PRIZEPICKS_PROXY_URL or PRIZEPICKS_PROXY_URL.
+            </span>
+          </label>
+        </div>
 
         <div className="settings-api-actions">
           <button type="button" style={styles.secondaryButton} onClick={handleSave}>
