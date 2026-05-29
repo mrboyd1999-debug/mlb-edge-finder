@@ -6,8 +6,8 @@ import { resolveProjectionValue, computeAbsoluteProjectionEdge } from "./project
 import {
   computeDisplayPropMetrics,
   evaluateMlbPlayability,
-  hasMajorResearchGaps,
-  isConfidenceAvailable,
+  formatEdgeDisplay,
+  isVerifiedPlay,
 } from "./conservativeProjection.js";
 import { computeStandardEdge, computeStandardEdgePercent } from "./standardPropMetrics.js";
 import {
@@ -168,10 +168,8 @@ export function enrichBestPlayRankingFields(prop = {}) {
   const edgeMagnitude = Number.isFinite(Number(edge)) ? Math.abs(Number(edge)) : resolveEdgeMagnitude(prop);
   const edgeScore = edgeMagnitude;
   const verifiedProbability = playability.probabilityScore ?? metrics.probabilityScore;
-  const numericConfidence = finiteOr(prop.confidenceScore ?? prop.confidence, NaN);
-  const confidence = isConfidenceAvailable(prop)
-    ? Math.round(numericConfidence)
-    : resolvePlayConfidenceLabel(games);
+  const displayConfidence = playability.displayConfidenceScore;
+  const edgeLabels = playability.edgeDisplay ?? formatEdgeDisplay({ ...prop, edge, edgePercent, line });
   const direction =
     leanDirection && leanDirection !== "PASS"
       ? leanDirection
@@ -180,20 +178,25 @@ export function enrichBestPlayRankingFields(prop = {}) {
           ? "OVER"
           : "UNDER"
         : null;
-  const verified =
-    playability.isDisplayPlayable &&
-    projection != null &&
-    isConfidenceAvailable(prop) &&
-    Number(prop.dataQualityScore ?? 0) >= 70 &&
-    !hasMajorResearchGaps(prop);
-  const rankScore = computeBestPlayRankScore({
+  const enrichedProp = {
     ...prop,
+    projection,
+    probabilityScore: verifiedProbability,
+    displayConfidenceScore: displayConfidence,
+    pickTierLabel: playability.pickTierLabel,
+    pickTierRank: playability.pickTierRank,
+  };
+  const verified = isVerifiedPlay(enrichedProp, {
+    probability: verifiedProbability,
+    confidence: displayConfidence ?? prop.confidenceScore ?? prop.confidence,
+  });
+  const rankScore = computeBestPlayRankScore({
+    ...enrichedProp,
     edgeScore,
     edge,
     edgePercent,
     verifiedProbability,
-    probabilityScore: verifiedProbability,
-    confidence: numericConfidence,
+    confidence: displayConfidence ?? prop.confidenceScore ?? prop.confidence,
   });
   const marketContext = buildMarketContextNote(prop);
 
@@ -210,13 +213,18 @@ export function enrichBestPlayRankingFields(prop = {}) {
     edgeScore,
     verifiedProbability,
     probabilityScore: verifiedProbability,
-    confidence: Number.isFinite(numericConfidence) ? numericConfidence : confidence,
-    confidenceScore: Number.isFinite(numericConfidence) ? numericConfidence : undefined,
+    displayConfidenceScore: displayConfidence,
+    confidence: displayConfidence ?? prop.confidenceScore ?? prop.confidence,
+    confidenceScore: displayConfidence ?? prop.confidenceScore ?? prop.confidence,
+    rawEdgeLabel: edgeLabels.rawEdgeLabel,
+    displayEdgeLabel: edgeLabels.displayEdgeLabel,
     verified,
     isDisplayPlayable: playability.isDisplayPlayable,
     displayResearchOnly: playability.displayResearchOnly,
     bettingLabel: playability.bettingLabel,
     pickTierLabel: playability.pickTierLabel,
+    pickTierRank: playability.pickTierRank,
+    researchReasons: playability.researchReasons,
     whyNotPlayable: playability.whyNotPlayable,
     direction,
     rankScore,

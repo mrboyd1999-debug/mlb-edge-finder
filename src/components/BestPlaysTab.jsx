@@ -1,8 +1,10 @@
 import { memo, useMemo } from "react";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
+import PlayerImage from "./PlayerImage.jsx";
+import { groupPicksByPlayer } from "../utils/playerPropGroups.js";
 
 function BestPlaysTab({ sections = [], loading = false, onOpen, filterDiagnostics = null }) {
-  const { picks, debugBanner } = useMemo(() => {
+  const { playerGroups, debugBanner } = useMemo(() => {
     const section =
       (sections || []).find((row) => row.id === "highest-probability") ||
       (sections || []).find((row) => row.id === "best-plays") ||
@@ -29,12 +31,14 @@ function BestPlaysTab({ sections = [], loading = false, onOpen, filterDiagnostic
         .join(" | ");
     }
 
-    return { picks: sectionPicks, debugBanner: banner };
+    return { playerGroups: groupPicksByPlayer(sectionPicks), debugBanner: banner };
   }, [sections, filterDiagnostics]);
 
   if (loading) {
     return <p className="compact-empty">Loading MLB projection candidates…</p>;
   }
+
+  const totalPicks = playerGroups.reduce((sum, group) => sum + group.props.length, 0);
 
   return (
     <div className="compact-tab-panel">
@@ -43,17 +47,34 @@ function BestPlaysTab({ sections = [], loading = false, onOpen, filterDiagnostic
           {debugBanner}
         </p>
       ) : null}
-      {!picks.length ? (
+      {!totalPicks ? (
         <p className="compact-empty">No verified MLB props available yet.</p>
       ) : (
         <section className="compact-section">
           <div className="compact-section__head">
             <h2>MLB Projection Candidates</h2>
-            <p>Verified MLB props with real projections, edge, and confidence above threshold.</p>
+            <p>Verified plays rank first, then probability, confidence, and data quality.</p>
           </div>
-          <div className="compact-card-list">
-            {picks.map((prop, index) => (
-              <BestPlayRowCard key={prop.id || `hp-${index}`} prop={prop} rank={index + 1} onOpen={onOpen} />
+          <div className="compact-card-list player-prop-group-list">
+            {playerGroups.map((group) => (
+              <div key={group.playerName} className="player-prop-group">
+                <header className="player-prop-group__head">
+                  <PlayerImage prop={group.props[0]} />
+                  <div>
+                    <h3 className="player-prop-group__name">{group.playerName}</h3>
+                    <p className="player-prop-group__count">
+                      {group.props.length} prop{group.props.length === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                </header>
+                <ul className="player-prop-group__props">
+                  {group.props.map((prop, index) => (
+                    <li key={prop.id || `${group.playerName}-${index}`}>
+                      <BestPlayRowCard prop={prop} onOpen={onOpen} grouped />
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ))}
           </div>
         </section>

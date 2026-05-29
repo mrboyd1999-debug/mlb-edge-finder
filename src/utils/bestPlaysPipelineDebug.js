@@ -8,8 +8,8 @@ import { resolveEdgeMagnitude } from "./bestPlayRanking.js";
 import {
   evaluateMlbPlayability,
   computeDisplayPropMetrics,
-  hasMajorResearchGaps,
-  isConfidenceAvailable,
+  isVerifiedPlay,
+  isResearchCandidate,
 } from "./conservativeProjection.js";
 
 export const BEST_PLAYS_DEBUG_MODE = false;
@@ -17,7 +17,7 @@ export const BEST_PLAYS_DEBUG_SAMPLE_SIZE = 0;
 export const PROJECTION_JOIN_DEBUG = import.meta.env?.DEV === true;
 
 export const VERIFIED_MIN_PROJECTION = 0.01;
-export const VERIFIED_MIN_CONFIDENCE = 65;
+export const VERIFIED_MIN_CONFIDENCE = 75;
 export const VERIFIED_MIN_EDGE = 0.015;
 
 function resolveNumericConfidence(prop = {}) {
@@ -75,18 +75,14 @@ export function passesVerifiedBestPlaysFilter(prop = {}) {
 
   const projection = resolveBestPlayProjection(prop);
   if (projection == null || projection <= VERIFIED_MIN_PROJECTION) return false;
-  if (!isConfidenceAvailable(prop)) return false;
-  const confidence = resolveNumericConfidence(prop);
-  if (!Number.isFinite(confidence) || confidence < VERIFIED_MIN_CONFIDENCE) return false;
-  if (Number(prop.dataQualityScore ?? 0) < 70) return false;
-  if (hasMajorResearchGaps(prop)) return false;
+  if (isResearchCandidate(prop)) return false;
   const edge = resolveEdgeMagnitude(prop);
   if (!Number.isFinite(edge) || edge < VERIFIED_MIN_EDGE) return false;
   if (prop.projectionUnavailable || prop.unverifiedGradeBlocked || prop.isFallbackProjection) return false;
 
   const metrics = computeDisplayPropMetrics({ ...prop, projection });
-  const playability = evaluateMlbPlayability(prop, metrics);
-  return playability.isDisplayPlayable;
+  const playability = evaluateMlbPlayability({ ...prop, projection }, metrics);
+  return isVerifiedPlay({ ...prop, ...playability }, { probability: playability.probabilityScore });
 }
 
 export function resolveBestPlayInvalidReason(prop = {}) {
@@ -102,19 +98,18 @@ export function resolveBestPlayInvalidReason(prop = {}) {
   if (projection == null || projection <= 0) {
     return prop.projectionMissingReason || prop.sportsDataMatchReason || "missing projection";
   }
-  if (!isConfidenceAvailable(prop)) return "confidence unavailable";
+  if (isResearchCandidate(prop)) {
+    const metrics = computeDisplayPropMetrics({ ...prop, projection });
+    const playability = evaluateMlbPlayability(prop, metrics);
+    return playability.researchReasons?.[0] || "research candidate";
+  }
   const confidence = resolveNumericConfidence(prop);
   if (!Number.isFinite(confidence) || confidence < VERIFIED_MIN_CONFIDENCE) return "low confidence";
-  if (Number(prop.dataQualityScore ?? 0) < 70) return "low data quality";
-  if (hasMajorResearchGaps(prop)) return "research gaps";
   const edge = resolveEdgeMagnitude(prop);
   if (!Number.isFinite(edge) || edge < VERIFIED_MIN_EDGE) return "weak edge";
   if (prop.projectionUnavailable || prop.unverifiedGradeBlocked || prop.isFallbackProjection) {
     return "invalid projection quality";
   }
-  const metrics = computeDisplayPropMetrics({ ...prop, projection });
-  const playability = evaluateMlbPlayability(prop, metrics);
-  if (!playability.isDisplayPlayable) return "research candidate";
   return "";
 }
 

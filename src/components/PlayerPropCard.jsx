@@ -182,18 +182,28 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
   const confRaw =
     noVerifiedPlay || passPlay
       ? null
-      : prop.calibratedConfidence != null && prop.calibratedConfidence !== prop.confidenceScore
-        ? prop.calibratedConfidence
-        : prop.confidenceScore ?? prop.confidence ?? null;
+      : prop.displayConfidenceScore ??
+        (prop.calibratedConfidence != null && prop.calibratedConfidence !== prop.confidenceScore
+          ? prop.calibratedConfidence
+          : prop.confidenceScore ?? prop.confidence ?? null);
   const confDisplay =
     confRaw != null && Number(confRaw) > 0 ? Math.round(Number(confRaw)) : null;
   const confDisplayLabel = confDisplay != null ? `${confDisplay}%` : "Unavailable";
+  const edgeLabels = prop.rawEdgeLabel
+    ? { raw: prop.rawEdgeLabel, display: prop.displayEdgeLabel }
+    : null;
   const edgePct = Number(prop.edgePercent);
-  const edgeDisplay = Number.isFinite(edgePct)
-    ? `${edgePct > 0 ? "+" : ""}${Math.round(edgePct)}%`
-    : noVerifiedPlay || !Number.isFinite(Number(prop.edge))
-      ? null
-      : formatNumber(prop.edge);
+  const edgeDisplay = edgeLabels
+    ? edgeLabels.display
+    : Number.isFinite(edgePct)
+      ? `${edgePct > 0 ? "+" : ""}${Math.round(edgePct)}%`
+      : noVerifiedPlay || !Number.isFinite(Number(prop.edge))
+        ? null
+        : formatNumber(prop.edge);
+  const rawEdgeDisplay = edgeLabels?.raw ?? (Number.isFinite(Number(prop.edge)) ? formatNumber(prop.edge) : null);
+  const dqLabel = Number.isFinite(Number(prop.dataQualityScore))
+    ? `${Math.round(Number(prop.dataQualityScore))}%`
+    : "—";
   const hitChanceDisplay = noVerifiedPlay
     ? null
     : Number.isFinite(Number(prop.impliedHitChance))
@@ -435,6 +445,12 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
               </span>
               <span>
                 Conf <strong>{confDisplayLabel}</strong>
+              </span>
+              <span>
+                DQ <strong>{dqLabel}</strong>
+              </span>
+              <span>
+                Raw <strong>{rawEdgeDisplay != null ? (Number(prop.edge) > 0 ? `+${rawEdgeDisplay}` : rawEdgeDisplay) : "—"}</strong>
               </span>
               <span>
                 Edge <strong>{edgeDisplay ?? "—"}</strong>

@@ -1134,6 +1134,58 @@ body,
   }
 }
 
+.player-prop-group-list {
+  display: grid;
+  gap: 12px;
+}
+
+.player-prop-group {
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0f172a;
+  overflow: hidden;
+}
+
+.player-prop-group__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #1e293b;
+  background: #1e293b;
+}
+
+.player-prop-group__name {
+  margin: 0;
+  font-size: 15px;
+  color: #f8fafc;
+}
+
+.player-prop-group__count {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.player-prop-group__props {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.player-prop-group__props > li {
+  border-bottom: 1px solid #1e293b;
+}
+
+.player-prop-group__props > li:last-child {
+  border-bottom: none;
+}
+
+.best-play-row-card--grouped {
+  border: none !important;
+  border-radius: 0 !important;
+}
+
 .developer-debug-details {
   margin-top: 0;
 }

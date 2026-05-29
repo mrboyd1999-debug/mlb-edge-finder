@@ -11,9 +11,9 @@ import {
 import { displayFullMarketLabel } from "../utils/propLabels.js";
 import { resolveProjectionValue } from "../utils/projectionQuality.js";
 import { formatHighestProbabilitySource } from "../utils/highestProbabilityPlays.js";
-import { highestProbabilityLabel, isConfidenceAvailable } from "../utils/conservativeProjection.js";
+import { formatEdgeDisplay } from "../utils/conservativeProjection.js";
 
-function BestPlayRowCard({ prop, onOpen, rank }) {
+function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
   const enriched = withPlayerImageUrl(prop || {});
   const side = resolvePickSide(enriched);
   const sidePalette = recommendationPalette(side);
@@ -24,19 +24,25 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
   const sideLabel = side === "WATCH" ? "PASS" : formatPlatformSideLabel(enriched);
   const probability = enriched.probabilityScore ?? enriched.verifiedProbability;
   const probLabel = Number.isFinite(Number(probability)) ? `${Math.round(Number(probability))}%` : "—";
-  const confRaw = enriched.confidenceScore ?? enriched.confidence;
-  const confLabel = isConfidenceAvailable(enriched)
-    ? Number.isFinite(Number(confRaw))
-      ? `${Math.round(Number(confRaw))}%`
-      : "—"
-    : "Unavailable";
-  const edgePct = Number(enriched.edgePercent);
-  const edgeLabel = Number.isFinite(edgePct) ? `${edgePct > 0 ? "+" : ""}${Math.round(edgePct)}%` : "—";
-  const pickLabel = highestProbabilityLabel(enriched);
-  const statusLabel = enriched.pickTierLabel || enriched.bettingLabel || pickLabel;
+  const confLabel =
+    enriched.displayConfidenceScore != null
+      ? `${enriched.displayConfidenceScore}%`
+      : enriched.confidenceScore != null
+        ? `${Math.round(Number(enriched.confidenceScore))}%`
+        : "Unavailable";
+  const edgeLabels = enriched.rawEdgeLabel
+    ? { rawEdgeLabel: enriched.rawEdgeLabel, displayEdgeLabel: enriched.displayEdgeLabel }
+    : formatEdgeDisplay(enriched);
+  const statusLabel = enriched.pickTierLabel || enriched.bettingLabel || "Research Candidate";
+  const dq = Number(enriched.dataQualityScore);
+  const dqLabel = Number.isFinite(dq) ? `${Math.round(dq)}%` : "—";
   const projection = resolveProjectionValue(enriched);
   const projectionLabel = projection != null && projection > 0 ? formatNumber(projection) : "—";
   const lean = enriched.lean || sideLabel;
+  const researchHint =
+    statusLabel === "Research Candidate" && Array.isArray(enriched.researchReasons) && enriched.researchReasons.length
+      ? enriched.researchReasons[0]
+      : "";
 
   function openDetails(event) {
     event?.stopPropagation?.();
@@ -45,7 +51,7 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
 
   return (
     <article
-      className="best-play-row-card"
+      className={`best-play-row-card${grouped ? " best-play-row-card--grouped" : ""}`}
       style={styles.bestPlayRowCard}
       role="button"
       tabIndex={0}
@@ -58,25 +64,33 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
       }}
     >
       <div className="best-play-row-left" style={styles.bestPlayRowLeft}>
-        <PlayerImage prop={enriched} />
+        {!grouped ? <PlayerImage prop={enriched} /> : null}
         <div style={styles.bestPlayRowMeta}>
-          <div style={styles.bestPlayRowTopLine}>
-            {rank != null ? <span style={styles.bestPlayRowRank}>#{rank}</span> : null}
-            <h3 style={styles.bestPlayRowPlayer}>{playerName}</h3>
-            <span
-              style={{
-                ...styles.bestPlayPlatformBadge,
-                border: "1px solid #334155",
-                background: "#1e293b",
-                color: "#cbd5e1",
-              }}
-            >
-              {platform}
-            </span>
+          <div className="best-play-row-top-line">
+            {rank != null && !grouped ? <span style={styles.bestPlayRowRank}>#{rank}</span> : null}
+            {!grouped ? <h3 style={styles.bestPlayRowPlayer}>{playerName}</h3> : null}
+            {!grouped ? (
+              <span
+                style={{
+                  ...styles.bestPlayPlatformBadge,
+                  border: "1px solid #334155",
+                  background: "#1e293b",
+                  color: "#cbd5e1",
+                }}
+              >
+                {platform}
+              </span>
+            ) : (
+              <p style={{ ...styles.bestPlayRowSubline, margin: 0, fontWeight: 700 }}>{propType}</p>
+            )}
           </div>
-          <p style={styles.bestPlayRowSubline}>
-            {propType} · Line {line}
-          </p>
+          {grouped ? (
+            <p style={styles.bestPlayRowSubline}>Line {line}</p>
+          ) : (
+            <p style={styles.bestPlayRowSubline}>
+              {propType} · Line {line}
+            </p>
+          )}
           <div className="prop-card-core-metrics" style={{ marginTop: 4 }}>
             <span>
               Proj <strong>{projectionLabel}</strong>
@@ -91,12 +105,23 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
               Conf <strong>{confLabel}</strong>
             </span>
             <span>
-              Edge <strong>{edgeLabel}</strong>
+              DQ <strong>{dqLabel}</strong>
+            </span>
+            <span>
+              Raw <strong>{edgeLabels.rawEdgeLabel}</strong>
+            </span>
+            <span>
+              Edge <strong>{edgeLabels.displayEdgeLabel}</strong>
             </span>
             <span>
               Status <strong>{statusLabel}</strong>
             </span>
           </div>
+          {researchHint ? (
+            <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 11 }}>
+              {researchHint}
+            </p>
+          ) : null}
         </div>
       </div>
 

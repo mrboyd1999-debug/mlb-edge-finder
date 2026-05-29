@@ -118,19 +118,32 @@ function resolveMlbStatsStatus(stats = {}) {
   return { status: "Failed", detail: stats.lastError || stats.failureReason || "Stats API unavailable" };
 }
 
-function resolveProjectionStatus(projection = {}, statsConnected = false) {
-  const count = Number(projection.projectionCount ?? projection.count ?? 0);
-  if (projection.status === "Connected" || count > 0) {
+function resolveProjectionStatus(projection = {}, activeProjectionCount = 0) {
+  const count = Math.max(
+    Number(activeProjectionCount) || 0,
+    Number(projection.projectionCount ?? projection.count ?? 0)
+  );
+  if (count > 0) {
     return {
       status: "Connected",
-      detail: count > 0 ? `${count} projections` : "Engine ready",
+      detail: `${count} projections`,
       checkedAt: projection.lastProjectionGeneratedAt || projection.lastSuccessAt,
     };
   }
-  if (statsConnected) {
-    return { status: "Limited", detail: projection.lastError || "Waiting for projection run" };
+  if (projection.status === "Connected" && projection.lastProjectionGeneratedAt) {
+    return {
+      status: "Connected",
+      detail: "Engine ready",
+      checkedAt: projection.lastProjectionGeneratedAt || projection.lastSuccessAt,
+    };
   }
-  return { status: "Failed", detail: projection.lastError || projection.failureReason || "Projection engine idle" };
+  if (projection.lastError || projection.failureReason) {
+    return {
+      status: "Limited",
+      detail: projection.lastError || projection.failureReason || "No projections yet",
+    };
+  }
+  return { status: "Limited", detail: "No projections generated" };
 }
 
 function StatusTableRow({ provider, status, checkedAt, detail }) {
@@ -156,6 +169,7 @@ function SystemStatusCard({
   connectionReport = null,
   onConnectionReportChange,
   feedHealthContext = null,
+  activeProjectionCount = 0,
 }) {
   const meta = readSettingsMeta();
   const reportRows = connectionReport?.results || meta.lastConnectionReport || [];
@@ -193,7 +207,7 @@ function SystemStatusCard({
   const stats = mlbPipelineStatus?.mlbStatsApi || {};
   const projection = mlbPipelineStatus?.projectionApi || {};
   const statsResolved = resolveMlbStatsStatus(stats);
-  const projectionResolved = resolveProjectionStatus(projection, stats.status === "Connected");
+  const projectionResolved = resolveProjectionStatus(projection, activeProjectionCount);
 
   const rows = [
     { provider: "Odds API", ...oddsResolved, checkedAt: testedAt },

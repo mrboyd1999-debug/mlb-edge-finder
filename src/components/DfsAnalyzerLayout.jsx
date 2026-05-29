@@ -79,6 +79,7 @@ function DfsAnalyzerLayout({
         connectionReport={connectionReport}
         onConnectionReportChange={handleConnectionReportChange}
         feedHealthContext={feedHealthContext}
+        activeProjectionCount={pipelineRenderCounts?.withProjections ?? 0}
       />
 
       <ApiSetupBanner onOpenSettings={() => setAppView("settings")} />

@@ -19,6 +19,7 @@ import {
   sanitizeProjectionValue,
   PROJECTION_JOIN_DEBUG,
 } from "./bestPlaysPipelineDebug.js";
+import { comparePickRank } from "./conservativeProjection.js";
 import {
   buildMarketContextNote,
   enrichBestPlayRankingFields,
@@ -43,17 +44,7 @@ export function enrichBestPlayCandidate(prop = {}) {
 }
 
 export function sortHighestProbabilityPlays(props = []) {
-  return [...props]
-    .map((prop) => enrichBestPlayRankingFields(prop))
-    .sort((a, b) => {
-      const probA = Number(a.probabilityScore ?? a.verifiedProbability ?? 0);
-      const probB = Number(b.probabilityScore ?? b.verifiedProbability ?? 0);
-      if (probB !== probA) return probB - probA;
-      const edgeA = resolveEdgeMagnitude(a);
-      const edgeB = resolveEdgeMagnitude(b);
-      if (edgeB !== edgeA) return edgeB - edgeA;
-      return Number(b.line || 0) - Number(a.line || 0);
-    });
+  return [...props].map((prop) => enrichBestPlayRankingFields(prop)).sort(comparePickRank);
 }
 
 function summarizeInvalidReasons(enriched = []) {
@@ -93,19 +84,19 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   }).length;
   logBestPlaysPipelineStage("WITH PROJECTIONS:", withProjections);
 
-  const filtered = PROJECTION_JOIN_DEBUG
-    ? enriched.filter((p) => {
-        const proj = resolveBestPlayProjection(p);
-        return proj != null && proj > 0 && passesMinimalBestPlaysFilter(p);
-      })
-    : enriched.filter((p) => passesVerifiedBestPlaysFilter(p));
-  logBestPlaysPipelineStage("AFTER FILTER:", filtered.length);
+  const displayPool = enriched.filter((p) => {
+    const proj = resolveBestPlayProjection(p);
+    return proj != null && proj > 0 && passesMinimalBestPlaysFilter(p);
+  });
+  const verifiedCount = displayPool.filter((p) => passesVerifiedBestPlaysFilter(p)).length;
+  logBestPlaysPipelineStage("AFTER FILTER:", displayPool.length);
+  logBestPlaysPipelineStage("VERIFIED:", verifiedCount);
 
   const invalidReasons = summarizeInvalidReasons(enriched);
   logBestPlaysPipelineStage("INVALID REASONS:", invalidReasons);
   logRejectionSummary(enriched);
 
-  const ranked = sortHighestProbabilityPlays(filtered);
+  const ranked = sortHighestProbabilityPlays(displayPool);
   const seen = new Set();
   const picks = [];
 
@@ -114,7 +105,7 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
     const key = buildPropDedupeKey(prop);
     if (seen.has(key)) continue;
     seen.add(key);
-    picks.push({ ...prop, verified: true });
+    picks.push({ ...prop, verified: prop.pickTierLabel === "Verified Play" || Boolean(prop.isDisplayPlayable) });
   }
 
   if (options.withMeta) {
@@ -128,7 +119,8 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
         rawProps: rawProps.length,
         normalized: normalized.length,
         withProjections,
-        filtered: filtered.length,
+        filtered: verifiedCount,
+        displayPool: displayPool.length,
       },
     };
   }
