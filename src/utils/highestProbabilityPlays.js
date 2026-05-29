@@ -16,8 +16,8 @@ import {
   resolveBestPlayInvalidReason,
   resolveBestPlayPlayerName,
   resolveBestPlayProjection,
+  resolveBestPlayStatSpecificProjection,
   sanitizeProjectionValue,
-  PROJECTION_JOIN_DEBUG,
 } from "./bestPlaysPipelineDebug.js";
 import { comparePickRank } from "./conservativeProjection.js";
 import {
@@ -79,13 +79,13 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
 
   const enriched = normalized.map(enrichBestPlayCandidate);
   const withProjections = enriched.filter((p) => {
-    const proj = resolveBestPlayProjection(p);
+    const proj = resolveBestPlayStatSpecificProjection(p);
     return proj != null && proj > 0;
   }).length;
   logBestPlaysPipelineStage("WITH PROJECTIONS:", withProjections);
 
   const displayPool = enriched.filter((p) => {
-    const proj = resolveBestPlayProjection(p);
+    const proj = resolveBestPlayStatSpecificProjection(p);
     return proj != null && proj > 0 && passesMinimalBestPlaysFilter(p);
   });
   const verifiedPool = displayPool.filter((p) => passesVerifiedBestPlaysFilter(p));

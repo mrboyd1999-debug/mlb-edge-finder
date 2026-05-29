@@ -13,11 +13,12 @@ import { computeStandardEdge, computeStandardEdgePercent } from "./standardPropM
 import {
   passesMinimalBestPlaysFilter,
   resolveBestPlayInvalidReason,
-  resolveBestPlayProjection,
+  resolveBestPlayStatSpecificProjection,
   sanitizeProjectionValue,
 } from "./bestPlaysPipelineDebug.js";
 import { isPitcherStrikeoutMarket } from "./topMlbPlaysRanking.js";
 import { isMlbPitcherMarket } from "../modules/mlbPitcherData.js";
+import { resolvePropSport } from "./mlbOnlyMode.js";
 
 export const BEST_PLAYS_MIN_EDGE = 0.015;
 export const BEST_PLAYS_MIN_GAMES = 5;
@@ -145,7 +146,7 @@ export function buildMarketContextNote(prop = {}) {
 }
 
 export function enrichBestPlayRankingFields(prop = {}) {
-  const projection = resolveBestPlayProjection(prop);
+  const projection = resolveBestPlayStatSpecificProjection(prop);
   const line = finiteOr(prop.line, NaN);
   const games = resolveGamesPlayed(prop);
   const leanDirection = resolveLeanDirection(prop);
@@ -205,10 +206,18 @@ export function enrichBestPlayRankingFields(prop = {}) {
   });
   const marketContext = buildMarketContextNote(prop);
 
+  const statSpecificMissing = projection == null && resolvePropSport(prop) === "MLB";
   return {
     ...prop,
     projection,
     projectedValue: projection ?? prop.projectedValue,
+    ...(statSpecificMissing
+      ? {
+          projectionMissingReason:
+            prop.projectionMissingReason || "Stat-specific projection unavailable",
+          projectionUnavailable: true,
+        }
+      : {}),
     games,
     leanDirection,
     lean: metrics.lean,

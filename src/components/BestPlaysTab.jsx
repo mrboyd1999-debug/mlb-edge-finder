@@ -2,6 +2,8 @@ import { memo, useMemo } from "react";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
 import PlayerImage from "./PlayerImage.jsx";
 import { groupPicksByPlayer } from "../utils/playerPropGroups.js";
+import { passesVerifiedBestPlaysFilter } from "../utils/bestPlaysPipelineDebug.js";
+import { PICK_TIER_VERIFIED } from "../utils/conservativeProjection.js";
 
 function BestPlaysTab({ sections = [], loading = false, onOpen, filterDiagnostics = null }) {
   const { playerGroups, debugBanner } = useMemo(() => {
@@ -31,7 +33,13 @@ function BestPlaysTab({ sections = [], loading = false, onOpen, filterDiagnostic
         .join(" | ");
     }
 
-    return { playerGroups: groupPicksByPlayer(sectionPicks), debugBanner: banner };
+    const verifiedPicks = sectionPicks.filter(
+      (prop) =>
+        passesVerifiedBestPlaysFilter(prop) &&
+        prop.pickTierLabel === PICK_TIER_VERIFIED &&
+        !prop.displayResearchOnly
+    );
+    return { playerGroups: groupPicksByPlayer(verifiedPicks), debugBanner: banner };
   }, [sections, filterDiagnostics]);
 
   if (loading) {
@@ -48,7 +56,7 @@ function BestPlaysTab({ sections = [], loading = false, onOpen, filterDiagnostic
         </p>
       ) : null}
       {!totalPicks ? (
-        <p className="compact-empty">No Verified Play props yet. Check MLB Props for research candidates.</p>
+        <p className="compact-empty">No verified plays yet. Check MLB Props for research candidates.</p>
       ) : (
         <section className="compact-section">
           <div className="compact-section__head">

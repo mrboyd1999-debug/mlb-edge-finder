@@ -4362,6 +4362,7 @@ function scoreDFSProp(prop, context) {
   let dataStatus = statModel.dataStatus || null;
   let projectionConfidence = statModel.projectionConfidence ?? null;
   let isVerifiedProjection = Boolean(statModel.isVerifiedProjection);
+  let projectionMissingReason = prop.projectionMissingReason || "";
 
   let mlbVerifiedModel = null;
   let mlbPipelineTrace = null;
@@ -4488,6 +4489,8 @@ function scoreDFSProp(prop, context) {
     projectionSource = "missing";
     isVerifiedProjection = false;
     isFallbackProjection = false;
+    projectionMissingReason =
+      prop.projectionMissingReason || "Stat-specific projection unavailable";
   }
 
   if (!Number.isFinite(projection) || projection <= 0) {
@@ -4984,7 +4987,11 @@ function scoreDFSProp(prop, context) {
     playerId: prop.playerId || enriched?.playerId || enriched?.profile?.playerId || null,
     projection,
     projectedValue: Number.isFinite(projection) ? round(projection) : null,
+    projectionForStatType: prop.statType || prop.market || prop.propType || null,
     projectionSource,
+    projectionMissingReason: mlbGradeBlocked
+      ? projectionMissingReason || mlbGradeBlockReason || LIVE_LINE_PROJECTION_UNAVAILABLE
+      : prop.projectionMissingReason || "",
     projectionReasoning,
     projectionBreakdown,
     projectionLabel,

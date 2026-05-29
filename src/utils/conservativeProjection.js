@@ -5,9 +5,10 @@ import { computeStandardEdge, computeStandardEdgePercent, computeStandardPropMet
 export const PICK_TIER_VERIFIED = "Verified Play";
 export const PICK_TIER_RESEARCH = "Research Candidate";
 
-const VERIFIED_MIN_CONFIDENCE = 75;
-const VERIFIED_MIN_PROBABILITY = 65;
+const VERIFIED_MIN_CONFIDENCE = 65;
+const VERIFIED_MIN_PROBABILITY = 60;
 const VERIFIED_MIN_DATA_QUALITY = 75;
+const RESEARCH_MAX_RAW_CONFIDENCE = 50;
 const RESEARCH_MAX_PROBABILITY = 70;
 const ELITE_DATA_QUALITY = 85;
 
@@ -82,9 +83,20 @@ export function computeAdjustedConfidence(prop = {}) {
   return clamp(Math.round(adjusted), 0, 100);
 }
 
+export function resolveTierProjectionValue(prop = {}) {
+  if (prop.projectionUnavailable || prop.isFallbackProjection || prop.unverifiedGradeBlocked) return null;
+  const source = String(prop.projectionSource || "").toLowerCase();
+  if (/missing|fallback|estimate|manual-fallback|line-neutral|unavailable|stat-type-mismatch/.test(source)) {
+    return null;
+  }
+  return resolveProjectionValue(prop);
+}
+
 /** Research tier when any supporting input is incomplete. */
 export function isResearchCandidate(prop = {}, { confidence } = {}) {
-  if (resolveProjectionValue(prop) == null) return true;
+  if (resolveTierProjectionValue(prop) == null) return true;
+  const rawConf = finiteOr(prop.confidenceScore ?? prop.confidence, NaN);
+  if (!Number.isFinite(rawConf) || rawConf < RESEARCH_MAX_RAW_CONFIDENCE) return true;
   const adjusted = confidence ?? computeAdjustedConfidence(prop);
   if (!Number.isFinite(adjusted) || adjusted <= 0) return true;
   if (hasMissingMatchupData(prop)) return true;
@@ -100,10 +112,13 @@ export function isVerifiedPlay(prop = {}, { probability, confidence } = {}) {
   if (isResearchCandidate(prop, { confidence })) return false;
   const prob = finiteOr(probability ?? prop.probabilityScore, NaN);
   const conf = finiteOr(confidence ?? prop.displayConfidenceScore ?? computeAdjustedConfidence(prop), NaN);
+  const dq = finiteOr(prop.dataQualityScore, 0);
   return (
     prob >= VERIFIED_MIN_PROBABILITY &&
     conf >= VERIFIED_MIN_CONFIDENCE &&
-    Number.isFinite(conf)
+    dq >= VERIFIED_MIN_DATA_QUALITY &&
+    Number.isFinite(conf) &&
+    resolveTierProjectionValue(prop) != null
   );
 }
 
@@ -244,9 +259,10 @@ export function computeDisplayPropMetrics(prop = {}) {
 }
 
 export function evaluateMlbPlayability(prop = {}, metrics = {}) {
-  const projection = resolveProjectionValue(prop);
+  const projection = resolveTierProjectionValue(prop);
   const line = finiteOr(prop.line, NaN);
   const adjustedConfidence = metrics.adjustedConfidence ?? computeAdjustedConfidence(prop);
+  const rawConfidence = finiteOr(prop.confidenceScore ?? prop.confidence, NaN);
 
   if (projection == null || !Number.isFinite(line) || line <= 0) {
     return {
@@ -264,8 +280,10 @@ export function evaluateMlbPlayability(prop = {}, metrics = {}) {
     };
   }
 
-  const research = isResearchCandidate(prop, { confidence: adjustedConfidence });
-  const tier = research ? PICK_TIER_RESEARCH : PICK_TIER_VERIFIED;
+  const lowRawConfidence = !Number.isFinite(rawConfidence) || rawConfidence < RESEARCH_MAX_RAW_CONFIDENCE;
+  const research =
+    lowRawConfidence ||
+    isResearchCandidate({ ...prop, projection, projectedValue: projection }, { confidence: adjustedConfidence });
 
   let probability =
     metrics.probabilityScore ??

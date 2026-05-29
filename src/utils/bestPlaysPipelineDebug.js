@@ -10,14 +10,21 @@ import {
   computeDisplayPropMetrics,
   isVerifiedPlay,
   isResearchCandidate,
+  hasMajorResearchGaps,
+  hasMissingMatchupData,
+  PICK_TIER_VERIFIED,
+  PICK_TIER_RESEARCH,
 } from "./conservativeProjection.js";
+import { statTypesAlign } from "./propMergeKeys.js";
 
 export const BEST_PLAYS_DEBUG_MODE = false;
 export const BEST_PLAYS_DEBUG_SAMPLE_SIZE = 0;
-export const PROJECTION_JOIN_DEBUG = import.meta.env?.DEV === true;
+/** When true, logs projection join samples only — never bypasses verified filters. */
+export const PROJECTION_JOIN_DEBUG = import.meta.env?.VITE_PROJECTION_JOIN_DEBUG === "true";
 
 export const VERIFIED_MIN_PROJECTION = 0.01;
-export const VERIFIED_MIN_CONFIDENCE = 75;
+export const VERIFIED_MIN_CONFIDENCE = 65;
+export const VERIFIED_MIN_PROBABILITY = 60;
 export const VERIFIED_MIN_DATA_QUALITY = 75;
 export const VERIFIED_MIN_EDGE = 0.015;
 
@@ -51,13 +58,25 @@ export function resolveBestPlayPlayerName(prop = {}) {
   return String(prop.playerName || prop.player || "").trim();
 }
 
+/** Stat-specific projection only — no last5/season cross-market reuse (Verified Plays / Chris Sale fix). */
+export function resolveBestPlayStatSpecificProjection(prop = {}) {
+  if (prop.projectionUnavailable || prop.isFallbackProjection || prop.unverifiedGradeBlocked) return null;
+  const source = String(prop.projectionSource || "").toLowerCase();
+  if (/missing|fallback|estimate|manual-fallback|line-neutral|unavailable|stat-type-mismatch/.test(source)) {
+    return null;
+  }
+  const direct = sanitizeProjectionValue(prop.projection ?? prop.projectedValue);
+  if (direct == null) return null;
+  const forStat = prop.projectionForStatType;
+  if (forStat && prop.statType && !statTypesAlign(prop.statType, forStat)) return null;
+  return direct;
+}
+
 export function resolveBestPlayProjection(prop = {}) {
+  const specific = resolveBestPlayStatSpecificProjection(prop);
+  if (specific != null) return specific;
   const direct = sanitizeProjectionValue(prop.projection ?? prop.projectedValue);
   if (direct != null) return direct;
-  const last5 = sanitizeProjectionValue(prop.last5Average);
-  if (last5 != null) return last5;
-  const season = sanitizeProjectionValue(prop.seasonAverage);
-  if (season != null) return season;
   return sanitizeProjectionValue(resolveProjectionValue(prop));
 }
 
@@ -72,24 +91,32 @@ export function passesMinimalBestPlaysFilter(prop = {}) {
 export function passesVerifiedBestPlaysFilter(prop = {}) {
   if (!passesMinimalBestPlaysFilter(prop)) return false;
   if (resolvePropSport(prop) !== "MLB") return false;
-  if (PROJECTION_JOIN_DEBUG) return true;
+  if (prop.pickTierLabel === PICK_TIER_RESEARCH || prop.displayResearchOnly) return false;
 
-  const projection = resolveBestPlayProjection(prop);
+  const projection = resolveBestPlayStatSpecificProjection(prop);
   if (projection == null || projection <= VERIFIED_MIN_PROJECTION) return false;
-  if (isResearchCandidate(prop)) return false;
-  const edge = resolveEdgeMagnitude(prop);
-  if (!Number.isFinite(edge) || edge < VERIFIED_MIN_EDGE) return false;
   if (prop.projectionUnavailable || prop.unverifiedGradeBlocked || prop.isFallbackProjection) return false;
+  if (hasMajorResearchGaps(prop) || hasMissingMatchupData(prop)) return false;
 
-  const metrics = computeDisplayPropMetrics({ ...prop, projection });
-  const playability = evaluateMlbPlayability({ ...prop, projection }, metrics);
-  return (
-    playability.pickTierLabel === "Verified Play" &&
-    isVerifiedPlay(
-      { ...prop, ...playability },
-      { probability: playability.probabilityScore, confidence: playability.adjustedConfidence }
-    )
-  );
+  const enriched = { ...prop, projection, projectedValue: projection };
+  if (isResearchCandidate(enriched)) return false;
+
+  const edge = resolveEdgeMagnitude(enriched);
+  if (!Number.isFinite(edge) || edge < VERIFIED_MIN_EDGE) return false;
+
+  const metrics = computeDisplayPropMetrics(enriched);
+  const playability = evaluateMlbPlayability(enriched, metrics);
+  if (playability.pickTierLabel !== PICK_TIER_VERIFIED) return false;
+  if (playability.displayResearchOnly || playability.rejected) return false;
+
+  const conf = Number(playability.displayConfidenceScore ?? playability.adjustedConfidence);
+  const prob = Number(playability.probabilityScore);
+  const dq = Number(prop.dataQualityScore);
+  if (!Number.isFinite(conf) || conf < VERIFIED_MIN_CONFIDENCE) return false;
+  if (!Number.isFinite(prob) || prob < VERIFIED_MIN_PROBABILITY) return false;
+  if (!Number.isFinite(dq) || dq < VERIFIED_MIN_DATA_QUALITY) return false;
+
+  return isVerifiedPlay(enriched, { probability: prob, confidence: conf });
 }
 
 export function resolveBestPlayInvalidReason(prop = {}) {
