@@ -62,7 +62,7 @@ function probabilityFromBaseline(baseline, line, projection, prop = {}) {
   }
 
   probability -= resolveVariancePenalty(prop);
-  return clamp(Math.round(probability), 50, 92);
+  return clamp(Math.round(probability * 10) / 10, 50, 92);
 }
 
 export function computeStatSpecificProbability(prop = {}, projection = null, line = null) {

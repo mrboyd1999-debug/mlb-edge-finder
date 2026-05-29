@@ -29,6 +29,17 @@ import {
   annotateTopPickRankingFields,
   compareTopPickScore,
 } from "./bestPlayRankingScore.js";
+import {
+  computeStandardEdge,
+  computeStandardEdgePercent,
+} from "./standardPropMetrics.js";
+import { resolveProjectionValue } from "./conservativeProjection.js";
+import {
+  buildProbabilityDistributionAudit,
+  resolveProbabilityPipelineValues,
+} from "./probabilityDistributionAudit.js";
+
+export { PROBABILITY_HISTOGRAM_BUCKETS } from "./probabilityDistributionAudit.js";
 
 export { VERIFICATION_AUDIT_KEYS };
 
@@ -72,16 +83,26 @@ function displayCell(value, suffix = "") {
   return `${value}${suffix}`;
 }
 
-function displayMetric(value) {
+function displayMetric(value, { decimals = 0 } = {}) {
   if (value == null || value === "") return "N/A";
   const num = Number(value);
-  if (Number.isFinite(num)) return Math.round(num);
+  if (Number.isFinite(num)) {
+    return decimals > 0 ? Number(num.toFixed(decimals)) : Math.round(num);
+  }
   return String(value);
 }
 
-function toVerificationDiagnosticRow(prop = {}, { withFailureReason = false, withMatchup = false } = {}) {
+function toVerificationDiagnosticRow(
+  prop = {},
+  { withFailureReason = false, withMatchup = false, withPropDetails = false } = {}
+) {
   const player = String(prop.playerName || prop.player || "Unknown").trim() || "N/A";
-  const probability = displayMetric(prop.probabilityScore ?? prop.verifiedProbability);
+  const pipeline = resolveProbabilityPipelineValues(prop);
+  const probability = displayMetric(prop.probabilityScore ?? prop.verifiedProbability, { decimals: 1 });
+  const probabilityRaw = displayMetric(
+    pipeline.statSpecific ?? pipeline.verifiedCapped ?? pipeline.researchCapped,
+    { decimals: 1 }
+  );
   const confidence = displayMetric(
     prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence
   );
@@ -89,13 +110,33 @@ function toVerificationDiagnosticRow(prop = {}, { withFailureReason = false, wit
   const scoreRaw = prop.topPickScore ?? prop.verifiedRankingScore ?? prop.weightedBestPlayScore;
   const score = Number.isFinite(Number(scoreRaw)) ? Number(scoreRaw).toFixed(1) : "N/A";
 
+  const projection = finite(prop.projection ?? prop.projectedValue ?? resolveProjectionValue(prop));
+  const line = finite(prop.line);
+  const edge = finite(prop.edge ?? computeStandardEdge(projection, line));
+  const edgePercent = finite(prop.edgePercent ?? computeStandardEdgePercent(edge, line));
+
   const row = {
     player,
     probability,
+    probabilityRaw,
     confidence,
     playability,
     score,
   };
+
+  if (withPropDetails) {
+    row.propType =
+      String(prop.statType || prop.market || prop.propType || "N/A").trim() || "N/A";
+    row.line = line != null ? line : "N/A";
+    row.projection = projection != null ? projection : "N/A";
+    row.edge =
+      edgePercent != null
+        ? `${edgePercent > 0 ? "+" : ""}${Math.round(edgePercent)}%`
+        : edge != null
+          ? `${edge > 0 ? "+" : ""}${edge}`
+          : "N/A";
+    row.capFlag = pipeline.likelyResearchCap ? "research_cap_70" : "—";
+  }
 
   if (withFailureReason) {
     try {
@@ -120,6 +161,11 @@ function toVerificationDiagnosticRow(prop = {}, { withFailureReason = false, wit
   }
 
   return row;
+}
+
+function finite(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
 }
 
 function computeGateMetrics(projectedPool = []) {
@@ -207,9 +253,15 @@ function buildTopDiagnosticRows(pool = [], limit = DIAGNOSTIC_TOP_N, options = {
         row: {
           player: String(prop?.playerName || prop?.player || "Unknown").trim() || "N/A",
           probability: "N/A",
+          probabilityRaw: "N/A",
           confidence: "N/A",
           playability: "N/A",
           score: "N/A",
+          propType: options.withPropDetails ? "N/A" : undefined,
+          line: options.withPropDetails ? "N/A" : undefined,
+          projection: options.withPropDetails ? "N/A" : undefined,
+          edge: options.withPropDetails ? "N/A" : undefined,
+          capFlag: options.withPropDetails ? "—" : undefined,
           failureReason: options.withFailureReason ? "N/A" : undefined,
           team: options.withMatchup ? "N/A" : undefined,
           opponent: options.withMatchup ? "N/A" : undefined,
@@ -260,7 +312,17 @@ export function buildVerificationDashboard(props = [], options = {}) {
   const topProjectedProps = buildTopDiagnosticRows(projectedPool, DIAGNOSTIC_PROJECTED_TOP_N, {
     withFailureReason: true,
     withMatchup: true,
+    withPropDetails: true,
   });
+
+  const topProjectedPool = projectedPool
+    .slice()
+    .sort((a, b) => compareTopPickScore(a, b))
+    .slice(0, DIAGNOSTIC_PROJECTED_TOP_N);
+  const probabilityDistribution = buildProbabilityDistributionAudit(
+    projectedPool,
+    topProjectedPool
+  );
 
   console.info("[MLB Pipeline] verification top projected props", {
     projectedPool: projectedPool.length,
@@ -283,6 +345,7 @@ export function buildVerificationDashboard(props = [], options = {}) {
     topBeforeVerification: buildTopDiagnosticRows(projectedPool),
     topAfterVerification: buildTopDiagnosticRows(verifiedPicks),
     topProjectedProps,
+    probabilityDistribution,
     failureBreakdown,
     ruleRejectionCounts,
     rejectionCounts: verifiedPasses === 0 ? ruleRejectionCounts : null,

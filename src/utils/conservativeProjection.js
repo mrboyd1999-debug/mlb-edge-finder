@@ -204,7 +204,20 @@ function applyProbabilityCaps(probability, prop = {}, { verified = false, confid
   else if (edgePct >= 15) cap = Math.max(cap, 76);
 
   if (!canExceedConfidencePlusTen(prop, { verified }) && Number.isFinite(conf)) {
-    const confCap = edgePct >= 40 ? conf + 22 : edgePct >= 20 ? conf + 15 : conf + 10;
+    const confBonus = verified
+      ? edgePct >= 40
+        ? 28
+        : edgePct >= 20
+          ? 22
+          : edgePct >= 12
+            ? 18
+            : 15
+      : edgePct >= 40
+        ? 22
+        : edgePct >= 20
+          ? 15
+          : 10;
+    const confCap = conf + confBonus;
     cap = Math.min(cap, confCap);
   }
 
@@ -217,7 +230,7 @@ function applyProbabilityCaps(probability, prop = {}, { verified = false, confid
     cap = Math.min(cap, RESEARCH_MAX_PROBABILITY);
   }
 
-  return clamp(Math.round(probability), 50, cap);
+  return clamp(round1(probability), 50, cap);
 }
 
 export function computeConservativeProbability(prop = {}, metrics = {}, options = {}) {

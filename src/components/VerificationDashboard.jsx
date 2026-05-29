@@ -17,7 +17,13 @@ function formatCell(value, suffix = "") {
   return `${value}${suffix}`;
 }
 
-function DiagnosticTable({ rows = [], emptyMessage = "None", showFailureReason = false, showMatchup = false }) {
+function DiagnosticTable({
+  rows = [],
+  emptyMessage = "None",
+  showFailureReason = false,
+  showMatchup = false,
+  showPropDetails = false,
+}) {
   const safeRows = Array.isArray(rows) ? rows : [];
 
   if (!safeRows.length) {
@@ -30,10 +36,20 @@ function DiagnosticTable({ rows = [], emptyMessage = "None", showFailureReason =
         <thead>
           <tr>
             <th>Player</th>
+            {showPropDetails ? (
+              <>
+                <th>Prop Type</th>
+                <th>Line</th>
+                <th>Projection</th>
+                <th>Edge</th>
+              </>
+            ) : null}
             <th>Probability</th>
+            {showPropDetails ? <th>Stat Prob</th> : null}
             <th>Confidence</th>
             <th>Playability</th>
             <th>Score</th>
+            {showPropDetails ? <th>Cap</th> : null}
             {showMatchup ? (
               <>
                 <th>Team</th>
@@ -50,10 +66,20 @@ function DiagnosticTable({ rows = [], emptyMessage = "None", showFailureReason =
           {safeRows.map((row, index) => (
             <tr key={`${row?.player || "row"}-${index}`}>
               <td>{formatCell(row?.player)}</td>
+              {showPropDetails ? (
+                <>
+                  <td>{formatCell(row?.propType)}</td>
+                  <td>{formatCell(row?.line)}</td>
+                  <td>{formatCell(row?.projection)}</td>
+                  <td>{formatCell(row?.edge)}</td>
+                </>
+              ) : null}
               <td>{formatCell(row?.probability, "%")}</td>
+              {showPropDetails ? <td>{formatCell(row?.probabilityRaw, "%")}</td> : null}
               <td>{formatCell(row?.confidence, "%")}</td>
               <td>{formatCell(row?.playability)}</td>
               <td>{formatCell(row?.score)}</td>
+              {showPropDetails ? <td>{formatCell(row?.capFlag)}</td> : null}
               {showMatchup ? (
                 <>
                   <td>{formatCell(row?.team)}</td>
@@ -68,6 +94,31 @@ function DiagnosticTable({ rows = [], emptyMessage = "None", showFailureReason =
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function DistributionSummary({ title, summary = {}, histogram = [] }) {
+  const formatPct = (value) =>
+    value == null || !Number.isFinite(Number(value)) ? "N/A" : `${value}%`;
+
+  return (
+    <div className="verification-diagnostics__distribution-block">
+      <h5 className="verification-diagnostics__distribution-title">{title}</h5>
+      <div className="verification-diagnostics__grid verification-diagnostics__grid--compact">
+        <Metric label="Minimum Probability" value={formatPct(summary.min)} />
+        <Metric label="Maximum Probability" value={formatPct(summary.max)} />
+        <Metric label="Average Probability" value={formatPct(summary.average)} />
+        <Metric label="Spread (Max − Min)" value={formatPct(summary.spread)} />
+      </div>
+      <div className="verification-diagnostics__histogram">
+        {histogram.map((bucket) => (
+          <div key={bucket.id} className="verification-diagnostics__histogram-row">
+            <span className="verification-diagnostics__histogram-label">{bucket.label}</span>
+            <span className="verification-diagnostics__histogram-count">{bucket.count ?? 0}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -111,6 +162,7 @@ function VerificationDashboard({ dashboard = null }) {
     failureBreakdown = {},
     regressionReasons = {},
     usedVerifiedFallback = false,
+    probabilityDistribution = null,
   } = dashboard;
 
   const showRejections = verifiedPasses === 0;
@@ -125,15 +177,7 @@ function VerificationDashboard({ dashboard = null }) {
         .slice(0, 10)
     : [];
 
-  const firstRowPreview = topProjectedProps[0]
-    ? {
-        player: topProjectedProps[0].player,
-        probability: topProjectedProps[0].probability,
-        confidence: topProjectedProps[0].confidence,
-        playability: topProjectedProps[0].playability,
-        score: topProjectedProps[0].score,
-      }
-    : null;
+  const compression = probabilityDistribution?.compressionAudit || null;
 
   return (
     <section className="verification-diagnostics" aria-label="Verification diagnostics">
@@ -202,16 +246,55 @@ function VerificationDashboard({ dashboard = null }) {
         </p>
       ) : null}
 
+      <h4 className="verification-diagnostics__subtitle">Model Distribution Audit</h4>
+      {probabilityDistribution ? (
+        <>
+          <DistributionSummary
+            title="All projected props"
+            summary={probabilityDistribution.projected}
+            histogram={probabilityDistribution.projected?.histogram}
+          />
+          <DistributionSummary
+            title="Top 20 projected props"
+            summary={probabilityDistribution.top20}
+            histogram={probabilityDistribution.top20?.histogram}
+          />
+          {compression ? (
+            <div className="verification-diagnostics__compression">
+              <p className="verification-diagnostics__meta">
+                Compression check: {compression.exact70Count ?? 0} at exactly 70% ·{" "}
+                {compression.band68to70Count ?? 0} in 68–70% band ·{" "}
+                {compression.uniqueDisplayedValues ?? 0} unique displayed values ·{" "}
+                {compression.researchCapHits ?? 0} research-cap hits
+              </p>
+              {compression.statSpecificHigherCount > 0 ? (
+                <p className="verification-diagnostics__meta">
+                  {compression.statSpecificHigherCount} props have stat-specific probability above
+                  displayed value (cap or confidence ceiling likely applied).
+                </p>
+              ) : null}
+              {Array.isArray(compression.notes) && compression.notes.length ? (
+                <ul className="verification-diagnostics__rejection-list">
+                  {compression.notes.map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <p className="verification-diagnostics__empty">Distribution audit unavailable.</p>
+      )}
+
       <h4 className="verification-diagnostics__subtitle">Top 20 projected props</h4>
       <p className="verification-diagnostics__meta">Rows Loaded: {topProjectedProps.length}</p>
-      {firstRowPreview ? (
-        <pre className="verification-diagnostics__debug">{JSON.stringify(firstRowPreview, null, 2)}</pre>
-      ) : null}
       <DiagnosticTable
         rows={topProjectedProps}
         emptyMessage="No projected props."
         showFailureReason
         showMatchup
+        showPropDetails
       />
 
       <h4 className="verification-diagnostics__subtitle">Top 10 props after verification</h4>
