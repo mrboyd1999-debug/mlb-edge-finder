@@ -6,7 +6,7 @@ import {
   applyUnderdogProviderToDebug,
   UNDERDOG_SOFT_MESSAGE,
 } from "./services/providers/underdogProvider.js";
-import { resolveSourceHealthState, resolveFetchHealthBadge, summarizeSourceCounts, formatProviderStatusLabel, HEALTH_STATES, EMPTY_SOURCE_MESSAGE, resolveProviderConnectionStatus, formatIngestionMetrics, CONNECTION_TIERS } from "./services/sourceHealth.js";
+import { resolveSourceHealthState, resolveFetchHealthBadge, summarizeSourceCounts, formatProviderStatusLabel, HEALTH_STATES, EMPTY_SOURCE_MESSAGE, resolveProviderConnectionStatus, formatIngestionMetrics, CONNECTION_TIERS, countActivePropsForSource } from "./services/sourceHealth.js";
 import { enrichLineMovementWithTags } from "./services/lineMovementTrust.js";
 import { fetchSportsbookComparison } from "./services/sportsbookOdds";
 import { fetchOddsApiDisplayProps } from "./services/oddsApiPlayerProps.js";
@@ -867,11 +867,14 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
   const sourceSnapshot = buildSourceHealthSnapshot();
   const boardTs = board?.updatedAt ? new Date(board.updatedAt).getTime() : 0;
   const boardPropCount = (board?.props || []).length;
-  const buildRow = (row, status) => {
+  const boardProps = board?.props || [];
+  const buildRow = (row, status, providerKey = "") => {
     const counts = summarizeSourceCounts(row);
+    const activeUsableCount = countActivePropsForSource(boardProps, providerKey);
+    const effectiveUsable = Math.max(counts.usableCount, activeUsableCount);
     const fetchFailed = /failed|unavailable|offline/i.test(String(status || row.status || ""));
     const timedOut = /timed?\s*out/i.test(String(row.message || row.lastError || status || ""));
-    const cached = /cached/i.test(String(status || row.status || row.lineSourceBadge || ""));
+    const cached = /cached/i.test(String(status || row.status || row.lineSourceBadge || "")) || activeUsableCount > counts.usableCount;
     const health = resolveFetchHealthBadge({
       ok: !fetchFailed,
       failed: fetchFailed,
@@ -880,15 +883,17 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
       cached,
       rawCount: counts.rawCount,
       parsedCount: counts.parsedCount,
-      usableCount: counts.usableCount,
+      usableCount: effectiveUsable,
       lastError: row.message || row.lastError || "",
       fallback: Boolean(row.fallback),
-      partial: counts.rawCount > 0 && counts.usableCount === 0 && counts.parsedCount > 0,
+      partial: counts.rawCount > 0 && effectiveUsable === 0 && counts.parsedCount > 0,
     });
     const connection = resolveProviderConnectionStatus({
       usableCount: counts.usableCount,
+      activeUsableCount,
       parsedCount: counts.parsedCount,
       rawCount: counts.rawCount,
+      cachedCount: counts.cachedCount,
       cached,
       fallback: Boolean(row.fallback),
       fetchFailed,
@@ -898,17 +903,19 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
     const statusLabel = formatLiveProviderLabel({
       badge: health.badge,
       status: connection.tier,
-      usableCount: counts.usableCount,
+      usableCount: effectiveUsable,
       rawCount: counts.rawCount,
       parsedCount: counts.parsedCount,
       failed: connection.tier === CONNECTION_TIERS.FAILED,
-      timedOut,
+      timedOut: timedOut && effectiveUsable === 0,
       cached,
       lastError: row.message || row.lastError || "",
       connectionTier: connection.tier,
     });
     return {
       ...counts,
+      usableCount: effectiveUsable,
+      activeUsableCount,
       filteredCount: metrics.filteredCount,
       cachedCount: metrics.cachedCount,
       lineSourceBadge: health.badge,
@@ -916,8 +923,8 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
       connectionTier: connection.tier,
     };
   };
-  const ppRow = buildRow(pp, board?.sourceStatus?.PrizePicks);
-  const udRow = buildRow(ud, board?.sourceStatus?.Underdog);
+  const ppRow = buildRow(pp, board?.sourceStatus?.PrizePicks, "prizepicks");
+  const udRow = buildRow(ud, board?.sourceStatus?.Underdog, "underdog");
   const oddsRow = buildRow(odds, board?.sourceStatus?.["The Odds API"]);
   const cacheUsableCount = boardPropCount;
   const cacheLayerLabel =
@@ -942,6 +949,7 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
       rawCount: ppRow.rawCount,
       parsedCount: ppRow.parsedCount,
       usableCount: ppRow.usableCount,
+      activeUsableCount: ppRow.activeUsableCount,
       filteredCount: ppRow.filteredCount,
       cachedCount: ppRow.cachedCount,
       ingestionSummary: formatIngestionMetrics(ppRow).summary,
@@ -960,6 +968,7 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
       rawCount: udRow.rawCount,
       parsedCount: udRow.parsedCount,
       usableCount: udRow.usableCount,
+      activeUsableCount: udRow.activeUsableCount,
       filteredCount: udRow.filteredCount,
       cachedCount: udRow.cachedCount,
       ingestionSummary: formatIngestionMetrics(udRow).summary,
@@ -3094,13 +3103,25 @@ export default function DFSPropsApp() {
           setApiHealth((current) => ({
             PrizePicks: {
               ...(current?.PrizePicks || {}),
-              connectionTier: Number(current?.PrizePicks?.usableCount) > 0 ? CONNECTION_TIERS.CONNECTED : CONNECTION_TIERS.FAILED,
-              status: Number(current?.PrizePicks?.usableCount) > 0 ? CONNECTION_TIERS.CONNECTED : CONNECTION_TIERS.FAILED,
+              connectionTier:
+                Number(current?.PrizePicks?.activeUsableCount ?? current?.PrizePicks?.usableCount) > 0
+                  ? CONNECTION_TIERS.DEGRADED
+                  : CONNECTION_TIERS.FAILED,
+              status:
+                Number(current?.PrizePicks?.activeUsableCount ?? current?.PrizePicks?.usableCount) > 0
+                  ? CONNECTION_TIERS.DEGRADED
+                  : CONNECTION_TIERS.FAILED,
             },
             Underdog: {
               ...(current?.Underdog || {}),
-              connectionTier: Number(current?.Underdog?.usableCount) > 0 ? CONNECTION_TIERS.CONNECTED : CONNECTION_TIERS.FAILED,
-              status: Number(current?.Underdog?.usableCount) > 0 ? CONNECTION_TIERS.CONNECTED : CONNECTION_TIERS.FAILED,
+              connectionTier:
+                Number(current?.Underdog?.activeUsableCount ?? current?.Underdog?.usableCount) > 0
+                  ? CONNECTION_TIERS.DEGRADED
+                  : CONNECTION_TIERS.FAILED,
+              status:
+                Number(current?.Underdog?.activeUsableCount ?? current?.Underdog?.usableCount) > 0
+                  ? CONNECTION_TIERS.DEGRADED
+                  : CONNECTION_TIERS.FAILED,
             },
             OddsAPI: {
               ...(current?.OddsAPI || {}),

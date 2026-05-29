@@ -19,7 +19,11 @@ export default class SectionErrorBoundary extends Component {
 
   render() {
     if (this.state.error) {
-      if (this.props.fallback) return this.props.fallback;
+      if (this.props.fallback) {
+        return typeof this.props.fallback === "function"
+          ? this.props.fallback(this.state.error)
+          : this.props.fallback;
+      }
       return (
         <div
           className="section-error-boundary"

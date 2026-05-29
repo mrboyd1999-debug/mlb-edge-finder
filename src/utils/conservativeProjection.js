@@ -32,6 +32,18 @@ export function hasMajorResearchGaps(prop = {}) {
   return false;
 }
 
+export function isConfidenceAvailable(prop = {}) {
+  const score = finiteOr(prop.confidenceScore ?? prop.confidence, NaN);
+  if (!Number.isFinite(score) || score <= 0) return false;
+  const label = String(prop.confidenceLabel || prop.confidenceTier || prop.confidenceExplanation || "").toLowerCase();
+  if (/unavailable|missing|unknown/.test(label)) return false;
+  return true;
+}
+
+export function isDataQualityComplete(prop = {}) {
+  return finiteOr(prop.dataQualityScore, 0) >= 70;
+}
+
 export function hasCompleteDataForEliteProbability(prop = {}) {
   const projection = resolveProjectionValue(prop);
   if (projection == null) return false;
@@ -48,13 +60,21 @@ export function hasCompleteDataForEliteProbability(prop = {}) {
     Number(prop.sportsbookBooksCount || prop.sportsbookComparison?.books || 0) >= 1 ||
     Boolean(prop.sportsbookComparison);
   const injury = prop.injuryRisk != null || prop.injury != null;
-  return sample >= 5 && recent && opponent && books && injury;
+  return sample >= 5 && recent && opponent && books && injury && isConfidenceAvailable(prop);
+}
+
+function applyProbabilityCaps(probability, prop = {}, { playable = false } = {}) {
+  let cap = hasCompleteDataForEliteProbability(prop) ? 85 : 78;
+  if (!isConfidenceAvailable(prop)) cap = Math.min(cap, 60);
+  if (!isDataQualityComplete(prop) || hasMajorResearchGaps(prop)) cap = Math.min(cap, 65);
+  if (!playable) cap = Math.min(cap, 70);
+  return clamp(Math.round(probability), 50, cap);
 }
 
 /**
- * Conservative probability (50–78 typical, up to 85 only with complete data).
+ * Conservative probability with strict caps so UI never shows 95% without full data.
  */
-export function computeConservativeProbability(prop = {}, metrics = {}) {
+export function computeConservativeProbability(prop = {}, metrics = {}, options = {}) {
   const projection = resolveProjectionValue(prop);
   const line = finiteOr(prop.line, NaN);
   if (projection == null || !Number.isFinite(line) || line <= 0) return null;
@@ -85,8 +105,7 @@ export function computeConservativeProbability(prop = {}, metrics = {}) {
     probability -= 10;
   }
 
-  const maxCap = hasCompleteDataForEliteProbability(prop) ? 85 : 78;
-  return clamp(Math.round(probability), 50, maxCap);
+  return applyProbabilityCaps(probability, prop, options);
 }
 
 export function computeDisplayPropMetrics(prop = {}) {
@@ -103,7 +122,9 @@ export function computeDisplayPropMetrics(prop = {}) {
   }
 
   const base = computeStandardPropMetrics({ projection, line });
-  const probabilityScore = computeConservativeProbability(prop, base);
+  const probabilityScore = computeConservativeProbability(prop, base, {
+    playable: Boolean(prop.isDisplayPlayable),
+  });
   return {
     ...base,
     probabilityScore,
@@ -115,9 +136,10 @@ export function computeDisplayPropMetrics(prop = {}) {
 export function evaluateMlbPlayability(prop = {}, metrics = {}) {
   const projection = resolveProjectionValue(prop);
   const line = finiteOr(prop.line, NaN);
-  const probability = metrics.probabilityScore ?? computeConservativeProbability(prop, metrics);
+  let probability = metrics.probabilityScore ?? computeConservativeProbability(prop, metrics);
   const dq = finiteOr(prop.dataQualityScore, 0);
   const confidence = finiteOr(prop.confidenceScore ?? prop.confidence, 0);
+  const confidenceOk = isConfidenceAvailable(prop);
 
   if (projection == null || !Number.isFinite(line) || line <= 0) {
     return {
@@ -126,26 +148,38 @@ export function evaluateMlbPlayability(prop = {}, metrics = {}) {
       bettingLabel: "Projection unavailable",
       cardStatus: "unavailable",
       whyNotPlayable: "Projection unavailable",
+      pickTierLabel: "Research Candidate",
     };
   }
 
   const majorGaps = hasMajorResearchGaps(prop);
   const sport = String(prop.sport || prop.league || "").toUpperCase();
   const mlbOnly = !sport || sport === "MLB" || sport.includes("BASEBALL");
+
   const playable =
     mlbOnly &&
     probability != null &&
     probability >= 60 &&
+    confidenceOk &&
+    confidence >= 65 &&
     dq >= 70 &&
     !majorGaps &&
     !prop.projectionUnavailable &&
     !prop.isFallbackProjection;
 
+  if (!playable && probability != null) {
+    probability = applyProbabilityCaps(probability, prop, { playable: false });
+  } else if (playable && probability != null) {
+    probability = applyProbabilityCaps(probability, prop, { playable: true });
+  }
+
   const displayResearchOnly = !playable;
   const whyNotPlayable = playable
     ? ""
     : [
-        probability != null && probability < 60 ? `Probability ${probability}% below 60` : "",
+        !confidenceOk ? "Confidence unavailable" : "",
+        confidenceOk && confidence < 65 ? `Confidence ${Math.round(confidence)}% below 65` : "",
+        probability != null && !playable && probability <= 70 ? `Probability ${probability}% (research cap)` : "",
         dq < 70 ? `Data quality ${Math.round(dq)} below 70` : "",
         majorGaps ? "Research gaps present" : "",
         prop.projectionUnavailable ? "Projection unavailable" : "",
@@ -156,8 +190,9 @@ export function evaluateMlbPlayability(prop = {}, metrics = {}) {
   return {
     isDisplayPlayable: playable,
     displayResearchOnly,
-    bettingLabel: playable ? "Playable" : "Research only",
+    bettingLabel: playable ? "Playable" : "Research Candidate",
     cardStatus: playable ? "playable" : "research",
+    pickTierLabel: playable ? "Verified Play" : "Research Candidate",
     whyNotPlayable,
     probabilityScore: probability,
     confidenceScore: confidence,
@@ -168,6 +203,7 @@ export function qualifiesAsHighestProbabilityPick(prop = {}) {
   return (
     Boolean(prop.isDisplayPlayable) &&
     Number(prop.probabilityScore ?? 0) >= 65 &&
+    isConfidenceAvailable(prop) &&
     Number(prop.confidenceScore ?? prop.confidence ?? 0) >= 65 &&
     Number(prop.dataQualityScore ?? 0) >= 75 &&
     !hasMajorResearchGaps(prop)

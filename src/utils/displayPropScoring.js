@@ -38,6 +38,11 @@ function round1(value) {
   return Math.round(Number(value) * 10) / 10;
 }
 
+function round(value, digits = 2) {
+  const factor = 10 ** digits;
+  return Math.round(Number(value) * factor) / factor;
+}
+
 function hashString(text = "") {
   let hash = 0;
   for (let i = 0; i < text.length; i += 1) {
@@ -424,7 +429,11 @@ export function scoreDisplayProp(prop = {}) {
     confidenceExplanation: analyticsReason || calibrated.confidenceExplanation,
   };
 
-  const playability = evaluateMlbPlayability(finalized, metrics);
+  const playability = evaluateMlbPlayability(
+    { ...finalized, confidenceScore: finalConfidence, confidence: finalConfidence },
+    metrics
+  );
+  const finalProbability = playability.probabilityScore ?? metrics.probabilityScore;
   const tier = confidenceTierLabel(finalized.confidence);
   const invalidProp = !isValidDisplayProp({ ...finalized, line, player: prop.player, playerName: prop.playerName });
 
@@ -435,17 +444,18 @@ export function scoreDisplayProp(prop = {}) {
         fullMarketLabel: fullMarketDisplayLabel(finalized.statType || prop.statType, finalized.sport || prop.sport),
         confidenceTier: tier,
         edgeScore: round1(Math.abs(edge) * (finalized.confidence / 50) + (finiteOr(prop.last10HitRate, 0.5) * 3)),
+        edgePercent: metrics.edgePercent,
         displayRejected: invalidProp,
         displayResearchOnly: invalidProp || playability.displayResearchOnly,
         isDisplayPlayable: !invalidProp && playability.isDisplayPlayable,
         bettingLabel: invalidProp ? "Rejected" : playability.bettingLabel,
+        pickTierLabel: playability.pickTierLabel,
         cardStatus: invalidProp ? "rejected" : playability.cardStatus,
         whyNotPlayable: playability.whyNotPlayable,
-        probabilityScore: metrics.probabilityScore,
+        probabilityScore: finalProbability,
         lean: metrics.lean,
         projectionStatus: metrics.projectionStatus,
-        modelProbability:
-          metrics.probabilityScore != null ? round(metrics.probabilityScore / 100, 3) : null,
+        modelProbability: finalProbability != null ? round(finalProbability / 100, 3) : null,
         premiumRiskSummary: finalized.premiumRiskSummary || premiumRiskSummary(finalized),
       })
     )

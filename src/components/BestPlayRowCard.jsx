@@ -1,7 +1,7 @@
 import { memo } from "react";
 import PlayerImage from "./PlayerImage.jsx";
 import { styles } from "../theme/styles.js";
-import { formatNumber, formatSignedNumber } from "../utils/formatters.js";
+import { formatNumber } from "../utils/formatters.js";
 import { withPlayerImageUrl } from "../utils/playerImageFields.js";
 import {
   formatPlatformSideLabel,
@@ -10,11 +10,8 @@ import {
 } from "../utils/pickRecommendation.js";
 import { displayFullMarketLabel } from "../utils/propLabels.js";
 import { resolveProjectionValue } from "../utils/projectionQuality.js";
-import {
-  buildHighestProbabilityQualifyReason,
-  formatHighestProbabilitySource,
-} from "../utils/highestProbabilityPlays.js";
-import { highestProbabilityLabel } from "../utils/conservativeProjection.js";
+import { formatHighestProbabilitySource } from "../utils/highestProbabilityPlays.js";
+import { highestProbabilityLabel, isConfidenceAvailable } from "../utils/conservativeProjection.js";
 
 function BestPlayRowCard({ prop, onOpen, rank }) {
   const enriched = withPlayerImageUrl(prop || {});
@@ -25,18 +22,21 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
   const propType = enriched.propType || enriched.statType || enriched.market || displayFullMarketLabel(enriched);
   const line = formatNumber(enriched.line);
   const sideLabel = side === "WATCH" ? "PASS" : formatPlatformSideLabel(enriched);
-  const edgeScore = enriched.edgeScore ?? enriched.edge ?? null;
-  const edgeLabel =
-    Number.isFinite(Number(edgeScore)) && Math.abs(Number(edgeScore)) >= 0.015
-      ? formatSignedNumber(Math.abs(Number(edgeScore)))
-      : "—";
-  const probability =
-    enriched.probabilityScore ?? enriched.verifiedProbability ?? enriched.confidenceScore ?? enriched.confidence;
+  const probability = enriched.probabilityScore ?? enriched.verifiedProbability;
+  const probLabel = Number.isFinite(Number(probability)) ? `${Math.round(Number(probability))}%` : "—";
+  const confRaw = enriched.confidenceScore ?? enriched.confidence;
+  const confLabel = isConfidenceAvailable(enriched)
+    ? Number.isFinite(Number(confRaw))
+      ? `${Math.round(Number(confRaw))}%`
+      : "—"
+    : "Unavailable";
+  const edgePct = Number(enriched.edgePercent);
+  const edgeLabel = Number.isFinite(edgePct) ? `${edgePct > 0 ? "+" : ""}${Math.round(edgePct)}%` : "—";
   const pickLabel = highestProbabilityLabel(enriched);
-  const confLabel = Number.isFinite(Number(probability)) ? `${Math.round(Number(probability))}%` : "—";
+  const statusLabel = enriched.pickTierLabel || enriched.bettingLabel || pickLabel;
   const projection = resolveProjectionValue(enriched);
   const projectionLabel = projection != null && projection > 0 ? formatNumber(projection) : "—";
-  const qualifyReason = buildHighestProbabilityQualifyReason(enriched);
+  const lean = enriched.lean || sideLabel;
 
   function openDetails(event) {
     event?.stopPropagation?.();
@@ -75,11 +75,28 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
             </span>
           </div>
           <p style={styles.bestPlayRowSubline}>
-            {pickLabel} · {propType} · Line {line} · Lean {sideLabel} · Proj {projectionLabel}
+            {propType} · Line {line}
           </p>
-          {qualifyReason ? (
-            <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 2 }}>{qualifyReason}</p>
-          ) : null}
+          <div className="prop-card-core-metrics" style={{ marginTop: 4 }}>
+            <span>
+              Proj <strong>{projectionLabel}</strong>
+            </span>
+            <span>
+              Lean <strong>{lean}</strong>
+            </span>
+            <span>
+              Prob <strong>{probLabel}</strong>
+            </span>
+            <span>
+              Conf <strong>{confLabel}</strong>
+            </span>
+            <span>
+              Edge <strong>{edgeLabel}</strong>
+            </span>
+            <span>
+              Status <strong>{statusLabel}</strong>
+            </span>
+          </div>
         </div>
       </div>
 
@@ -94,17 +111,9 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
         >
           {sideLabel}
         </div>
-        <span style={styles.bestPlayMetric} title="Verified probability">
-          {confLabel}
-        </span>
-        <span style={styles.bestPlayMetric} title="Edge score">
-          {edgeLabel !== "—" ? edgeLabel : "—"}
-        </span>
-        {enriched.verified === false ? (
-          <span style={{ ...styles.bestPlayMetric, color: "#94a3b8" }} title="Below 65% verified threshold">
-            lean
-          </span>
-        ) : null}
+        <button type="button" className="prop-card-why-link" style={styles.whyLink} onClick={openDetails}>
+          View Details
+        </button>
       </div>
     </article>
   );

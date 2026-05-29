@@ -19,14 +19,16 @@ function formatCheckedAt(value) {
 function statusTier(status) {
   const key = String(status || "").toLowerCase();
   if (key === "connected") return CONNECTION_TIERS.CONNECTED;
-  if (key === "not configured" || key === "not tested" || key === "limited") return CONNECTION_TIERS.WARNING;
+  if (key === "degraded" || key === "not configured" || key === "not tested" || key === "limited") {
+    return CONNECTION_TIERS.DEGRADED;
+  }
   return CONNECTION_TIERS.FAILED;
 }
 
 function indicatorTier(status) {
   const key = String(status || "").toLowerCase();
   if (key === "connected") return "ok";
-  if (key === "not configured" || key === "not tested" || key === "limited") return "warn";
+  if (key === "degraded" || key === "not configured" || key === "not tested" || key === "limited") return "warn";
   return "fail";
 }
 
@@ -70,28 +72,43 @@ function resolveKeyProviderStatus(row, keyConfigured, tested) {
 function resolveLineFeedStatus(feed = {}) {
   const statusLabel = String(feed.statusLabel || feed.lastError || "").trim();
   const tier = String(feed.connectionTier || feed.status || "");
-  if (/not configured/i.test(statusLabel)) {
+  const active = Number(feed.activeUsableCount ?? feed.usableCount) || 0;
+  const timedOut =
+    /timed?\s*out/i.test(statusLabel) || /timed?\s*out/i.test(feed.lastError || "") || tier === CONNECTION_TIERS.DEGRADED;
+
+  if (/not configured/i.test(statusLabel) || /proxy.*missing|proxy url/i.test(statusLabel)) {
     return { status: "Not configured", detail: statusLabel };
   }
-  if (/timed?\s*out/i.test(statusLabel) || /timed?\s*out/i.test(feed.lastError || "")) {
-    return { status: "Timed out", detail: statusLabel || feed.lastError || "Timed out after 15s" };
+
+  if (active > 0) {
+    if (tier === CONNECTION_TIERS.CONNECTED) {
+      return { status: "Connected", detail: `${active} props in use (live refresh)` };
+    }
+    return {
+      status: "Degraded",
+      detail: timedOut
+        ? `Refresh timed out — ${active} cached props in use`
+        : `${active} props in use (cached)`,
+    };
   }
-  if (/proxy.*missing|proxy url/i.test(statusLabel)) {
-    return { status: "Not configured", detail: statusLabel };
+
+  if (tier === CONNECTION_TIERS.CONNECTED) {
+    return { status: "Connected", detail: statusLabel || "Feed OK" };
   }
-  if (tier === CONNECTION_TIERS.CONNECTED && Number(feed.usableCount) > 0) {
-    return { status: "Connected", detail: `${feed.usableCount} usable props` };
-  }
-  if (Number(feed.parsedCount) > 0 && Number(feed.usableCount) === 0) {
+
+  if (Number(feed.parsedCount) > 0 && active === 0) {
     return { status: "Failed", detail: "Returned 0 usable props" };
   }
+
+  if (timedOut) {
+    return { status: "Failed", detail: statusLabel || feed.lastError || "Timed out — no cached props" };
+  }
+
   if (tier === CONNECTION_TIERS.FAILED || /failed|unavailable/i.test(statusLabel)) {
     return { status: "Failed", detail: statusLabel || feed.lastError || "Feed fetch failed" };
   }
-  if (Number(feed.usableCount) > 0) {
-    return { status: "Connected", detail: `${feed.usableCount} usable props` };
-  }
-  return { status: "Failed", detail: statusLabel || feed.lastError || "No usable props yet" };
+
+  return { status: "Failed", detail: statusLabel || feed.lastError || "No usable props" };
 }
 
 function resolveMlbStatsStatus(stats = {}) {

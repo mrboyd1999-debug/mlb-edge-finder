@@ -4,6 +4,13 @@
 
 import { resolveProjectionValue, computeAbsoluteProjectionEdge } from "./projectionQuality.js";
 import {
+  computeDisplayPropMetrics,
+  evaluateMlbPlayability,
+  hasMajorResearchGaps,
+  isConfidenceAvailable,
+} from "./conservativeProjection.js";
+import { computeStandardEdge, computeStandardEdgePercent } from "./standardPropMetrics.js";
+import {
   passesMinimalBestPlaysFilter,
   resolveBestPlayInvalidReason,
   resolveBestPlayProjection,
@@ -53,11 +60,10 @@ export function computePlayEdgeScore({ projection, line, games } = {}) {
   return round(percentEdge * confidenceWeight * stability, 4);
 }
 
-/** verifiedProbability = clamp(50 + |edgeScore| * 100, 50, 95) */
+/** @deprecated Use conservative probability from computeDisplayPropMetrics. */
 export function computeVerifiedProbability(edgeScore = 0) {
   const magnitude = Math.abs(finiteOr(edgeScore, 0));
-  const probability = Math.round(50 + magnitude * 100);
-  return Math.max(50, Math.min(95, probability));
+  return Math.max(50, Math.min(70, Math.round(50 + magnitude * 40)));
 }
 
 export function resolvePlayConfidenceLabel(games = 0) {
@@ -143,10 +149,29 @@ export function enrichBestPlayRankingFields(prop = {}) {
   const line = finiteOr(prop.line, NaN);
   const games = resolveGamesPlayed(prop);
   const leanDirection = resolveLeanDirection(prop);
-  const edgeMagnitude = resolveEdgeMagnitude(prop);
-  const edgeScore = finiteOr(prop.edgeScore, computePlayEdgeScore({ projection, line, games }));
-  const verifiedProbability = computeVerifiedProbability(edgeScore);
-  const confidence = resolvePlayConfidenceLabel(games);
+  const metrics =
+    prop.probabilityScore != null && prop.edge != null
+      ? {
+          edge: prop.edge,
+          edgePercent: prop.edgePercent,
+          probabilityScore: prop.probabilityScore,
+          lean: prop.lean,
+        }
+      : computeDisplayPropMetrics({ ...prop, projection, line });
+  const playability = evaluateMlbPlayability(
+    { ...prop, projection, projectedValue: projection, confidenceScore: prop.confidenceScore ?? prop.confidence },
+    metrics
+  );
+  const edge = metrics.edge ?? (projection != null && line > 0 ? computeStandardEdge(projection, line) : null);
+  const edgePercent =
+    metrics.edgePercent ?? (edge != null && line > 0 ? computeStandardEdgePercent(edge, line) : null);
+  const edgeMagnitude = Number.isFinite(Number(edge)) ? Math.abs(Number(edge)) : resolveEdgeMagnitude(prop);
+  const edgeScore = edgeMagnitude;
+  const verifiedProbability = playability.probabilityScore ?? metrics.probabilityScore;
+  const numericConfidence = finiteOr(prop.confidenceScore ?? prop.confidence, NaN);
+  const confidence = isConfidenceAvailable(prop)
+    ? Math.round(numericConfidence)
+    : resolvePlayConfidenceLabel(games);
   const direction =
     leanDirection && leanDirection !== "PASS"
       ? leanDirection
@@ -155,11 +180,20 @@ export function enrichBestPlayRankingFields(prop = {}) {
           ? "OVER"
           : "UNDER"
         : null;
-  const verified = verifiedProbability >= BEST_PLAYS_VERIFIED_THRESHOLD;
+  const verified =
+    playability.isDisplayPlayable &&
+    projection != null &&
+    isConfidenceAvailable(prop) &&
+    Number(prop.dataQualityScore ?? 0) >= 70 &&
+    !hasMajorResearchGaps(prop);
   const rankScore = computeBestPlayRankScore({
     ...prop,
     edgeScore,
+    edge,
+    edgePercent,
     verifiedProbability,
+    probabilityScore: verifiedProbability,
+    confidence: numericConfidence,
   });
   const marketContext = buildMarketContextNote(prop);
 
@@ -169,11 +203,21 @@ export function enrichBestPlayRankingFields(prop = {}) {
     projectedValue: projection ?? prop.projectedValue,
     games,
     leanDirection,
+    lean: metrics.lean,
+    edge,
+    edgePercent,
     edgeMagnitude,
     edgeScore,
     verifiedProbability,
-    confidence,
+    probabilityScore: verifiedProbability,
+    confidence: Number.isFinite(numericConfidence) ? numericConfidence : confidence,
+    confidenceScore: Number.isFinite(numericConfidence) ? numericConfidence : undefined,
     verified,
+    isDisplayPlayable: playability.isDisplayPlayable,
+    displayResearchOnly: playability.displayResearchOnly,
+    bettingLabel: playability.bettingLabel,
+    pickTierLabel: playability.pickTierLabel,
+    whyNotPlayable: playability.whyNotPlayable,
     direction,
     rankScore,
     marketContext,

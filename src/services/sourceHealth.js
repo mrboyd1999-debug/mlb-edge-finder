@@ -1,6 +1,7 @@
 import { resolveCacheLayer, formatCacheLayerLabel, CACHE_TTL } from "./smartCache.js";
 import { countUsableProps } from "../utils/propShape.js";
 import { formatProviderStatusLabel, resolveLiveBadge } from "../utils/livePropUsability.js";
+import { normalizeSource } from "../utils/normalizeSource.js";
 
 export const HEALTH_STATES = {
   LIVE: "LIVE",
@@ -25,6 +26,7 @@ export const CONNECTION_LABELS = {
 
 export const CONNECTION_TIERS = {
   CONNECTED: "Connected",
+  DEGRADED: "Degraded",
   WARNING: "Warning",
   FAILED: "Failed",
   PENDING: "Pending",
@@ -32,6 +34,7 @@ export const CONNECTION_TIERS = {
 
 export const HEALTH_COLORS = {
   Connected: { bg: "rgba(34,197,94,0.18)", text: "#86efac", border: "rgba(34,197,94,0.35)" },
+  Degraded: { bg: "rgba(234,179,8,0.18)", text: "#fde047", border: "rgba(234,179,8,0.35)" },
   Warning: { bg: "rgba(234,179,8,0.18)", text: "#fde047", border: "rgba(234,179,8,0.35)" },
   Failed: { bg: "rgba(239,68,68,0.15)", text: "#fca5a5", border: "rgba(239,68,68,0.3)" },
   Pending: { bg: "rgba(148,163,184,0.12)", text: "#cbd5e1", border: "rgba(148,163,184,0.28)" },
@@ -81,11 +84,28 @@ function finiteCount(value) {
   return Number.isFinite(num) ? num : 0;
 }
 
+/** Count props currently rendered from a line provider. */
+export function countActivePropsForSource(props = [], provider = "") {
+  if (!Array.isArray(props)) return 0;
+  const key = String(provider || "").toLowerCase();
+  if (!key) return 0;
+  return props.filter((prop) => {
+    const src = normalizeSource(prop).toLowerCase();
+    if (key.includes("prize")) return src === "prizepicks";
+    if (key.includes("underdog")) return src === "underdog";
+    return src === key;
+  }).length;
+}
+
 /**
- * Canonical provider connection tier — props/cache win over stale fetch flags.
+ * Provider status: active board props win over stale timeout flags.
+ * CONNECTED — live refresh returned usable props.
+ * DEGRADED — refresh timed out/failed but cached/active props still in use.
+ * FAILED — no usable and no cached props available.
  */
 export function resolveProviderConnectionStatus({
   usableCount = 0,
+  activeUsableCount = 0,
   parsedCount = 0,
   rawCount = 0,
   cachedCount = 0,
@@ -96,33 +116,51 @@ export function resolveProviderConnectionStatus({
   timedOut = false,
 } = {}) {
   const usable = finiteCount(usableCount);
+  const active = finiteCount(activeUsableCount) || usable;
   const parsed = finiteCount(parsedCount);
   const raw = finiteCount(rawCount);
   const cachedProps = finiteCount(cachedCount);
   const hasCached = cached || cachedProps > 0;
-  const hasData = usable > 0 || parsed > 0 || hasCached;
+  const hasActive = active > 0;
+  const hasRefreshData = usable > 0 || parsed > 0;
+  const refreshDegraded = timedOut || fetchFailed || fallback || partial;
 
-  if (timedOut && !hasData) {
-    return { tier: CONNECTION_TIERS.FAILED, badge: HEALTH_STATES.FAILED, connected: false };
-  }
-  if (hasData) {
-    const warning =
-      hasCached ||
-      fallback ||
-      partial ||
-      (raw > 0 && usable === 0 && parsed > 0) ||
-      (fetchFailed && hasData);
+  if (hasActive) {
+    const liveOk = usable > 0 && !refreshDegraded;
+    if (liveOk) {
+      return {
+        tier: CONNECTION_TIERS.CONNECTED,
+        badge: HEALTH_STATES.LIVE,
+        connected: true,
+        degraded: false,
+      };
+    }
     return {
-      tier: warning ? CONNECTION_TIERS.WARNING : CONNECTION_TIERS.CONNECTED,
-      badge: warning ? (hasCached ? HEALTH_STATES.CACHED : HEALTH_STATES.DEGRADED) : HEALTH_STATES.LIVE,
+      tier: CONNECTION_TIERS.DEGRADED,
+      badge: hasCached ? HEALTH_STATES.CACHED : HEALTH_STATES.DEGRADED,
       connected: true,
-      warning,
+      degraded: true,
     };
   }
-  if (fetchFailed || timedOut) {
-    return { tier: CONNECTION_TIERS.FAILED, badge: HEALTH_STATES.FAILED, connected: false };
+
+  if (hasRefreshData && hasCached) {
+    return {
+      tier: CONNECTION_TIERS.DEGRADED,
+      badge: HEALTH_STATES.CACHED,
+      connected: true,
+      degraded: true,
+    };
   }
-  return { tier: CONNECTION_TIERS.FAILED, badge: HEALTH_STATES.EMPTY, connected: false };
+
+  if (refreshDegraded || timedOut || fetchFailed) {
+    return { tier: CONNECTION_TIERS.FAILED, badge: HEALTH_STATES.FAILED, connected: false, degraded: false };
+  }
+
+  if (raw > 0) {
+    return { tier: CONNECTION_TIERS.FAILED, badge: HEALTH_STATES.EMPTY, connected: false, degraded: false };
+  }
+
+  return { tier: CONNECTION_TIERS.FAILED, badge: HEALTH_STATES.EMPTY, connected: false, degraded: false };
 }
 
 export function formatIngestionMetrics(row = {}) {
@@ -212,15 +250,15 @@ export function resolveFetchHealthBadge({
       connectionTier: connection.tier,
     };
   }
-  if (connection.tier === CONNECTION_TIERS.WARNING) {
+  if (connection.tier === CONNECTION_TIERS.DEGRADED || connection.tier === CONNECTION_TIERS.WARNING) {
     return {
-      pipelineStatus: cached || rateLimited ? "Cached" : "Degraded",
+      pipelineStatus: cached || rateLimited || timedOut ? "Degraded" : "Degraded",
       badge: connection.badge,
       message: statusLabel,
-      connectionTier: connection.tier,
+      connectionTier: connection.degraded ? CONNECTION_TIERS.DEGRADED : connection.tier,
     };
   }
-  if (timedOut) {
+  if (timedOut && finiteCount(usableCount) === 0 && finiteCount(parsedCount) === 0) {
     return { pipelineStatus: "Timed out", badge: "TIMED OUT", message: statusLabel, connectionTier: CONNECTION_TIERS.FAILED };
   }
   if (rawCount > 0 && parsedCount === 0) {

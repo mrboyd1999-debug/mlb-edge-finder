@@ -126,7 +126,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
   const researchOnly = Boolean(prop.displayResearchOnly) || /research only/i.test(String(prop.bettingLabel || ""));
   const playable = Boolean(prop.isDisplayPlayable) && !researchOnly;
   const cardStatus = prop.cardStatus || (prop.displayRejected ? "rejected" : playable ? "playable" : "research");
-  const cardStatusLabel = resolveCardStatusLabel(prop);
+  const cardStatusLabel = prop.pickTierLabel || prop.bettingLabel || resolveCardStatusLabel(prop);
   const probabilityPct =
     prop.probabilityScore ??
     (Number.isFinite(Number(prop.modelProbability)) ? Math.round(Number(prop.modelProbability) * 100) : null);
@@ -179,15 +179,19 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
   const recentTrend = prop.formNote || prop.profile?.formNote || prop.recentTrend || prop.strikeoutTrend || "";
   const openingLine = prop.lineMovement?.openingLine ?? null;
   const currentLineSnap = prop.lineMovement?.currentLine ?? prop.line ?? null;
-  const confDisplay =
+  const confRaw =
     noVerifiedPlay || passPlay
       ? null
       : prop.calibratedConfidence != null && prop.calibratedConfidence !== prop.confidenceScore
         ? prop.calibratedConfidence
         : prop.confidenceScore ?? prop.confidence ?? null;
-  const confDisplayPositive = confDisplay != null && Number(confDisplay) > 0 ? confDisplay : null;
-  const edgeDisplay =
-    noVerifiedPlay || !Number.isFinite(Number(prop.edge)) || Number(prop.edge) <= 0
+  const confDisplay =
+    confRaw != null && Number(confRaw) > 0 ? Math.round(Number(confRaw)) : null;
+  const confDisplayLabel = confDisplay != null ? `${confDisplay}%` : "Unavailable";
+  const edgePct = Number(prop.edgePercent);
+  const edgeDisplay = Number.isFinite(edgePct)
+    ? `${edgePct > 0 ? "+" : ""}${Math.round(edgePct)}%`
+    : noVerifiedPlay || !Number.isFinite(Number(prop.edge))
       ? null
       : formatNumber(prop.edge);
   const hitChanceDisplay = noVerifiedPlay
@@ -377,9 +381,9 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
                     EDGE +{edgeDisplay}
                   </span>
                 ) : null}
-                {confDisplayPositive != null ? (
+                {confDisplay != null ? (
                   <span style={{ ...styles.scoreBadge, ...metricFade, borderColor: "#166534", color: "#86efac", background: "#052e16" }}>
-                    CONF {confDisplayPositive}%
+                    CONF {confDisplay}%
                   </span>
                 ) : null}
                 {hitChanceDisplay ? (
@@ -430,25 +434,15 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
                 Prob <strong>{probabilityPct != null ? `${probabilityPct}%` : "—"}</strong>
               </span>
               <span>
-                Conf <strong>{confDisplay != null ? `${confDisplay}%` : "—"}</strong>
+                Conf <strong>{confDisplayLabel}</strong>
               </span>
               <span>
-                Risk <strong>{riskShort || "—"}</strong>
+                Edge <strong>{edgeDisplay ?? "—"}</strong>
               </span>
               <span>
-                DQ <strong>{Number.isFinite(Number(prop.dataQualityScore)) ? Math.round(Number(prop.dataQualityScore)) : "—"}</strong>
+                Status <strong>{cardStatusLabel}</strong>
               </span>
-              {edgeDisplay != null ? (
-                <span>
-                  Edge <strong>{Number(prop.edge) > 0 ? "+" : ""}{edgeDisplay}</strong>
-                </span>
-              ) : null}
             </div>
-            {prop.whyNotPlayable && !playable ? (
-              <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, color: "#94a3b8", marginTop: 2 }}>
-                {prop.whyNotPlayable}
-              </p>
-            ) : null}
           </>
           )
         ) : (
@@ -547,39 +541,26 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
           </span>
         )}
       </div>
-      {!compact && statSourceBadges.length > 0 ? (
-        <p style={{ ...styles.compactFlags, margin: "4px 0 0", color: "#bae6fd" }}>
-          Stats: {statSourceBadges.join(" · ")}
-        </p>
-      ) : null}
-      {!compact && bookTag ? <p style={{ ...styles.compactFlags, margin: "4px 0 0", color: "#86efac" }}>{bookTag}</p> : null}
       {!compact ? (
         <>
-          <p style={{ ...styles.compactFlags, margin: "4px 0 0" }}>{shortReason(prop)}</p>
-          {!ready && lowReasons.length > 0 && (
-            <div style={{ marginTop: "6px" }}>
-              <p style={{ ...styles.compactFlags, margin: 0, color: "#fcd34d", fontWeight: 700 }}>Why confidence is low</p>
-              <ul style={{ ...styles.explanationList, margin: "4px 0 0", paddingLeft: "16px" }}>
-                {lowReasons.slice(0, 3).map((reason) => (
-                  <li key={reason} style={{ fontSize: "11px", color: "#94a3b8" }}>
-                    {reason}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          {statSourceBadges.length > 0 ? (
+            <p style={{ ...styles.compactFlags, margin: "4px 0 0", color: "#bae6fd", display: "none" }} aria-hidden="true">
+              Stats: {statSourceBadges.join(" · ")}
+            </p>
+          ) : null}
+          {bookTag ? (
+            <p style={{ ...styles.compactFlags, margin: "4px 0 0", color: "#86efac", display: "none" }} aria-hidden="true">
+              {bookTag}
+            </p>
+          ) : null}
         </>
       ) : null}
       {shouldShowMlbPipelineFailure(prop) && !(isManual && noVerifiedPlay) ? (
         <MlbPipelineFailureBlock prop={prop} />
       ) : null}
-      {compact ? (
-        <button type="button" className="prop-card-why-link" style={styles.whyLink} onClick={openDetails}>
-          Tap for details
-        </button>
-      ) : (
-        <div className="prop-card-why-link" style={styles.whyLink}>Why this pick?</div>
-      )}
+      <button type="button" className="prop-card-why-link" style={styles.whyLink} onClick={openDetails}>
+        View Details
+      </button>
     </article>
   );
 }

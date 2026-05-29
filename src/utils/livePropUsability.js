@@ -72,9 +72,9 @@ export function formatProviderStatusLabel({
 
   if (timedOut || isTimeoutPreview(errorText) || /timed?\s*out/i.test(normalizedBadge)) {
     if (usable > 0 || parsed > 0) {
-      return cached ? `Cached — ${usable || parsed} usable props` : `Live — ${usable || parsed} usable props`;
+      return `Degraded — ${usable || parsed} cached props in use`;
     }
-    return "Timed out — fallback disabled";
+    return "Timed out — no cached props available";
   }
 
   if (usable > 0) {
