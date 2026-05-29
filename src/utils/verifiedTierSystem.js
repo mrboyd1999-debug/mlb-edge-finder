@@ -1,5 +1,5 @@
 /**
- * Phase 3 verified tier system — probability/confidence gates for Verified Plays.
+ * Phase 3 verified tier system — probability/confidence/playability gates for Verified Plays.
  */
 
 import {
@@ -9,11 +9,33 @@ import {
 } from "./bestPlaysPipelineDebug.js";
 import { hasMajorResearchGaps, isLowMatchupProp } from "./conservativeProjection.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
-import { compareVerifiedRankingPlays } from "./bestPlayRankingScore.js";
+import {
+  annotateTopPickRankingFields,
+  compareTopPickScore,
+  resolvePlayabilityScore,
+  selectHighestTierAPlays,
+  NO_TIER_A_PLAYS_MESSAGE,
+} from "./bestPlayRankingScore.js";
 
-export const VERIFIED_TIER_A = { id: "A", minProbability: 65, minConfidence: 60, rank: 0 };
-export const VERIFIED_TIER_B = { id: "B", minProbability: 60, minConfidence: 55, rank: 1 };
-export const VERIFIED_TIER_C = { id: "C", minProbability: 55, minConfidence: 50, rank: 2 };
+export { NO_TIER_A_PLAYS_MESSAGE };
+
+export const VERIFIED_TIER_A = {
+  id: "A",
+  minProbability: 65,
+  minConfidence: 70,
+  minPlayability: 65,
+  rank: 0,
+};
+export const VERIFIED_TIER_B = {
+  id: "B",
+  minConfidence: 60,
+  minPlayability: 50,
+  rank: 1,
+};
+export const VERIFIED_TIER_C = { id: "C", rank: 2 };
+
+export const VERIFIED_BASE_MIN_PROBABILITY = 55;
+export const VERIFIED_BASE_MIN_CONFIDENCE = 50;
 
 export const VERIFIED_TIERS = [VERIFIED_TIER_A, VERIFIED_TIER_B, VERIFIED_TIER_C];
 
@@ -31,22 +53,30 @@ export const VERIFICATION_AUDIT_KEYS = [
 export function resolveVerifiedMetrics(prop = {}) {
   const probability = Number(prop.probabilityScore ?? prop.verifiedProbability);
   const confidence = Number(prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence);
-  return { probability, confidence };
+  const playability = resolvePlayabilityScore(prop);
+  return { probability, confidence, playability };
 }
 
 export function classifyVerifiedTier(prop = {}) {
-  const { probability, confidence } = resolveVerifiedMetrics(prop);
-  if (!Number.isFinite(probability) || !Number.isFinite(confidence)) return null;
-  if (probability >= VERIFIED_TIER_A.minProbability && confidence >= VERIFIED_TIER_A.minConfidence) {
+  const { probability, confidence, playability } = resolveVerifiedMetrics(prop);
+  if (!Number.isFinite(probability) || !Number.isFinite(confidence) || !Number.isFinite(playability)) {
+    return null;
+  }
+  if (probability < VERIFIED_BASE_MIN_PROBABILITY || confidence < VERIFIED_BASE_MIN_CONFIDENCE) {
+    return null;
+  }
+
+  if (
+    probability >= VERIFIED_TIER_A.minProbability &&
+    confidence >= VERIFIED_TIER_A.minConfidence &&
+    playability >= VERIFIED_TIER_A.minPlayability
+  ) {
     return VERIFIED_TIER_A.id;
   }
-  if (probability >= VERIFIED_TIER_B.minProbability && confidence >= VERIFIED_TIER_B.minConfidence) {
+  if (confidence >= VERIFIED_TIER_B.minConfidence && playability >= VERIFIED_TIER_B.minPlayability) {
     return VERIFIED_TIER_B.id;
   }
-  if (probability >= VERIFIED_TIER_C.minProbability && confidence >= VERIFIED_TIER_C.minConfidence) {
-    return VERIFIED_TIER_C.id;
-  }
-  return null;
+  return VERIFIED_TIER_C.id;
 }
 
 export function hasIncompleteSupportingData(prop = {}) {
@@ -83,8 +113,8 @@ export function passesResearchTierFilter(prop = {}) {
   if (!hasIncompleteSupportingData(prop)) return false;
 
   const { probability, confidence } = resolveVerifiedMetrics(prop);
-  if (!Number.isFinite(probability) || probability < VERIFIED_TIER_C.minProbability) return false;
-  if (!Number.isFinite(confidence) || confidence < VERIFIED_TIER_C.minConfidence) return false;
+  if (!Number.isFinite(probability) || probability < VERIFIED_BASE_MIN_PROBABILITY) return false;
+  if (!Number.isFinite(confidence) || confidence < VERIFIED_BASE_MIN_CONFIDENCE) return false;
   return true;
 }
 
@@ -95,12 +125,15 @@ export function auditVerificationFailure(prop = {}) {
   if (resolvePropSport(prop) !== "MLB") return "failedProjection";
   if (!hasValidVerifiedProjection(prop)) return "failedProjection";
 
-  const { probability, confidence } = resolveVerifiedMetrics(prop);
+  const { probability, confidence, playability } = resolveVerifiedMetrics(prop);
 
-  if (!Number.isFinite(probability) || probability < VERIFIED_TIER_C.minProbability) {
+  if (!Number.isFinite(probability) || probability < VERIFIED_BASE_MIN_PROBABILITY) {
     return "failedProbability";
   }
-  if (!Number.isFinite(confidence) || confidence < VERIFIED_TIER_C.minConfidence) {
+  if (!Number.isFinite(confidence) || confidence < VERIFIED_BASE_MIN_CONFIDENCE) {
+    return "failedConfidence";
+  }
+  if (!Number.isFinite(playability) || playability < VERIFIED_TIER_B.minPlayability) {
     return "failedConfidence";
   }
   if (hasIncompleteSupportingData(prop)) return "failedMatchup";
@@ -126,8 +159,7 @@ export function summarizeVerificationAudit(props = []) {
         player: prop.playerName || prop.player,
         stat: prop.statType || prop.market,
         reason,
-        probability: resolveVerifiedMetrics(prop).probability,
-        confidence: resolveVerifiedMetrics(prop).confidence,
+        ...resolveVerifiedMetrics(prop),
       });
     }
   }
@@ -141,89 +173,41 @@ export function logVerificationAudit(props = []) {
   return audit;
 }
 
-function tierRank(tierId) {
-  if (tierId === "A") return 0;
-  if (tierId === "B") return 1;
-  if (tierId === "C") return 2;
-  return 3;
-}
-
 export function compareVerifiedTierPlays(a = {}, b = {}) {
-  const tierDiff = tierRank(a.verifiedTier) - tierRank(b.verifiedTier);
-  if (tierDiff !== 0) return tierDiff;
-  return compareVerifiedRankingPlays(a, b);
+  return compareTopPickScore(a, b);
 }
 
 export function annotateVerifiedTier(prop = {}) {
   const tier = classifyVerifiedTier(prop);
-  return {
+  return annotateTopPickRankingFields({
     ...prop,
     verifiedTier: tier,
     verifiedTierLabel: tier ? `Tier ${tier}` : null,
     pickTierLabel: tier ? "Verified Play" : prop.pickTierLabel,
     verified: Boolean(tier),
     bestPlayPool: tier ? "verified" : prop.bestPlayPool,
-  };
+  });
 }
 
-/**
- * Populate verified plays: Tier A first, then B, then C — never return empty when pool has candidates.
- */
+/** Verified plays sorted by top pick score descending. */
 export function selectVerifiedPlaysByTier(props = [], options = {}) {
   const max = options.max ?? VERIFIED_MAX_PLAYS;
-  const min = options.min ?? VERIFIED_MIN_PLAYS;
-  const sortFn = options.sortCompare ?? compareVerifiedTierPlays;
-
   const eligible = (props || [])
     .filter(passesVerifiedTierFilter)
     .map(annotateVerifiedTier)
-    .sort(sortFn);
+    .sort(compareTopPickScore);
 
-  const tierA = eligible.filter((p) => p.verifiedTier === "A");
-  const tierB = eligible.filter((p) => p.verifiedTier === "B");
-  const tierC = eligible.filter((p) => p.verifiedTier === "C");
-
-  const seen = new Set();
-  const picks = [];
-
-  const pushUnique = (list) => {
-    for (const prop of list) {
-      if (picks.length >= max) break;
-      const key = `${prop.playerName}|${prop.statType}|${prop.line}|${prop.source}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      picks.push(prop);
-    }
-  };
-
-  pushUnique(tierA);
-  if (picks.length < min) pushUnique(tierB);
-  if (picks.length < min) pushUnique(tierC);
-
-  if (!picks.length && eligible.length) {
-    pushUnique(eligible);
-  }
-
-  if (!picks.length && props.length) {
-    const fallbackSort = options.fallbackSort;
-    const fallbackPool = (props || []).filter(hasValidVerifiedProjection);
-    if (fallbackSort) fallbackPool.sort(fallbackSort);
-    pushUnique(
-      fallbackPool.map((prop) =>
-        annotateVerifiedTier({ ...prop, verifiedTier: VERIFIED_TIER_C.id, verifiedTierFallback: true })
-      )
-    );
-  }
-
-  return picks.slice(0, max);
+  return eligible.slice(0, max);
 }
+
+export { selectHighestTierAPlays };
 
 export function selectTopByProbability(props = [], limit = BEST_PLAYS_ENGINE_SIZE) {
   const seen = new Set();
   const picks = [];
-  const sorted = [...(props || [])].sort(
-    (a, b) => Number(b.probabilityScore ?? b.verifiedProbability ?? 0) - Number(a.probabilityScore ?? a.verifiedProbability ?? 0)
-  );
+  const sorted = [...(props || [])]
+    .map(annotateTopPickRankingFields)
+    .sort(compareTopPickScore);
   for (const prop of sorted) {
     if (picks.length >= limit) break;
     const key = `${prop.playerName}|${prop.statType}|${prop.line}|${prop.source}`;
@@ -243,7 +227,7 @@ export function selectTopByEdge(props = [], limit = BEST_PLAYS_ENGINE_SIZE, reso
     const key = `${prop.playerName}|${prop.statType}|${prop.line}|${prop.source}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    picks.push(prop);
+    picks.push(annotateTopPickRankingFields(prop));
   }
   return picks;
 }

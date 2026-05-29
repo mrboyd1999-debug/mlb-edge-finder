@@ -56,13 +56,7 @@ export function leanMatchesProjection(prop = {}, leanValue = "") {
 }
 
 export function isVerifiedHighestProbabilityPick(prop = {}) {
-  const tier = prop.verifiedTier || classifyVerifiedTier(prop);
-  return Boolean(
-    tier &&
-      (prop.verified === true ||
-        prop.pickTierLabel === "Verified Play" ||
-        /verified|top-verified/.test(String(prop.bestPlayPool || "")))
-  );
+  return prop.verifiedTier === "A";
 }
 
 export function validatePickDirectionBeforeRender(prop = {}, context = "card") {
@@ -139,16 +133,22 @@ export function formatHitRatePercent(value) {
 }
 
 export function resolveBreakdownTitle(prop = {}) {
-  const verified = isVerifiedHighestProbabilityPick(prop);
-  const research =
-    prop.displayResearchOnly ||
-    prop.pickTierLabel === "Research Candidate" ||
-    /research/i.test(String(prop.bettingLabel || ""));
+  const verifiedTierA = prop.verifiedTier === "A" || classifyVerifiedTier(prop) === "A";
 
-  if (verified && (prop.isHighestProbabilityPick || prop.topVerifiedRank != null)) {
+  if (verifiedTierA && prop.isHighestProbabilityPick) {
     return "Highest Probability Pick Breakdown";
   }
-  if (verified) return "Verified Play Breakdown";
-  if (research) return "Research Candidate Breakdown";
+  if (verifiedTierA) return "Verified Play Breakdown · Tier A";
+  if (prop.verifiedTier === "B") return "Verified Play Breakdown · Tier B";
+  if (prop.verifiedTier === "C" || prop.pickTierLabel === "Verified Play") {
+    return "Verified Play Breakdown · Tier C";
+  }
+  if (
+    prop.displayResearchOnly ||
+    prop.pickTierLabel === "Research Candidate" ||
+    /research/i.test(String(prop.bettingLabel || ""))
+  ) {
+    return "Research Candidate Breakdown";
+  }
   return "Prop Breakdown";
 }

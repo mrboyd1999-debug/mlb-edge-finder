@@ -33,6 +33,7 @@ import {
   auditHighestProbabilityProps,
   buildHighestProbabilityQualifyReason,
 } from "./highestProbabilityPlays.js";
+import { NO_TIER_A_PLAYS_MESSAGE } from "./verifiedTierSystem.js";
 import {
   logProjectionFilterSummary,
   resetProjectionFilterCounters,
@@ -277,14 +278,17 @@ export function resolveTopMlbPlays(displayProps = [], rawProps = [], parsedUnder
 
 function annotateHighestProbabilityPlay(prop, rank) {
   if (!prop) return null;
-  const label = highestProbabilityLabel(prop);
+  const label =
+    prop.verifiedTier === "A" && prop.isHighestProbabilityPick
+      ? "Highest Probability Pick"
+      : highestProbabilityLabel(prop);
   return withPlayerImageUrl({
     ...prop,
     topMlbPlayRank: rank,
     highestProbabilityLabel: label,
-    isHighestProbabilityPick: qualifiesAsHighestProbabilityPick(prop),
-    qualifyReason: buildHighestProbabilityQualifyReason(prop),
-    reason: buildHighestProbabilityQualifyReason(prop),
+    isHighestProbabilityPick: prop.verifiedTier === "A" && Boolean(prop.isHighestProbabilityPick),
+    qualifyReason: prop.rankingReason || buildHighestProbabilityQualifyReason(prop),
+    reason: prop.rankingReason || buildHighestProbabilityQualifyReason(prop),
     bettingLabel: label,
   });
 }
@@ -373,21 +377,16 @@ export function resolveTopMlbPlaySections(
   const topProbabilityPicks = (selection.topProbabilityPicks || []).map((prop, idx) =>
     annotateHighestProbabilityPlay(prop, idx + 1)
   );
+  const highestProbabilityPicks = (selection.highestProbabilityPicks || []).map((prop, idx) =>
+    annotateHighestProbabilityPlay({ ...prop, topVerifiedRank: 1 }, idx + 1)
+  );
   const topEdgePicks = (selection.topEdgePicks || []).map((prop, idx) =>
     annotateHighestProbabilityPlay(prop, idx + 1)
   );
   const topVerifiedPicks = (selection.topVerifiedPicks || []).map((prop, idx) =>
     annotateHighestProbabilityPlay({ ...prop, topVerifiedRank: prop.topVerifiedRank ?? idx + 1 }, idx + 1)
   );
-
-  if (!verifiedPicks.length && topProbabilityPicks.length) {
-    verifiedPicks = topProbabilityPicks.slice(0, 5).map((prop, idx) =>
-      annotateHighestProbabilityPlay(
-        { ...prop, verifiedTier: prop.verifiedTier || "C", verifiedTierFallback: true, bestPlayPool: "verified" },
-        idx + 1
-      )
-    );
-  }
+  const noTierAPlays = Boolean(selection.noTierAPlays);
 
   filterDiagnostics.usedVerifiedFallback = Boolean(selection.usedVerifiedFallback);
   filterDiagnostics.verificationDashboard = selection.verificationDashboard || null;
@@ -397,6 +396,8 @@ export function resolveTopMlbPlaySections(
   filterDiagnostics.topProbabilityCount = topProbabilityPicks.length;
   filterDiagnostics.topEdgeCount = topEdgePicks.length;
   filterDiagnostics.topVerifiedCount = topVerifiedPicks.length;
+  filterDiagnostics.highestProbabilityCount = highestProbabilityPicks.length;
+  filterDiagnostics.noTierAPlays = noTierAPlays;
 
   filterDiagnostics.selected = highestPicks.length;
   filterDiagnostics.eligible = strictEligible;
@@ -415,22 +416,25 @@ export function resolveTopMlbPlaySections(
 
   const sections = [
     {
+      id: "highest-probability",
+      title: "Highest Probability Pick",
+      eyebrow: noTierAPlays
+        ? NO_TIER_A_PLAYS_MESSAGE
+        : "Top Tier A play by composite score",
+      picks: highestProbabilityPicks.filter(Boolean),
+      emptyMessage: NO_TIER_A_PLAYS_MESSAGE,
+    },
+    {
       id: "top-verified-plays",
       title: "Top 5 Verified Plays",
-      eyebrow: "Ranked by probability, confidence, and edge",
+      eyebrow: "Sorted by top pick score descending",
       picks: topVerifiedPicks.filter(Boolean),
     },
     {
       id: "verified-plays",
       title: "Verified Plays",
-      eyebrow: "Tier A/B/C — sorted by ranking score",
+      eyebrow: "Tier A/B/C — sorted by top pick score descending",
       picks: verifiedPicks.filter(Boolean),
-    },
-    {
-      id: "highest-probability",
-      title: "Top 5 Highest Probability",
-      eyebrow: "Best projected probability from today's prop pool",
-      picks: topProbabilityPicks.filter(Boolean),
     },
     {
       id: "highest-edge",

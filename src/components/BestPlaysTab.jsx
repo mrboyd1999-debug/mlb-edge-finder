@@ -4,6 +4,7 @@ import PlayerImage from "./PlayerImage.jsx";
 import PropPipelineCounters from "./PropPipelineCounters.jsx";
 import VerificationDashboard from "./VerificationDashboard.jsx";
 import { groupPicksByPlayer } from "../utils/playerPropGroups.js";
+import { NO_TIER_A_PLAYS_MESSAGE } from "../utils/verifiedTierSystem.js";
 
 function renderRankedPlays(picks = [], onOpen) {
   if (!picks.length) return null;
@@ -108,16 +109,16 @@ function BestPlaysTab({
       };
     }, [sections, filterDiagnostics]);
 
+  const highestProbabilityPicks = probabilitySection?.picks || [];
   const topVerifiedPicks = topVerifiedSection?.picks || [];
   const verifiedGroups = groupPicksByPlayer(verifiedSection?.picks || []);
   const researchGroups = groupPicksByPlayer(researchSection?.picks || []);
-  const probabilityGroups = groupPicksByPlayer(probabilitySection?.picks || []);
   const edgeGroups = groupPicksByPlayer(edgeSection?.picks || []);
   const totalPicks =
+    highestProbabilityPicks.length +
     topVerifiedPicks.length +
     verifiedGroups.reduce((sum, group) => sum + group.props.length, 0) +
     researchGroups.reduce((sum, group) => sum + group.props.length, 0) +
-    probabilityGroups.reduce((sum, group) => sum + group.props.length, 0) +
     edgeGroups.reduce((sum, group) => sum + group.props.length, 0);
 
   const failureReason =
@@ -147,11 +148,25 @@ function BestPlaysTab({
       ) : null}
       {failureReason && !totalPicks ? <p className="compact-form-notice">{failureReason}</p> : null}
 
+      {probabilitySection ? (
+        <section className="compact-section">
+          <div className="compact-section__head">
+            <h2>{probabilitySection?.title || "Highest Probability Pick"}</h2>
+            <p>{probabilitySection?.eyebrow || "Top Tier A play by composite score"}</p>
+          </div>
+          {highestProbabilityPicks.length ? (
+            renderRankedPlays(highestProbabilityPicks, onOpen)
+          ) : (
+            <p className="compact-empty">{probabilitySection?.emptyMessage || NO_TIER_A_PLAYS_MESSAGE}</p>
+          )}
+        </section>
+      ) : null}
+
       {topVerifiedPicks.length ? (
         <section className="compact-section">
           <div className="compact-section__head">
             <h2>{topVerifiedSection?.title || "Top 5 Verified Plays"}</h2>
-            <p>{topVerifiedSection?.eyebrow || "Ranked by probability, confidence, and edge"}</p>
+            <p>{topVerifiedSection?.eyebrow || "Sorted by top pick score descending"}</p>
           </div>
           {renderRankedPlays(topVerifiedPicks, onOpen)}
         </section>
@@ -160,20 +175,10 @@ function BestPlaysTab({
       <section className="compact-section">
         <div className="compact-section__head">
           <h2>{verifiedSection?.title || "Verified Plays"}</h2>
-          <p>{verifiedSection?.eyebrow || "Tier A/B/C — sorted by ranking score"}</p>
+          <p>{verifiedSection?.eyebrow || "Tier A/B/C — sorted by top pick score descending"}</p>
         </div>
         {renderPlayerGroups(verifiedGroups, onOpen)}
       </section>
-
-      {probabilityGroups.length ? (
-        <section className="compact-section">
-          <div className="compact-section__head">
-            <h2>{probabilitySection?.title || "Top 5 Highest Probability"}</h2>
-            <p>{probabilitySection?.eyebrow || "Best projected probability from today's prop pool"}</p>
-          </div>
-          {renderPlayerGroups(probabilityGroups, onOpen)}
-        </section>
-      ) : null}
 
       {edgeGroups.length ? (
         <section className="compact-section">

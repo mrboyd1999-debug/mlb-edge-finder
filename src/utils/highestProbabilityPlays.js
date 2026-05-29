@@ -29,6 +29,7 @@ import {
   selectVerifiedPlaysByTier,
   selectTopByEdge,
   selectTopByProbability,
+  NO_TIER_A_PLAYS_MESSAGE,
   VERIFIED_MAX_PLAYS,
 } from "./verifiedTierSystem.js";
 import {
@@ -38,7 +39,11 @@ import {
   resolveLeanDirection,
   compareWeightedBestPlays,
 } from "./bestPlayRanking.js";
-import { compareVerifiedRankingPlays } from "./bestPlayRankingScore.js";
+import {
+  compareTopPickScore,
+  selectHighestTierAPlays,
+  selectTopVerifiedByScore,
+} from "./bestPlayRankingScore.js";
 
 export const HIGHEST_PROBABILITY_MIN_CONFIDENCE = 50;
 export const HIGHEST_PROBABILITY_MIN_EDGE = 0.02;
@@ -166,12 +171,10 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
     verified: true,
     bestPlayPool: "verified",
   }));
-  verifiedPicks = [...verifiedPicks].sort(compareVerifiedRankingPlays);
-  const topVerifiedPicks = verifiedPicks.slice(0, BEST_PLAYS_ENGINE_SIZE).map((prop, index) => ({
-    ...prop,
-    topVerifiedRank: index + 1,
-    bestPlayPool: "top-verified",
-  }));
+  verifiedPicks = [...verifiedPicks].sort(compareTopPickScore);
+  const topVerifiedPicks = selectTopVerifiedByScore(verifiedPicks, BEST_PLAYS_ENGINE_SIZE);
+  const highestProbabilityPicks = selectHighestTierAPlays(verifiedPicks, 1);
+  const noTierAPlays = !highestProbabilityPicks.length;
   const researchPicks = dedupeAndTake(
     rankedResearch.map((prop) => ({
       ...prop,
@@ -224,6 +227,9 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
       picks,
       verifiedPicks,
       topVerifiedPicks,
+      highestProbabilityPicks,
+      noTierAPlays,
+      noTierAPlaysMessage: NO_TIER_A_PLAYS_MESSAGE,
       researchPicks,
       topProbabilityPicks,
       topEdgePicks,

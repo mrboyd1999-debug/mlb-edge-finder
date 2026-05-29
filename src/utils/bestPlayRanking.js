@@ -20,10 +20,10 @@ import {
 } from "./bestPlaysPipelineDebug.js";
 import { computeMlbPlayConfidence } from "./mlbPlayConfidence.js";
 import { attachBestPlayExplanation } from "./bestPlayExplanation.js";
+import { computePlayabilityScore } from "./propCalibration.js";
 import {
-  computeVerifiedRankingScore,
-  compareWeightedBestPlays,
-  computeWeightedBestPlayScore,
+  computeTopPickScore,
+  annotateTopPickRankingFields,
 } from "./bestPlayRankingScore.js";
 import { enrichPickDirectionFields, resolveProjectionLeanDisplay } from "./pickDirectionAudit.js";
 import { isPitcherStrikeoutMarket } from "./topMlbPlaysRanking.js";
@@ -123,8 +123,17 @@ export function computeRecentFormScore(prop = {}) {
   return 40;
 }
 
-/** @deprecated Use computeVerifiedRankingScore from bestPlayRankingScore.js */
-export { computeVerifiedRankingScore, compareVerifiedRankingPlays, computeWeightedBestPlayScore, compareWeightedBestPlays, resolveRankingEdgePercent } from "./bestPlayRankingScore.js";
+/** @deprecated Use computeTopPickScore from bestPlayRankingScore.js */
+export {
+  computeTopPickScore,
+  computeVerifiedRankingScore,
+  compareVerifiedRankingPlays,
+  compareTopPickScore,
+  computeWeightedBestPlayScore,
+  compareWeightedBestPlays,
+  resolveRankingEdgePercent,
+  buildTopPickRankingReason,
+} from "./bestPlayRankingScore.js";
 
 /** rankScore = (confidence * 0.45) + (abs(edge) * 35) + (recentFormScore * 0.20) */
 export function computeBestPlayRankScore(prop = {}) {
@@ -196,7 +205,8 @@ export function enrichBestPlayRankingFields(prop = {}) {
     ...prop,
     projection,
     probabilityScore: playability.probabilityScore ?? metrics.probabilityScore,
-    displayConfidenceScore: playability.displayConfidenceScore ?? metrics.adjustedConfidence,
+    displayConfidenceScore: displayConfidence,
+    playabilityScore,
   });
   const edge = metrics.edge ?? (projection != null && line > 0 ? computeStandardEdge(projection, line) : null);
   const edgePercent =
@@ -205,6 +215,12 @@ export function enrichBestPlayRankingFields(prop = {}) {
   const edgeScore = edgeMagnitude;
   const verifiedProbability = playability.probabilityScore ?? metrics.probabilityScore;
   const displayConfidence = playability.displayConfidenceScore;
+  const playabilityScore = Number.isFinite(Number(prop.playabilityScore))
+    ? Number(prop.playabilityScore)
+    : computePlayabilityScore(
+        { ...prop, projection, projectedValue: projection, edge: metrics.edge, edgePercent: metrics.edgePercent },
+        displayConfidence ?? prop.confidenceScore ?? prop.confidence ?? 50
+      );
   const edgeLabels = playability.edgeDisplay ?? formatEdgeDisplay({ ...prop, edge, edgePercent, line });
   const direction =
     leanDirection && leanDirection !== "PASS"
@@ -219,19 +235,12 @@ export function enrichBestPlayRankingFields(prop = {}) {
     projection,
     probabilityScore: verifiedProbability,
     displayConfidenceScore: displayConfidence,
+    playabilityScore,
     pickTierLabel: playability.pickTierLabel,
     pickTierRank: playability.pickTierRank,
   };
   const verified = isVerifiedPlay(enrichedProp, {
     probability: verifiedProbability,
-    confidence: displayConfidence ?? prop.confidenceScore ?? prop.confidence,
-  });
-  const rankScore = computeVerifiedRankingScore({
-    ...enrichedProp,
-    edgeScore,
-    edge,
-    edgePercent,
-    verifiedProbability,
     confidence: displayConfidence ?? prop.confidenceScore ?? prop.confidence,
   });
   const marketContext = buildMarketContextNote(prop);
@@ -251,10 +260,12 @@ export function enrichBestPlayRankingFields(prop = {}) {
     projectedValue: projection ?? prop.projectedValue,
     edge,
     edgePercent,
+    playabilityScore,
+    verifiedTier,
   });
 
   const statSpecificMissing = projection == null && resolvePropSport(prop) === "MLB";
-  return {
+  const ranked = annotateTopPickRankingFields({
     ...directed,
     projection,
     projectedValue: projection ?? prop.projectedValue,
@@ -288,16 +299,18 @@ export function enrichBestPlayRankingFields(prop = {}) {
     pickTierRank: tierLabel === "Verified Play" ? 0 : 1,
     verifiedTier,
     verifiedTierLabel: verifiedTier ? `Tier ${verifiedTier}` : null,
-    weightedBestPlayScore: rankScore,
-    verifiedRankingScore: rankScore,
+    playabilityScore,
     researchReasons: playability.researchReasons,
     whyNotPlayable: playability.whyNotPlayable,
     direction,
-    rankScore,
     marketContext,
     recommendedSide: prop.recommendedSide || direction,
     invalidReason: resolveBestPlayInvalidReason({ ...prop, projection }),
-  };
+  });
+  ranked.rankScore = computeTopPickScore(ranked);
+  ranked.weightedBestPlayScore = ranked.topPickScore;
+  ranked.verifiedRankingScore = ranked.topPickScore;
+  return ranked;
 }
 
 export function passesBestPlaysFilter(prop = {}) {

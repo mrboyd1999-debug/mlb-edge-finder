@@ -386,18 +386,16 @@ export function comparePickRank(a = {}, b = {}) {
 }
 
 export function qualifiesAsHighestProbabilityPick(prop = {}) {
-  return isVerifiedHighestProbabilityPick(prop);
+  return isVerifiedHighestProbabilityPick(prop) && Boolean(prop.isHighestProbabilityPick);
 }
 
 function isVerifiedHighestProbabilityPick(prop = {}) {
-  const tier = prop.verifiedTier || classifyVerifiedTier(prop);
-  return Boolean(tier && prop.pickTierLabel === PICK_TIER_VERIFIED);
+  return prop.verifiedTier === "A" || classifyVerifiedTier(prop) === "A";
 }
 
 export function highestProbabilityLabel(prop = {}) {
+  if (qualifiesAsHighestProbabilityPick(prop)) return "Highest Probability Pick";
   const tier = prop.verifiedTier || classifyVerifiedTier(prop);
-  if (isVerifiedHighestProbabilityPick(prop)) {
-    return tier ? `Verified Play · Tier ${tier}` : "Verified Play";
-  }
+  if (tier) return `Verified Play · Tier ${tier}`;
   return "Research Candidate";
 }
