@@ -43,6 +43,7 @@ function PrizePicksDiagnosticsPanel({ diagnostics: diagnosticsProp = null, feedR
         {row("Expected format", d.expectedFormat || "External https JSON proxy (see example below)")}
         {row("Example proxy URL", d.exampleProxyUrl || "https://api.apify.com/v2/acts/.../run-sync-get-dataset-items?token=...")}
         {row("HTTP executed", d.httpExecuted ? "yes" : "no")}
+        {row("Response time", d.responseTimeMs != null ? `${d.responseTimeMs}ms` : "—")}
         {row("Status code", statusCode)}
         {row("Response size (chars)", d.responseSize ?? 0)}
         {row("Raw prop count", d.rawPropCount ?? feed.rawCount ?? feed.rawPropsLoaded ?? 0)}

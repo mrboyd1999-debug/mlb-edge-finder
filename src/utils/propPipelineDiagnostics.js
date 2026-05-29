@@ -250,6 +250,9 @@ export function buildPipelineDiagnostics({
       underdog: providers.underdog.samples,
     },
     providers,
+    providerFetchDiagnostics:
+      debugInfo?.providerFetchDiagnostics ||
+      (typeof window !== "undefined" ? window.__PROVIDER_FETCH_DIAGNOSTICS__ : null),
     consoleLabel: "PIPELINE",
   };
 

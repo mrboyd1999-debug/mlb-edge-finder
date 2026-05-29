@@ -1,7 +1,21 @@
 import { memo } from "react";
+import { getProviderFetchDiagnostics } from "../utils/providerFetchDiagnostics.js";
+
+function ProviderStatusLine({ label, row = {} }) {
+  if (row.skipped) return `${label}: skipped`;
+  const ms = row.responseTimeMs != null ? `${row.responseTimeMs}ms` : "pending";
+  const status = row.httpStatus ?? "—";
+  const parsed = row.parsedPropsCount ?? 0;
+  const flag = row.timedOut ? " (timeout)" : row.slow ? " (slow)" : "";
+  return `${label}: ${parsed} props · ${ms} · HTTP ${status}${flag}`;
+}
 
 function PropPipelineCounters({ counts = null, compact = false }) {
   if (!counts) return null;
+  const providerDiag =
+    counts.providerFetchDiagnostics ||
+    (typeof window !== "undefined" ? window.__PROVIDER_FETCH_DIAGNOSTICS__ : null) ||
+    getProviderFetchDiagnostics();
   const {
     raw = counts.fetched ?? 0,
     normalized = 0,
@@ -33,6 +47,13 @@ function PropPipelineCounters({ counts = null, compact = false }) {
         Providers — PrizePicks: {prizepicksFetch} · Underdog: {underdogFetch}
         {fallbackMode ? ` · Fallback: ${fallbackMode}` : ""}
       </p>
+      {providerDiag ? (
+        <p className="prop-pipeline-counters prop-pipeline-counters--meta">
+          <ProviderStatusLine label="PrizePicks" row={providerDiag.prizepicks || {}} />
+          {" · "}
+          <ProviderStatusLine label="Underdog" row={providerDiag.underdog || {}} />
+        </p>
+      ) : null}
       {failureReason ? (
         <p className="compact-form-notice prop-pipeline-counters__failure" role="status">
           {bottleneckStage ? `[${bottleneckStage}] ` : ""}

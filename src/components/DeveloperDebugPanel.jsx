@@ -7,6 +7,7 @@ import UnderdogDebugPanel from "./UnderdogDebugPanel.jsx";
 import ParsedUnderdogDebugCard from "./ParsedUnderdogDebugCard.jsx";
 import RawApiDebugPanel from "./RawApiDebugPanel.jsx";
 import PrizePicksDiagnosticsPanel from "./PrizePicksDiagnosticsPanel.jsx";
+import ProviderFeedDiagnosticsPanel from "./ProviderFeedDiagnosticsPanel.jsx";
 import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 
 function DeveloperDebugPanel({
@@ -26,6 +27,7 @@ function DeveloperDebugPanel({
   const ppFeed = feedHealthContext?.PrizePicks || apiHealth?.PrizePicks || {};
   return (
     <div className="developer-debug-panel">
+      <ProviderFeedDiagnosticsPanel />
       <PrizePicksDiagnosticsPanel diagnostics={prizePicksDiagnostics} feedRow={ppFeed} />
       {debugModeEnabled ? (
         <label className="developer-debug-panel__toggle">

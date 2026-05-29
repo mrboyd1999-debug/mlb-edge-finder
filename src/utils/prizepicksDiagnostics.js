@@ -15,6 +15,7 @@ const EMPTY = {
   httpExecuted: false,
   statusCode: null,
   responseSize: 0,
+  responseTimeMs: null,
   rawPropCount: 0,
   mlbScopedCount: 0,
   normalizedCount: 0,

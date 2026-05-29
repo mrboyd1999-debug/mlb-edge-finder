@@ -51,6 +51,10 @@ import {
   assessProxyUrl,
   UNDERDOG_PROXY_DISABLED_LOG,
 } from "../utils/providerProxy.js";
+import {
+  logProviderFetchPhase,
+  recordProviderFetchMetrics,
+} from "../utils/providerFetchDiagnostics.js";
 import { MLB_ONLY_MODE, emptySourcePipelineAudit } from "../utils/mlbOnlyMode.js";
 import {
   parseUnderdogPayloadDedicated,
@@ -193,6 +197,15 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all", sig
         parsedPropsCount: parsedProps.length,
         filteredPropsCount: props.length,
         usablePropsCount: usableCount,
+      });
+      recordProviderFetchMetrics("Underdog", {
+        responseTimeMs: parsed.attempt?.durationMs,
+        httpStatus: parsed.attempt?.status,
+        payloadSize: parsed.attempt?.responseSize,
+        rawPropCount: rawCount,
+        parsedPropsCount: parsedProps.length,
+        timedOut: Boolean(parsed.attempt?.error && /timed out|abort/i.test(parsed.attempt.error)),
+        lastError: parsed.attempt?.error || "",
       });
       recordProviderResponse("underdog", {
         url: apiUrl,
@@ -362,6 +375,8 @@ async function attemptUnderdogEndpoint(endpoint, { signal } = {}) {
   };
   const startedAt = Date.now();
 
+  logProviderFetchPhase("Underdog", "fetch start", { url: attempt.url, timeoutMs: lineFeedTimeoutMs });
+
   try {
     const response = await resilientFetch(
       endpoint,
@@ -381,6 +396,18 @@ async function attemptUnderdogEndpoint(endpoint, { signal } = {}) {
     attempt.durationMs = Date.now() - startedAt;
     const text = await response.text();
     attempt.preview = text.slice(0, 200).replace(/\s+/g, " ").trim();
+    attempt.responseSize = text.length;
+
+    logProviderFetchPhase("Underdog", "response received", {
+      status: attempt.status,
+      responseSize: attempt.responseSize,
+      durationMs: attempt.durationMs,
+    });
+    recordProviderFetchMetrics("Underdog", {
+      responseTimeMs: attempt.durationMs,
+      httpStatus: attempt.status,
+      payloadSize: attempt.responseSize,
+    });
 
     console.info(`${UNDERDOG_AUDIT_PREFIX} fetch attempt`, {
       url: attempt.url,
@@ -415,6 +442,9 @@ async function attemptUnderdogEndpoint(endpoint, { signal } = {}) {
     let payload;
     try {
       payload = JSON.parse(trimmed);
+      logProviderFetchPhase("Underdog", "JSON parsed", {
+        topLevelKeys: payload && typeof payload === "object" ? Object.keys(payload).slice(0, 8) : [],
+      });
     } catch (parseError) {
       console.error("Non-JSON response:", trimmed.slice(0, 300));
       attempt.error = `Underdog returned non-JSON response: ${parseError.message || "invalid JSON"}`;
@@ -425,6 +455,10 @@ async function attemptUnderdogEndpoint(endpoint, { signal } = {}) {
       attempt.error = payload.error || payload.message || "Proxy error payload";
       return { ok: false, attempt };
     }
+
+    logProviderFetchPhase("Underdog", "props extracted", {
+      rawPropCount: rawUnderdogRecordCount(payload),
+    });
 
     return { ok: true, attempt, payload };
   } catch (error) {

@@ -9,6 +9,11 @@ import {
 } from "./apiTimeout.js";
 import { SOURCE_IDS, releaseSourceRequestLock } from "../services/sourceRateLimit.js";
 import { updatePrizePicksDiagnostics } from "./prizepicksDiagnostics.js";
+import {
+  PROVIDER_SLOW_THRESHOLD_MS,
+  recordProviderFetchMetrics,
+  updateProviderFetchDiagnostics,
+} from "./providerFetchDiagnostics.js";
 
 export {
   PRIZEPICKS_PROVIDER_TIMEOUT_MS,
@@ -128,6 +133,13 @@ export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyRe
     if (result?.__providerTimeout || controller.signal.aborted) {
       console.log(`${logKey} FAILED`);
       console.log(`${logKey} TIME MS`, durationMs);
+      recordProviderFetchMetrics(label, {
+        responseTimeMs: durationMs,
+        timedOut: true,
+        slow: durationMs >= PROVIDER_SLOW_THRESHOLD_MS,
+        lastError: `Timed out after ${timeoutMs}ms`,
+      });
+      console.warn(`[Provider] ${label} timed out after ${durationMs}ms (limit ${timeoutMs}ms)`);
       return {
         label,
         result: failResult({ timedOut: true, message: `Timed out after ${timeoutMs}ms` }),
@@ -145,6 +157,15 @@ export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyRe
       console.log(`${logKey} SUCCESS`);
     }
     console.log(`${logKey} TIME MS`, durationMs);
+    if (durationMs >= PROVIDER_SLOW_THRESHOLD_MS) {
+      recordProviderFetchMetrics(label, {
+        responseTimeMs: durationMs,
+        slow: true,
+        lastError: result?.warnings?.[0] || "",
+      });
+      console.warn(`[Provider] ${label} slow response — ${durationMs}ms (threshold ${PROVIDER_SLOW_THRESHOLD_MS}ms)`);
+    }
+    updateProviderFetchDiagnostics(label, { responseTimeMs: durationMs });
 
     return {
       label,

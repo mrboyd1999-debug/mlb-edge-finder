@@ -1909,6 +1909,64 @@ body,
   margin-top: 8px;
 }
 
+.provider-feed-diagnostics {
+  margin-top: 8px;
+}
+
+.provider-feed-diagnostics__body {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.provider-feed-diagnostics__block {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid #e2e8f0;
+}
+
+.provider-feed-diagnostics__title {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.provider-feed-diagnostics__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 6px;
+}
+
+.provider-feed-diagnostics__metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+}
+
+.provider-feed-diagnostics__metric-label {
+  color: #64748b;
+}
+
+.provider-feed-diagnostics__metric-value {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.provider-feed-diagnostics__warn {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: #b45309;
+}
+
+.provider-feed-diagnostics__note {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: #64748b;
+}
+
 .hit-rate-viz {
   display: flex;
   flex-wrap: wrap;

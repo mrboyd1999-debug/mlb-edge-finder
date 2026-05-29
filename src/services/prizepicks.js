@@ -55,6 +55,11 @@ import {
   updatePrizePicksDiagnostics,
 } from "../utils/prizepicksDiagnostics.js";
 import {
+  logProviderFetchPhase,
+  recordProviderFetchMetrics,
+  resetProviderFetchDiagnostics,
+} from "../utils/providerFetchDiagnostics.js";
+import {
   buildPlayerAttributeMap,
   logPrizePicksRawSample,
   normalizePrizePicksResponse,
@@ -125,6 +130,7 @@ export async function fetchPrizePicksProps({ sport = "all", statType = "all", si
 
 async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", signal } = {}) {
   resetPrizePicksDiagnostics();
+  resetProviderFetchDiagnostics();
   const proxyUrl = getProxyUrl("prizepicks");
   const rawProxy = getRawProxyUrl("prizepicks");
   const proxyAssessment = assessProxyUrl(rawProxy);
@@ -315,11 +321,21 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
             ? "Empty"
             : "Empty";
 
+      recordProviderFetchMetrics("PrizePicks", {
+        responseTimeMs: parsed.attempt?.durationMs,
+        httpStatus: parsed.attempt?.status,
+        payloadSize: parsed.attempt?.responseSize,
+        rawPropCount: rawCount,
+        parsedPropsCount: normalizedProps.length,
+        timedOut: Boolean(parsed.attempt?.error && /timed out|abort/i.test(parsed.attempt.error)),
+        lastError: parsed.attempt?.error || warnings[0] || "",
+      });
       updatePrizePicksDiagnostics({
         mlbScopedCount: audit.fetched,
         normalizedCount: audit.normalized ?? normalizedProps.length,
         validationCount: usableCount,
         mlbUsableCount: usableMlbCount,
+        responseTimeMs: parsed.attempt?.durationMs ?? null,
         filterReasons: audit.filterReasons || {},
         providerStatus: pipelineStatus,
         lastError: warnings[0] || parsed.attempt?.error || "",
@@ -453,6 +469,8 @@ async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
   };
   const startedAt = Date.now();
 
+  logProviderFetchPhase("PrizePicks", "fetch start", { url: attempt.url, timeoutMs: lineFeedTimeoutMs });
+
   try {
     const response = await resilientFetch(
       endpoint,
@@ -474,6 +492,17 @@ async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
     const text = await response.text();
     attempt.responseSize = text.length;
     attempt.preview = text.slice(0, 200).replace(/\s+/g, " ").trim();
+
+    logProviderFetchPhase("PrizePicks", "response received", {
+      status: attempt.status,
+      responseSize: attempt.responseSize,
+      durationMs: attempt.durationMs,
+    });
+    recordProviderFetchMetrics("PrizePicks", {
+      responseTimeMs: attempt.durationMs,
+      httpStatus: attempt.status,
+      payloadSize: attempt.responseSize,
+    });
 
     console.info("[PrizePicks] fetch attempt", {
       url: attempt.url,
@@ -523,6 +552,9 @@ async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
     let payload;
     try {
       payload = JSON.parse(trimmed);
+      logProviderFetchPhase("PrizePicks", "JSON parsed", {
+        topLevelKeys: payload && typeof payload === "object" ? Object.keys(payload).slice(0, 8) : [],
+      });
     } catch (parseError) {
       console.error("Non-JSON response:", trimmed.slice(0, 300));
       attempt.error = `PrizePicks returned non-JSON response: ${parseError.message || "invalid JSON"}`;
@@ -530,6 +562,8 @@ async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
     }
 
     logPrizePicksRawSample(payload);
+    const extractedRaw = rawPrizePicksRecordCount(payload);
+    logProviderFetchPhase("PrizePicks", "props extracted", { rawPropCount: extractedRaw });
 
     if (payload?.ok === true && payload?.fallback === true) {
       attempt.rateLimited = Boolean(payload.rateLimited);

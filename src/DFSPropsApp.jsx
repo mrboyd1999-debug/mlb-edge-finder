@@ -251,6 +251,7 @@ import {
   PRIZEPICKS_PROVIDER_TIMEOUT_MS,
   UNDERDOG_PROVIDER_TIMEOUT_MS,
 } from "./utils/providerFetch.js";
+import { buildProviderEntryDiagnostics } from "./utils/providerFetchDiagnostics.js";
 import {
   hasUsableProjectionSources,
   markProjectionDataUnavailable,
@@ -1482,13 +1483,8 @@ function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderd
     oddsFetch,
     seasonFetch,
     awaitLineProviders: () => Promise.allSettled([ppFetch, udFetch]),
-    awaitCoreFeeds: async () => {
-      const [lineSettled, oddsSettled] = await Promise.all([
-        Promise.allSettled([ppFetch, udFetch]),
-        Promise.allSettled([oddsFetch]),
-      ]);
-      return [...lineSettled, ...oddsSettled];
-    },
+    awaitCoreFeeds: () => Promise.allSettled([ppFetch, udFetch, oddsFetch]),
+    awaitCoreFeedsLineOnly: () => Promise.allSettled([ppFetch, udFetch]),
     awaitEnrichmentFeeds: () => Promise.allSettled([seasonFetch]),
     awaitAllForPerf: () => Promise.allSettled([ppFetch, udFetch, oddsFetch, seasonFetch]),
   };
@@ -1680,6 +1676,18 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         durationMs: udEntry.durationMs,
       });
       sourceWarnings.push(underdogResult?.warnings?.[0] || UNDERDOG_UNAVAILABLE_MESSAGE);
+      if (underdogResult?.props?.length || underdogResult?.parsedProps?.length) {
+        applySourceResult({
+          label: "Underdog",
+          result: underdogResult,
+          sourceWarnings,
+          sourceFailures,
+          rawProps,
+          sourceStatus,
+          debugInfo,
+        });
+        applyUnderdogProviderToDebug(debugInfo, underdogResult);
+      }
       debugInfo.sources.Underdog = {
         ...debugInfo.sources.Underdog,
         status: "Unavailable",
@@ -1752,6 +1760,17 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         timedOut: Boolean(ppEntry.timedOut),
       };
       updatePrizePicksDiagnostics(failDiag);
+      if (prizePicksResult?.props?.length) {
+        applySourceResult({
+          label: "PrizePicks",
+          result: prizePicksResult,
+          sourceWarnings,
+          sourceFailures,
+          rawProps,
+          sourceStatus,
+          debugInfo,
+        });
+      }
       debugInfo.sources.PrizePicks = {
         ...debugInfo.sources.PrizePicks,
         status: notConfigured ? "Not configured" : "Failed",
@@ -1804,17 +1823,32 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     })
   );
 
+  const prizePicksProps = prizePicksResult?.props || [];
+  const underdogProps = underdogResult?.parsedProps || underdogResult?.props || [];
+  console.log("PrizePicks count", prizePicksProps.length);
+  console.log("Underdog count", underdogProps.length);
+
   const mergedProviderProps = mergeProviderRawProps({
-    underdogProps: underdogResult?.parsedProps || underdogResult?.props || [],
-    prizePicksProps: prizePicksResult?.props || [],
+    underdogProps,
+    prizePicksProps,
   });
+  console.log("Merged count", mergedProviderProps.length);
+
   debugInfo.providerFetchCounts = {
-    prizepicks: Number(prizePicksResult?.props?.length || 0),
-    underdog: Number(underdogResult?.parsedProps?.length || underdogResult?.props?.length || 0),
+    prizepicks: prizePicksProps.length,
+    underdog: underdogProps.length,
+    merged: mergedProviderProps.length,
+  };
+  debugInfo.providerFetchDiagnostics = {
+    prizepicks: buildProviderEntryDiagnostics(ppEntry, prizePicksResult || ppEntry.result),
+    underdog: buildProviderEntryDiagnostics(udEntry, underdogResult || udEntry.result),
   };
   if (mergedProviderProps.length) {
     rawProps.length = 0;
     rawProps.push(...ensureMlbSportOnProps(mergedProviderProps));
+  } else if (rawProps.length) {
+    pipelineFallback = true;
+    debugInfo.ingestionFallback = debugInfo.ingestionFallback || "partial-provider-raw";
   } else {
     const sdioImmediate = await injectSportsDataIfProvidersEmpty({
       mergedCount: 0,
