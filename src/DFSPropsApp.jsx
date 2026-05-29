@@ -215,6 +215,8 @@ import {
 import { enrichPropsWithSportsData } from "./services/propSportsDataEnrichment.js";
 import { mergeProjectionsOntoProps } from "./services/mlb/projectionMergePipeline.js";
 import { buildLiveRenderBoard, filterPlatformProps, isFakeOrFallbackProp } from "./utils/livePropRender.js";
+import { resolvePipelineProjectionStats } from "./utils/projectionPipelineStatus.js";
+import { PICK_TIER_RESEARCH, PICK_TIER_VERIFIED } from "./utils/conservativeProjection.js";
 import { resolveIngestionFallback } from "./services/ingestionFallback.js";
 import { writeLastGoodBoard, readLastGoodBoard, boardFromLastGood } from "./services/lastGoodBoardCache.js";
 import { initRawResponseDebug, dumpDebugGlobals, recordProviderStatus, recordNormalizedProps } from "./utils/rawResponseDebug.js";
@@ -3267,10 +3269,16 @@ export default function DFSPropsApp() {
   const liveRenderBoard = useMemo(() => buildLiveRenderBoard(allDisplayProps), [allDisplayProps]);
   const boardDisplayProps = useMemo(() => liveRenderBoard.props, [liveRenderBoard]);
 
-  const prizePicksFeedProps = useMemo(
-    () => filterPlatformProps(boardDisplayProps, "prizepicks"),
-    [boardDisplayProps]
-  );
+  const prizePicksFeedProps = useMemo(() => {
+    const research = (boardDisplayProps || []).filter((prop) => {
+      const tier = prop.pickTierLabel;
+      if (tier === PICK_TIER_VERIFIED) return false;
+      if (tier === PICK_TIER_RESEARCH) return true;
+      return Boolean(prop.displayResearchOnly) || prop.pickTierRank === 1;
+    });
+    if (research.length) return research;
+    return (boardDisplayProps || []).filter((prop) => prop.pickTierLabel !== PICK_TIER_VERIFIED);
+  }, [boardDisplayProps]);
   const underdogFeedProps = useMemo(
     () => filterPlatformProps(boardDisplayProps, "underdog"),
     [boardDisplayProps]
@@ -3455,15 +3463,24 @@ export default function DFSPropsApp() {
   const pipelineRenderCounts = useMemo(() => {
     const base = liveRenderBoard.counts;
     const audit = topMlbPlayBoard?.filterDiagnostics;
-    if (!audit) return base;
+    const projectionStats = resolvePipelineProjectionStats({
+      allDisplayProps,
+      filterDiagnostics: audit,
+      debugPipelineCounts: debugInfo?.pipelineRenderCounts,
+      liveRenderCounts: base,
+    });
     return {
       ...base,
-      filteredMissingProjection: audit.filteredMissingProjection || 0,
-      filteredLowConfidence: audit.filteredLowConfidence || 0,
-      filteredWeakEdge: audit.filteredWeakEdge || 0,
-      filteredOut: audit.filteredOut || base.filteredOut,
+      withProjections: projectionStats.projectionCount,
+      normalized: projectionStats.normalizedCount,
+      verified: projectionStats.verifiedCount,
+      projectionStats,
+      filteredMissingProjection: audit?.filteredMissingProjection || 0,
+      filteredLowConfidence: audit?.filteredLowConfidence || 0,
+      filteredWeakEdge: audit?.filteredWeakEdge || 0,
+      filteredOut: audit?.filteredOut || base.filteredOut,
     };
-  }, [liveRenderBoard, topMlbPlayBoard]);
+  }, [liveRenderBoard, topMlbPlayBoard, allDisplayProps, debugInfo?.pipelineRenderCounts]);
   const curatedSportPicks = useMemo(() => {
     const primary = resolveMlbStreakPicks(
       streakSportBoards,

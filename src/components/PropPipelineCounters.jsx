@@ -7,6 +7,8 @@ function PropPipelineCounters({ counts = null }) {
     normalized = 0,
     rendered = 0,
     filteredOut = 0,
+    withProjections = 0,
+    verified = 0,
     filteredMissingProjection = 0,
     filteredLowConfidence = 0,
     filteredWeakEdge = 0,
@@ -15,7 +17,8 @@ function PropPipelineCounters({ counts = null }) {
     filteredMissingProjection + filteredLowConfidence + filteredWeakEdge > 0;
   return (
     <p className="prop-pipeline-counters" aria-label="Prop pipeline counts">
-      Props: {fetched} fetched · {normalized} normalized · {rendered} rendered · {filteredOut} filtered out
+      Props: {fetched} fetched · {normalized} normalized · {withProjections} with projections · {verified}{" "}
+      verified · {rendered} rendered · {filteredOut} filtered out
       {hasBestPlaysAudit ? (
         <>
           {" "}

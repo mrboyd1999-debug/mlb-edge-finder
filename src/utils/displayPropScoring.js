@@ -2,7 +2,11 @@
 
 import { TIER_LEAN } from "./sideEvaluationEngine.js";
 
-import { computeDisplayPropMetrics, evaluateMlbPlayability } from "./conservativeProjection.js";
+import {
+  computeAdjustedConfidence,
+  computeDisplayPropMetrics,
+  evaluateMlbPlayability,
+} from "./conservativeProjection.js";
 import {
   applyPropCalibrationBundle,
   computeEdgePercent,
@@ -431,7 +435,7 @@ export function scoreDisplayProp(prop = {}) {
 
   const playability = evaluateMlbPlayability(
     { ...finalized, confidenceScore: finalConfidence, confidence: finalConfidence },
-    metrics
+    { ...metrics, adjustedConfidence: metrics.adjustedConfidence ?? computeAdjustedConfidence(finalized) }
   );
   const finalProbability = playability.probabilityScore ?? metrics.probabilityScore;
   const tier = confidenceTierLabel(finalized.confidence);

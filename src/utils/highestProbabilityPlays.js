@@ -88,15 +88,17 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
     const proj = resolveBestPlayProjection(p);
     return proj != null && proj > 0 && passesMinimalBestPlaysFilter(p);
   });
-  const verifiedCount = displayPool.filter((p) => passesVerifiedBestPlaysFilter(p)).length;
+  const verifiedPool = displayPool.filter((p) => passesVerifiedBestPlaysFilter(p));
+  const researchCount = displayPool.length - verifiedPool.length;
   logBestPlaysPipelineStage("AFTER FILTER:", displayPool.length);
-  logBestPlaysPipelineStage("VERIFIED:", verifiedCount);
+  logBestPlaysPipelineStage("VERIFIED:", verifiedPool.length);
+  logBestPlaysPipelineStage("RESEARCH:", researchCount);
 
   const invalidReasons = summarizeInvalidReasons(enriched);
   logBestPlaysPipelineStage("INVALID REASONS:", invalidReasons);
   logRejectionSummary(enriched);
 
-  const ranked = sortHighestProbabilityPlays(displayPool);
+  const ranked = sortHighestProbabilityPlays(verifiedPool);
   const seen = new Set();
   const picks = [];
 
@@ -119,8 +121,9 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
         rawProps: rawProps.length,
         normalized: normalized.length,
         withProjections,
-        filtered: verifiedCount,
+        filtered: verifiedPool.length,
         displayPool: displayPool.length,
+        researchPool: researchCount,
       },
     };
   }

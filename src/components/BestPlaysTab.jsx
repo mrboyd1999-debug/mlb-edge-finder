@@ -48,12 +48,12 @@ function BestPlaysTab({ sections = [], loading = false, onOpen, filterDiagnostic
         </p>
       ) : null}
       {!totalPicks ? (
-        <p className="compact-empty">No verified MLB props available yet.</p>
+        <p className="compact-empty">No Verified Play props yet. Check MLB Props for research candidates.</p>
       ) : (
         <section className="compact-section">
           <div className="compact-section__head">
-            <h2>MLB Projection Candidates</h2>
-            <p>Verified plays rank first, then probability, confidence, and data quality.</p>
+            <h2>Verified Plays</h2>
+            <p>Verified Play tier only. Research candidates are on the MLB Props tab.</p>
           </div>
           <div className="compact-card-list player-prop-group-list">
             {playerGroups.map((group) => (

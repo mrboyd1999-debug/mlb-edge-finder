@@ -79,7 +79,7 @@ function DfsAnalyzerLayout({
         connectionReport={connectionReport}
         onConnectionReportChange={handleConnectionReportChange}
         feedHealthContext={feedHealthContext}
-        activeProjectionCount={pipelineRenderCounts?.withProjections ?? 0}
+        pipelineProjectionStats={pipelineRenderCounts?.projectionStats ?? null}
       />
 
       <ApiSetupBanner onOpenSettings={() => setAppView("settings")} />
@@ -120,7 +120,7 @@ function DfsAnalyzerLayout({
       {appView === "prizepicks" ? (
         <SectionErrorBoundary name="MLB Props" onError={onSectionError}>
           <PlatformFeedTab
-            platformLabel="MLB Props"
+            platformLabel="MLB Props · Research"
             picks={prizePicksFeedProps || []}
             loading={loading}
             onOpen={onOpenProp}

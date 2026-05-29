@@ -159,7 +159,12 @@ export function enrichBestPlayRankingFields(prop = {}) {
         }
       : computeDisplayPropMetrics({ ...prop, projection, line });
   const playability = evaluateMlbPlayability(
-    { ...prop, projection, projectedValue: projection, confidenceScore: prop.confidenceScore ?? prop.confidence },
+    {
+      ...prop,
+      projection,
+      projectedValue: projection,
+      confidenceScore: metrics.adjustedConfidence ?? prop.confidenceScore ?? prop.confidence,
+    },
     metrics
   );
   const edge = metrics.edge ?? (projection != null && line > 0 ? computeStandardEdge(projection, line) : null);
@@ -214,6 +219,7 @@ export function enrichBestPlayRankingFields(prop = {}) {
     verifiedProbability,
     probabilityScore: verifiedProbability,
     displayConfidenceScore: displayConfidence,
+    adjustedConfidence: playability.adjustedConfidence,
     confidence: displayConfidence ?? prop.confidenceScore ?? prop.confidence,
     confidenceScore: displayConfidence ?? prop.confidenceScore ?? prop.confidence,
     rawEdgeLabel: edgeLabels.rawEdgeLabel,

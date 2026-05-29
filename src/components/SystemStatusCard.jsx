@@ -3,6 +3,7 @@ import { formatDateTime } from "../utils/formatters.js";
 import { readSettingsMeta, getOddsApiKey, getSportsDataApiKey, writeSettingsMeta } from "../services/runtimeSettings.js";
 import { healthStateStyle, CONNECTION_TIERS } from "../services/sourceHealth.js";
 import { testAllApiConnections } from "../services/apiConnectionTest.js";
+import { resolveProjectionEngineStatus } from "../utils/projectionPipelineStatus.js";
 
 function findProviderRow(results = [], name) {
   return results.find((row) => String(row.provider || "").toLowerCase().includes(name.toLowerCase())) || null;
@@ -118,32 +119,21 @@ function resolveMlbStatsStatus(stats = {}) {
   return { status: "Failed", detail: stats.lastError || stats.failureReason || "Stats API unavailable" };
 }
 
-function resolveProjectionStatus(projection = {}, activeProjectionCount = 0) {
-  const count = Math.max(
-    Number(activeProjectionCount) || 0,
-    Number(projection.projectionCount ?? projection.count ?? 0)
-  );
-  if (count > 0) {
-    return {
-      status: "Connected",
-      detail: `${count} projections`,
-      checkedAt: projection.lastProjectionGeneratedAt || projection.lastSuccessAt,
-    };
-  }
-  if (projection.status === "Connected" && projection.lastProjectionGeneratedAt) {
-    return {
-      status: "Connected",
-      detail: "Engine ready",
-      checkedAt: projection.lastProjectionGeneratedAt || projection.lastSuccessAt,
-    };
-  }
-  if (projection.lastError || projection.failureReason) {
-    return {
-      status: "Limited",
-      detail: projection.lastError || projection.failureReason || "No projections yet",
-    };
-  }
-  return { status: "Limited", detail: "No projections generated" };
+function resolveProjectionStatus(projection = {}, pipelineStats = {}) {
+  const fetchFailed =
+    /failed/i.test(String(projection.status || "")) &&
+    !Number(pipelineStats.projectionCount);
+  const resolved = resolveProjectionEngineStatus({
+    projectionCount: pipelineStats.projectionCount,
+    normalizedCount: pipelineStats.normalizedCount,
+    projectionCoverage: pipelineStats.projectionCoverage,
+    fetchFailed,
+    lastError: projection.lastError || projection.failureReason || "",
+  });
+  return {
+    ...resolved,
+    checkedAt: projection.lastProjectionGeneratedAt || projection.lastSuccessAt,
+  };
 }
 
 function StatusTableRow({ provider, status, checkedAt, detail }) {
@@ -169,7 +159,7 @@ function SystemStatusCard({
   connectionReport = null,
   onConnectionReportChange,
   feedHealthContext = null,
-  activeProjectionCount = 0,
+  pipelineProjectionStats = null,
 }) {
   const meta = readSettingsMeta();
   const reportRows = connectionReport?.results || meta.lastConnectionReport || [];
@@ -207,7 +197,7 @@ function SystemStatusCard({
   const stats = mlbPipelineStatus?.mlbStatsApi || {};
   const projection = mlbPipelineStatus?.projectionApi || {};
   const statsResolved = resolveMlbStatsStatus(stats);
-  const projectionResolved = resolveProjectionStatus(projection, activeProjectionCount);
+  const projectionResolved = resolveProjectionStatus(projection, pipelineProjectionStats || {});
 
   const rows = [
     { provider: "Odds API", ...oddsResolved, checkedAt: testedAt },

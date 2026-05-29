@@ -18,6 +18,7 @@ export const PROJECTION_JOIN_DEBUG = import.meta.env?.DEV === true;
 
 export const VERIFIED_MIN_PROJECTION = 0.01;
 export const VERIFIED_MIN_CONFIDENCE = 75;
+export const VERIFIED_MIN_DATA_QUALITY = 75;
 export const VERIFIED_MIN_EDGE = 0.015;
 
 function resolveNumericConfidence(prop = {}) {
@@ -82,7 +83,13 @@ export function passesVerifiedBestPlaysFilter(prop = {}) {
 
   const metrics = computeDisplayPropMetrics({ ...prop, projection });
   const playability = evaluateMlbPlayability({ ...prop, projection }, metrics);
-  return isVerifiedPlay({ ...prop, ...playability }, { probability: playability.probabilityScore });
+  return (
+    playability.pickTierLabel === "Verified Play" &&
+    isVerifiedPlay(
+      { ...prop, ...playability },
+      { probability: playability.probabilityScore, confidence: playability.adjustedConfidence }
+    )
+  );
 }
 
 export function resolveBestPlayInvalidReason(prop = {}) {
