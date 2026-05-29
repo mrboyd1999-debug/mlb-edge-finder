@@ -87,10 +87,19 @@ function BestPlaysTab({
     edgeGroups.reduce((sum, group) => sum + group.props.length, 0);
 
   const projectedCount =
+    filterDiagnostics?.verificationDashboard?.projectedCount ??
     filterDiagnostics?.verificationDashboard?.projected ??
     filterDiagnostics?.pipelineCounts?.displayPool ??
     filterDiagnostics?.pipelineCounts?.withProjections ??
     0;
+  const verifiedPasses =
+    filterDiagnostics?.verificationDashboard?.verifiedPasses ??
+    filterDiagnostics?.pipelineCounts?.filtered ??
+    0;
+  const verifiedBoardCount =
+    filterDiagnostics?.verifiedPicksCount ??
+    filterDiagnostics?.verificationDashboard?.verifiedCount ??
+    verifiedGroups.reduce((sum, group) => sum + group.props.length, 0);
 
   const failureReason =
     pipelineDiagnostics?.failureReason || loadError || filterDiagnostics?.error || "";
@@ -146,6 +155,9 @@ function BestPlaysTab({
           <p>{verifiedSection?.eyebrow || "Tier A/B/C — sorted by top pick score descending"}</p>
         </div>
         {renderPlayerGroups(verifiedGroups, onOpen)}
+        {!verifiedGroups.length && projectedCount > 0 && verifiedPasses === 0 && verifiedBoardCount === 0 ? (
+          <p className="compact-empty">No verified plays passed thresholds.</p>
+        ) : null}
       </section>
 
       {edgeGroups.length ? (
@@ -171,7 +183,7 @@ function BestPlaysTab({
         </section>
       ) : null}
 
-      {!totalPicks && projectedCount === 0 ? (
+      {projectedCount === 0 && !totalPicks ? (
         <p className="compact-empty">Waiting for projected props to load.</p>
       ) : null}
     </div>

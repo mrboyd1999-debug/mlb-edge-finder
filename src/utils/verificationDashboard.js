@@ -5,6 +5,7 @@
 import {
   passesMinimalBestPlaysFilter,
   resolveBestPlayStatSpecificProjection,
+  sanitizeProjectionValue,
   passesVerifiedBestPlaysFilter,
   passesResearchBestPlaysFilter,
 } from "./bestPlaysPipelineDebug.js";
@@ -20,6 +21,8 @@ import {
   VERIFIED_MIN_DATA_QUALITY,
   hasIncompleteSupportingData,
   classifyVerifiedTier,
+  explainVerificationRejection,
+  passesVerifiedTierFilter,
   VERIFICATION_AUDIT_KEYS,
 } from "./verifiedTierSystem.js";
 import {
@@ -31,6 +34,7 @@ import {
 export { VERIFICATION_AUDIT_KEYS };
 
 export const DIAGNOSTIC_TOP_N = 10;
+export const DIAGNOSTIC_PROJECTED_TOP_N = 20;
 
 function emptyBreakdown() {
   return {
@@ -62,9 +66,9 @@ export function resolveProjectedPool(props = []) {
   });
 }
 
-export function toVerificationDiagnosticRow(prop = {}) {
+export function toVerificationDiagnosticRow(prop = {}, { withFailureReason = false } = {}) {
   const annotated = annotateTopPickRankingFields(prop);
-  return {
+  const row = {
     player: String(annotated.playerName || annotated.player || "Unknown").trim(),
     probability: Math.round(Number(annotated.probabilityScore ?? annotated.verifiedProbability ?? 0)),
     confidence: Math.round(
@@ -73,6 +77,12 @@ export function toVerificationDiagnosticRow(prop = {}) {
     playability: Math.round(Number(annotated.playabilityScore ?? 0)),
     score: Number(annotated.topPickScore ?? computeTopPickScore(annotated)).toFixed(1),
   };
+  if (withFailureReason) {
+    row.failureReason = passesVerifiedTierFilter(annotated)
+      ? "passed verification"
+      : explainVerificationRejection(annotated);
+  }
+  return row;
 }
 
 function computeGateMetrics(projectedPool = []) {
@@ -132,9 +142,20 @@ function countTierBreakdown(picks = []) {
   return counts;
 }
 
-function buildTopDiagnosticRows(pool = [], limit = DIAGNOSTIC_TOP_N) {
+function buildRuleRejectionCounts(projectedPool = []) {
+  const counts = {};
+  for (const prop of projectedPool) {
+    if (passesVerifiedTierFilter(prop)) continue;
+    const rule = auditVerificationFailure(prop) || "failedProbability";
+    const label = AUDIT_LABELS[rule] || rule;
+    counts[label] = (counts[label] || 0) + 1;
+  }
+  return counts;
+}
+
+function buildTopDiagnosticRows(pool = [], limit = DIAGNOSTIC_TOP_N, options = {}) {
   return [...pool]
-    .map((prop) => ({ prop, row: toVerificationDiagnosticRow(prop) }))
+    .map((prop) => ({ prop, row: toVerificationDiagnosticRow(prop, options) }))
     .sort((a, b) => compareTopPickScore(a.prop, b.prop))
     .slice(0, limit)
     .map(({ row }) => row);
@@ -151,38 +172,42 @@ export function buildVerificationDashboard(props = [], options = {}) {
     : resolveProjectedPool(props);
   const verifiedPicks = options.verifiedPicks || [];
   const gateMetrics = computeGateMetrics(projectedPool);
-  const tierCounts = countTierBreakdown(verifiedPicks);
+  const tierQualified = projectedPool.filter(passesVerifiedBestPlaysFilter);
+  const tierCounts = countTierBreakdown(
+    verifiedPicks.length ? verifiedPicks : tierQualified
+  );
   const verifiedCount = verifiedPicks.length;
+  const verifiedPasses = tierQualified.length;
+  const ruleRejectionCounts = buildRuleRejectionCounts(projectedPool);
 
-  let verifiedPasses = 0;
   let researchPasses = 0;
-
   for (const prop of props || []) {
-    if (passesVerifiedBestPlaysFilter(prop)) {
-      verifiedPasses += 1;
-      continue;
-    }
-    if (passesResearchBestPlaysFilter(prop)) {
-      researchPasses += 1;
-    }
+    if (passesVerifiedBestPlaysFilter(prop)) continue;
+    if (passesResearchBestPlaysFilter(prop)) researchPasses += 1;
   }
 
   const failureBreakdown = { ...emptyBreakdown(), ...audit.breakdown };
 
   return {
     projected: projectedPool.length,
+    projectedCount: projectedPool.length,
     verifiedCount,
     verifiedPasses,
     researchPasses,
     verifiedFailures: audit.totalFailures,
+    usedVerifiedFallback: Boolean(options.usedVerifiedFallback),
     ...gateMetrics,
     tierA: tierCounts.tierA,
     tierB: tierCounts.tierB,
     tierC: tierCounts.tierC,
     topBeforeVerification: buildTopDiagnosticRows(projectedPool),
     topAfterVerification: buildTopDiagnosticRows(verifiedPicks),
+    topProjectedProps: buildTopDiagnosticRows(projectedPool, DIAGNOSTIC_PROJECTED_TOP_N, {
+      withFailureReason: true,
+    }),
     failureBreakdown,
-    rejectionCounts: verifiedCount === 0 ? failureBreakdown : null,
+    ruleRejectionCounts,
+    rejectionCounts: verifiedPasses === 0 ? ruleRejectionCounts : null,
     regressionReasons: audit.regressionReasons,
     auditLabels: AUDIT_LABELS,
     auditSamples: audit.samples,
@@ -196,7 +221,8 @@ export function logVerificationDashboardAudit(props = [], options = {}) {
   const regression = logVerificationRegressionAudit(props);
 
   console.info("[MLB Pipeline] verification dashboard", {
-    projected: dashboard.projected,
+    projectedCount: dashboard.projectedCount,
+    verifiedPasses: dashboard.verifiedPasses,
     verifiedCount: dashboard.verifiedCount,
     gateMetrics: {
       passedProbability: dashboard.passedProbability,
@@ -213,6 +239,7 @@ export function logVerificationDashboardAudit(props = [], options = {}) {
       tierB: dashboard.tierB,
       tierC: dashboard.tierC,
     },
+    ruleRejectionCounts: dashboard.ruleRejectionCounts,
     failureBreakdown: dashboard.failureBreakdown,
     regressionReasons: dashboard.regressionReasons,
   });

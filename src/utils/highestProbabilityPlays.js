@@ -175,6 +175,7 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   const verificationDashboardResult = logVerificationDashboardAudit(enriched, {
     displayPool,
     verifiedPicks,
+    usedVerifiedFallback: usedVerifiedScoreFallback,
   });
   const verificationDashboard = verificationDashboardResult;
   const topVerifiedPicks = selectTopVerifiedByScore(verifiedPicks, BEST_PLAYS_ENGINE_SIZE);

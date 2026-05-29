@@ -5,6 +5,7 @@
 import {
   passesMinimalBestPlaysFilter,
   resolveBestPlayStatSpecificProjection,
+  sanitizeProjectionValue,
   VERIFIED_MIN_PROJECTION,
 } from "./bestPlaysPipelineDebug.js";
 import { hasMajorResearchGaps, isLowMatchupProp } from "./conservativeProjection.js";
@@ -325,12 +326,12 @@ export function selectVerifiedPlaysWithFallback(props = [], options = {}) {
 
   if (!picks.length && (props || []).length) {
     picks = [...props]
-      .filter(
-        (prop) =>
-          passesMinimalBestPlaysFilter(prop) &&
-          resolvePropSport(prop) === "MLB" &&
-          hasValidVerifiedProjection(prop)
-      )
+      .filter((prop) => {
+        if (!passesMinimalBestPlaysFilter(prop) || resolvePropSport(prop) !== "MLB") return false;
+        if (hasValidVerifiedProjection(prop)) return true;
+        const loose = sanitizeProjectionValue(prop.projection ?? prop.projectedValue);
+        return loose != null && loose > 0;
+      })
       .map((prop) =>
         annotateTopPickRankingFields(
           annotateVerifiedTier({

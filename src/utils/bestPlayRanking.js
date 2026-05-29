@@ -193,18 +193,31 @@ export function enrichBestPlayRankingFields(prop = {}) {
     },
     metrics
   );
+  const verifiedProbability = playability.probabilityScore ?? metrics.probabilityScore;
+  const displayConfidence =
+    playability.displayConfidenceScore ??
+    metrics.adjustedConfidence ??
+    prop.displayConfidenceScore ??
+    prop.confidenceScore ??
+    prop.confidence;
+  const playabilityScore = Number.isFinite(Number(prop.playabilityScore))
+    ? Number(prop.playabilityScore)
+    : computePlayabilityScore(
+        { ...prop, projection, projectedValue: projection, edge: metrics.edge, edgePercent: metrics.edgePercent },
+        displayConfidence ?? prop.confidenceScore ?? prop.confidence ?? 50
+      );
   const tierLabel = classifyBestPlayTier({
     ...prop,
     projection,
     projectedValue: projection,
-    probabilityScore: playability.probabilityScore ?? metrics.probabilityScore,
-    displayConfidenceScore: playability.displayConfidenceScore ?? metrics.adjustedConfidence,
+    probabilityScore: verifiedProbability,
+    displayConfidenceScore: displayConfidence,
     pickTierLabel: playability.pickTierLabel,
   });
   const verifiedTier = classifyVerifiedTier({
     ...prop,
     projection,
-    probabilityScore: playability.probabilityScore ?? metrics.probabilityScore,
+    probabilityScore: verifiedProbability,
     displayConfidenceScore: displayConfidence,
     playabilityScore,
   });
@@ -213,14 +226,6 @@ export function enrichBestPlayRankingFields(prop = {}) {
     metrics.edgePercent ?? (edge != null && line > 0 ? computeStandardEdgePercent(edge, line) : null);
   const edgeMagnitude = Number.isFinite(Number(edge)) ? Math.abs(Number(edge)) : resolveEdgeMagnitude(prop);
   const edgeScore = edgeMagnitude;
-  const verifiedProbability = playability.probabilityScore ?? metrics.probabilityScore;
-  const displayConfidence = playability.displayConfidenceScore;
-  const playabilityScore = Number.isFinite(Number(prop.playabilityScore))
-    ? Number(prop.playabilityScore)
-    : computePlayabilityScore(
-        { ...prop, projection, projectedValue: projection, edge: metrics.edge, edgePercent: metrics.edgePercent },
-        displayConfidence ?? prop.confidenceScore ?? prop.confidence ?? 50
-      );
   const edgeLabels = playability.edgeDisplay ?? formatEdgeDisplay({ ...prop, edge, edgePercent, line });
   const direction =
     leanDirection && leanDirection !== "PASS"
