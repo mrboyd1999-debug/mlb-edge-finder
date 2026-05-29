@@ -299,6 +299,7 @@ export function evaluateMlbPlayability(prop = {}, metrics = {}) {
     });
   }
 
+  const tier = playable ? PICK_TIER_VERIFIED : PICK_TIER_RESEARCH;
   const displayConfidenceScore = resolveDisplayConfidence(prop, tier, adjustedConfidence);
   const researchReasons = research ? resolveResearchReasons(prop) : [];
 
