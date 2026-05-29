@@ -1796,12 +1796,20 @@ body,
 
 .verification-diagnostics__table-wrap {
   overflow-x: auto;
+  overflow-y: visible;
+  max-width: 100%;
+  min-height: 24px;
+  position: relative;
+  z-index: 1;
 }
 
 .verification-diagnostics__table {
   width: 100%;
+  min-width: 720px;
   border-collapse: collapse;
   font-size: 11px;
+  color: #334155;
+  background: #fff;
 }
 
 .verification-diagnostics__table th,
@@ -1809,12 +1817,27 @@ body,
   padding: 6px 8px;
   text-align: left;
   border-bottom: 1px solid #e2e8f0;
+  color: #334155;
+  background: #fff;
+  vertical-align: top;
+  white-space: normal;
+  word-break: break-word;
 }
 
-.verification-diagnostics__table th {
-  font-weight: 700;
-  color: #475569;
+.verification-diagnostics__table tbody tr:hover {
+  background: #f8fafc;
+}
+
+.verification-diagnostics__debug {
+  margin: 4px 0 8px;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
   background: #fff;
+  color: #334155;
+  font-size: 10px;
+  line-height: 1.4;
+  overflow-x: auto;
 }
 
 .verification-diagnostics__empty,

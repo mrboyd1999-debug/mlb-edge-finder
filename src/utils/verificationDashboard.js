@@ -28,7 +28,6 @@ import {
 import {
   annotateTopPickRankingFields,
   compareTopPickScore,
-  computeTopPickScore,
 } from "./bestPlayRankingScore.js";
 
 export { VERIFICATION_AUDIT_KEYS };
@@ -66,30 +65,60 @@ export function resolveProjectedPool(props = []) {
   });
 }
 
+function displayCell(value, suffix = "") {
+  if (value == null || value === "") return "N/A";
+  if (typeof value === "number" && !Number.isFinite(value)) return "N/A";
+  if (value === "N/A") return "N/A";
+  return `${value}${suffix}`;
+}
+
+function displayMetric(value) {
+  if (value == null || value === "") return "N/A";
+  const num = Number(value);
+  if (Number.isFinite(num)) return Math.round(num);
+  return String(value);
+}
+
 function toVerificationDiagnosticRow(prop = {}, { withFailureReason = false, withMatchup = false } = {}) {
-  const annotated = annotateTopPickRankingFields(prop);
+  const player = String(prop.playerName || prop.player || "Unknown").trim() || "N/A";
+  const probability = displayMetric(prop.probabilityScore ?? prop.verifiedProbability);
+  const confidence = displayMetric(
+    prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence
+  );
+  const playability = displayMetric(prop.playabilityScore);
+  const scoreRaw = prop.topPickScore ?? prop.verifiedRankingScore ?? prop.weightedBestPlayScore;
+  const score = Number.isFinite(Number(scoreRaw)) ? Number(scoreRaw).toFixed(1) : "N/A";
+
   const row = {
-    player: String(annotated.playerName || annotated.player || "Unknown").trim(),
-    probability: Math.round(Number(annotated.probabilityScore ?? annotated.verifiedProbability ?? 0)),
-    confidence: Math.round(
-      Number(annotated.displayConfidenceScore ?? annotated.confidenceScore ?? annotated.confidence ?? 0)
-    ),
-    playability: Math.round(Number(annotated.playabilityScore ?? 0)),
-    score: Number(annotated.topPickScore ?? computeTopPickScore(annotated)).toFixed(1),
+    player,
+    probability,
+    confidence,
+    playability,
+    score,
   };
+
   if (withFailureReason) {
-    row.failureReason = passesVerifiedTierFilter(annotated)
-      ? "passed verification"
-      : explainVerificationRejection(annotated);
+    try {
+      row.failureReason = passesVerifiedTierFilter(prop)
+        ? "passed verification"
+        : explainVerificationRejection(prop);
+    } catch {
+      row.failureReason = "N/A";
+    }
   }
+
   if (withMatchup) {
-    const matchup = annotated.matchupAudit || {};
-    row.opponent = matchup.opponent || annotated.opponent || "—";
-    row.pitcher = matchup.pitcher || "—";
-    row.team = matchup.team || annotated.team || "—";
-    row.venue = matchup.venue || "—";
-    row.matchupScore = matchup.matchupScore ?? "—";
+    const matchup = prop.matchupAudit || {};
+    row.team = displayCell(matchup.team || prop.team);
+    row.opponent = displayCell(matchup.opponent || prop.opponent);
+    row.pitcher = displayCell(matchup.pitcher || prop.opposingPitcher || prop.pitcherName);
+    row.venue = displayCell(matchup.venue || prop.venue || prop.ballpark || prop.stadium);
+    row.matchupScore =
+      matchup.matchupScore != null && Number.isFinite(Number(matchup.matchupScore))
+        ? Math.round(Number(matchup.matchupScore))
+        : "N/A";
   }
+
   return row;
 }
 
@@ -162,8 +191,41 @@ function buildRuleRejectionCounts(projectedPool = []) {
 }
 
 function buildTopDiagnosticRows(pool = [], limit = DIAGNOSTIC_TOP_N, options = {}) {
-  return [...pool]
-    .map((prop) => ({ prop, row: toVerificationDiagnosticRow(prop, options) }))
+  const rows = [];
+  for (const prop of pool || []) {
+    try {
+      const enriched =
+        prop?.topPickScore != null ||
+        prop?.probabilityAudit != null ||
+        prop?.matchupAudit != null
+          ? prop
+          : annotateTopPickRankingFields(prop);
+      rows.push({ prop: enriched, row: toVerificationDiagnosticRow(enriched, options) });
+    } catch (error) {
+      rows.push({
+        prop,
+        row: {
+          player: String(prop?.playerName || prop?.player || "Unknown").trim() || "N/A",
+          probability: "N/A",
+          confidence: "N/A",
+          playability: "N/A",
+          score: "N/A",
+          failureReason: options.withFailureReason ? "N/A" : undefined,
+          team: options.withMatchup ? "N/A" : undefined,
+          opponent: options.withMatchup ? "N/A" : undefined,
+          pitcher: options.withMatchup ? "N/A" : undefined,
+          venue: options.withMatchup ? "N/A" : undefined,
+          matchupScore: options.withMatchup ? "N/A" : undefined,
+        },
+      });
+      console.warn("[MLB Pipeline] diagnostic row build failed", {
+        player: prop?.playerName || prop?.player,
+        error: error?.message || error,
+      });
+    }
+  }
+
+  return rows
     .sort((a, b) => compareTopPickScore(a.prop, b.prop))
     .slice(0, limit)
     .map(({ row }) => row);
@@ -195,6 +257,16 @@ export function buildVerificationDashboard(props = [], options = {}) {
   }
 
   const failureBreakdown = { ...emptyBreakdown(), ...audit.breakdown };
+  const topProjectedProps = buildTopDiagnosticRows(projectedPool, DIAGNOSTIC_PROJECTED_TOP_N, {
+    withFailureReason: true,
+    withMatchup: true,
+  });
+
+  console.info("[MLB Pipeline] verification top projected props", {
+    projectedPool: projectedPool.length,
+    topProjectedPropsLength: topProjectedProps.length,
+    firstRow: topProjectedProps[0] || null,
+  });
 
   return {
     projected: projectedPool.length,
@@ -210,10 +282,7 @@ export function buildVerificationDashboard(props = [], options = {}) {
     tierC: tierCounts.tierC,
     topBeforeVerification: buildTopDiagnosticRows(projectedPool),
     topAfterVerification: buildTopDiagnosticRows(verifiedPicks),
-    topProjectedProps: buildTopDiagnosticRows(projectedPool, DIAGNOSTIC_PROJECTED_TOP_N, {
-      withFailureReason: true,
-      withMatchup: true,
-    }),
+    topProjectedProps,
     failureBreakdown,
     ruleRejectionCounts,
     rejectionCounts: verifiedPasses === 0 ? ruleRejectionCounts : null,
@@ -233,6 +302,7 @@ export function logVerificationDashboardAudit(props = [], options = {}) {
     projectedCount: dashboard.projectedCount,
     verifiedPasses: dashboard.verifiedPasses,
     verifiedCount: dashboard.verifiedCount,
+    topProjectedPropsLength: dashboard.topProjectedProps?.length ?? 0,
     gateMetrics: {
       passedProbability: dashboard.passedProbability,
       failedProbability: dashboard.failedProbability,

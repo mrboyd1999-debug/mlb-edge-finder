@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useEffect } from "react";
 import { AUDIT_LABELS } from "../utils/verificationDashboard.js";
 
 function Metric({ label, value }) {
@@ -10,10 +10,20 @@ function Metric({ label, value }) {
   );
 }
 
+function formatCell(value, suffix = "") {
+  if (value == null || value === "") return "N/A";
+  if (typeof value === "number" && !Number.isFinite(value)) return "N/A";
+  if (value === "N/A") return "N/A";
+  return `${value}${suffix}`;
+}
+
 function DiagnosticTable({ rows = [], emptyMessage = "None", showFailureReason = false, showMatchup = false }) {
-  if (!rows.length) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+
+  if (!safeRows.length) {
     return <p className="verification-diagnostics__empty">{emptyMessage}</p>;
   }
+
   return (
     <div className="verification-diagnostics__table-wrap">
       <table className="verification-diagnostics__table">
@@ -37,23 +47,23 @@ function DiagnosticTable({ rows = [], emptyMessage = "None", showFailureReason =
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, index) => (
-            <tr key={`${row.player}-${index}`}>
-              <td>{row.player}</td>
-              <td>{row.probability}%</td>
-              <td>{row.confidence}%</td>
-              <td>{row.playability}</td>
-              <td>{row.score}</td>
+          {safeRows.map((row, index) => (
+            <tr key={`${row?.player || "row"}-${index}`}>
+              <td>{formatCell(row?.player)}</td>
+              <td>{formatCell(row?.probability, "%")}</td>
+              <td>{formatCell(row?.confidence, "%")}</td>
+              <td>{formatCell(row?.playability)}</td>
+              <td>{formatCell(row?.score)}</td>
               {showMatchup ? (
                 <>
-                  <td>{row.team || "—"}</td>
-                  <td>{row.opponent || "—"}</td>
-                  <td>{row.pitcher || "—"}</td>
-                  <td>{row.venue || "—"}</td>
-                  <td>{row.matchupScore ?? "—"}</td>
+                  <td>{formatCell(row?.team)}</td>
+                  <td>{formatCell(row?.opponent)}</td>
+                  <td>{formatCell(row?.pitcher)}</td>
+                  <td>{formatCell(row?.venue)}</td>
+                  <td>{formatCell(row?.matchupScore)}</td>
                 </>
               ) : null}
-              {showFailureReason ? <td>{row.failureReason || "—"}</td> : null}
+              {showFailureReason ? <td>{formatCell(row?.failureReason)}</td> : null}
             </tr>
           ))}
         </tbody>
@@ -63,6 +73,21 @@ function DiagnosticTable({ rows = [], emptyMessage = "None", showFailureReason =
 }
 
 function VerificationDashboard({ dashboard = null }) {
+  const topProjectedProps = Array.isArray(dashboard?.topProjectedProps)
+    ? dashboard.topProjectedProps
+    : Array.isArray(dashboard?.topBeforeVerification)
+      ? dashboard.topBeforeVerification
+      : [];
+
+  useEffect(() => {
+    if (!dashboard) return;
+    console.info("[MLB Pipeline] verification dashboard render", {
+      topProjectedPropsLength: topProjectedProps.length,
+      projectedCount: dashboard.projectedCount ?? dashboard.projected ?? 0,
+      firstRow: topProjectedProps[0] || null,
+    });
+  }, [dashboard, topProjectedProps]);
+
   if (!dashboard) return null;
 
   const {
@@ -82,7 +107,6 @@ function VerificationDashboard({ dashboard = null }) {
     tierB = 0,
     tierC = 0,
     topAfterVerification = [],
-    topProjectedProps = [],
     ruleRejectionCounts = {},
     failureBreakdown = {},
     regressionReasons = {},
@@ -100,6 +124,16 @@ function VerificationDashboard({ dashboard = null }) {
         .sort((a, b) => b[1] - a[1])
         .slice(0, 10)
     : [];
+
+  const firstRowPreview = topProjectedProps[0]
+    ? {
+        player: topProjectedProps[0].player,
+        probability: topProjectedProps[0].probability,
+        confidence: topProjectedProps[0].confidence,
+        playability: topProjectedProps[0].playability,
+        score: topProjectedProps[0].score,
+      }
+    : null;
 
   return (
     <section className="verification-diagnostics" aria-label="Verification diagnostics">
@@ -169,6 +203,10 @@ function VerificationDashboard({ dashboard = null }) {
       ) : null}
 
       <h4 className="verification-diagnostics__subtitle">Top 20 projected props</h4>
+      <p className="verification-diagnostics__meta">Rows Loaded: {topProjectedProps.length}</p>
+      {firstRowPreview ? (
+        <pre className="verification-diagnostics__debug">{JSON.stringify(firstRowPreview, null, 2)}</pre>
+      ) : null}
       <DiagnosticTable
         rows={topProjectedProps}
         emptyMessage="No projected props."
@@ -177,6 +215,9 @@ function VerificationDashboard({ dashboard = null }) {
       />
 
       <h4 className="verification-diagnostics__subtitle">Top 10 props after verification</h4>
+      <p className="verification-diagnostics__meta">
+        Rows Loaded: {Array.isArray(topAfterVerification) ? topAfterVerification.length : 0}
+      </p>
       <DiagnosticTable rows={topAfterVerification} emptyMessage="No verified props on board." />
     </section>
   );
