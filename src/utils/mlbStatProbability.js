@@ -1,9 +1,9 @@
 /**
- * Stat-specific MLB probability from rolling averages (not generic edge-only math).
+ * Stat-specific MLB probability from rolling averages and projection-line gap.
  */
 
 import { canonicalMarketKey } from "./marketNormalization.js";
-import { computeStandardEdge } from "./standardPropMetrics.js";
+import { computeStandardEdge, computeStandardEdgePercent } from "./standardPropMetrics.js";
 
 function finite(value) {
   const num = Number(value);
@@ -24,22 +24,45 @@ function resolveRollingBaseline(prop = {}, preferPitcher = false) {
   return last5 ?? last10 ?? season;
 }
 
-function probabilityFromBaseline(baseline, line, projection) {
+function resolveVariancePenalty(prop = {}) {
+  const vol = finite(prop.volatility ?? prop.marketVolatility);
+  const sample = finite(prop.sampleSize ?? prop.gamesPlayed ?? prop.games);
+  let penalty = 0;
+  if (vol != null && vol >= 3) penalty += Math.min((vol - 2) * 3, 12);
+  if (sample != null && sample < 8) penalty += Math.min((8 - sample) * 1.2, 8);
+  return penalty;
+}
+
+function probabilityFromBaseline(baseline, line, projection, prop = {}) {
   const base = finite(baseline);
   const ln = finite(line);
   const proj = finite(projection);
-  if (base == null || ln == null || ln <= 0) return null;
+  if (ln == null || ln <= 0) return null;
 
   const anchor = proj ?? base;
+  if (anchor == null) return null;
+
   const edge = computeStandardEdge(anchor, ln) ?? anchor - ln;
   const edgePct = Math.abs(edge) / ln;
-  const directionStrength = Math.min(edgePct / 0.25, 1);
-  const baselineGap = Math.abs(base - ln) / ln;
-  const rollingStrength = Math.min(baselineGap / 0.2, 1);
+  const projectionStrength = Math.min(edgePct / 0.35, 1);
+  let probability = 50 + projectionStrength * 38;
 
-  let probability = 50 + directionStrength * 18 + rollingStrength * 10;
-  if (Math.sign(edge) === Math.sign(base - ln)) probability += 3;
-  return clamp(Math.round(probability), 50, 82);
+  if (base != null) {
+    const baselineGap = Math.abs(base - ln) / ln;
+    const rollingStrength = Math.min(baselineGap / 0.18, 1);
+    probability += rollingStrength * 10;
+    if (Math.sign(edge) === Math.sign(base - ln)) probability += 4;
+  }
+
+  const hitRate = finite(prop.last10HitRate ?? prop.recentHitRate ?? prop.last5HitRate);
+  if (hitRate != null) {
+    const leanOver = edge > 0;
+    const supports = leanOver ? hitRate : 1 - hitRate;
+    probability += (supports - 0.5) * 18;
+  }
+
+  probability -= resolveVariancePenalty(prop);
+  return clamp(Math.round(probability), 50, 92);
 }
 
 export function computeStatSpecificProbability(prop = {}, projection = null, line = null) {
@@ -52,21 +75,24 @@ export function computeStatSpecificProbability(prop = {}, projection = null, lin
 
   switch (marketKey) {
     case "hitsAllowed":
-      baseline = resolveRollingBaseline(prop, true);
-      break;
     case "strikeouts":
       baseline = resolveRollingBaseline(prop, true);
       break;
     case "hrr":
-      baseline = resolveRollingBaseline(prop, false);
-      break;
     case "totalBases":
-      baseline = resolveRollingBaseline(prop, false);
-      break;
     default:
       baseline = resolveRollingBaseline(prop, false);
       break;
   }
 
-  return probabilityFromBaseline(baseline, ln, proj);
+  const probability = probabilityFromBaseline(baseline, ln, proj, prop);
+  if (probability != null) return probability;
+
+  if (proj == null) return null;
+  const edge = computeStandardEdge(proj, ln);
+  const edgePct = Math.abs(computeStandardEdgePercent(edge, ln) ?? 0);
+  const projectionStrength = Math.min(edgePct / 35, 1);
+  let fallback = 50 + projectionStrength * 38;
+  fallback -= resolveVariancePenalty(prop);
+  return clamp(Math.round(fallback), 50, 92);
 }

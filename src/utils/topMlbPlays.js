@@ -364,17 +364,39 @@ export function resolveTopMlbPlaySections(
     fetchSport: "MLB",
   });
   let highestPicks = (selection.picks || []).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
-  const verifiedPicks = (selection.verifiedPicks || []).map((prop, idx) =>
+  let verifiedPicks = (selection.verifiedPicks || []).map((prop, idx) =>
     annotateHighestProbabilityPlay(prop, idx + 1)
   );
   const researchPicks = (selection.researchPicks || []).map((prop, idx) =>
     annotateHighestProbabilityPlay(prop, idx + 1)
   );
+  const topProbabilityPicks = (selection.topProbabilityPicks || []).map((prop, idx) =>
+    annotateHighestProbabilityPlay(prop, idx + 1)
+  );
+  const topEdgePicks = (selection.topEdgePicks || []).map((prop, idx) =>
+    annotateHighestProbabilityPlay(prop, idx + 1)
+  );
+  const topVerifiedPicks = (selection.topVerifiedPicks || []).map((prop, idx) =>
+    annotateHighestProbabilityPlay({ ...prop, topVerifiedRank: prop.topVerifiedRank ?? idx + 1 }, idx + 1)
+  );
+
+  if (!verifiedPicks.length && topProbabilityPicks.length) {
+    verifiedPicks = topProbabilityPicks.slice(0, 5).map((prop, idx) =>
+      annotateHighestProbabilityPlay(
+        { ...prop, verifiedTier: prop.verifiedTier || "C", verifiedTierFallback: true, bestPlayPool: "verified" },
+        idx + 1
+      )
+    );
+  }
 
   filterDiagnostics.usedVerifiedFallback = Boolean(selection.usedVerifiedFallback);
   filterDiagnostics.verificationDashboard = selection.verificationDashboard || null;
+  filterDiagnostics.verificationAudit = selection.verificationAudit || null;
   filterDiagnostics.verifiedPicksCount = verifiedPicks.length;
   filterDiagnostics.researchPicksCount = researchPicks.length;
+  filterDiagnostics.topProbabilityCount = topProbabilityPicks.length;
+  filterDiagnostics.topEdgeCount = topEdgePicks.length;
+  filterDiagnostics.topVerifiedCount = topVerifiedPicks.length;
 
   filterDiagnostics.selected = highestPicks.length;
   filterDiagnostics.eligible = strictEligible;
@@ -393,15 +415,33 @@ export function resolveTopMlbPlaySections(
 
   const sections = [
     {
+      id: "top-verified-plays",
+      title: "Top 5 Verified Plays",
+      eyebrow: "Ranked by probability, confidence, and edge",
+      picks: topVerifiedPicks.filter(Boolean),
+    },
+    {
       id: "verified-plays",
       title: "Verified Plays",
-      eyebrow: "High-confidence props with complete matchup context",
+      eyebrow: "Tier A/B/C — sorted by ranking score",
       picks: verifiedPicks.filter(Boolean),
+    },
+    {
+      id: "highest-probability",
+      title: "Top 5 Highest Probability",
+      eyebrow: "Best projected probability from today's prop pool",
+      picks: topProbabilityPicks.filter(Boolean),
+    },
+    {
+      id: "highest-edge",
+      title: "Top 5 Highest Edge",
+      eyebrow: "Largest projection vs line separation",
+      picks: topEdgePicks.filter(Boolean),
     },
     {
       id: "research-plays",
       title: "Research Plays",
-      eyebrow: "Quality projections with low matchup confidence or incomplete data",
+      eyebrow: "Missing matchup or incomplete supporting data — review before betting",
       picks: researchPicks.filter(Boolean),
     },
   ];
@@ -409,10 +449,10 @@ export function resolveTopMlbPlaySections(
   if (!verifiedPicks.length && !researchPicks.length && highestPicks.length) {
     sections.length = 0;
     sections.push({
-      id: "highest-probability",
+      id: "verified-plays",
       title: selection.usedVerifiedFallback ? "Top Projected Props" : "Verified Plays",
       eyebrow: selection.usedVerifiedFallback
-        ? "Verified pool empty — showing top projected props by probability, edge, and confidence"
+        ? "Verified tier pool empty — showing top projected props by probability, edge, and confidence"
         : "Weighted top plays",
       picks: highestPicks.filter(Boolean),
     });

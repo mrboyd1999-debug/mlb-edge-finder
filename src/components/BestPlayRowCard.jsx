@@ -12,6 +12,7 @@ import { displayFullMarketLabel } from "../utils/propLabels.js";
 import { resolveProjectionValue } from "../utils/projectionQuality.js";
 import { formatHighestProbabilitySource } from "../utils/highestProbabilityPlays.js";
 import { formatEdgeDisplay } from "../utils/conservativeProjection.js";
+import { formatBestPlayProjectionSource } from "../utils/bestPlayExplanation.js";
 
 function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
   const enriched = withPlayerImageUrl(prop || {});
@@ -34,15 +35,19 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
     ? { rawEdgeLabel: enriched.rawEdgeLabel, displayEdgeLabel: enriched.displayEdgeLabel }
     : formatEdgeDisplay(enriched);
   const statusLabel = enriched.pickTierLabel || enriched.bettingLabel || "Research Candidate";
-  const dq = Number(enriched.dataQualityScore);
-  const dqLabel = Number.isFinite(dq) ? `${Math.round(dq)}%` : "—";
+  const tierLabel = enriched.verifiedTier ? `Tier ${enriched.verifiedTier}` : statusLabel;
+  const rankingScore = enriched.verifiedRankingScore ?? enriched.weightedBestPlayScore;
+  const rankingLabel = Number.isFinite(Number(rankingScore)) ? Number(rankingScore).toFixed(1) : "—";
   const projection = resolveProjectionValue(enriched);
   const projectionLabel = projection != null && projection > 0 ? formatNumber(projection) : "—";
   const lean = enriched.lean || sideLabel;
-  const researchHint =
-    statusLabel === "Research Candidate" && Array.isArray(enriched.researchReasons) && enriched.researchReasons.length
-      ? enriched.researchReasons[0]
-      : "";
+  const explanation = enriched.verifiedPlayExplanation;
+  const projectionSource =
+    explanation?.projectionSource ||
+    enriched.projectionSourceLabel ||
+    formatBestPlayProjectionSource(enriched);
+  const statsLine = explanation?.statsLine || "";
+  const reason = explanation?.reason || enriched.qualifyReason || enriched.whyThisPick || "";
 
   function openDetails(event) {
     event?.stopPropagation?.();
@@ -67,7 +72,7 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
         {!grouped ? <PlayerImage prop={enriched} /> : null}
         <div style={styles.bestPlayRowMeta}>
           <div className="best-play-row-top-line">
-            {rank != null && !grouped ? <span style={styles.bestPlayRowRank}>#{rank}</span> : null}
+            {rank != null ? <span style={styles.bestPlayRowRank}>#{rank}</span> : null}
             {!grouped ? <h3 style={styles.bestPlayRowPlayer}>{playerName}</h3> : null}
             {!grouped ? (
               <span
@@ -105,21 +110,26 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
               Conf <strong>{confLabel}</strong>
             </span>
             <span>
-              DQ <strong>{dqLabel}</strong>
-            </span>
-            <span>
-              Raw <strong>{edgeLabels.rawEdgeLabel}</strong>
-            </span>
-            <span>
               Edge <strong>{edgeLabels.displayEdgeLabel}</strong>
             </span>
             <span>
-              Status <strong>{statusLabel}</strong>
+              Rank <strong>{rankingLabel}</strong>
+            </span>
+            <span>
+              Status <strong>{tierLabel}</strong>
             </span>
           </div>
-          {researchHint ? (
-            <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 11 }}>
-              {researchHint}
+          <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 11 }}>
+            Projection Source: <strong>{projectionSource}</strong>
+          </p>
+          {statsLine ? (
+            <p style={{ ...styles.bestPlayRowSubline, color: "#cbd5e1", marginTop: 4, fontSize: 11 }}>
+              {statsLine}
+            </p>
+          ) : null}
+          {reason ? (
+            <p style={{ ...styles.bestPlayRowSubline, color: "#e2e8f0", marginTop: 4, fontSize: 11 }}>
+              Reason: {reason}
             </p>
           ) : null}
         </div>

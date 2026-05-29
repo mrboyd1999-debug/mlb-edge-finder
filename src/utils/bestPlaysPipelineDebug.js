@@ -6,20 +6,18 @@ import { resolveProjectionValue } from "./projectionQuality.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
 import { resolveEdgeMagnitude } from "./bestPlayRanking.js";
 import {
-  evaluateMlbPlayability,
   computeDisplayPropMetrics,
-  isVerifiedPlay,
   isResearchCandidate,
-  hasMajorResearchGaps,
-  hasMissingMatchupData,
   isLowMatchupProp,
   PICK_TIER_VERIFIED,
   PICK_TIER_RESEARCH,
-  CONSERVATIVE_MIN_CONFIDENCE,
-  CONSERVATIVE_MIN_PROBABILITY,
 } from "./conservativeProjection.js";
-import { computeMlbPlayConfidence } from "./mlbPlayConfidence.js";
 import { statTypesAlign } from "./propMergeKeys.js";
+import {
+  passesVerifiedTierFilter,
+  passesResearchTierFilter,
+  classifyVerifiedTier,
+} from "./verifiedTierSystem.js";
 
 export const BEST_PLAYS_DEBUG_MODE = false;
 export const BEST_PLAYS_DEBUG_SAMPLE_SIZE = 0;
@@ -100,27 +98,7 @@ export function passesMinimalBestPlaysFilter(prop = {}) {
 }
 
 export function passesResearchBestPlaysFilter(prop = {}) {
-  if (!passesMinimalBestPlaysFilter(prop)) return false;
-  if (resolvePropSport(prop) !== "MLB") return false;
-  if (!isLowMatchupProp(prop)) return false;
-
-  const projection = resolveBestPlayStatSpecificProjection(prop);
-  if (projection == null || projection <= VERIFIED_MIN_PROJECTION) return false;
-  if (prop.projectionUnavailable || prop.unverifiedGradeBlocked || prop.isFallbackProjection) return false;
-  if (hasMajorResearchGaps(prop)) return false;
-
-  const enriched = { ...prop, projection, projectedValue: projection };
-  const edgePercent = resolveBestPlayEdgePercent(enriched);
-  if (edgePercent < VERIFIED_MIN_EDGE) return false;
-
-  const metrics = computeDisplayPropMetrics(enriched);
-  const conf = Number(
-    metrics.adjustedConfidence ?? computeMlbPlayConfidence(enriched, projection) ?? prop.confidenceScore
-  );
-  const prob = Number(metrics.probabilityScore);
-  if (!Number.isFinite(conf) || conf < CONSERVATIVE_MIN_CONFIDENCE) return false;
-  if (!Number.isFinite(prob) || prob < CONSERVATIVE_MIN_PROBABILITY) return false;
-  return true;
+  return passesResearchTierFilter(prop);
 }
 
 export function classifyBestPlayTier(prop = {}) {
@@ -129,38 +107,12 @@ export function classifyBestPlayTier(prop = {}) {
   return null;
 }
 
+/** Phase 3: tier A/B/C probability + confidence gates — matchup gaps no longer hard-block verified. */
 export function passesVerifiedBestPlaysFilter(prop = {}) {
-  if (!passesMinimalBestPlaysFilter(prop)) return false;
-  if (resolvePropSport(prop) !== "MLB") return false;
-  if (isLowMatchupProp(prop)) return false;
-  if (prop.pickTierLabel === PICK_TIER_RESEARCH && prop.matchupConfidence === "LOW") return false;
-
-  const projection = resolveBestPlayStatSpecificProjection(prop);
-  if (projection == null || projection <= VERIFIED_MIN_PROJECTION) return false;
-  if (prop.projectionUnavailable || prop.unverifiedGradeBlocked || prop.isFallbackProjection) return false;
-  if (hasMajorResearchGaps(prop)) return false;
-
-  const enriched = { ...prop, projection, projectedValue: projection };
-  if (isResearchCandidate(enriched)) return false;
-
-  const edge = resolveEdgeMagnitude(enriched);
-  const edgePercent = resolveBestPlayEdgePercent(enriched);
-  if (!Number.isFinite(edge) || edgePercent < VERIFIED_MIN_EDGE) return false;
-
-  const metrics = computeDisplayPropMetrics(enriched);
-  const playability = evaluateMlbPlayability(enriched, metrics);
-  if (playability.pickTierLabel !== PICK_TIER_VERIFIED) return false;
-  if (playability.displayResearchOnly || playability.rejected) return false;
-
-  const conf = Number(playability.displayConfidenceScore ?? playability.adjustedConfidence);
-  const prob = Number(playability.probabilityScore);
-  const dq = Number(prop.dataQualityScore);
-  if (!Number.isFinite(conf) || conf < VERIFIED_MIN_CONFIDENCE) return false;
-  if (!Number.isFinite(prob) || prob < VERIFIED_MIN_PROBABILITY) return false;
-  if (!Number.isFinite(dq) || dq < VERIFIED_MIN_DATA_QUALITY) return false;
-
-  return isVerifiedPlay(enriched, { probability: prob, confidence: conf });
+  return passesVerifiedTierFilter(prop);
 }
+
+export { classifyVerifiedTier };
 
 export function resolveBestPlayInvalidReason(prop = {}) {
   const player = resolveBestPlayPlayerName(prop);
@@ -177,8 +129,7 @@ export function resolveBestPlayInvalidReason(prop = {}) {
   }
   if (isResearchCandidate(prop) && !isLowMatchupProp(prop)) {
     const metrics = computeDisplayPropMetrics({ ...prop, projection });
-    const playability = evaluateMlbPlayability(prop, metrics);
-    return playability.researchReasons?.[0] || "research candidate";
+    return metrics.probabilityScore != null ? "research candidate" : "research candidate";
   }
   if (passesResearchBestPlaysFilter(prop)) return "";
   const confidence = resolveNumericConfidence(prop);

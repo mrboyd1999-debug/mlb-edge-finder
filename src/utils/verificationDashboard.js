@@ -4,78 +4,40 @@
 
 import {
   passesVerifiedBestPlaysFilter,
-  resolveBestPlayInvalidReason,
-  resolveBestPlayPlayerName,
-  resolveBestPlayStatSpecificProjection,
   passesResearchBestPlaysFilter,
-  VERIFIED_MIN_CONFIDENCE,
-  VERIFIED_MIN_EDGE,
-  VERIFIED_MIN_PROBABILITY,
 } from "./bestPlaysPipelineDebug.js";
-import { hasMissingMatchupData, isLowMatchupProp } from "./conservativeProjection.js";
-import { resolveEdgeMagnitude } from "./bestPlayRanking.js";
+import {
+  auditVerificationFailure,
+  summarizeVerificationAudit,
+  VERIFICATION_AUDIT_KEYS,
+} from "./verifiedTierSystem.js";
 
-export const VERIFICATION_FAILURE_KEYS = [
-  "missingTeam",
-  "missingProjection",
-  "missingMatchup",
-  "lowEdge",
-  "lowConfidence",
-  "other",
-];
+export { VERIFICATION_AUDIT_KEYS };
 
 function emptyBreakdown() {
   return {
-    missingTeam: 0,
-    missingProjection: 0,
-    missingMatchup: 0,
-    lowEdge: 0,
-    lowConfidence: 0,
-    other: 0,
+    failedProjection: 0,
+    failedProbability: 0,
+    failedConfidence: 0,
+    failedMatchup: 0,
   };
 }
 
-function resolveEdgePercent(prop = {}) {
-  const edge = resolveEdgeMagnitude(prop);
-  const line = Number(prop.line);
-  if (!Number.isFinite(edge) || !Number.isFinite(line) || line <= 0) return 0;
-  return Math.abs(edge) / line;
-}
+const AUDIT_LABELS = {
+  failedProjection: "Failed Projection",
+  failedProbability: "Failed Probability",
+  failedConfidence: "Failed Confidence",
+  failedMatchup: "Failed Matchup",
+};
 
 export function categorizeVerifiedFailure(prop = {}) {
-  if (!resolveBestPlayPlayerName(prop)) return "other";
-
-  const projection = resolveBestPlayStatSpecificProjection(prop);
-  if (projection == null || projection <= 0) return "missingProjection";
-
-  if (!String(prop.team || "").trim() && prop.teamConfidence !== "LOW") return "missingTeam";
-
-  if (passesResearchBestPlaysFilter(prop)) return "lowConfidence";
-  if (isLowMatchupProp(prop) || hasMissingMatchupData(prop)) return "missingMatchup";
-
-  const confidence = Number(prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence);
-  if (!Number.isFinite(confidence) || confidence < VERIFIED_MIN_CONFIDENCE) return "lowConfidence";
-
-  const probability = Number(prop.probabilityScore ?? prop.verifiedProbability);
-  if (!Number.isFinite(probability) || probability < VERIFIED_MIN_PROBABILITY) return "lowConfidence";
-
-  if (resolveEdgePercent(prop) < VERIFIED_MIN_EDGE) return "lowEdge";
-
-  const invalid = resolveBestPlayInvalidReason(prop);
-  if (/team/.test(invalid)) return "missingTeam";
-  if (/projection/.test(invalid)) return "missingProjection";
-  if (/matchup|research/.test(invalid)) return "missingMatchup";
-  if (/edge/.test(invalid)) return "lowEdge";
-  if (/confidence|probability/.test(invalid)) return "lowConfidence";
-
-  return "other";
+  return auditVerificationFailure(prop) || "failedProbability";
 }
 
 export function buildVerificationDashboard(props = []) {
-  const breakdown = emptyBreakdown();
+  const audit = summarizeVerificationAudit(props);
   let verifiedPasses = 0;
   let researchPasses = 0;
-  let verifiedFailures = 0;
 
   for (const prop of props || []) {
     if (passesVerifiedBestPlaysFilter(prop)) {
@@ -84,18 +46,30 @@ export function buildVerificationDashboard(props = []) {
     }
     if (passesResearchBestPlaysFilter(prop)) {
       researchPasses += 1;
-      continue;
     }
-    verifiedFailures += 1;
-    const bucket = categorizeVerifiedFailure(prop);
-    breakdown[bucket] = (breakdown[bucket] || 0) + 1;
   }
+
+  const verifiedFailures = audit.totalFailures;
+  const failureBreakdown = { ...emptyBreakdown(), ...audit.breakdown };
 
   return {
     verifiedPasses,
     researchPasses,
     verifiedFailures,
-    failureBreakdown: breakdown,
+    failureBreakdown,
+    auditLabels: AUDIT_LABELS,
+    auditSamples: audit.samples,
     total: (props || []).length,
   };
+}
+
+export function logVerificationDashboardAudit(props = []) {
+  const dashboard = buildVerificationDashboard(props);
+  console.info("[MLB Pipeline] verification dashboard", {
+    verifiedPasses: dashboard.verifiedPasses,
+    researchPasses: dashboard.researchPasses,
+    verifiedFailures: dashboard.verifiedFailures,
+    failureBreakdown: dashboard.failureBreakdown,
+  });
+  return dashboard;
 }

@@ -3,6 +3,7 @@
 import { computeStandardEdge, computeStandardEdgePercent, computeStandardPropMetrics } from "./standardPropMetrics.js";
 import { computeStatSpecificProbability } from "./mlbStatProbability.js";
 import { computeMlbPlayConfidence } from "./mlbPlayConfidence.js";
+import { classifyVerifiedTier } from "./verifiedTierSystem.js";
 
 export const PICK_TIER_VERIFIED = "Verified Play";
 export const PICK_TIER_RESEARCH = "Research Candidate";
@@ -147,15 +148,11 @@ export function formatEdgeDisplay(prop = {}) {
     return { rawEdgeLabel: "—", displayEdgeLabel: "—", edgeCapped: false };
   }
   const displayPct = finiteOr(prop.edgePercent, computeStandardEdgePercent(raw, line));
-  const rawPct = Math.round((raw / line) * 100);
-  const capped = Math.abs(rawPct) > 50;
   const rawEdgeLabel = `${raw > 0 ? "+" : ""}${round1(raw)}`;
   const displayEdgeLabel = Number.isFinite(displayPct)
-    ? capped
-      ? `${displayPct > 0 ? "+" : ""}${displayPct}% (capped)`
-      : `${displayPct > 0 ? "+" : ""}${displayPct}%`
+    ? `${displayPct > 0 ? "+" : ""}${displayPct}%`
     : "—";
-  return { rawEdgeLabel, displayEdgeLabel, edgeCapped: capped };
+  return { rawEdgeLabel, displayEdgeLabel, edgeCapped: false };
 }
 
 export function resolveResearchReasons(prop = {}) {
@@ -183,12 +180,19 @@ function canExceedConfidencePlusTen(prop = {}, { verified = false } = {}) {
   );
 }
 
-function applyProbabilityCaps(probability, prop = {}, { verified = false, confidence = null } = {}) {
+function applyProbabilityCaps(probability, prop = {}, { verified = false, confidence = null, edgePercent = null } = {}) {
   const conf = finiteOr(confidence ?? prop.displayConfidenceScore ?? computeAdjustedConfidence(prop), NaN);
-  let cap = verified ? 85 : RESEARCH_MAX_PROBABILITY;
+  const edgePct = Math.abs(finiteOr(edgePercent ?? prop.edgePercent, 0));
+  let cap = verified ? 92 : RESEARCH_MAX_PROBABILITY;
+
+  if (edgePct >= 60) cap = Math.max(cap, 90);
+  else if (edgePct >= 40) cap = Math.max(cap, 85);
+  else if (edgePct >= 25) cap = Math.max(cap, 80);
+  else if (edgePct >= 15) cap = Math.max(cap, 76);
 
   if (!canExceedConfidencePlusTen(prop, { verified }) && Number.isFinite(conf)) {
-    cap = Math.min(cap, conf + 10);
+    const confCap = edgePct >= 40 ? conf + 22 : edgePct >= 20 ? conf + 15 : conf + 10;
+    cap = Math.min(cap, confCap);
   }
 
   if (!verified) {
@@ -196,7 +200,9 @@ function applyProbabilityCaps(probability, prop = {}, { verified = false, confid
   }
 
   if (!Number.isFinite(conf)) cap = Math.min(cap, 60);
-  if (isResearchCandidate(prop, { confidence: conf })) cap = Math.min(cap, RESEARCH_MAX_PROBABILITY);
+  if (isResearchCandidate(prop, { confidence: conf }) && edgePct < 25) {
+    cap = Math.min(cap, RESEARCH_MAX_PROBABILITY);
+  }
 
   return clamp(Math.round(probability), 50, cap);
 }
@@ -209,12 +215,12 @@ export function computeConservativeProbability(prop = {}, metrics = {}, options 
   const adjustedConfidence = options.confidence ?? computeAdjustedConfidence(prop);
   const edge = metrics.edge ?? computeStandardEdge(projection, line);
   const edgePercent = metrics.edgePercent ?? computeStandardEdgePercent(edge, line) ?? 0;
-  const edgeStrength = Math.min(Math.abs(edgePercent) / 50, 1);
+  const edgeStrength = Math.min(Math.abs(edgePercent) / 35, 1);
 
   const statSpecific = computeStatSpecificProbability(prop, projection, line);
   let probability =
     statSpecific ??
-    50 + edgeStrength * 20;
+    50 + edgeStrength * 38;
 
   const dq = finiteOr(prop.dataQualityScore, 50);
   if (dq >= 80) probability += 3;
@@ -240,7 +246,11 @@ export function computeConservativeProbability(prop = {}, metrics = {}, options 
   }
 
   const verified = options.verified ?? false;
-  return applyProbabilityCaps(probability, prop, { verified, confidence: adjustedConfidence });
+  return applyProbabilityCaps(probability, prop, {
+    verified,
+    confidence: adjustedConfidence,
+    edgePercent,
+  });
 }
 
 export function computeDisplayPropMetrics(prop = {}) {
@@ -319,6 +329,7 @@ export function evaluateMlbPlayability(prop = {}, metrics = {}) {
     probability = applyProbabilityCaps(probability, prop, {
       verified: playable,
       confidence: adjustedConfidence,
+      edgePercent: metrics.edgePercent ?? prop.edgePercent,
     });
   }
 
@@ -367,9 +378,11 @@ export function comparePickRank(a = {}, b = {}) {
 }
 
 export function qualifiesAsHighestProbabilityPick(prop = {}) {
-  return prop.pickTierLabel === PICK_TIER_VERIFIED && isVerifiedPlay(prop);
+  return classifyVerifiedTier(prop) != null || prop.pickTierLabel === PICK_TIER_VERIFIED;
 }
 
 export function highestProbabilityLabel(prop = {}) {
+  const tier = prop.verifiedTier || classifyVerifiedTier(prop);
+  if (tier) return `Verified Play · Tier ${tier}`;
   return qualifiesAsHighestProbabilityPick(prop) ? "Highest Probability Pick" : "Top Research Candidate";
 }

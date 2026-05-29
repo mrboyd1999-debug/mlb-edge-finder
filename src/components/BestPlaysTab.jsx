@@ -1,9 +1,25 @@
-import { memo, useMemo } from "react";
+import { memo } from "react";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
 import PlayerImage from "./PlayerImage.jsx";
 import PropPipelineCounters from "./PropPipelineCounters.jsx";
 import VerificationDashboard from "./VerificationDashboard.jsx";
 import { groupPicksByPlayer } from "../utils/playerPropGroups.js";
+
+function renderRankedPlays(picks = [], onOpen) {
+  if (!picks.length) return null;
+  return (
+    <div className="compact-card-list">
+      {picks.map((prop, index) => (
+        <BestPlayRowCard
+          key={prop.id || `${prop.playerName}-${prop.statType}-${prop.line}-${index}`}
+          prop={prop}
+          rank={prop.topVerifiedRank ?? index + 1}
+          onOpen={onOpen}
+        />
+      ))}
+    </div>
+  );
+}
 
 function renderPlayerGroups(groups = [], onOpen) {
   if (!groups.length) return null;
@@ -33,6 +49,10 @@ function renderPlayerGroups(groups = [], onOpen) {
   );
 }
 
+function findSection(sections, id) {
+  return (sections || []).find((row) => row.id === id) || null;
+}
+
 function BestPlaysTab({
   sections = [],
   loading = false,
@@ -42,48 +62,63 @@ function BestPlaysTab({
   onOpen,
   filterDiagnostics = null,
 }) {
-  const { verifiedSection, researchSection, fallbackSection, debugBanner } = useMemo(() => {
-    const verified =
-      (sections || []).find((row) => row.id === "verified-plays") ||
-      (sections || []).find((row) => row.id === "highest-probability");
-    const research = (sections || []).find((row) => row.id === "research-plays");
-    const fallback = (sections || []).find((row) => row.id === "highest-probability");
-    const counts = filterDiagnostics?.pipelineCounts;
-    const invalidReasons = filterDiagnostics?.invalidReasons;
+  const { topVerifiedSection, verifiedSection, researchSection, probabilitySection, edgeSection, debugBanner } =
+    useMemo(() => {
+      const topVerified = findSection(sections, "top-verified-plays");
+      const verified = findSection(sections, "verified-plays");
+      const research = findSection(sections, "research-plays");
+      const probability = findSection(sections, "highest-probability");
+      const edge = findSection(sections, "highest-edge");
+      const counts = filterDiagnostics?.pipelineCounts;
+      const invalidReasons = filterDiagnostics?.invalidReasons;
+      const audit = filterDiagnostics?.verificationAudit;
 
-    let banner = null;
-    if (counts || invalidReasons) {
-      const reasonText = invalidReasons
-        ? Object.entries(invalidReasons)
-            .slice(0, 6)
-            .map(([reason, count]) => `${reason}: ${count}`)
-            .join(" · ")
-        : "";
-      banner = [
-        counts
-          ? `Pipeline: ${counts.rawProps ?? 0} raw · ${counts.normalized ?? 0} normalized · ${counts.withProjections ?? 0} with projections · ${counts.filtered ?? 0} verified · ${counts.researchPool ?? 0} research`
-          : null,
-        reasonText ? `Rejected: ${reasonText}` : null,
-      ]
-        .filter(Boolean)
-        .join(" | ");
-    }
+      let banner = null;
+      if (counts || invalidReasons || audit) {
+        const reasonText = invalidReasons
+          ? Object.entries(invalidReasons)
+              .slice(0, 6)
+              .map(([reason, count]) => `${reason}: ${count}`)
+              .join(" · ")
+          : "";
+        const auditText = audit
+          ? Object.entries(audit)
+              .filter(([, count]) => Number(count) > 0)
+              .map(([key, count]) => `${key}: ${count}`)
+              .join(" · ")
+          : "";
+        banner = [
+          counts
+            ? `Pipeline: ${counts.rawProps ?? 0} raw · ${counts.normalized ?? 0} normalized · ${counts.withProjections ?? 0} projected · ${counts.filtered ?? 0} verified · ${counts.researchPool ?? 0} research`
+            : null,
+          auditText ? `Audit: ${auditText}` : null,
+          reasonText ? `Rejected: ${reasonText}` : null,
+        ]
+          .filter(Boolean)
+          .join(" | ");
+      }
 
-    return {
-      verifiedSection: verified,
-      researchSection: research,
-      fallbackSection: fallback,
-      debugBanner: banner,
-    };
-  }, [sections, filterDiagnostics]);
+      return {
+        topVerifiedSection: topVerified,
+        verifiedSection: verified,
+        researchSection: research,
+        probabilitySection: probability,
+        edgeSection: edge,
+        debugBanner: banner,
+      };
+    }, [sections, filterDiagnostics]);
 
+  const topVerifiedPicks = topVerifiedSection?.picks || [];
   const verifiedGroups = groupPicksByPlayer(verifiedSection?.picks || []);
   const researchGroups = groupPicksByPlayer(researchSection?.picks || []);
-  const fallbackGroups = groupPicksByPlayer(fallbackSection?.picks || []);
+  const probabilityGroups = groupPicksByPlayer(probabilitySection?.picks || []);
+  const edgeGroups = groupPicksByPlayer(edgeSection?.picks || []);
   const totalPicks =
+    topVerifiedPicks.length +
     verifiedGroups.reduce((sum, group) => sum + group.props.length, 0) +
     researchGroups.reduce((sum, group) => sum + group.props.length, 0) +
-    fallbackGroups.reduce((sum, group) => sum + group.props.length, 0);
+    probabilityGroups.reduce((sum, group) => sum + group.props.length, 0) +
+    edgeGroups.reduce((sum, group) => sum + group.props.length, 0);
 
   const failureReason =
     pipelineDiagnostics?.failureReason || loadError || filterDiagnostics?.error || "";
@@ -112,13 +147,41 @@ function BestPlaysTab({
       ) : null}
       {failureReason && !totalPicks ? <p className="compact-form-notice">{failureReason}</p> : null}
 
-      {verifiedGroups.length ? (
+      {topVerifiedPicks.length ? (
         <section className="compact-section">
           <div className="compact-section__head">
-            <h2>{verifiedSection?.title || "Verified Plays"}</h2>
-            <p>{verifiedSection?.eyebrow || "High-confidence props with complete matchup context"}</p>
+            <h2>{topVerifiedSection?.title || "Top 5 Verified Plays"}</h2>
+            <p>{topVerifiedSection?.eyebrow || "Ranked by probability, confidence, and edge"}</p>
           </div>
-          {renderPlayerGroups(verifiedGroups, onOpen)}
+          {renderRankedPlays(topVerifiedPicks, onOpen)}
+        </section>
+      ) : null}
+
+      <section className="compact-section">
+        <div className="compact-section__head">
+          <h2>{verifiedSection?.title || "Verified Plays"}</h2>
+          <p>{verifiedSection?.eyebrow || "Tier A/B/C — sorted by ranking score"}</p>
+        </div>
+        {renderPlayerGroups(verifiedGroups, onOpen)}
+      </section>
+
+      {probabilityGroups.length ? (
+        <section className="compact-section">
+          <div className="compact-section__head">
+            <h2>{probabilitySection?.title || "Top 5 Highest Probability"}</h2>
+            <p>{probabilitySection?.eyebrow || "Best projected probability from today's prop pool"}</p>
+          </div>
+          {renderPlayerGroups(probabilityGroups, onOpen)}
+        </section>
+      ) : null}
+
+      {edgeGroups.length ? (
+        <section className="compact-section">
+          <div className="compact-section__head">
+            <h2>{edgeSection?.title || "Top 5 Highest Edge"}</h2>
+            <p>{edgeSection?.eyebrow || "Largest projection vs line separation"}</p>
+          </div>
+          {renderPlayerGroups(edgeGroups, onOpen)}
         </section>
       ) : null}
 
@@ -128,25 +191,15 @@ function BestPlaysTab({
             <h2>{researchSection?.title || "Research Plays"}</h2>
             <p>
               {researchSection?.eyebrow ||
-                "Quality projections with low matchup confidence — probability ≥ 58%, confidence ≥ 55"}
+                "Missing matchup or incomplete supporting data — review before betting"}
             </p>
           </div>
           {renderPlayerGroups(researchGroups, onOpen)}
         </section>
       ) : null}
 
-      {!verifiedGroups.length && !researchGroups.length && fallbackGroups.length ? (
-        <section className="compact-section">
-          <div className="compact-section__head">
-            <h2>{fallbackSection?.title || "Top Projected Props"}</h2>
-            <p>{fallbackSection?.eyebrow || "Weighted top plays by probability, edge, and confidence"}</p>
-          </div>
-          {renderPlayerGroups(fallbackGroups, onOpen)}
-        </section>
-      ) : null}
-
       {!totalPicks ? (
-        <p className="compact-empty">No verified plays yet. Check MLB Props for research candidates.</p>
+        <p className="compact-empty">Waiting for projected props to load.</p>
       ) : null}
     </div>
   );

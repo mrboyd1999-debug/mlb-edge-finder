@@ -78,12 +78,12 @@ export function computeStandardEdge(projection, line) {
   return round(proj - ln);
 }
 
-/** Display edge percent, clamped to [-50, +50]. */
+/** Display edge percent — actual value, not capped. */
 export function computeStandardEdgePercent(edge, line) {
   const e = Number(edge);
   const ln = Number(line);
   if (!Number.isFinite(e) || !Number.isFinite(ln) || ln <= 0) return null;
-  return Math.round(clamp((e / ln) * 100, -50, 50));
+  return Math.round((e / ln) * 100);
 }
 
 /** @deprecated Use computeConservativeProbability from conservativeProjection.js */

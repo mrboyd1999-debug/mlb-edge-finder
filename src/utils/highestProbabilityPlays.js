@@ -22,7 +22,15 @@ import {
 } from "./bestPlaysPipelineDebug.js";
 import { enrichPropsWithTeamLookup } from "./teamEnrichment.js";
 import { enrichPropsWithMatchupFallback } from "./matchupEnrichment.js";
-import { buildVerificationDashboard } from "./verificationDashboard.js";
+import { buildVerificationDashboard, logVerificationDashboardAudit } from "./verificationDashboard.js";
+import {
+  BEST_PLAYS_ENGINE_SIZE,
+  logVerificationAudit,
+  selectVerifiedPlaysByTier,
+  selectTopByEdge,
+  selectTopByProbability,
+  VERIFIED_MAX_PLAYS,
+} from "./verifiedTierSystem.js";
 import {
   buildMarketContextNote,
   enrichBestPlayRankingFields,
@@ -30,6 +38,7 @@ import {
   resolveLeanDirection,
   compareWeightedBestPlays,
 } from "./bestPlayRanking.js";
+import { compareVerifiedRankingPlays } from "./bestPlayRankingScore.js";
 
 export const HIGHEST_PROBABILITY_MIN_CONFIDENCE = 50;
 export const HIGHEST_PROBABILITY_MIN_EDGE = 0.02;
@@ -139,16 +148,30 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   logBestPlaysPipelineStage("VERIFIED:", verifiedPool.length);
   logBestPlaysPipelineStage("RESEARCH:", researchCount);
 
+  const verificationAudit = logVerificationAudit(enriched);
+  logVerificationDashboardAudit(enriched);
+
   const invalidReasons = summarizeInvalidReasons(enriched);
   logBestPlaysPipelineStage("INVALID REASONS:", invalidReasons);
+  logBestPlaysPipelineStage("VERIFICATION AUDIT:", verificationAudit.breakdown);
   logRejectionSummary(enriched);
 
-  const rankedVerified = sortHighestProbabilityPlays(verifiedPool);
+  const rankedVerified = selectVerifiedPlaysByTier(verifiedPool.length ? verifiedPool : displayPool, {
+    max: VERIFIED_MAX_PLAYS,
+    fallbackSort: compareWeightedBestPlays,
+  });
   const rankedResearch = sortHighestProbabilityPlays(researchPool);
-  const verifiedPicks = dedupeAndTake(
-    rankedVerified.map((prop) => ({ ...prop, verified: true, bestPlayPool: "verified" })),
-    max
-  );
+  let verifiedPicks = rankedVerified.map((prop) => ({
+    ...prop,
+    verified: true,
+    bestPlayPool: "verified",
+  }));
+  verifiedPicks = [...verifiedPicks].sort(compareVerifiedRankingPlays);
+  const topVerifiedPicks = verifiedPicks.slice(0, BEST_PLAYS_ENGINE_SIZE).map((prop, index) => ({
+    ...prop,
+    topVerifiedRank: index + 1,
+    bestPlayPool: "top-verified",
+  }));
   const researchPicks = dedupeAndTake(
     rankedResearch.map((prop) => ({
       ...prop,
@@ -159,14 +182,32 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
     max
   );
 
+  const enginePool = displayPool.filter((p) => {
+    const proj = resolveBestPlayStatSpecificProjection(p);
+    return proj != null && proj > 0;
+  });
+  const topProbabilityPicks = selectTopByProbability(enginePool, BEST_PLAYS_ENGINE_SIZE).map((prop) => ({
+    ...prop,
+    bestPlayPool: "highest-probability",
+  }));
+  const topEdgePicks = selectTopByEdge(enginePool, BEST_PLAYS_ENGINE_SIZE, resolveEdgeMagnitude).map((prop) => ({
+    ...prop,
+    bestPlayPool: "highest-edge",
+  }));
+
   let picks = dedupeAndTake(
-    sortHighestProbabilityPlays([...verifiedPool, ...researchPool]).map((prop) => ({
+    sortHighestProbabilityPlays([...verifiedPicks, ...researchPicks]).map((prop) => ({
       ...prop,
       verified: passesVerifiedBestPlaysFilter(prop),
     })),
     max
   );
   let usedVerifiedFallback = false;
+
+  if (verifiedPicks.some((p) => p.verifiedTierFallback)) {
+    usedVerifiedFallback = true;
+    logBestPlaysPipelineStage("VERIFIED TIER FALLBACK:", verifiedPicks.length);
+  }
 
   if (!picks.length) {
     const fallbackPool = displayPool.length ? displayPool : enriched;
@@ -182,8 +223,12 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
     return {
       picks,
       verifiedPicks,
+      topVerifiedPicks,
       researchPicks,
+      topProbabilityPicks,
+      topEdgePicks,
       usedVerifiedFallback,
+      verificationAudit: verificationAudit.breakdown,
       strictEligible: verifiedPicks.length + researchPicks.length,
       debugMode: BEST_PLAYS_DEBUG_MODE,
       invalidReasons,
@@ -276,6 +321,8 @@ export function auditHighestProbabilityProps(props = [], options = {}) {
 }
 
 export function buildHighestProbabilityQualifyReason(prop = {}) {
+  const explanation = prop.verifiedPlayExplanation;
+  if (explanation?.summary) return explanation.summary;
   const market = buildMarketContextNote(prop) || prop.marketContext || "";
   const base =
     prop.analyticsReason ||

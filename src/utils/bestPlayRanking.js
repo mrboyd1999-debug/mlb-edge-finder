@@ -15,9 +15,16 @@ import {
   resolveBestPlayInvalidReason,
   resolveBestPlayStatSpecificProjection,
   classifyBestPlayTier,
+  classifyVerifiedTier,
   sanitizeProjectionValue,
 } from "./bestPlaysPipelineDebug.js";
 import { computeMlbPlayConfidence } from "./mlbPlayConfidence.js";
+import { attachBestPlayExplanation } from "./bestPlayExplanation.js";
+import {
+  computeVerifiedRankingScore,
+  compareWeightedBestPlays,
+  computeWeightedBestPlayScore,
+} from "./bestPlayRankingScore.js";
 import { isPitcherStrikeoutMarket } from "./topMlbPlaysRanking.js";
 import { isMlbPitcherMarket } from "../modules/mlbPitcherData.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
@@ -116,17 +123,8 @@ export function computeRecentFormScore(prop = {}) {
   return 40;
 }
 
-/** Weighted ranking: probability, edge, confidence. */
-export function computeWeightedBestPlayScore(prop = {}) {
-  const probability = Number(prop.probabilityScore ?? prop.verifiedProbability ?? 0);
-  const edge = resolveEdgeMagnitude(prop);
-  const confidence = Number(prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence ?? 0);
-  return probability * 0.45 + Math.min(edge * 14, 28) + confidence * 0.25;
-}
-
-export function compareWeightedBestPlays(a = {}, b = {}) {
-  return computeWeightedBestPlayScore(b) - computeWeightedBestPlayScore(a);
-}
+/** @deprecated Use computeVerifiedRankingScore from bestPlayRankingScore.js */
+export { computeVerifiedRankingScore, compareVerifiedRankingPlays, computeWeightedBestPlayScore, compareWeightedBestPlays, resolveRankingEdgePercent } from "./bestPlayRankingScore.js";
 
 /** rankScore = (confidence * 0.45) + (abs(edge) * 35) + (recentFormScore * 0.20) */
 export function computeBestPlayRankScore(prop = {}) {
@@ -194,6 +192,12 @@ export function enrichBestPlayRankingFields(prop = {}) {
     displayConfidenceScore: playability.displayConfidenceScore ?? metrics.adjustedConfidence,
     pickTierLabel: playability.pickTierLabel,
   });
+  const verifiedTier = classifyVerifiedTier({
+    ...prop,
+    projection,
+    probabilityScore: playability.probabilityScore ?? metrics.probabilityScore,
+    displayConfidenceScore: playability.displayConfidenceScore ?? metrics.adjustedConfidence,
+  });
   const edge = metrics.edge ?? (projection != null && line > 0 ? computeStandardEdge(projection, line) : null);
   const edgePercent =
     metrics.edgePercent ?? (edge != null && line > 0 ? computeStandardEdgePercent(edge, line) : null);
@@ -222,7 +226,7 @@ export function enrichBestPlayRankingFields(prop = {}) {
     probability: verifiedProbability,
     confidence: displayConfidence ?? prop.confidenceScore ?? prop.confidence,
   });
-  const rankScore = computeWeightedBestPlayScore({
+  const rankScore = computeVerifiedRankingScore({
     ...enrichedProp,
     edgeScore,
     edge,
@@ -231,10 +235,20 @@ export function enrichBestPlayRankingFields(prop = {}) {
     confidence: displayConfidence ?? prop.confidenceScore ?? prop.confidence,
   });
   const marketContext = buildMarketContextNote(prop);
+  const explained = attachBestPlayExplanation({
+    ...prop,
+    projection,
+    probabilityScore: verifiedProbability,
+    displayConfidenceScore: displayConfidence,
+    edge,
+    edgePercent,
+    verifiedTier,
+    marketContext,
+  });
 
   const statSpecificMissing = projection == null && resolvePropSport(prop) === "MLB";
   return {
-    ...prop,
+    ...explained,
     projection,
     projectedValue: projection ?? prop.projectedValue,
     ...(statSpecificMissing
@@ -265,7 +279,10 @@ export function enrichBestPlayRankingFields(prop = {}) {
     bettingLabel: tierLabel || playability.bettingLabel,
     pickTierLabel: tierLabel || playability.pickTierLabel,
     pickTierRank: tierLabel === "Verified Play" ? 0 : 1,
+    verifiedTier,
+    verifiedTierLabel: verifiedTier ? `Tier ${verifiedTier}` : null,
     weightedBestPlayScore: rankScore,
+    verifiedRankingScore: rankScore,
     researchReasons: playability.researchReasons,
     whyNotPlayable: playability.whyNotPlayable,
     direction,
