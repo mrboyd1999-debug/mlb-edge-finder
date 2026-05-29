@@ -1,3 +1,5 @@
+import { getRawProxyUrl } from "../services/runtimeSettings.js";
+
 /** Validate and normalize external provider proxy URLs (PrizePicks / Underdog). */
 
 const INVALID_PROXY_LITERALS = new Set(["undefined", "null", "none", "false", "n/a", "na"]);
@@ -36,6 +38,27 @@ export function assessProxyUrl(rawValue = "") {
     invalid: Boolean(raw) && !normalized,
     configured: Boolean(normalized),
   };
+}
+
+/** Line-feed provider config — invalid URL blocks fetch; missing URL uses direct /api route. */
+export function getLineProviderPreflight(platform = "") {
+  const key = String(platform || "").toLowerCase();
+  const envKeys =
+    key.includes("prize") || key.includes("pp")
+      ? ["VITE_PRIZEPICKS_PROXY_URL", "PRIZEPICKS_PROXY_URL"]
+      : ["VITE_UNDERDOG_PROXY_URL", "UNDERDOG_PROXY_URL"];
+  const label = key.includes("prize") ? "PrizePicks" : "Underdog";
+  const assessment = assessProxyUrl(getRawProxyUrl(label));
+
+  if (assessment.invalid) {
+    return {
+      skip: true,
+      status: "Not configured",
+      reason: `${label} proxy URL is invalid. Set ${envKeys[0]} in Settings or .env.local.`,
+    };
+  }
+
+  return { skip: false, useDirect: !assessment.configured, proxyUrl: assessment.normalized };
 }
 
 export async function fetchWithProxyTimeout(url, init = {}, timeoutMs = PROVIDER_PROXY_FETCH_TIMEOUT_MS) {

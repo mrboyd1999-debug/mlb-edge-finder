@@ -1,5 +1,6 @@
 /** Confidence floors, consensus, risk, playability, flags, and premium copy. */
 
+import { computeConservativeProbability } from "./conservativeProjection.js";
 import { computeStandardEdgePercent, computeStandardPropMetrics } from "./standardPropMetrics.js";
 
 function finiteOr(value, fallback = NaN) {
@@ -261,8 +262,10 @@ export function premiumWhySummary(prop = {}) {
 }
 
 export function applyPropCalibrationBundle(prop = {}) {
-  const projection = finiteOr(prop.projection ?? prop.projectedValue, prop.line);
-  const edge = finiteOr(prop.edge, 0);
+  const projectionRaw = prop.projection ?? prop.projectedValue;
+  const projection =
+    Number.isFinite(Number(projectionRaw)) && Number(projectionRaw) > 0 ? Number(projectionRaw) : null;
+  const edge = projection != null ? finiteOr(prop.edge, computeStandardPropMetrics({ projection, line: prop.line }).edge ?? 0) : null;
   let confidence = finiteOr(prop.confidence ?? prop.confidenceScore, 50);
 
   confidence = applyConsensusAdjustments(confidence, prop);
@@ -273,8 +276,15 @@ export function applyPropCalibrationBundle(prop = {}) {
   const smartFlags = buildSmartFlags(prop, edge);
   const playabilityScore = computePlayabilityScore({ ...prop, riskLevel }, confidence);
   const displayResearchOnly = isDisplayResearchOnly({ ...prop, confidence, confidenceScore: confidence });
-  const edgePct = computeEdgePercent(prop, edge);
-  const standardMetrics = computeStandardPropMetrics({ projection, line: finiteOr(prop.line, NaN), edge });
+  const edgePct = edge != null ? computeEdgePercent(prop, edge) : null;
+  const standardMetrics =
+    projection != null
+      ? computeStandardPropMetrics({ projection, line: finiteOr(prop.line, NaN), edge })
+      : { edge: null, edgePercent: null, probabilityScore: null };
+  const probabilityScore =
+    projection != null
+      ? computeConservativeProbability({ ...prop, projection, line: finiteOr(prop.line, NaN) }, standardMetrics)
+      : null;
 
   return {
     ...prop,
@@ -282,7 +292,7 @@ export function applyPropCalibrationBundle(prop = {}) {
     projectedValue: projection,
     edge,
     edgePercent: edgePct,
-    probabilityScore: standardMetrics.probabilityScore,
+    probabilityScore,
     confidence,
     confidenceScore: confidence,
     riskLevel,

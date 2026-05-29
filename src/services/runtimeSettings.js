@@ -1,6 +1,7 @@
 /** Runtime API keys and proxy URLs — env vars + localStorage (dev overrides). */
 
 import { clearSourceAuthBlock, SOURCE_IDS } from "./sourceRateLimit.js";
+import { resetOddsApiStartupValidation } from "./oddsApiClient.js";
 import { cleanApiKey } from "../utils/cleanApiKey.js";
 import { normalizeProxyUrl } from "../utils/providerProxy.js";
 
@@ -132,6 +133,7 @@ export function writeRuntimeSettings(settings = {}) {
         // ignore
       }
       clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
+      resetOddsApiStartupValidation();
     }
     if (key === "VITE_PRIZEPICKS_PROXY_URL") {
       try {

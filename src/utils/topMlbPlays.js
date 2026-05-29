@@ -24,6 +24,7 @@ import { buildLiveFetchFailureSummary } from "./liveFetchAudit.js";
 import { isMinimalRenderableProp } from "./normalizeProp.js";
 import { filterQualityMlbProps, auditQualityMlbProps } from "./mlbPropQualityFilter.js";
 import { isFakeOrFallbackProp } from "./livePropRender.js";
+import { highestProbabilityLabel, qualifiesAsHighestProbabilityPick } from "./conservativeProjection.js";
 import {
   HIGHEST_PROBABILITY_MAX_PLAYS,
   HIGHEST_PROBABILITY_TARGET_PLAYS,
@@ -275,11 +276,15 @@ export function resolveTopMlbPlays(displayProps = [], rawProps = [], parsedUnder
 
 function annotateHighestProbabilityPlay(prop, rank) {
   if (!prop) return null;
+  const label = highestProbabilityLabel(prop);
   return withPlayerImageUrl({
     ...prop,
     topMlbPlayRank: rank,
+    highestProbabilityLabel: label,
+    isHighestProbabilityPick: qualifiesAsHighestProbabilityPick(prop),
     qualifyReason: buildHighestProbabilityQualifyReason(prop),
     reason: buildHighestProbabilityQualifyReason(prop),
+    bettingLabel: label,
   });
 }
 

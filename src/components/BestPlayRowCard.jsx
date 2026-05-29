@@ -14,6 +14,7 @@ import {
   buildHighestProbabilityQualifyReason,
   formatHighestProbabilitySource,
 } from "../utils/highestProbabilityPlays.js";
+import { highestProbabilityLabel } from "../utils/conservativeProjection.js";
 
 function BestPlayRowCard({ prop, onOpen, rank }) {
   const enriched = withPlayerImageUrl(prop || {});
@@ -29,7 +30,9 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
     Number.isFinite(Number(edgeScore)) && Math.abs(Number(edgeScore)) >= 0.015
       ? formatSignedNumber(Math.abs(Number(edgeScore)))
       : "—";
-  const probability = enriched.verifiedProbability ?? enriched.confidenceScore ?? enriched.confidence;
+  const probability =
+    enriched.probabilityScore ?? enriched.verifiedProbability ?? enriched.confidenceScore ?? enriched.confidence;
+  const pickLabel = highestProbabilityLabel(enriched);
   const confLabel = Number.isFinite(Number(probability)) ? `${Math.round(Number(probability))}%` : "—";
   const projection = resolveProjectionValue(enriched);
   const projectionLabel = projection != null && projection > 0 ? formatNumber(projection) : "—";
@@ -72,7 +75,7 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
             </span>
           </div>
           <p style={styles.bestPlayRowSubline}>
-            {propType} · Line {line} · Lean {sideLabel} · Proj {projectionLabel}
+            {pickLabel} · {propType} · Line {line} · Lean {sideLabel} · Proj {projectionLabel}
           </p>
           {qualifyReason ? (
             <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 2 }}>{qualifyReason}</p>

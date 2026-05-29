@@ -14,7 +14,7 @@ import {
   sportFromUnderdogGame,
 } from "./sportMappings.js";
 
-/** Scoring pipeline allowlist — filter before projection/scoring. */
+/** MLB-only ingestion gate — filter before projection/scoring. */
 export const INGESTION_ALLOWED_SPORTS = ALLOWED_SCORING_SPORTS;
 
 /** PrizePicks league ids that must never enter the pipeline. */
@@ -116,7 +116,7 @@ export function resolveIngestionSport(context = {}) {
     statType: context.statType,
   });
   const normalized = normalizeScoringSportLabel(inferred);
-  if (normalized && INGESTION_ALLOWED_SPORTS.has(normalized)) return normalized;
+  if (normalized === "MLB") return "MLB";
   return "";
 }
 

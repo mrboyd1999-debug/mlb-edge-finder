@@ -11,6 +11,7 @@ import {
 import {
   testOddsAPI,
   testSportsDataIO,
+  testAllApiConnections,
   mergeConnectionReportWithFeeds,
   formatOddsTestNotice,
   formatSportsDataTestNotice,
@@ -56,6 +57,7 @@ export default function SettingsPanel({
   const [notice, setNotice] = useState("");
   const [testingOdds, setTestingOdds] = useState(false);
   const [testingSportsData, setTestingSportsData] = useState(false);
+  const [testingAll, setTestingAll] = useState(false);
   const [connectionReport, setConnectionReport] = useState(() => {
     const storedMeta = readSettingsMeta();
     if (storedMeta.lastTestedAt && Array.isArray(storedMeta.lastConnectionReport)) {
@@ -112,6 +114,30 @@ export default function SettingsPanel({
       setNotice(error?.message || "Odds API test failed.");
     } finally {
       setTestingOdds(false);
+    }
+  }
+
+  async function handleRetestAll() {
+    setTestingAll(true);
+    try {
+      const { cleaned } = persistDraft();
+      const report = await testAllApiConnections({ feedContext: feedHealthContext });
+      setConnectionReport(report);
+      writeSettingsMeta({
+        ...readSettingsMeta(),
+        lastTestedAt: report.testedAt,
+        lastConnectionReport: report.results,
+      });
+      const oddsRow = findProviderRow(report.results || [], "Odds API");
+      const sdRow = findProviderRow(report.results || [], "SportsDataIO");
+      const parts = ["All providers tested."];
+      if (oddsRow?.settingsLine) parts.push(`Odds API: ${oddsRow.settingsLine}.`);
+      if (sdRow?.settingsLine) parts.push(`SportsDataIO: ${sdRow.settingsLine}.`);
+      setNotice(parts.join(" ") || buildSaveNotice(cleaned));
+    } catch (error) {
+      setNotice(error?.message || "API retest failed.");
+    } finally {
+      setTestingAll(false);
     }
   }
 
@@ -240,6 +266,14 @@ export default function SettingsPanel({
         <div className="settings-api-actions">
           <button type="button" style={styles.secondaryButton} onClick={handleSave}>
             Save Keys
+          </button>
+          <button
+            type="button"
+            style={styles.secondaryButton}
+            onClick={handleRetestAll}
+            disabled={testingAll || testingOdds || testingSportsData}
+          >
+            {testingAll ? "Testing…" : "Retest All APIs"}
           </button>
         </div>
 

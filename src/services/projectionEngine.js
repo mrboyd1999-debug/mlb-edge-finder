@@ -1,4 +1,4 @@
-import { computeStandardProbabilityScore } from "../utils/standardPropMetrics.js";
+import { computeConservativeProbability } from "../utils/conservativeProjection.js";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -296,12 +296,15 @@ export function computeRankScore(prop = {}) {
   );
 }
 
-export function estimateModelProbability({ projection, line, edge, confidenceScore, dataQualityScore, volatility }) {
+export function estimateModelProbability({ projection, line, edge, confidenceScore, dataQualityScore, volatility, prop = {} }) {
   void edge;
   void confidenceScore;
   void dataQualityScore;
   void volatility;
-  const score = computeStandardProbabilityScore(projection, line);
+  const score = computeConservativeProbability(
+    { ...prop, projection, projectedValue: projection, line, dataQualityScore },
+    { edge: Number.isFinite(Number(edge)) ? Number(edge) : undefined }
+  );
   if (score == null) return null;
   return round(score / 100, 3);
 }

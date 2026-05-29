@@ -1,6 +1,6 @@
 import { getOddsApiKey as getRuntimeOddsApiKey } from "../config/apiConfig.js";
 import { cleanApiKey } from "../utils/cleanApiKey.js";
-import { isSourceAuthBlocked, recordSourceAuthFailure, SOURCE_IDS } from "./sourceRateLimit.js";
+import { clearSourceAuthBlock, isSourceAuthBlocked, recordSourceAuthFailure, SOURCE_IDS } from "./sourceRateLimit.js";
 
 export const ODDS_API_INVALID_KEY_MESSAGE = "Invalid Odds API key or subscription access.";
 
@@ -90,6 +90,10 @@ export function sanitizeOddsApiUiMessage(message = "") {
 
 let oddsKeyStartupValidated = false;
 
+export function resetOddsApiStartupValidation() {
+  oddsKeyStartupValidated = false;
+}
+
 /** One-time startup probe — blocks repeat 401 spam when the saved key is invalid. */
 export async function validateOddsApiKeyOnce() {
   if (oddsKeyStartupValidated || typeof window === "undefined") return;
@@ -114,6 +118,8 @@ export async function validateOddsApiKeyOnce() {
     });
     if (authFailure) {
       recordSourceAuthFailure(SOURCE_IDS.ODDS_API, authFailure);
+    } else if (response.ok && Array.isArray(data) && data.length > 0) {
+      clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
     }
   } catch {
     // Network failures should not permanently block Odds API.

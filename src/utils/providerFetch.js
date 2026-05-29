@@ -37,10 +37,32 @@ function resolveSourceId(label = "") {
  * Fetch one provider with an independent AbortController + Promise.race timeout.
  * Never throws — returns { result, error, timedOut, durationMs }.
  */
-export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyResult, sourceId = null }) {
+export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyResult, sourceId = null, preflight } = {}) {
   const logKey = providerLogKey(label);
   const lockSourceId = sourceId || resolveSourceId(label);
   const startedAt = Date.now();
+
+  if (typeof preflight === "function") {
+    const pre = preflight();
+    if (pre?.skip) {
+      console.log(`${logKey} FAILED`);
+      console.log(`${logKey} TIME MS`, 0);
+      return {
+        label,
+        skipped: true,
+        result:
+          typeof emptyResult === "function"
+            ? emptyResult({ timedOut: false, error: true, message: pre.reason || pre.status || "Not configured" })
+            : { error: true, notConfigured: true, status: pre.status || "Not configured", warnings: [pre.reason] },
+        durationMs: 0,
+        timedOut: false,
+        error: true,
+        notConfigured: true,
+        statusReason: pre.reason || "",
+      };
+    }
+  }
+
   const controller = new AbortController();
   let timedOut = false;
   let error = false;
@@ -76,40 +98,49 @@ export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyRe
     ]);
 
     if (timer != null) window.clearTimeout(timer);
+    const durationMs = Date.now() - startedAt;
 
     if (result?.__providerTimeout || controller.signal.aborted) {
+      console.log(`${logKey} FAILED`);
+      console.log(`${logKey} TIME MS`, durationMs);
       return {
         label,
-        result: failResult({ timedOut: true }),
-        durationMs: Date.now() - startedAt,
+        result: failResult({ timedOut: true, message: `Timed out after ${timeoutMs}ms` }),
+        durationMs,
         timedOut: true,
         error: true,
+        statusReason: `Timed out after ${Math.round(timeoutMs / 1000)}s`,
       };
     }
 
-    console.log(`${logKey} END`);
-    if (result?.error || result?.timedOut) error = true;
+    if (result?.error || result?.timedOut) {
+      error = true;
+      console.log(`${logKey} FAILED`);
+    } else {
+      console.log(`${logKey} SUCCESS`);
+    }
+    console.log(`${logKey} TIME MS`, durationMs);
+
     return {
       label,
       result,
-      durationMs: Date.now() - startedAt,
+      durationMs,
       timedOut: false,
       error,
     };
   } catch (err) {
     if (timer != null) window.clearTimeout(timer);
+    const durationMs = Date.now() - startedAt;
     const wasTimeout = timedOut || controller.signal.aborted || isAbortOrTimeoutError(err);
-    if (wasTimeout) {
-      if (!timedOut) console.log(`${logKey} TIMEOUT`);
-    } else {
-      console.log(`${logKey} END`);
-    }
+    console.log(wasTimeout ? `${logKey} TIMEOUT` : `${logKey} FAILED`);
+    console.log(`${logKey} TIME MS`, durationMs);
     return {
       label,
       result: failResult({ timedOut: wasTimeout, message: err?.message }),
-      durationMs: Date.now() - startedAt,
+      durationMs,
       timedOut: wasTimeout,
       error: true,
+      statusReason: wasTimeout ? `Timed out after ${Math.round(timeoutMs / 1000)}s` : err?.message || "Fetch failed",
     };
   }
 }
@@ -138,14 +169,6 @@ export function unwrapProviderSettled(settled) {
   return settled.value || { label: "unknown", result: null, error: false, timedOut: false, durationMs: 0 };
 }
 
-const PERF_LOG_KEYS = {
-  PrizePicks: "PRIZEPICKS",
-  Underdog: "UNDERDOG",
-  Stats: "STATS",
-  SeasonStats: "SEASON_STATS",
-};
-
-/** Log per-provider durations, slowest provider, and any timeouts. */
 export function logProviderFetchPerformance(entries = []) {
   const completed = entries.filter(Boolean);
   let slowest = null;
@@ -153,26 +176,13 @@ export function logProviderFetchPerformance(entries = []) {
 
   for (const entry of completed) {
     if (entry.skipped) continue;
-    const logKey = PERF_LOG_KEYS[entry.label] || String(entry.label || "").toUpperCase().replace(/\s+/g, "_");
-
-    if (logKey === "PRIZEPICKS") {
-      console.error("PRIZEPICKS TIME:", entry.durationMs);
-    } else if (logKey === "UNDERDOG") {
-      console.error("UNDERDOG TIME:", entry.durationMs);
-    } else if (logKey === "STATS") {
-      console.error("STATS TIME:", entry.durationMs);
-    } else if (logKey === "SEASON_STATS") {
-      console.error("SEASON STATS TIME:", entry.durationMs);
-    }
-
+    const logKey = PROVIDER_LOG_KEYS[entry.label] || String(entry.label || "").toUpperCase().replace(/\s+/g, "_");
+    console.error(`${logKey} TIME:`, entry.durationMs);
     if (entry.timedOut) {
       timedOutLabels.push(entry.label);
       console.error(`${logKey} TIMEOUT after ${entry.durationMs}ms`);
     }
-
-    if (!slowest || entry.durationMs > slowest.durationMs) {
-      slowest = entry;
-    }
+    if (!slowest || entry.durationMs > slowest.durationMs) slowest = entry;
   }
 
   if (slowest && !slowest.skipped) {
@@ -183,28 +193,30 @@ export function logProviderFetchPerformance(entries = []) {
   }
 }
 
-export function emptyPrizePicksProviderResult({ timedOut = false, message = "" } = {}) {
+export function emptyPrizePicksProviderResult({ timedOut = false, message = "", notConfigured = false } = {}) {
   return {
     source: "PrizePicks",
-    status: "Failed",
+    status: notConfigured ? "Not configured" : "Failed",
     props: [],
     lineSourceBadge: "",
-    warnings: [message || (timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "PrizePicks fetch failed")],
+    warnings: [message || (notConfigured ? "PrizePicks proxy URL missing or invalid." : timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "PrizePicks fetch failed")],
     error: true,
     timedOut,
+    notConfigured,
   };
 }
 
-export function emptyUnderdogProviderResult({ timedOut = false, message = "" } = {}) {
+export function emptyUnderdogProviderResult({ timedOut = false, message = "", notConfigured = false } = {}) {
   return {
     source: "Underdog",
-    status: "Unavailable",
+    status: notConfigured ? "Not configured" : "Unavailable",
     props: [],
     parsedProps: [],
-    warnings: [message || (timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "Underdog fetch failed")],
+    warnings: [message || (notConfigured ? "Underdog proxy URL missing or invalid." : timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : "Underdog fetch failed")],
     lineSourceBadge: "STALE",
     error: true,
     timedOut,
+    notConfigured,
     partialDegradation: true,
   };
 }

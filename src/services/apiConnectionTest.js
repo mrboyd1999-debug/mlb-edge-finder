@@ -14,7 +14,7 @@ import {
 } from "../utils/apiTimeout.js";
 import { getOddsKeyLengthWarning, cleanApiKey } from "../utils/cleanApiKey.js";
 import { runSportsDataMultiEndpointTest, SPORTSDATA_STATUS_LABELS } from "./sportsDataAuthTest.js";
-import { getSourceState, isSourceInCooldown, SOURCE_IDS } from "./sourceRateLimit.js";
+import { clearSourceAuthBlock, getSourceState, isSourceInCooldown, SOURCE_IDS } from "./sourceRateLimit.js";
 import { readCachedBoard, readVerifiedCacheBoard } from "./pickStore.js";
 import { buildFeedHealthContext, mergeConnectionReportWithFeeds } from "./providerHealth.js";
 
@@ -364,6 +364,7 @@ async function testOddsApi() {
   }
 
   if (probe.ok) {
+    clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
     return {
       provider: "Odds API",
       route: probe.route,

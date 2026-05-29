@@ -1,18 +1,13 @@
 /** Canonical edge / probability metrics and trusted-sport validation for scoring. */
 
-export const ALLOWED_SCORING_SPORTS = new Set(["NBA", "MLB", "NFL", "NHL"]);
+export const ALLOWED_SCORING_SPORTS = new Set(["MLB"]);
+export const MLB_ONLY_SCORING = true;
 
 const BLOCKED_SPORT_PATTERN = /\b(pga|lpga|golf|dp world|pga tour|liv golf)\b/i;
 
 const TRUSTED_SPORT_ALIASES = {
   MLB: "MLB",
   BASEBALL: "MLB",
-  NBA: "NBA",
-  BASKETBALL: "NBA",
-  NFL: "NFL",
-  FOOTBALL: "NFL",
-  NHL: "NHL",
-  HOCKEY: "NHL",
 };
 
 function clamp(value, min, max) {
@@ -59,11 +54,15 @@ export function getBlockedSportRejectReason(prop = {}) {
 
 export function getScoringSportRejectReason(prop = {}) {
   const blocked = getBlockedSportRejectReason(prop);
-  if (blocked) return blocked;
+  if (blocked) {
+    console.info("[MLB Pipeline] Rejected non-MLB prop.", blocked);
+    return blocked;
+  }
   const trusted = getTrustedSportFromProp(prop);
-  if (trusted) return "";
+  if (trusted === "MLB") return "";
   const raw = String(prop.sport || prop.classifiedSport || prop.sourceSport || prop.leagueSport || "").trim();
   if (!raw) return "missing sport";
+  console.info("[MLB Pipeline] Rejected non-MLB prop.", raw);
   return `unsupported sport: ${raw}`;
 }
 
@@ -87,13 +86,11 @@ export function computeStandardEdgePercent(edge, line) {
   return Math.round(clamp((e / ln) * 100, -50, 50));
 }
 
-/** Probability score (1–99) from projection vs line — not a raw ratio elsewhere. */
+/** @deprecated Use computeConservativeProbability from conservativeProjection.js */
 export function computeStandardProbabilityScore(projection, line) {
-  const proj = Number(projection);
-  const ln = Number(line);
-  if (!Number.isFinite(proj) || !Number.isFinite(ln) || proj < 0 || ln <= 0) return null;
-  const baseProb = proj / (proj + ln);
-  return clamp(Math.round(baseProb * 100), 1, 99);
+  void projection;
+  void line;
+  return null;
 }
 
 export function computeStandardPropMetrics({ projection, line, edge = null } = {}) {
@@ -102,7 +99,7 @@ export function computeStandardPropMetrics({ projection, line, edge = null } = {
   return {
     edge: rawEdge,
     edgePercent: computeStandardEdgePercent(rawEdge, line),
-    probabilityScore: computeStandardProbabilityScore(projection, line),
+    probabilityScore: null,
   };
 }
 

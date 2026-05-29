@@ -1037,6 +1037,103 @@ body,
   color: #64748b;
 }
 
+.system-status-card__retest {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #e2e8f0;
+  cursor: pointer;
+}
+
+.system-status-card__retest:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.system-status-card__table-wrap {
+  overflow-x: auto;
+}
+
+.system-status-card__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.system-status-card__table th {
+  text-align: left;
+  color: #64748b;
+  font-weight: 700;
+  padding: 4px 6px;
+  border-bottom: 1px solid #334155;
+}
+
+.system-status-card__table td {
+  padding: 6px;
+  border-bottom: 1px solid #1e293b;
+  vertical-align: top;
+}
+
+.system-status-card__table-provider {
+  font-weight: 700;
+  color: #e2e8f0;
+  white-space: nowrap;
+}
+
+.system-status-card__table-time {
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.system-status-card__table-detail {
+  color: #94a3b8;
+  max-width: 220px;
+}
+
+.prop-card-status-badge--playable {
+  border-color: #16a34a !important;
+  background: #14532d !important;
+  color: #dcfce7 !important;
+}
+
+.prop-card-status-badge--research {
+  border-color: #ca8a04 !important;
+  background: #422006 !important;
+  color: #fef08a !important;
+}
+
+.prop-card-status-badge--rejected,
+.prop-card-status-badge--unavailable {
+  border-color: #475569 !important;
+  background: #1e293b !important;
+  color: #94a3b8 !important;
+}
+
+.prop-card-core-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 8px;
+  margin-top: 4px;
+}
+
+.prop-card-core-metrics span {
+  font-size: 11px;
+  color: #cbd5e1;
+}
+
+.prop-card-core-metrics strong {
+  color: #f8fafc;
+}
+
+@media (min-width: 640px) {
+  .prop-card-core-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .developer-debug-details {
   margin-top: 0;
 }

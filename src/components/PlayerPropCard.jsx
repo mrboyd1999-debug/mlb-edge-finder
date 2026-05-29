@@ -89,6 +89,21 @@ function noVerifiedPlayBadgeStyle() {
   return { border: "1px solid #475569", background: "#1e293b", color: "#94a3b8" };
 }
 
+function cardStatusBadgeClass(cardStatus = "") {
+  const key = String(cardStatus || "").toLowerCase();
+  if (key === "playable") return "prop-card-status-badge--playable";
+  if (key === "research") return "prop-card-status-badge--research";
+  if (key === "rejected") return "prop-card-status-badge--rejected";
+  return "prop-card-status-badge--unavailable";
+}
+
+function resolveCardStatusLabel(prop = {}) {
+  if (prop.displayRejected) return "Rejected";
+  if (prop.projectionStatus === "missing" || prop.projection == null) return "Unavailable";
+  if (prop.isDisplayPlayable) return "Playable";
+  return "Research Only";
+}
+
 function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, cardStyle, savedResult }) {
   const isManual = isManualAnalyzerProp(prop);
   const hasProjection = hasValidProjection(prop);
@@ -110,6 +125,14 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
   const projVsLine = projectionVsLineLabel(prop);
   const researchOnly = Boolean(prop.displayResearchOnly) || /research only/i.test(String(prop.bettingLabel || ""));
   const playable = Boolean(prop.isDisplayPlayable) && !researchOnly;
+  const cardStatus = prop.cardStatus || (prop.displayRejected ? "rejected" : playable ? "playable" : "research");
+  const cardStatusLabel = resolveCardStatusLabel(prop);
+  const probabilityPct =
+    prop.probabilityScore ??
+    (Number.isFinite(Number(prop.modelProbability)) ? Math.round(Number(prop.modelProbability) * 100) : null);
+  const leanDisplay =
+    prop.lean ||
+    (pickSide === "over" ? "Higher" : pickSide === "under" ? "Lower" : formatLeanSide(prop.bestPick || prop.side || "Watch"));
   const ready = playable && (Boolean(prop.isQualificationAccepted) || isReadyToBet(prop));
   const bettingLabel =
     researchOnly
@@ -388,46 +411,44 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
           <>
             <span className="prop-card-stat-highlight prop-card-prop-line-row" style={{ ...styles.compactMetaItem, flex: "1 1 100%" }}>
               <strong>
-                {displayMarketLabel(prop)} · Line {formatNumber(prop.line)}
-                {movementLabel ? <span style={{ marginLeft: "4px", color: "#7dd3fc", fontSize: "10px" }}>{movementLabel}</span> : null}
+                {prop.team || "—"} vs {prop.opponent || "—"} · {displayMarketLabel(prop)} · Line {formatNumber(prop.line)}
               </strong>
             </span>
             <div className="prop-card-badge-row" style={styles.badgeRow}>
-              {confDisplay != null ? (
-                <span style={{ ...styles.scoreBadge, borderColor: "#166534", color: "#86efac" }}>
-                  CONF {confDisplay}%
-                </span>
-              ) : null}
-              {edgeDisplay != null ? (
-                <span
-                  style={{
-                    ...styles.scoreBadge,
-                    borderColor: Number(prop.edge) >= 0 ? "#1d4ed8" : "#991b1b",
-                    color: Number(prop.edge) >= 0 ? "#93c5fd" : "#fca5a5",
-                  }}
-                >
-                  EDGE {Number(prop.edge) > 0 ? "+" : ""}{edgeDisplay}
-                </span>
-              ) : null}
-              {lean === "Over" || lean === "Under" ? (
-                <span style={{ ...styles.scoreBadge, ...leanBadgeStyle(lean) }}>
-                  {lean.toUpperCase()}
-                </span>
-              ) : null}
-              {hitChanceDisplay ? (
-                <span style={{ ...styles.scoreBadge, borderColor: "#155e75", color: "#a5f3fc" }}>
-                  HIT {hitChanceDisplay}
-                </span>
-              ) : null}
-              {riskShort ? (
-                <span style={{ ...styles.scoreBadge, ...manualRiskBadgeStyle(prop.riskLevel) }}>
-                  RISK {riskShort}
-                </span>
-              ) : null}
-              {(prop.positiveFlags || prop.smartFlags?.positive || []).slice(0, 1).map((flag) => (
-                <span key={flag} style={{ ...styles.scoreBadge, borderColor: "#166534", color: "#86efac" }}>{flag}</span>
-              ))}
+              <span className={`prop-card-status-badge ${cardStatusBadgeClass(cardStatus)}`} style={bettingLabelStyle(cardStatusLabel)}>
+                {cardStatusLabel}
+              </span>
             </div>
+            <div className="prop-card-core-metrics">
+              <span>
+                Proj <strong>{projectionDisplay ?? "—"}</strong>
+              </span>
+              <span>
+                Lean <strong>{leanDisplay}</strong>
+              </span>
+              <span>
+                Prob <strong>{probabilityPct != null ? `${probabilityPct}%` : "—"}</strong>
+              </span>
+              <span>
+                Conf <strong>{confDisplay != null ? `${confDisplay}%` : "—"}</strong>
+              </span>
+              <span>
+                Risk <strong>{riskShort || "—"}</strong>
+              </span>
+              <span>
+                DQ <strong>{Number.isFinite(Number(prop.dataQualityScore)) ? Math.round(Number(prop.dataQualityScore)) : "—"}</strong>
+              </span>
+              {edgeDisplay != null ? (
+                <span>
+                  Edge <strong>{Number(prop.edge) > 0 ? "+" : ""}{edgeDisplay}</strong>
+                </span>
+              ) : null}
+            </div>
+            {prop.whyNotPlayable && !playable ? (
+              <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, color: "#94a3b8", marginTop: 2 }}>
+                {prop.whyNotPlayable}
+              </p>
+            ) : null}
           </>
           )
         ) : (

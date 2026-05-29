@@ -77,6 +77,8 @@ function DfsAnalyzerLayout({
         apiHealth={apiHealth}
         mlbPipelineStatus={mlbPipelineStatus}
         connectionReport={connectionReport}
+        onConnectionReportChange={handleConnectionReportChange}
+        feedHealthContext={feedHealthContext}
       />
 
       <ApiSetupBanner onOpenSettings={() => setAppView("settings")} />

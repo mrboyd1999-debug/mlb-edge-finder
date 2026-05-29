@@ -2,6 +2,7 @@
 
 import { TIER_LEAN } from "./sideEvaluationEngine.js";
 
+import { computeDisplayPropMetrics, evaluateMlbPlayability } from "./conservativeProjection.js";
 import {
   applyPropCalibrationBundle,
   computeEdgePercent,
@@ -389,18 +390,20 @@ export function scoreDisplayProp(prop = {}) {
       })
     );
   }
-  const edge = computeDisplayEdgeValue({ ...prop, projection, side });
+  const metrics = computeDisplayPropMetrics({ ...prop, projection, line });
+  const edge = metrics.edge ?? 0;
   const { confidence, boostLabels, penaltyLabels } = computeWeightedConfidence(prop, projection, line, edge);
   const analyticsReason = buildAnalyticsReason({ ...prop, projection, edge, confidence });
   const whyThisPick = buildWhyThisPick({ ...prop, projection, edge, confidence });
-  const edgePct = computeEdgePercent({ ...prop, edge }, edge);
 
   const calibrated = applyPropCalibrationBundle({
     ...prop,
     projection,
     projectedValue: projection,
-    edge,
-    edgePercent: edgePct,
+    edge: metrics.edge,
+    edgePercent: metrics.edgePercent,
+    probabilityScore: metrics.probabilityScore,
+    lean: metrics.lean,
     confidence,
     confidenceScore: confidence,
     confidenceBoostLabels: boostLabels,
@@ -421,14 +424,9 @@ export function scoreDisplayProp(prop = {}) {
     confidenceExplanation: analyticsReason || calibrated.confidenceExplanation,
   };
 
+  const playability = evaluateMlbPlayability(finalized, metrics);
   const tier = confidenceTierLabel(finalized.confidence);
   const invalidProp = !isValidDisplayProp({ ...finalized, line, player: prop.player, playerName: prop.playerName });
-  const displayResearchOnly = invalidProp
-    ? true
-    : finiteOr(finalized.confidence, 0) < TIER_LEAN || isDisplayResearchOnly(finalized);
-  const isDisplayPlayable = !displayResearchOnly && !invalidProp;
-  const bandScore = resolveBandScore(finalized);
-  const bettingLabel = displayResearchOnly ? "Research only" : confidenceBandDisplay(bandScore);
 
   return attachHistoricalPerformance(
     attachRankScore(
@@ -436,11 +434,18 @@ export function scoreDisplayProp(prop = {}) {
         ...finalized,
         fullMarketLabel: fullMarketDisplayLabel(finalized.statType || prop.statType, finalized.sport || prop.sport),
         confidenceTier: tier,
-        edgeScore: round1(edge * (finalized.confidence / 50) + (finiteOr(prop.last10HitRate, 0.5) * 3)),
+        edgeScore: round1(Math.abs(edge) * (finalized.confidence / 50) + (finiteOr(prop.last10HitRate, 0.5) * 3)),
         displayRejected: invalidProp,
-        displayResearchOnly,
-        isDisplayPlayable,
-        bettingLabel,
+        displayResearchOnly: invalidProp || playability.displayResearchOnly,
+        isDisplayPlayable: !invalidProp && playability.isDisplayPlayable,
+        bettingLabel: invalidProp ? "Rejected" : playability.bettingLabel,
+        cardStatus: invalidProp ? "rejected" : playability.cardStatus,
+        whyNotPlayable: playability.whyNotPlayable,
+        probabilityScore: metrics.probabilityScore,
+        lean: metrics.lean,
+        projectionStatus: metrics.projectionStatus,
+        modelProbability:
+          metrics.probabilityScore != null ? round(metrics.probabilityScore / 100, 3) : null,
         premiumRiskSummary: finalized.premiumRiskSummary || premiumRiskSummary(finalized),
       })
     )

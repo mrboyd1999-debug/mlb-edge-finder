@@ -7,8 +7,8 @@ export const ODDS_API_KEY_LENGTH = 32;
 export function getOddsKeyLengthWarning(key = "") {
   const cleaned = cleanApiKey(key);
   if (!cleaned) return "";
-  if (cleaned.length !== ODDS_API_KEY_LENGTH) {
-    return "Odds API key looks incomplete. Re-copy the full key.";
+  if (cleaned.length < 16) {
+    return "Odds API key looks too short. Re-copy the full key.";
   }
   return "";
 }

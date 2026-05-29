@@ -312,6 +312,7 @@ import {
   normalizeScoringSportLabel,
   ALLOWED_SCORING_SPORTS,
 } from "./utils/standardPropMetrics.js";
+import { getLineProviderPreflight } from "./utils/providerProxy.js";
 import { buildContextFromProp, resolveIngestionSport } from "./utils/ingestionFilter.js";
 import { isParserMergeComboBug } from "./utils/comboMarkets.js";
 import {
@@ -1274,11 +1275,19 @@ function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderd
         label: "PrizePicks",
         sourceId: "PrizePicks",
         timeoutMs: PRIZEPICKS_PROVIDER_TIMEOUT_MS,
+        preflight: () => getLineProviderPreflight("PrizePicks"),
         fetchFn: ({ signal }) => fetchPrizePicksProps({ sport: fetchSport, statType: "all", signal }),
-        emptyResult: ({ timedOut, message }) =>
+        emptyResult: ({ timedOut, message, notConfigured }) =>
           emptyPrizePicksProviderResult({
             timedOut,
-            message: message || (timedOut ? "PrizePicks timed out" : "PrizePicks fetch failed"),
+            notConfigured,
+            message:
+              message ||
+              (notConfigured
+                ? "PrizePicks proxy URL missing or invalid."
+                : timedOut
+                  ? `PrizePicks timed out after ${PRIZEPICKS_PROVIDER_TIMEOUT_MS / 1000}s`
+                  : "PrizePicks fetch failed"),
           }),
       })
     : skippedProviderResult("PrizePicks");
@@ -1288,11 +1297,19 @@ function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderd
         label: "Underdog",
         sourceId: "Underdog",
         timeoutMs: UNDERDOG_PROVIDER_TIMEOUT_MS,
+        preflight: () => getLineProviderPreflight("Underdog"),
         fetchFn: ({ signal }) => fetchUnderdogProviderProps({ sport: fetchSport, statType: "all", signal }),
-        emptyResult: ({ timedOut, message }) =>
+        emptyResult: ({ timedOut, message, notConfigured }) =>
           emptyUnderdogProviderResult({
             timedOut,
-            message: message || (timedOut ? "Underdog timed out" : "Underdog fetch failed"),
+            notConfigured,
+            message:
+              message ||
+              (notConfigured
+                ? "Underdog proxy URL missing or invalid."
+                : timedOut
+                  ? `Underdog timed out after ${UNDERDOG_PROVIDER_TIMEOUT_MS / 1000}s`
+                  : "Underdog fetch failed"),
           }),
       })
     : skippedProviderResult("Underdog");

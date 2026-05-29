@@ -46,8 +46,8 @@ export function sortHighestProbabilityPlays(props = []) {
   return [...props]
     .map((prop) => enrichBestPlayRankingFields(prop))
     .sort((a, b) => {
-      const probA = Number(a.verifiedProbability ?? 0);
-      const probB = Number(b.verifiedProbability ?? 0);
+      const probA = Number(a.probabilityScore ?? a.verifiedProbability ?? 0);
+      const probB = Number(b.probabilityScore ?? b.verifiedProbability ?? 0);
       if (probB !== probA) return probB - probA;
       const edgeA = resolveEdgeMagnitude(a);
       const edgeB = resolveEdgeMagnitude(b);
