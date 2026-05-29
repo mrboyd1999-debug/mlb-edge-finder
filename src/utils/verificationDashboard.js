@@ -9,6 +9,8 @@ import {
 import {
   auditVerificationFailure,
   summarizeVerificationAudit,
+  logTopPickScoreAudit,
+  logVerificationRegressionAudit,
   VERIFICATION_AUDIT_KEYS,
 } from "./verifiedTierSystem.js";
 
@@ -20,14 +22,16 @@ function emptyBreakdown() {
     failedProbability: 0,
     failedConfidence: 0,
     failedMatchup: 0,
+    failedDataQuality: 0,
   };
 }
 
-const AUDIT_LABELS = {
+export const AUDIT_LABELS = {
   failedProjection: "Failed Projection",
   failedProbability: "Failed Probability",
   failedConfidence: "Failed Confidence",
   failedMatchup: "Failed Matchup",
+  failedDataQuality: "Failed Data Quality",
 };
 
 export function categorizeVerifiedFailure(prop = {}) {
@@ -49,27 +53,32 @@ export function buildVerificationDashboard(props = []) {
     }
   }
 
-  const verifiedFailures = audit.totalFailures;
   const failureBreakdown = { ...emptyBreakdown(), ...audit.breakdown };
 
   return {
     verifiedPasses,
     researchPasses,
-    verifiedFailures,
+    verifiedFailures: audit.totalFailures,
     failureBreakdown,
     auditLabels: AUDIT_LABELS,
     auditSamples: audit.samples,
+    regressionReasons: audit.regressionReasons,
     total: (props || []).length,
   };
 }
 
 export function logVerificationDashboardAudit(props = []) {
   const dashboard = buildVerificationDashboard(props);
+  const scoreAudit = logTopPickScoreAudit(props);
+  const regression = logVerificationRegressionAudit(props);
+
   console.info("[MLB Pipeline] verification dashboard", {
     verifiedPasses: dashboard.verifiedPasses,
     researchPasses: dashboard.researchPasses,
     verifiedFailures: dashboard.verifiedFailures,
     failureBreakdown: dashboard.failureBreakdown,
+    regressionReasons: dashboard.regressionReasons,
   });
-  return dashboard;
+
+  return { ...dashboard, scoreAudit, regression };
 }

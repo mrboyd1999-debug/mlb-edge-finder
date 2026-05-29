@@ -26,7 +26,7 @@ import { buildVerificationDashboard, logVerificationDashboardAudit } from "./ver
 import {
   BEST_PLAYS_ENGINE_SIZE,
   logVerificationAudit,
-  selectVerifiedPlaysByTier,
+  selectVerifiedPlaysWithFallback,
   selectTopByEdge,
   selectTopByProbability,
   NO_TIER_A_PLAYS_MESSAGE,
@@ -154,17 +154,24 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   logBestPlaysPipelineStage("RESEARCH:", researchCount);
 
   const verificationAudit = logVerificationAudit(enriched);
-  logVerificationDashboardAudit(enriched);
+  const verificationDashboardResult = logVerificationDashboardAudit(enriched);
 
   const invalidReasons = summarizeInvalidReasons(enriched);
   logBestPlaysPipelineStage("INVALID REASONS:", invalidReasons);
   logBestPlaysPipelineStage("VERIFICATION AUDIT:", verificationAudit.breakdown);
+  logBestPlaysPipelineStage(
+    "VERIFICATION REGRESSION:",
+    verificationDashboardResult.regression?.regressionReasons ||
+      verificationDashboardResult.regressionReasons
+  );
   logRejectionSummary(enriched);
 
-  const rankedVerified = selectVerifiedPlaysByTier(verifiedPool.length ? verifiedPool : displayPool, {
-    max: VERIFIED_MAX_PLAYS,
-    fallbackSort: compareWeightedBestPlays,
-  });
+  const verifiedSelection = selectVerifiedPlaysWithFallback(
+    verifiedPool.length ? verifiedPool : displayPool,
+    { max: VERIFIED_MAX_PLAYS }
+  );
+  const rankedVerified = verifiedSelection.picks;
+  let usedVerifiedScoreFallback = verifiedSelection.usedFallback;
   const rankedResearch = sortHighestProbabilityPlays(researchPool);
   let verifiedPicks = rankedVerified.map((prop) => ({
     ...prop,
@@ -205,7 +212,7 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
     })),
     max
   );
-  let usedVerifiedFallback = false;
+  let usedVerifiedFallback = usedVerifiedScoreFallback;
 
   if (verifiedPicks.some((p) => p.verifiedTierFallback)) {
     usedVerifiedFallback = true;
@@ -235,6 +242,8 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
       topEdgePicks,
       usedVerifiedFallback,
       verificationAudit: verificationAudit.breakdown,
+      regressionAudit: verificationDashboardResult.regression || null,
+      scoreAudit: verificationDashboardResult.scoreAudit || null,
       strictEligible: verifiedPicks.length + researchPicks.length,
       debugMode: BEST_PLAYS_DEBUG_MODE,
       invalidReasons,
