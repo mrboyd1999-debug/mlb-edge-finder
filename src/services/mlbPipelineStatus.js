@@ -164,6 +164,30 @@ export function mergeDfsSourceStatusFromApiHealth(apiHealth = {}) {
     const parsed = Number(row.parsedCount) || 0;
     const cachedCount = Number(row.cachedCount) || 0;
     const hasCached = cachedCount > 0 || /cached/i.test(String(row.statusLabel || row.lineSourceBadge || ""));
+    const ppOptionalNotConfigured =
+      name === "PrizePicks" &&
+      (/not configured/i.test(String(row.status || row.statusLabel || "")) ||
+        row.httpExecuted === false ||
+        row.diagnostics?.httpExecuted === false);
+
+    if (ppOptionalNotConfigured) {
+      pipelineStatus.dfsSources[name] = {
+        ...pipelineStatus.dfsSources[name],
+        status: "Not configured",
+        connectionTier: "Not configured",
+        statusLabel: row.statusLabel || "Missing VITE_PRIZEPICKS_PROXY_URL",
+        rawCount: 0,
+        parsedCount: 0,
+        usableCount: 0,
+        filteredCount: 0,
+        cachedCount: 0,
+        ingestionSummary: row.ingestionSummary || "",
+        lastSuccessAt: pipelineStatus.dfsSources[name].lastSuccessAt,
+        lastError: "",
+      };
+      return;
+    }
+
     const connected = usable > 0 || parsed > 0 || hasCached;
     const warning =
       connected &&

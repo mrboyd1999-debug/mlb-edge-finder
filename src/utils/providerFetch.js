@@ -8,6 +8,7 @@ import {
   UNDERDOG_PROVIDER_TIMEOUT_MS,
 } from "./apiTimeout.js";
 import { SOURCE_IDS, releaseSourceRequestLock } from "../services/sourceRateLimit.js";
+import { updatePrizePicksDiagnostics } from "./prizepicksDiagnostics.js";
 
 export {
   PRIZEPICKS_PROVIDER_TIMEOUT_MS,
@@ -50,6 +51,21 @@ export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyRe
       console.log(`${logKey} TIME MS`, 0);
       if (notConfigured) {
         console.info(`${logKey} detail:`, pre.reason || "Not configured");
+      }
+      if (label === "PrizePicks" && notConfigured) {
+        updatePrizePicksDiagnostics({
+          proxyConfigured: false,
+          proxyMode: "none — blocked before fetch",
+          httpExecuted: false,
+          providerStatus: "Not configured",
+          uiConnectionTier: "Not configured",
+          failureClass: "MISSING_PROXY",
+          lastError: pre.reason || "PrizePicks proxy URL missing",
+          missingConfiguration: pre.missingConfiguration || pre.config?.missingConfiguration || "VITE_PRIZEPICKS_PROXY_URL",
+          configKeysChecked: pre.config?.keysChecked || [],
+          expectedFormat: pre.config?.expectedFormat || "",
+          exampleProxyUrl: pre.config?.exampleProxyUrl || "",
+        });
       }
       return {
         label,

@@ -46,7 +46,7 @@ import {
   withSourceRequestLock,
 } from "./sourceRateLimit.js";
 import { getProxyUrl, getRawProxyUrl } from "../config/apiConfig.js";
-import { assessProxyUrl } from "../utils/providerProxy.js";
+import { assessProxyUrl, inspectPrizePicksProxyConfig } from "../utils/providerProxy.js";
 import { recordProviderResponse } from "../utils/rawResponseDebug.js";
 import {
   classifyPrizePicksFailure,
@@ -137,16 +137,22 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
   })();
 
   if (!proxyUrl) {
+    const config = inspectPrizePicksProxyConfig();
     const message = proxyAssessment.invalid
-      ? "PrizePicks proxy URL is invalid. Set VITE_PRIZEPICKS_PROXY_URL in Settings."
+      ? `PrizePicks proxy URL is invalid. Set ${config.canonicalKey} in Settings.`
       : "PrizePicks proxy URL missing";
-    console.info("[PrizePicks]", message, "— fetch skipped");
+    console.info("[PrizePicks]", message, "— fetch skipped (no HTTP)");
     updatePrizePicksDiagnostics({
       proxyConfigured: false,
-      proxyMode: "none — client requires VITE_PRIZEPICKS_PROXY_URL",
+      proxyMode: "none — blocked in fetchPrizePicksPropsInternal",
       httpExecuted: false,
       lastError: message,
       providerStatus: "Not configured",
+      uiConnectionTier: "Not configured",
+      missingConfiguration: config.missingConfiguration,
+      configKeysChecked: config.keysChecked,
+      expectedFormat: config.expectedFormat,
+      exampleProxyUrl: config.exampleProxyUrl,
       failureClass: classifyPrizePicksFailure({ notConfigured: true, lastError: message }),
     });
     return notConfiguredPrizePicksProviderResult(message);

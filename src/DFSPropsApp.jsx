@@ -314,7 +314,12 @@ import {
   normalizeScoringSportLabel,
   ALLOWED_SCORING_SPORTS,
 } from "./utils/standardPropMetrics.js";
-import { getLineProviderPreflight } from "./utils/providerProxy.js";
+import {
+  getLineProviderPreflight,
+  inspectPrizePicksProxyConfig,
+  isPrizePicksProxyNotConfigured,
+  PRIZEPICKS_NOT_CONFIGURED_DETAIL,
+} from "./utils/providerProxy.js";
 import { getPrizePicksDiagnostics, updatePrizePicksDiagnostics } from "./utils/prizepicksDiagnostics.js";
 import { buildContextFromProp, resolveIngestionSport } from "./utils/ingestionFilter.js";
 import { isParserMergeComboBug } from "./utils/comboMarkets.js";
@@ -498,6 +503,11 @@ function prizePicksHasUsableProps(props = [], sourceStatus = {}) {
 
 function shouldSuppressCriticalUiMessage(message = "", props = [], sourceStatus = {}) {
   if (!message) return false;
+  if (/proxy url missing|vite_prizepicks_proxy_url|prizepicks proxy url missing|missing vite_prizepicks/i.test(message)) {
+    return true;
+  }
+  if (String(sourceStatus?.PrizePicks || "").toLowerCase() === "not configured") return true;
+  if (isPrizePicksProxyNotConfigured() && /prizepicks|could not load prizepicks/i.test(message)) return true;
   if (isNonCriticalUnderdogFailure(message)) return true;
   if (/using verified mlb cache/i.test(message)) return true;
   if (/recently verified cached mlb props/i.test(message)) return true;
@@ -520,14 +530,16 @@ function shouldSuppressCriticalUiMessage(message = "", props = [], sourceStatus 
 }
 
 function filterPrizePicksFailuresWhenAlternativesExist(sourceFailures = [], { rawProps = [], oddsApiProps = [] } = {}) {
-  const hasAlternatives = rawProps.length > 0 || oddsApiProps.length > 0;
-  if (!hasAlternatives) return sourceFailures;
-  return sourceFailures.filter(
-    (message) =>
-      !/prizepicks live fetch failed|could not load prizepicks lines|prizepicks temporarily unavailable/i.test(
-        String(message || "")
-      )
-  );
+  void rawProps;
+  void oddsApiProps;
+  return (sourceFailures || []).filter((message) => {
+    const text = String(message || "").toLowerCase();
+    if (/proxy url missing|vite_prizepicks_proxy|prizepicks proxy|not configured/.test(text)) return false;
+    if (isPrizePicksProxyNotConfigured() && /prizepicks|could not load prizepicks/.test(text)) return false;
+    return !/prizepicks live fetch failed|could not load prizepicks lines|prizepicks temporarily unavailable/i.test(
+      text
+    );
+  });
 }
 
 function filterCriticalUiMessages(messages = [], props = [], sourceStatus = {}) {
@@ -588,6 +600,7 @@ function sourceFailureMessage(label, error) {
 function normalizeSourceState(status, fallback = "Failed") {
   const text = String(status || "").trim();
   if (!text || text === "Pending") return fallback;
+  if (/not configured/i.test(text)) return "Not configured";
   if (text === "Connected" || text === "Full") return "Full";
   if (text === "Cached") return "Cached";
   if (text === "Empty") return "Empty";
@@ -599,10 +612,15 @@ function normalizeSourceState(status, fallback = "Failed") {
   return text;
 }
 
+function prizePicksSourceFallback(explicit = "") {
+  if (explicit) return explicit;
+  return isPrizePicksProxyNotConfigured() ? "Not configured" : "Failed";
+}
+
 function finalizeSourceStatus(sourceStatus, fallback = {}) {
   const underdogFallback = MLB_ONLY_MODE ? fallback.Underdog || "Unavailable" : fallback.Underdog || "Failed";
   return {
-    PrizePicks: normalizeSourceState(sourceStatus.PrizePicks, fallback.PrizePicks || "Failed"),
+    PrizePicks: normalizeSourceState(sourceStatus.PrizePicks, prizePicksSourceFallback(fallback.PrizePicks)),
     Underdog: MLB_ONLY_MODE
       ? normalizeUnderdogStatusForMlb(sourceStatus.Underdog, underdogFallback)
       : normalizeSourceState(sourceStatus.Underdog, underdogFallback),
@@ -624,6 +642,7 @@ function buildSourceHealth(backgroundWarnings = [], sourceFailures = [], sourceS
   if (/wnba stat/.test(text)) health["WNBA stats"] = "Fallback";
   if (sourceStatus.PrizePicks === "Fallback") health.PrizePicks = "Fallback";
   if (sourceStatus.Underdog === "Fallback") health.Underdog = "Fallback";
+  if (/not configured/i.test(String(sourceStatus.PrizePicks || ""))) health.PrizePicks = "Not configured";
   if (sourceFailures.length && sourceStatus.PrizePicks === "Failed") health.PrizePicks = "Failed";
   if (sourceFailures.length && sourceStatus.Underdog === "Failed") {
     health.Underdog = MLB_ONLY_MODE ? "Partial" : "Failed";
@@ -875,9 +894,42 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
     const counts = summarizeSourceCounts(row);
     const activeUsableCount = countActivePropsForSource(boardProps, providerKey);
     const effectiveUsable = Math.max(counts.usableCount, activeUsableCount);
-    const fetchFailed = /failed|unavailable|offline/i.test(String(status || row.status || ""));
-    const timedOut = /timed?\s*out/i.test(String(row.message || row.lastError || status || ""));
+    const isPrizePicks = String(providerKey || "").includes("prize");
+    const ppNotConfigured =
+      isPrizePicks &&
+      (isPrizePicksProxyNotConfigured() ||
+        /not configured/i.test(String(status || row.status || row.apiStatus || "")) ||
+        row.diagnostics?.httpExecuted === false ||
+        row.diagnostics?.failureClass === "MISSING_PROXY" ||
+        /MISSING_PROXY|NO_HTTP_REQUEST/i.test(String(row.diagnostics?.failureClass || "")));
+    const fetchFailed =
+      !ppNotConfigured && /failed|unavailable|offline/i.test(String(status || row.status || ""));
+    const timedOut =
+      !ppNotConfigured && /timed?\s*out/i.test(String(row.message || row.lastError || status || ""));
     const cached = /cached/i.test(String(status || row.status || row.lineSourceBadge || "")) || activeUsableCount > counts.usableCount;
+    if (ppNotConfigured) {
+      const detail = PRIZEPICKS_NOT_CONFIGURED_DETAIL;
+      const ncMetrics = formatIngestionMetrics({ ...counts, lineSourceBadge: HEALTH_STATES.NOT_CONFIGURED });
+      const ncDiag = row.diagnostics || {
+        ...getPrizePicksDiagnostics(),
+        httpExecuted: false,
+        proxyConfigured: false,
+        missingConfiguration: inspectPrizePicksProxyConfig().missingConfiguration,
+      };
+      return {
+        ...counts,
+        usableCount: effectiveUsable,
+        activeUsableCount,
+        filteredCount: ncMetrics.filteredCount,
+        cachedCount: ncMetrics.cachedCount,
+        lineSourceBadge: HEALTH_STATES.NOT_CONFIGURED,
+        statusLabel: detail,
+        status: "Not configured",
+        connectionTier: CONNECTION_TIERS.DEGRADED,
+        httpExecuted: false,
+        diagnostics: ncDiag,
+      };
+    }
     const health = resolveFetchHealthBadge({
       ok: !fetchFailed,
       failed: fetchFailed,
@@ -944,11 +996,13 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
   const statsLoadedCount = Number(board?.debugInfo?.statsLoadedCount || 0);
   return {
     PrizePicks: {
-      status: ppRow.connectionTier || CONNECTION_TIERS.PENDING,
+      status: ppRow.status || ppRow.connectionTier || CONNECTION_TIERS.PENDING,
       connectionTier: ppRow.connectionTier || CONNECTION_TIERS.PENDING,
       lastFetchAt: pp.lastSuccessfulFetchAt || sourceSnapshot.PrizePicks?.lastSuccessfulFetchAt || board?.updatedAt || "",
       lineSourceBadge: ppRow.lineSourceBadge,
       statusLabel: ppRow.statusLabel,
+      httpExecuted: ppRow.httpExecuted ?? pp.httpExecuted ?? pp.diagnostics?.httpExecuted,
+      diagnostics: ppRow.diagnostics || pp.diagnostics,
       rawCount: ppRow.rawCount,
       parsedCount: ppRow.parsedCount,
       usableCount: ppRow.usableCount,
@@ -1046,9 +1100,8 @@ function applySourceResult({
   const platform = label === "PrizePicks" ? "PrizePicks" : label === "Underdog" ? "Underdog" : label;
 
   if (label === "PrizePicks" && (result.notConfigured || result.status === "Not configured")) {
-    const detail = result.warnings?.[0] || "PrizePicks proxy URL missing";
+    const detail = PRIZEPICKS_NOT_CONFIGURED_DETAIL;
     sourceStatus.PrizePicks = "Not configured";
-    if (!sourceWarnings.includes(detail)) sourceWarnings.push(detail);
     const ppDiag = result.diagnostics || getPrizePicksDiagnostics();
     debugInfo.sources.PrizePicks = {
       ...debugInfo.sources.PrizePicks,
@@ -1620,9 +1673,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   if (wantsPrizePicks) {
     prizePicksResult = ppEntry.result;
     if (ppEntry.skipped && ppEntry.notConfigured) {
-      const detail = ppEntry.statusReason || prizePicksResult?.warnings?.[0] || "PrizePicks proxy URL missing";
+      const detail = PRIZEPICKS_NOT_CONFIGURED_DETAIL;
+      const ppDiag = getPrizePicksDiagnostics();
       sourceStatus.PrizePicks = "Not configured";
-      if (!sourceWarnings.includes(detail)) sourceWarnings.push(detail);
       debugInfo.sources.PrizePicks = {
         ...debugInfo.sources.PrizePicks,
         status: "Not configured",
@@ -1630,7 +1683,11 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         apiStatus: "Not configured",
         message: detail,
         lineSourceBadge: HEALTH_STATES.NOT_CONFIGURED,
+        statusLabel: detail,
         timedOut: false,
+        httpExecuted: false,
+        diagnostics: ppDiag,
+        failureClass: ppDiag.failureClass || "MISSING_PROXY",
       };
     } else if (prizePicksResult && !prizePicksResult.error && !prizePicksResult.notConfigured) {
       console.info("[DFS Source Audit] PrizePicks result", {

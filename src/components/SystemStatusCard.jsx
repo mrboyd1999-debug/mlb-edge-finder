@@ -2,6 +2,7 @@ import { memo, useState, useCallback } from "react";
 import { formatDateTime } from "../utils/formatters.js";
 import { readSettingsMeta, getOddsApiKey, getSportsDataApiKey, writeSettingsMeta } from "../services/runtimeSettings.js";
 import { healthStateStyle, CONNECTION_TIERS } from "../services/sourceHealth.js";
+import { isPrizePicksFeedNotConfigured, PRIZEPICKS_NOT_CONFIGURED_DETAIL } from "../utils/providerProxy.js";
 import { testAllApiConnections } from "../services/apiConnectionTest.js";
 import { resolveProjectionEngineStatus } from "../utils/projectionPipelineStatus.js";
 
@@ -77,10 +78,6 @@ function resolveLineFeedStatus(feed = {}) {
   const timedOut =
     /timed?\s*out/i.test(statusLabel) || /timed?\s*out/i.test(feed.lastError || "") || tier === CONNECTION_TIERS.DEGRADED;
 
-  if (/not configured/i.test(statusLabel) || /proxy.*missing|proxy url/i.test(statusLabel)) {
-    return { status: "Not configured", detail: statusLabel };
-  }
-
   if (active > 0) {
     if (tier === CONNECTION_TIERS.CONNECTED) {
       return { status: "Connected", detail: `${active} props in use (live refresh)` };
@@ -111,6 +108,10 @@ function resolveLineFeedStatus(feed = {}) {
 
   if (tier === CONNECTION_TIERS.FAILED || /failed|unavailable/i.test(statusLabel)) {
     return { status: "Failed", detail: statusLabel || feed.lastError || "Feed fetch failed" };
+  }
+
+  if (/not configured/i.test(String(feed.status || ""))) {
+    return { status: "Not configured", detail: PRIZEPICKS_NOT_CONFIGURED_DETAIL };
   }
 
   return { status: "Failed", detail: statusLabel || feed.lastError || "No usable props" };
@@ -193,7 +194,9 @@ function SystemStatusCard({
 
   const pp = apiHealth?.PrizePicks || {};
   const ud = apiHealth?.Underdog || {};
-  const ppResolved = resolveLineFeedStatus(pp);
+  const ppResolved = isPrizePicksFeedNotConfigured(pp)
+    ? { status: "Not configured", detail: PRIZEPICKS_NOT_CONFIGURED_DETAIL }
+    : resolveLineFeedStatus(pp);
   const udResolved = resolveLineFeedStatus(ud);
   const oddsResolved = resolveOddsStatus(oddsRow, Boolean(getOddsApiKey()), hasBeenTested);
   const sdResolved = resolveKeyProviderStatus(sdRow, Boolean(getSportsDataApiKey()), hasBeenTested);

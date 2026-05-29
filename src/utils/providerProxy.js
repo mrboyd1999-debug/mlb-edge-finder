@@ -1,6 +1,14 @@
-import { getProxyUrl, getRawProxyUrl } from "../services/runtimeSettings.js";
+import {
+  getEffectiveSetting,
+  getProxyUrl,
+  getRawProxyUrl,
+  getSettingDef,
+} from "../services/runtimeSettings.js";
 
 export { getProxyUrl, getRawProxyUrl };
+
+/** Canonical Settings / .env key for PrizePicks external proxy URL. */
+export const PRIZEPICKS_PROXY_SETTING_KEY = "VITE_PRIZEPICKS_PROXY_URL";
 
 /** Validate and normalize external provider proxy URLs (PrizePicks / Underdog). */
 
@@ -42,31 +50,87 @@ export function assessProxyUrl(rawValue = "") {
   };
 }
 
+/**
+ * Resolve which config key is missing/invalid and what URL shape is expected.
+ * Checked in order by getEffectiveSetting("VITE_PRIZEPICKS_PROXY_URL"):
+ *   localStorage[VITE_PRIZEPICKS_PROXY_URL] → Vite env keys → legacy PRIZEPICKS_PROXY_URL
+ */
+export function inspectPrizePicksProxyConfig() {
+  const def = getSettingDef(PRIZEPICKS_PROXY_SETTING_KEY);
+  const keysChecked = def.envKeys || [PRIZEPICKS_PROXY_SETTING_KEY];
+  const effective = getEffectiveSetting(PRIZEPICKS_PROXY_SETTING_KEY);
+  const raw = getRawProxyUrl("PrizePicks");
+  const normalized = getProxyUrl("prizepicks");
+  const assessment = assessProxyUrl(raw);
+
+  let missingConfiguration = "";
+  if (assessment.invalid) {
+    missingConfiguration = `${PRIZEPICKS_PROXY_SETTING_KEY} (value present but not a valid http(s) URL)`;
+  } else if (!assessment.configured) {
+    missingConfiguration = PRIZEPICKS_PROXY_SETTING_KEY;
+  }
+
+  return {
+    canonicalKey: PRIZEPICKS_PROXY_SETTING_KEY,
+    missingConfiguration,
+    keysChecked,
+    effectiveValuePresent: Boolean(String(effective || "").trim()),
+    rawValuePresent: Boolean(raw),
+    proxyConfigured: assessment.configured,
+    normalizedProxyUrl: normalized,
+    expectedFormat:
+      "External https URL that returns PrizePicks JSON (Apify/scraper). Not the app /api/prizepicks route.",
+    exampleProxyUrl: "https://api.apify.com/v2/acts/<actor>/run-sync-get-dataset-items?token=<token>",
+    appFetchRouteTemplate:
+      "{origin}/api/prizepicks?league_id=2&proxyUrl={encodeURIComponent(<external-proxy-url>)}",
+  };
+}
+
 /** PrizePicks ingestion requires a valid proxy URL — never hit /api when missing (avoids silent timeouts). */
 export function getPrizePicksPreflight() {
-  const envKeys = ["VITE_PRIZEPICKS_PROXY_URL", "PRIZEPICKS_PROXY_URL", "VITE_PRIZEPICKS_PROXY"];
-  const assessment = assessProxyUrl(getRawProxyUrl("PrizePicks"));
+  const config = inspectPrizePicksProxyConfig();
 
-  if (assessment.invalid) {
+  if (config.rawValuePresent && !config.proxyConfigured) {
     return {
       skip: true,
       notConfigured: true,
       status: "Not configured",
-      reason: `PrizePicks proxy URL is invalid. Set ${envKeys[0]} in Settings.`,
+      reason: `PrizePicks proxy URL is invalid. Set ${config.canonicalKey} in Settings.`,
+      missingConfiguration: config.missingConfiguration,
+      config,
     };
   }
 
-  if (!assessment.configured) {
+  if (!config.proxyConfigured) {
     return {
       skip: true,
       notConfigured: true,
       status: "Not configured",
       reason: "PrizePicks proxy URL missing",
+      missingConfiguration: config.missingConfiguration,
+      config,
     };
   }
 
-  return { skip: false, useDirect: false, proxyUrl: assessment.normalized };
+  return { skip: false, useDirect: false, proxyUrl: config.normalizedProxyUrl, config };
 }
+
+/** True when client will not call /api/prizepicks (optional provider). */
+export function isPrizePicksProxyNotConfigured() {
+  return !inspectPrizePicksProxyConfig().proxyConfigured;
+}
+
+/** PrizePicks row only — do not use for Underdog (would mis-read global proxy state). */
+export function isPrizePicksFeedNotConfigured(feed = {}) {
+  if (/not configured/i.test(String(feed.status || feed.apiStatus || feed.statusLabel || ""))) {
+    return true;
+  }
+  if (feed.diagnostics?.failureClass === "MISSING_PROXY") return true;
+  if (/missing vite_prizepicks/i.test(String(feed.statusLabel || feed.lastError || ""))) return true;
+  return isPrizePicksProxyNotConfigured();
+}
+
+export const PRIZEPICKS_NOT_CONFIGURED_DETAIL = `Missing ${PRIZEPICKS_PROXY_SETTING_KEY}`;
 
 /** Underdog: invalid URL blocks fetch; missing URL uses direct /api route. */
 export function getLineProviderPreflight(platform = "") {

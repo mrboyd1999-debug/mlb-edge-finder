@@ -38,6 +38,10 @@ function PrizePicksDiagnosticsPanel({ diagnostics: diagnosticsProp = null, feedR
         {row("Proxy mode", d.proxyMode || (d.proxyConfigured ? "proxied (app route → external proxy)" : "none"))}
         {row("External proxy host", d.externalProxyHost)}
         {row("Proxy configured", d.proxyConfigured ? "yes" : "no")}
+        {row("Missing configuration", d.missingConfiguration || (d.proxyConfigured ? "—" : "VITE_PRIZEPICKS_PROXY_URL"))}
+        {row("Config keys checked", (d.configKeysChecked || []).join(", ") || "VITE_PRIZEPICKS_PROXY_URL, …")}
+        {row("Expected format", d.expectedFormat || "External https JSON proxy (see example below)")}
+        {row("Example proxy URL", d.exampleProxyUrl || "https://api.apify.com/v2/acts/.../run-sync-get-dataset-items?token=...")}
         {row("HTTP executed", d.httpExecuted ? "yes" : "no")}
         {row("Status code", statusCode)}
         {row("Response size (chars)", d.responseSize ?? 0)}
