@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
 import PlayerImage from "./PlayerImage.jsx";
 import PropPipelineCounters from "./PropPipelineCounters.jsx";
