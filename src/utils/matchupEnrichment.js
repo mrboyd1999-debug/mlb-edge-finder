@@ -61,25 +61,35 @@ export function computeFormConfidenceScore(prop = {}, projection = null) {
 
 export function enrichPropWithMatchupFallback(prop = {}) {
   if (hasRichMatchupData(prop)) {
+    const formConfidenceScore = computeFormConfidenceScore(prop);
     return {
       ...prop,
       matchupConfidence: prop.matchupConfidence || "HIGH",
+      matchupScore: prop.matchupScore ?? formConfidenceScore,
+      formConfidenceScore,
     };
   }
 
   const formBaseline = resolveFormBaseline(prop);
   const formConfidenceScore = computeFormConfidenceScore(prop);
+  const opponent = String(prop.opponent || "").trim();
+  const team = String(prop.team || "").trim();
 
   return {
     ...prop,
-    matchupConfidence: "LOW",
+    matchupConfidence: formBaseline != null ? "FORM" : "LOW",
+    matchupScore: formConfidenceScore,
     matchupNote:
       prop.matchupNote ||
       (formBaseline != null
-        ? `Rolling form baseline ${formBaseline} (L5/L10/season)`
-        : "Matchup unavailable — rolling form only"),
+        ? `Rolling form baseline ${formBaseline} (L5/L10/season)${opponent ? ` · vs ${opponent}` : ""}`
+        : opponent
+          ? `Opponent ${opponent} — rolling form only`
+          : "Matchup unavailable — rolling form only"),
     formBaseline,
     formConfidenceScore,
+    opponent: opponent || prop.opponent,
+    team: team || prop.team,
   };
 }
 

@@ -380,6 +380,78 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
           ) : null}
         </div>
 
+        {breakdownMode && prop.probabilityAudit ? (
+          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
+            <strong style={{ fontSize: "11px" }}>Probability audit</strong>
+            <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "3px", marginTop: "4px" }}>
+              <MetricIf label="Last 10 hit rate" value={prop.probabilityAudit.last10HitRate} />
+              <MetricIf label="Season hit rate" value={prop.probabilityAudit.seasonHitRate} />
+              <MetricIf label="Projection vs line" value={prop.probabilityAudit.projectionVsLine} />
+              <MetricIf label="Opponent adjustment" value={prop.probabilityAudit.opponentAdjustment} />
+              <MetricIf label="Park adjustment" value={prop.probabilityAudit.parkAdjustment} />
+              <MetricIf label="Final probability" value={prop.probabilityAudit.finalProbability != null ? `${prop.probabilityAudit.finalProbability}%` : null} strong />
+            </div>
+            {prop.probabilityAudit.explanationLines?.length ? (
+              <p style={{ ...styles.compactFlags, margin: "4px 0 0", fontSize: "10px", lineHeight: 1.45, color: "#cbd5e1" }}>
+                {prop.probabilityAudit.explanationLines.join(" · ")}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {breakdownMode && prop.edgeValidation ? (
+          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
+            <strong style={{ fontSize: "11px" }}>Edge validation</strong>
+            <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "10px", lineHeight: 1.45, color: "#cbd5e1" }}>
+              {prop.edgeValidation.formula}
+            </p>
+            <p style={{ ...styles.compactFlags, margin: "2px 0 0", fontSize: "10px", lineHeight: 1.45, color: "#e2e8f0" }}>
+              {prop.edgeValidation.substitution}
+            </p>
+            {prop.edgeValidation.note ? (
+              <p style={{ ...styles.compactFlags, margin: "2px 0 0", fontSize: "10px", color: "#fbbf24" }}>
+                {prop.edgeValidation.note}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {breakdownMode && prop.matchupAudit ? (
+          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
+            <strong style={{ fontSize: "11px" }}>Matchup context</strong>
+            <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "3px", marginTop: "4px" }}>
+              <MetricIf label="Team" value={prop.matchupAudit.team !== "—" ? prop.matchupAudit.team : null} />
+              <MetricIf label="Opponent" value={prop.matchupAudit.opponent !== "—" ? prop.matchupAudit.opponent : null} />
+              <MetricIf label="Pitcher" value={prop.matchupAudit.pitcher !== "—" ? prop.matchupAudit.pitcher : null} />
+              <MetricIf label="Venue" value={prop.matchupAudit.venue !== "—" ? prop.matchupAudit.venue : null} />
+              <MetricIf label="Matchup score" value={prop.matchupAudit.matchupScore != null ? `${prop.matchupAudit.matchupScore}/100` : null} strong />
+              <MetricIf label="Matchup confidence" value={prop.matchupAudit.matchupConfidence !== "—" ? prop.matchupAudit.matchupConfidence : null} />
+            </div>
+            {prop.matchupAudit.matchupNote ? (
+              <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "10px", color: "#94a3b8" }}>
+                {prop.matchupAudit.matchupNote}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {breakdownMode && prop.hitRateSnapshot ? (
+          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
+            <strong style={{ fontSize: "11px" }}>Hit rate snapshot</strong>
+            <div className="hit-rate-viz hit-rate-viz--modal">
+              <span>
+                Last 5: <strong>{prop.hitRateSnapshot.last5Label}</strong>
+              </span>
+              <span>
+                Last 10: <strong>{prop.hitRateSnapshot.last10Label}</strong>
+              </span>
+              <span>
+                Season: <strong>{prop.hitRateSnapshot.seasonLabel}</strong>
+              </span>
+            </div>
+          </div>
+        ) : null}
+
         {(manualProp || Array.isArray(prop.projectionBreakdown)) && Array.isArray(prop.projectionBreakdown) && prop.projectionBreakdown.length > 0 ? (
           <div style={{ ...styles.explanationBlock, padding: "5px 6px", marginBottom: "4px" }}>
             <strong style={{ fontSize: "11px" }}>Projection breakdown</strong>

@@ -10,7 +10,7 @@ function Metric({ label, value }) {
   );
 }
 
-function DiagnosticTable({ rows = [], emptyMessage = "None", showFailureReason = false }) {
+function DiagnosticTable({ rows = [], emptyMessage = "None", showFailureReason = false, showMatchup = false }) {
   if (!rows.length) {
     return <p className="verification-diagnostics__empty">{emptyMessage}</p>;
   }
@@ -24,6 +24,15 @@ function DiagnosticTable({ rows = [], emptyMessage = "None", showFailureReason =
             <th>Confidence</th>
             <th>Playability</th>
             <th>Score</th>
+            {showMatchup ? (
+              <>
+                <th>Team</th>
+                <th>Opponent</th>
+                <th>Pitcher</th>
+                <th>Venue</th>
+                <th>Matchup</th>
+              </>
+            ) : null}
             {showFailureReason ? <th>Failure Reason</th> : null}
           </tr>
         </thead>
@@ -35,6 +44,15 @@ function DiagnosticTable({ rows = [], emptyMessage = "None", showFailureReason =
               <td>{row.confidence}%</td>
               <td>{row.playability}</td>
               <td>{row.score}</td>
+              {showMatchup ? (
+                <>
+                  <td>{row.team || "—"}</td>
+                  <td>{row.opponent || "—"}</td>
+                  <td>{row.pitcher || "—"}</td>
+                  <td>{row.venue || "—"}</td>
+                  <td>{row.matchupScore ?? "—"}</td>
+                </>
+              ) : null}
               {showFailureReason ? <td>{row.failureReason || "—"}</td> : null}
             </tr>
           ))}
@@ -155,6 +173,7 @@ function VerificationDashboard({ dashboard = null }) {
         rows={topProjectedProps}
         emptyMessage="No projected props."
         showFailureReason
+        showMatchup
       />
 
       <h4 className="verification-diagnostics__subtitle">Top 10 props after verification</h4>

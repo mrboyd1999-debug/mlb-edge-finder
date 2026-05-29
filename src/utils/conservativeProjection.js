@@ -73,6 +73,11 @@ export function hasMissingMatchupData(prop = {}) {
 }
 
 export function isLowMatchupProp(prop = {}) {
+  if (prop.matchupConfidence === "HIGH" || prop.matchupConfidence === "MEDIUM" || prop.matchupConfidence === "FORM") {
+    return false;
+  }
+  if (prop.formBaseline != null || prop.formConfidenceScore != null) return false;
+  if (prop.matchupNote || prop.handednessMatchup) return false;
   return prop.matchupConfidence === "LOW" || (!prop.matchupNote && !prop.handednessMatchup);
 }
 

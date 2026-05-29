@@ -66,7 +66,7 @@ export function resolveProjectedPool(props = []) {
   });
 }
 
-export function toVerificationDiagnosticRow(prop = {}, { withFailureReason = false } = {}) {
+function toVerificationDiagnosticRow(prop = {}, { withFailureReason = false, withMatchup = false } = {}) {
   const annotated = annotateTopPickRankingFields(prop);
   const row = {
     player: String(annotated.playerName || annotated.player || "Unknown").trim(),
@@ -81,6 +81,14 @@ export function toVerificationDiagnosticRow(prop = {}, { withFailureReason = fal
     row.failureReason = passesVerifiedTierFilter(annotated)
       ? "passed verification"
       : explainVerificationRejection(annotated);
+  }
+  if (withMatchup) {
+    const matchup = annotated.matchupAudit || {};
+    row.opponent = matchup.opponent || annotated.opponent || "—";
+    row.pitcher = matchup.pitcher || "—";
+    row.team = matchup.team || annotated.team || "—";
+    row.venue = matchup.venue || "—";
+    row.matchupScore = matchup.matchupScore ?? "—";
   }
   return row;
 }
@@ -204,6 +212,7 @@ export function buildVerificationDashboard(props = [], options = {}) {
     topAfterVerification: buildTopDiagnosticRows(verifiedPicks),
     topProjectedProps: buildTopDiagnosticRows(projectedPool, DIAGNOSTIC_PROJECTED_TOP_N, {
       withFailureReason: true,
+      withMatchup: true,
     }),
     failureBreakdown,
     ruleRejectionCounts,

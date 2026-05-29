@@ -20,6 +20,7 @@ import {
 } from "./bestPlaysPipelineDebug.js";
 import { computeMlbPlayConfidence } from "./mlbPlayConfidence.js";
 import { attachBestPlayExplanation } from "./bestPlayExplanation.js";
+import { attachModelValidationFields } from "./modelValidation.js";
 import { computePlayabilityScore } from "./propCalibration.js";
 import {
   computeTopPickScore,
@@ -315,7 +316,12 @@ export function enrichBestPlayRankingFields(prop = {}) {
   ranked.rankScore = computeTopPickScore(ranked);
   ranked.weightedBestPlayScore = ranked.topPickScore;
   ranked.verifiedRankingScore = ranked.topPickScore;
-  return ranked;
+  return attachModelValidationFields(ranked, {
+    edge,
+    edgePercent,
+    projection,
+    adjustedConfidence: playability.adjustedConfidence,
+  });
 }
 
 export function passesBestPlaysFilter(prop = {}) {

@@ -54,11 +54,23 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
   const projection = resolveProjectionValue(enriched);
   const projectionLabel = projection != null && projection > 0 ? formatNumber(projection) : "—";
   const lean = enriched.lean || "Pass";
-  const last10HitRate = formatHitRatePercent(
-    enriched.last10HitRate ?? enriched.recentHitRate ?? enriched.last5HitRate
-  );
-  const seasonHitRate = formatHitRatePercent(enriched.seasonHitRate);
   const explanation = enriched.verifiedPlayExplanation;
+  const hitRates = enriched.hitRateSnapshot || explanation?.hitRates;
+  const last5HitRate = formatHitRatePercent(
+    hitRates?.last5 != null ? hitRates.last5 / 100 : enriched.last5HitRate
+  );
+  const last10HitRate = formatHitRatePercent(
+    hitRates?.last10 != null ? hitRates.last10 / 100 : enriched.last10HitRate ?? enriched.recentHitRate
+  );
+  const seasonHitRate = formatHitRatePercent(
+    hitRates?.season != null ? hitRates.season / 100 : enriched.seasonHitRate
+  );
+  const isVerifiedPlay = Boolean(
+    enriched.verified || enriched.verifiedTier || enriched.pickTierLabel === "Verified Play"
+  );
+  const probabilityAudit = enriched.probabilityAudit || explanation?.probabilityAudit;
+  const edgeValidation = enriched.edgeValidation;
+  const matchupAudit = enriched.matchupAudit;
   const projectionSource =
     explanation?.projectionSource ||
     enriched.projectionSourceLabel ||
@@ -141,11 +153,58 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
           </div>
           <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 11 }}>
             Projection Source: <strong>{projectionSource}</strong>
-            {" · "}
-            L10 Hit: <strong>{last10HitRate}</strong>
-            {" · "}
-            Season Hit: <strong>{seasonHitRate}</strong>
           </p>
+          {isVerifiedPlay ? (
+            <div className="hit-rate-viz" aria-label="Hit rate snapshot">
+              <span>
+                Last 5: <strong>{last5HitRate}</strong>
+              </span>
+              <span>
+                Last 10: <strong>{last10HitRate}</strong>
+              </span>
+              <span>
+                Season: <strong>{seasonHitRate}</strong>
+              </span>
+            </div>
+          ) : null}
+          {probabilityAudit ? (
+            <div className="probability-audit" aria-label="Probability audit">
+              <p className="probability-audit__title">Probability inputs</p>
+              <p style={{ ...styles.bestPlayRowSubline, color: "#cbd5e1", marginTop: 2, fontSize: 11 }}>
+                Last 10: <strong>{probabilityAudit.last10HitRate}</strong>
+                {" · "}
+                Season: <strong>{probabilityAudit.seasonHitRate}</strong>
+                {" · "}
+                Proj vs Line: <strong>{probabilityAudit.projectionVsLine}</strong>
+                {" · "}
+                Opponent: <strong>{probabilityAudit.opponentAdjustment}</strong>
+                {" · "}
+                Park: <strong>{probabilityAudit.parkAdjustment}</strong>
+              </p>
+              {probabilityAudit.finalProbability != null ? (
+                <p style={{ ...styles.bestPlayRowSubline, color: "#e2e8f0", marginTop: 2, fontSize: 11 }}>
+                  {probabilityAudit.explanationLines?.map((line, index) => (
+                    <span key={line}>
+                      {index ? " · " : ""}
+                      {line}
+                    </span>
+                  ))}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          {edgeValidation ? (
+            <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 10 }}>
+              {edgeValidation.formula} → {edgeValidation.substitution}
+              {edgeValidation.unusuallyLarge ? " · Large edge — verify line scale." : ""}
+            </p>
+          ) : null}
+          {matchupAudit ? (
+            <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 10 }}>
+              Matchup: {matchupAudit.team} vs {matchupAudit.opponent} · Pitcher {matchupAudit.pitcher} · Venue{" "}
+              {matchupAudit.venue} · Score {matchupAudit.matchupScore ?? "—"}
+            </p>
+          ) : null}
           {statsLine ? (
             <p style={{ ...styles.bestPlayRowSubline, color: "#cbd5e1", marginTop: 4, fontSize: 11 }}>
               {statsLine}

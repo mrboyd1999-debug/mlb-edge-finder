@@ -41,6 +41,9 @@ function scoreSampleSize(prop = {}) {
 function scoreMatchupQuality(prop = {}) {
   if (prop.matchupConfidence === "HIGH") return 82;
   if (prop.matchupConfidence === "MEDIUM") return 68;
+  if (prop.matchupConfidence === "FORM") {
+    return finite(prop.matchupScore ?? prop.formConfidenceScore) ?? 68;
+  }
   if (prop.matchupConfidence === "LOW") return 52;
   if (prop.matchupNote || prop.handednessMatchup || prop.opponent) return 75;
   return 50;

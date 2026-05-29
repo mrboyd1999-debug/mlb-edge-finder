@@ -2,6 +2,7 @@
  * Best play projection source labels and verified-play explanations.
  */
 
+import { buildHitRateSnapshot, buildProbabilityAudit } from "./modelValidation.js";
 import { resolveProjectionSourceLabel, normalizeProjectionSourceKey } from "./projectionQuality.js";
 import { classifyVerifiedTier } from "./verifiedTierSystem.js";
 
@@ -97,6 +98,8 @@ export function buildVerifiedPlayExplanation(prop = {}) {
   const last10 = finite(prop.last10Average ?? prop.recentForm);
   const edgePct = resolveEdgePercent(prop);
   const lean = resolveLean(prop);
+  const probabilityAudit = prop.probabilityAudit || buildProbabilityAudit(prop);
+  const hitRates = prop.hitRateSnapshot || buildHitRateSnapshot(prop);
 
   const stats = [];
   if (last10 != null) stats.push(`Last 10 Avg: ${formatStat(last10)}`);
@@ -112,6 +115,7 @@ export function buildVerifiedPlayExplanation(prop = {}) {
     "Projection and recent form support this side.";
 
   const projectionSource = formatBestPlayProjectionSource(prop);
+  const probabilityExplanation = probabilityAudit.summary || probabilityAudit.explanationLines?.join(" · ");
 
   return {
     statsLine: stats.join(" · "),
@@ -119,6 +123,9 @@ export function buildVerifiedPlayExplanation(prop = {}) {
     summary: reason,
     projectionSource,
     projectionSourceLabel: projectionSource,
+    probabilityAudit,
+    probabilityExplanation,
+    hitRates,
   };
 }
 

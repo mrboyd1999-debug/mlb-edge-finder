@@ -1838,6 +1838,32 @@ body,
   line-height: 1.45;
 }
 
+.hit-rate-viz {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.hit-rate-viz strong {
+  color: #e2e8f0;
+}
+
+.hit-rate-viz--modal {
+  margin-top: 6px;
+}
+
+.probability-audit__title {
+  margin: 4px 0 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .compact-prop-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
