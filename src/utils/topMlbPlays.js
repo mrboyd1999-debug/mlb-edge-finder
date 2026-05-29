@@ -364,9 +364,17 @@ export function resolveTopMlbPlaySections(
     fetchSport: "MLB",
   });
   let highestPicks = (selection.picks || []).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
+  const verifiedPicks = (selection.verifiedPicks || []).map((prop, idx) =>
+    annotateHighestProbabilityPlay(prop, idx + 1)
+  );
+  const researchPicks = (selection.researchPicks || []).map((prop, idx) =>
+    annotateHighestProbabilityPlay(prop, idx + 1)
+  );
 
   filterDiagnostics.usedVerifiedFallback = Boolean(selection.usedVerifiedFallback);
   filterDiagnostics.verificationDashboard = selection.verificationDashboard || null;
+  filterDiagnostics.verifiedPicksCount = verifiedPicks.length;
+  filterDiagnostics.researchPicksCount = researchPicks.length;
 
   filterDiagnostics.selected = highestPicks.length;
   filterDiagnostics.eligible = strictEligible;
@@ -385,14 +393,30 @@ export function resolveTopMlbPlaySections(
 
   const sections = [
     {
+      id: "verified-plays",
+      title: "Verified Plays",
+      eyebrow: "High-confidence props with complete matchup context",
+      picks: verifiedPicks.filter(Boolean),
+    },
+    {
+      id: "research-plays",
+      title: "Research Plays",
+      eyebrow: "Quality projections with low matchup confidence or incomplete data",
+      picks: researchPicks.filter(Boolean),
+    },
+  ];
+
+  if (!verifiedPicks.length && !researchPicks.length && highestPicks.length) {
+    sections.length = 0;
+    sections.push({
       id: "highest-probability",
       title: selection.usedVerifiedFallback ? "Top Projected Props" : "Verified Plays",
       eyebrow: selection.usedVerifiedFallback
-        ? "Verified pool empty — showing top projected props by confidence and edge"
-        : "Verified Play tier only · probability, confidence, and data quality above threshold",
+        ? "Verified pool empty — showing top projected props by probability, edge, and confidence"
+        : "Weighted top plays",
       picks: highestPicks.filter(Boolean),
-    },
-  ];
+    });
+  }
 
   const audit = auditTopMlbPlayRankableRejections(
     strictPool.map((prop) => enrichPropWithSideEvaluation(prop)),

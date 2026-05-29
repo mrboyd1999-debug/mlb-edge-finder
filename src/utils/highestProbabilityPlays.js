@@ -13,6 +13,7 @@ import {
   logBestPlaysPipelineStage,
   passesMinimalBestPlaysFilter,
   passesVerifiedBestPlaysFilter,
+  passesResearchBestPlaysFilter,
   resolveBestPlayInvalidReason,
   resolveBestPlayPlayerName,
   resolveBestPlayProjection,
@@ -20,13 +21,14 @@ import {
   sanitizeProjectionValue,
 } from "./bestPlaysPipelineDebug.js";
 import { enrichPropsWithTeamLookup } from "./teamEnrichment.js";
+import { enrichPropsWithMatchupFallback } from "./matchupEnrichment.js";
 import { buildVerificationDashboard } from "./verificationDashboard.js";
-import { comparePickRank } from "./conservativeProjection.js";
 import {
   buildMarketContextNote,
   enrichBestPlayRankingFields,
   resolveEdgeMagnitude,
   resolveLeanDirection,
+  compareWeightedBestPlays,
 } from "./bestPlayRanking.js";
 
 export const HIGHEST_PROBABILITY_MIN_CONFIDENCE = 50;
@@ -47,7 +49,20 @@ export function enrichBestPlayCandidate(prop = {}) {
 }
 
 export function sortHighestProbabilityPlays(props = []) {
-  return [...props].map((prop) => enrichBestPlayRankingFields(prop)).sort(comparePickRank);
+  return [...props].map((prop) => enrichBestPlayRankingFields(prop)).sort(compareWeightedBestPlays);
+}
+
+function dedupeAndTake(props = [], max = HIGHEST_PROBABILITY_MAX_PLAYS) {
+  const seen = new Set();
+  const picks = [];
+  for (const prop of props) {
+    if (picks.length >= max) break;
+    const key = buildPropDedupeKey(prop);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    picks.push(prop);
+  }
+  return picks;
 }
 
 function summarizeInvalidReasons(enriched = []) {
@@ -73,23 +88,20 @@ function logRejectionSummary(enriched = []) {
 }
 
 export function selectTopProjectedFallback(props = [], max = HIGHEST_PROBABILITY_FALLBACK_MAX) {
-  return [...(props || [])]
-    .filter((prop) => {
-      const proj = resolveBestPlayStatSpecificProjection(prop);
-      return proj != null && proj > 0 && passesMinimalBestPlaysFilter(prop);
-    })
-    .sort((a, b) => {
-      const confA = Number(a.displayConfidenceScore ?? a.confidenceScore ?? a.confidence ?? 0);
-      const confB = Number(b.displayConfidenceScore ?? b.confidenceScore ?? b.confidence ?? 0);
-      if (confB !== confA) return confB - confA;
-      return resolveEdgeMagnitude(b) - resolveEdgeMagnitude(a);
-    })
-    .slice(0, max)
-    .map((prop) => ({
-      ...prop,
-      verifiedFallbackPick: true,
-      pickTierLabel: prop.pickTierLabel || "Research Candidate",
-    }));
+  return dedupeAndTake(
+    [...(props || [])]
+      .filter((prop) => {
+        const proj = resolveBestPlayStatSpecificProjection(prop);
+        return proj != null && proj > 0 && passesMinimalBestPlaysFilter(prop);
+      })
+      .sort(compareWeightedBestPlays)
+      .map((prop) => ({
+        ...prop,
+        verifiedFallbackPick: true,
+        pickTierLabel: prop.pickTierLabel || "Research Candidate",
+      })),
+    max
+  );
 }
 
 export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABILITY_MAX_PLAYS, options = {}) {
@@ -105,7 +117,8 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
     statsMap: options.statsMap,
     fetchSport: options.fetchSport || "MLB",
   });
-  const enriched = teamEnriched.map(enrichBestPlayCandidate);
+  const matchupEnriched = enrichPropsWithMatchupFallback(teamEnriched);
+  const enriched = matchupEnriched.map(enrichBestPlayCandidate);
   const verificationDashboard = buildVerificationDashboard(enriched);
   const withProjections = enriched.filter((p) => {
     const proj = resolveBestPlayStatSpecificProjection(p);
@@ -118,7 +131,10 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
     return proj != null && proj > 0 && passesMinimalBestPlaysFilter(p);
   });
   const verifiedPool = displayPool.filter((p) => passesVerifiedBestPlaysFilter(p));
-  const researchCount = displayPool.length - verifiedPool.length;
+  const researchPool = displayPool.filter(
+    (p) => passesResearchBestPlaysFilter(p) && !passesVerifiedBestPlaysFilter(p)
+  );
+  const researchCount = researchPool.length;
   logBestPlaysPipelineStage("AFTER FILTER:", displayPool.length);
   logBestPlaysPipelineStage("VERIFIED:", verifiedPool.length);
   logBestPlaysPipelineStage("RESEARCH:", researchCount);
@@ -127,24 +143,36 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   logBestPlaysPipelineStage("INVALID REASONS:", invalidReasons);
   logRejectionSummary(enriched);
 
-  const ranked = sortHighestProbabilityPlays(verifiedPool);
-  const seen = new Set();
-  const picks = [];
+  const rankedVerified = sortHighestProbabilityPlays(verifiedPool);
+  const rankedResearch = sortHighestProbabilityPlays(researchPool);
+  const verifiedPicks = dedupeAndTake(
+    rankedVerified.map((prop) => ({ ...prop, verified: true, bestPlayPool: "verified" })),
+    max
+  );
+  const researchPicks = dedupeAndTake(
+    rankedResearch.map((prop) => ({
+      ...prop,
+      verified: false,
+      bestPlayPool: "research",
+      pickTierLabel: prop.pickTierLabel || "Research Candidate",
+    })),
+    max
+  );
 
-  for (const prop of ranked) {
-    if (picks.length >= max) break;
-    const key = buildPropDedupeKey(prop);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    picks.push({ ...prop, verified: prop.pickTierLabel === "Verified Play" || Boolean(prop.isDisplayPlayable) });
-  }
-
+  let picks = dedupeAndTake(
+    sortHighestProbabilityPlays([...verifiedPool, ...researchPool]).map((prop) => ({
+      ...prop,
+      verified: passesVerifiedBestPlaysFilter(prop),
+    })),
+    max
+  );
   let usedVerifiedFallback = false;
+
   if (!picks.length) {
     const fallbackPool = displayPool.length ? displayPool : enriched;
     const fallbackPicks = selectTopProjectedFallback(fallbackPool, HIGHEST_PROBABILITY_FALLBACK_MAX);
     if (fallbackPicks.length) {
-      picks.push(...fallbackPicks.slice(0, max));
+      picks = fallbackPicks.slice(0, max);
       usedVerifiedFallback = true;
       logBestPlaysPipelineStage("VERIFIED FALLBACK:", fallbackPicks.length);
     }
@@ -153,8 +181,10 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   if (options.withMeta) {
     return {
       picks,
+      verifiedPicks,
+      researchPicks,
       usedVerifiedFallback,
-      strictEligible: picks.length,
+      strictEligible: verifiedPicks.length + researchPicks.length,
       debugMode: BEST_PLAYS_DEBUG_MODE,
       invalidReasons,
       verificationDashboard,
@@ -163,8 +193,8 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
         normalized: normalized.length,
         withProjections,
         filtered: verifiedPool.length,
-        displayPool: displayPool.length,
         researchPool: researchCount,
+        displayPool: displayPool.length,
         verifiedPasses: verificationDashboard.verifiedPasses,
         verifiedFailures: verificationDashboard.verifiedFailures,
       },

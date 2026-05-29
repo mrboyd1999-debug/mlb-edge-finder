@@ -1,6 +1,8 @@
 /** Realistic probability, playability tiers, and lean helpers for MLB props. */
 
 import { computeStandardEdge, computeStandardEdgePercent, computeStandardPropMetrics } from "./standardPropMetrics.js";
+import { computeStatSpecificProbability } from "./mlbStatProbability.js";
+import { computeMlbPlayConfidence } from "./mlbPlayConfidence.js";
 
 export const PICK_TIER_VERIFIED = "Verified Play";
 export const PICK_TIER_RESEARCH = "Research Candidate";
@@ -8,6 +10,8 @@ export const PICK_TIER_RESEARCH = "Research Candidate";
 const VERIFIED_MIN_CONFIDENCE = 50;
 const VERIFIED_MIN_PROBABILITY = 55;
 const VERIFIED_MIN_DATA_QUALITY = 50;
+export const CONSERVATIVE_MIN_CONFIDENCE = 55;
+export const CONSERVATIVE_MIN_PROBABILITY = 58;
 const RESEARCH_MAX_RAW_CONFIDENCE = 50;
 const RESEARCH_MAX_PROBABILITY = 70;
 const ELITE_DATA_QUALITY = 85;
@@ -55,7 +59,12 @@ export function isConfidenceAvailable(prop = {}) {
 }
 
 export function hasMissingMatchupData(prop = {}) {
-  return !prop.matchupNote && !prop.handednessMatchup;
+  if (prop.matchupConfidence === "LOW") return false;
+  return !prop.matchupNote && !prop.handednessMatchup && !String(prop.opponent || "").trim();
+}
+
+export function isLowMatchupProp(prop = {}) {
+  return prop.matchupConfidence === "LOW" || (!prop.matchupNote && !prop.handednessMatchup);
 }
 
 export function hasMissingOpponentData(prop = {}) {
@@ -74,12 +83,14 @@ export function hasMissingSportsbookComparison(prop = {}) {
 
 /** Apply research-gap penalties to raw confidence before tiering. */
 export function computeAdjustedConfidence(prop = {}) {
+  const projection = resolveProjectionValue(prop);
+  const modelConfidence = computeMlbPlayConfidence(prop, projection);
   const base = finiteOr(prop.confidenceScore ?? prop.confidence, NaN);
-  if (!Number.isFinite(base)) return null;
-  let adjusted = base;
-  if (hasMissingMatchupData(prop)) adjusted -= 10;
-  if (hasMissingOpponentData(prop)) adjusted -= 10;
-  if (hasMissingSportsbookComparison(prop)) adjusted -= 10;
+  let adjusted = Number.isFinite(base) ? Math.round(base * 0.35 + modelConfidence * 0.65) : modelConfidence;
+  if (isLowMatchupProp(prop)) adjusted -= 3;
+  else if (hasMissingMatchupData(prop)) adjusted -= 10;
+  if (hasMissingOpponentData(prop)) adjusted -= 6;
+  if (hasMissingSportsbookComparison(prop)) adjusted -= 4;
   return clamp(Math.round(adjusted), 0, 100);
 }
 
@@ -102,7 +113,7 @@ export function isResearchCandidate(prop = {}, { confidence } = {}) {
   if (hasMissingMatchupData(prop)) return true;
   if (hasMissingOpponentData(prop)) return true;
   if (hasMissingSportsbookComparison(prop)) return true;
-  if (finiteOr(prop.dataQualityScore, 0) < VERIFIED_MIN_DATA_QUALITY) return true;
+  if (finiteOr(prop.dataQualityScore, 0) < VERIFIED_MIN_DATA_QUALITY && !isLowMatchupProp(prop)) return true;
   if (hasMajorResearchGaps(prop)) return true;
   if (prop.projectionUnavailable || prop.isFallbackProjection) return true;
   return false;
@@ -199,7 +210,11 @@ export function computeConservativeProbability(prop = {}, metrics = {}, options 
   const edge = metrics.edge ?? computeStandardEdge(projection, line);
   const edgePercent = metrics.edgePercent ?? computeStandardEdgePercent(edge, line) ?? 0;
   const edgeStrength = Math.min(Math.abs(edgePercent) / 50, 1);
-  let probability = 50 + edgeStrength * 20;
+
+  const statSpecific = computeStatSpecificProbability(prop, projection, line);
+  let probability =
+    statSpecific ??
+    50 + edgeStrength * 20;
 
   const dq = finiteOr(prop.dataQualityScore, 50);
   if (dq >= 80) probability += 3;
@@ -213,8 +228,9 @@ export function computeConservativeProbability(prop = {}, metrics = {}, options 
   }
 
   if (hasMissingOpponentData(prop)) probability -= 5;
-  if (hasMissingMatchupData(prop)) probability -= 5;
-  if (hasMissingSportsbookComparison(prop)) probability -= 5;
+  if (isLowMatchupProp(prop)) probability -= 2;
+  else if (hasMissingMatchupData(prop)) probability -= 5;
+  if (hasMissingSportsbookComparison(prop)) probability -= 3;
 
   const vol = finiteOr(prop.volatility, NaN);
   if (Number.isFinite(vol) && vol >= 3) probability -= 5;
@@ -281,16 +297,23 @@ export function evaluateMlbPlayability(prop = {}, metrics = {}) {
   }
 
   const lowRawConfidence = !Number.isFinite(rawConfidence) || rawConfidence < RESEARCH_MAX_RAW_CONFIDENCE;
-  const research =
+  const researchGap =
     lowRawConfidence ||
     isResearchCandidate({ ...prop, projection, projectedValue: projection }, { confidence: adjustedConfidence });
 
   let probability =
     metrics.probabilityScore ??
-    computeConservativeProbability(prop, metrics, { verified: !research, confidence: adjustedConfidence });
+    computeConservativeProbability(prop, metrics, { verified: !researchGap, confidence: adjustedConfidence });
 
   const verified = isVerifiedPlay(prop, { probability, confidence: adjustedConfidence });
+  const lowMatchupResearch =
+    isLowMatchupProp(prop) &&
+    Number.isFinite(probability) &&
+    probability >= CONSERVATIVE_MIN_PROBABILITY &&
+    Number.isFinite(adjustedConfidence) &&
+    adjustedConfidence >= CONSERVATIVE_MIN_CONFIDENCE;
   const playable = verified;
+  const research = !playable && (lowMatchupResearch || researchGap);
 
   if (probability != null) {
     probability = applyProbabilityCaps(probability, prop, {
@@ -299,7 +322,7 @@ export function evaluateMlbPlayability(prop = {}, metrics = {}) {
     });
   }
 
-  const tier = playable ? PICK_TIER_VERIFIED : PICK_TIER_RESEARCH;
+  const tier = playable ? PICK_TIER_VERIFIED : research ? PICK_TIER_RESEARCH : PICK_TIER_RESEARCH;
   const displayConfidenceScore = resolveDisplayConfidence(prop, tier, adjustedConfidence);
   const researchReasons = research ? resolveResearchReasons(prop) : [];
 
@@ -311,8 +334,8 @@ export function evaluateMlbPlayability(prop = {}, metrics = {}) {
     isDisplayPlayable: playable,
     displayResearchOnly: !playable,
     bettingLabel: playable ? PICK_TIER_VERIFIED : PICK_TIER_RESEARCH,
-    cardStatus: playable ? "playable" : "research",
-    pickTierLabel: playable ? PICK_TIER_VERIFIED : PICK_TIER_RESEARCH,
+    cardStatus: playable ? "playable" : research ? "research" : "research",
+    pickTierLabel: playable ? PICK_TIER_VERIFIED : research ? PICK_TIER_RESEARCH : PICK_TIER_RESEARCH,
     pickTierRank: playable ? 0 : 1,
     whyNotPlayable,
     probabilityScore: probability,

@@ -2,7 +2,7 @@ import { memo } from "react";
 
 function VerificationDashboard({ dashboard = null }) {
   if (!dashboard) return null;
-  const { verifiedPasses = 0, verifiedFailures = 0, failureBreakdown = {} } = dashboard;
+  const { verifiedPasses = 0, researchPasses = 0, verifiedFailures = 0, failureBreakdown = {} } = dashboard;
   const rows = [
     ["Missing Team", failureBreakdown.missingTeam],
     ["Missing Projection", failureBreakdown.missingProjection],
@@ -15,7 +15,7 @@ function VerificationDashboard({ dashboard = null }) {
   return (
     <div className="verification-dashboard" aria-label="Verification dashboard">
       <p className="prop-pipeline-counters">
-        Verified Passes: {verifiedPasses} · Verified Failures: {verifiedFailures}
+        Verified Passes: {verifiedPasses} · Research Plays: {researchPasses} · Verified Failures: {verifiedFailures}
       </p>
       {rows.length ? (
         <p className="prop-pipeline-counters prop-pipeline-counters--meta">

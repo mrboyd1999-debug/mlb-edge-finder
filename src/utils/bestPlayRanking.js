@@ -14,8 +14,10 @@ import {
   passesMinimalBestPlaysFilter,
   resolveBestPlayInvalidReason,
   resolveBestPlayStatSpecificProjection,
+  classifyBestPlayTier,
   sanitizeProjectionValue,
 } from "./bestPlaysPipelineDebug.js";
+import { computeMlbPlayConfidence } from "./mlbPlayConfidence.js";
 import { isPitcherStrikeoutMarket } from "./topMlbPlaysRanking.js";
 import { isMlbPitcherMarket } from "../modules/mlbPitcherData.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
@@ -114,6 +116,18 @@ export function computeRecentFormScore(prop = {}) {
   return 40;
 }
 
+/** Weighted ranking: probability, edge, confidence. */
+export function computeWeightedBestPlayScore(prop = {}) {
+  const probability = Number(prop.probabilityScore ?? prop.verifiedProbability ?? 0);
+  const edge = resolveEdgeMagnitude(prop);
+  const confidence = Number(prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence ?? 0);
+  return probability * 0.45 + Math.min(edge * 14, 28) + confidence * 0.25;
+}
+
+export function compareWeightedBestPlays(a = {}, b = {}) {
+  return computeWeightedBestPlayScore(b) - computeWeightedBestPlayScore(a);
+}
+
 /** rankScore = (confidence * 0.45) + (abs(edge) * 35) + (recentFormScore * 0.20) */
 export function computeBestPlayRankScore(prop = {}) {
   const confidence = finiteOr(prop.verifiedProbability ?? prop.confidenceScore ?? prop.confidence, 0);
@@ -164,10 +178,22 @@ export function enrichBestPlayRankingFields(prop = {}) {
       ...prop,
       projection,
       projectedValue: projection,
-      confidenceScore: metrics.adjustedConfidence ?? prop.confidenceScore ?? prop.confidence,
+      confidenceScore:
+        metrics.adjustedConfidence ??
+        computeMlbPlayConfidence({ ...prop, projection }, projection) ??
+        prop.confidenceScore ??
+        prop.confidence,
     },
     metrics
   );
+  const tierLabel = classifyBestPlayTier({
+    ...prop,
+    projection,
+    projectedValue: projection,
+    probabilityScore: playability.probabilityScore ?? metrics.probabilityScore,
+    displayConfidenceScore: playability.displayConfidenceScore ?? metrics.adjustedConfidence,
+    pickTierLabel: playability.pickTierLabel,
+  });
   const edge = metrics.edge ?? (projection != null && line > 0 ? computeStandardEdge(projection, line) : null);
   const edgePercent =
     metrics.edgePercent ?? (edge != null && line > 0 ? computeStandardEdgePercent(edge, line) : null);
@@ -196,7 +222,7 @@ export function enrichBestPlayRankingFields(prop = {}) {
     probability: verifiedProbability,
     confidence: displayConfidence ?? prop.confidenceScore ?? prop.confidence,
   });
-  const rankScore = computeBestPlayRankScore({
+  const rankScore = computeWeightedBestPlayScore({
     ...enrichedProp,
     edgeScore,
     edge,
@@ -234,11 +260,12 @@ export function enrichBestPlayRankingFields(prop = {}) {
     rawEdgeLabel: edgeLabels.rawEdgeLabel,
     displayEdgeLabel: edgeLabels.displayEdgeLabel,
     verified,
-    isDisplayPlayable: playability.isDisplayPlayable,
-    displayResearchOnly: playability.displayResearchOnly,
-    bettingLabel: playability.bettingLabel,
-    pickTierLabel: playability.pickTierLabel,
-    pickTierRank: playability.pickTierRank,
+    isDisplayPlayable: tierLabel === "Verified Play" || playability.isDisplayPlayable,
+    displayResearchOnly: tierLabel !== "Verified Play",
+    bettingLabel: tierLabel || playability.bettingLabel,
+    pickTierLabel: tierLabel || playability.pickTierLabel,
+    pickTierRank: tierLabel === "Verified Play" ? 0 : 1,
+    weightedBestPlayScore: rankScore,
     researchReasons: playability.researchReasons,
     whyNotPlayable: playability.whyNotPlayable,
     direction,

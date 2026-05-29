@@ -7,11 +7,12 @@ import {
   resolveBestPlayInvalidReason,
   resolveBestPlayPlayerName,
   resolveBestPlayStatSpecificProjection,
+  passesResearchBestPlaysFilter,
   VERIFIED_MIN_CONFIDENCE,
   VERIFIED_MIN_EDGE,
   VERIFIED_MIN_PROBABILITY,
 } from "./bestPlaysPipelineDebug.js";
-import { hasMissingMatchupData } from "./conservativeProjection.js";
+import { hasMissingMatchupData, isLowMatchupProp } from "./conservativeProjection.js";
 import { resolveEdgeMagnitude } from "./bestPlayRanking.js";
 
 export const VERIFICATION_FAILURE_KEYS = [
@@ -47,9 +48,10 @@ export function categorizeVerifiedFailure(prop = {}) {
   const projection = resolveBestPlayStatSpecificProjection(prop);
   if (projection == null || projection <= 0) return "missingProjection";
 
-  if (!String(prop.team || "").trim()) return "missingTeam";
+  if (!String(prop.team || "").trim() && prop.teamConfidence !== "LOW") return "missingTeam";
 
-  if (hasMissingMatchupData(prop)) return "missingMatchup";
+  if (passesResearchBestPlaysFilter(prop)) return "lowConfidence";
+  if (isLowMatchupProp(prop) || hasMissingMatchupData(prop)) return "missingMatchup";
 
   const confidence = Number(prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence);
   if (!Number.isFinite(confidence) || confidence < VERIFIED_MIN_CONFIDENCE) return "lowConfidence";
@@ -72,11 +74,16 @@ export function categorizeVerifiedFailure(prop = {}) {
 export function buildVerificationDashboard(props = []) {
   const breakdown = emptyBreakdown();
   let verifiedPasses = 0;
+  let researchPasses = 0;
   let verifiedFailures = 0;
 
   for (const prop of props || []) {
     if (passesVerifiedBestPlaysFilter(prop)) {
       verifiedPasses += 1;
+      continue;
+    }
+    if (passesResearchBestPlaysFilter(prop)) {
+      researchPasses += 1;
       continue;
     }
     verifiedFailures += 1;
@@ -86,6 +93,7 @@ export function buildVerificationDashboard(props = []) {
 
   return {
     verifiedPasses,
+    researchPasses,
     verifiedFailures,
     failureBreakdown: breakdown,
     total: (props || []).length,

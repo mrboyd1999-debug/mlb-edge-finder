@@ -1,8 +1,10 @@
 /** Normalize live props without fabricating lines or projections. */
 
-import { annotateProjectionFields } from "./projectionQuality.js";
+import { annotateProjectionFields, resolveProjectionValue } from "./projectionQuality.js";
 import { normalizeSportLabel } from "./sportMappings.js";
-import { resolveProjectionValue } from "./projectionQuality.js";
+import { enrichPropWithTeamLookup } from "./teamEnrichment.js";
+import { enrichPropWithMatchupFallback } from "./matchupEnrichment.js";
+import { ensureDisplayProjection } from "./displayPropScoring.js";
 
 export function normalizePropSportFields(prop = {}) {
   const sport = normalizeSportLabel(prop.sport || prop.league || prop.inferredSport || "", prop.league || "");
@@ -41,33 +43,32 @@ export function prepareLiveProp(prop = {}, context = {}) {
   const withSport = normalizePropSportFields(prop);
   const withMatchup = ensureMatchupFields(withSport);
   const withTeam = enrichPropWithTeamLookup(withMatchup, context);
+  const withMatchupFallback = enrichPropWithMatchupFallback(withTeam);
   const existing =
-    resolveProjectionValue(withTeam) ??
-    (Number.isFinite(Number(withTeam.last5Average)) && Number(withTeam.last5Average) > 0
-      ? Number(withTeam.last5Average)
+    resolveProjectionValue(withMatchupFallback) ??
+    (Number.isFinite(Number(withMatchupFallback.last5Average)) && Number(withMatchupFallback.last5Average) > 0
+      ? Number(withMatchupFallback.last5Average)
       : null) ??
-    (Number.isFinite(Number(withTeam.seasonAverage)) && Number(withTeam.seasonAverage) > 0
-      ? Number(withTeam.seasonAverage)
+    (Number.isFinite(Number(withMatchupFallback.seasonAverage)) && Number(withMatchupFallback.seasonAverage) > 0
+      ? Number(withMatchupFallback.seasonAverage)
       : null);
 
   return annotateProjectionFields({
-    ...withTeam,
-    projection: existing ?? withTeam.projection ?? null,
-    projectedValue: existing ?? withTeam.projectedValue ?? null,
+    ...withMatchupFallback,
+    projection: existing ?? withMatchupFallback.projection ?? null,
+    projectedValue: existing ?? withMatchupFallback.projectedValue ?? null,
     projectionSource:
-      withTeam.projectionSource ||
-      (existing ? withTeam.projectionSource || "merged" : "missing"),
-    estimatedProjection: Boolean(withTeam.estimatedProjection),
-    isLiveLine: !withTeam.isDemoData,
+      withMatchupFallback.projectionSource ||
+      (existing ? withMatchupFallback.projectionSource || "merged" : "missing"),
+    estimatedProjection: Boolean(withMatchupFallback.estimatedProjection),
+    isLiveLine: !withMatchupFallback.isDemoData,
     projectionUnavailable: !(Number.isFinite(existing) && existing > 0),
   });
 }
 
-export function prepareLiveProps(props = []) {
-  return (props || []).map(prepareLiveProp);
+export function prepareLiveProps(props = [], context = {}) {
+  return (props || []).map((prop) => prepareLiveProp(prop, context));
 }
-
-import { enrichPropWithTeamLookup } from "./teamEnrichment.js";
 
 /** @deprecated synthetic prep for emergency demo path only */
 export function preparePropsForRanking(props = [], { synthetic = false } = {}) {
