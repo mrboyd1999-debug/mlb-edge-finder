@@ -79,10 +79,9 @@ export function inspectPrizePicksProxyConfig() {
     proxyConfigured: assessment.configured,
     normalizedProxyUrl: normalized,
     expectedFormat:
-      "External https URL that returns PrizePicks JSON (Apify/scraper). Not the app /api/prizepicks route.",
-    exampleProxyUrl: "https://api.apify.com/v2/acts/<actor>/run-sync-get-dataset-items?token=<token>",
-    appFetchRouteTemplate:
-      "{origin}/api/prizepicks?league_id=2&proxyUrl={encodeURIComponent(<external-proxy-url>)}",
+      "http(s) URL that returns PrizePicks JSON — e.g. local proxy http://localhost:4000/api/prizepicks/mlb",
+    exampleProxyUrl: "http://localhost:4000/api/prizepicks/mlb",
+    appFetchRouteTemplate: "{VITE_PRIZEPICKS_PROXY_URL} (direct fetch from browser)",
   };
 }
 

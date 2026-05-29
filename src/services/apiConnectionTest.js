@@ -208,7 +208,7 @@ async function testPrizePicks() {
     };
   }
 
-  const route = withProxyRoute("/api/prizepicks?league_id=2", proxyUrl);
+  const route = proxyUrl;
   console.info("[API Health] PrizePicks probe", { requestUrl: route });
   const lastResult = await probeFetch(route);
   const classified = classifyLineSourceProbe(lastResult, { sourceId: SOURCE_IDS.PRIZEPICKS });

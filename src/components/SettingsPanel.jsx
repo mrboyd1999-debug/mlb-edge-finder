@@ -284,16 +284,10 @@ export default function SettingsPanel({
               placeholder={ppProxyDef.placeholder}
             />
             <p className="settings-api-row__hint" style={{ margin: "8px 0 0", fontSize: 12, lineHeight: 1.45, color: "#94a3b8" }}>
-              PrizePicks is optional until configured. It requires an external proxy endpoint that returns
-              PrizePicks-shaped JSON with <code>data</code> + <code>included</code>. Enter it as{" "}
-              <strong>VITE_PRIZEPICKS_PROXY_URL</strong> (Settings or <code>.env.local</code>).
-            </p>
-            <p className="settings-api-row__hint" style={{ margin: "6px 0 0", fontSize: 12, lineHeight: 1.45, color: "#94a3b8" }}>
-              Do <strong>not</strong> use <code>http://localhost:5173/api/prizepicks</code> — that is this app&apos;s
-              API route, not the upstream proxy.
-            </p>
-            <p className="settings-api-row__hint" style={{ margin: "6px 0 0", fontSize: 12, lineHeight: 1.45, color: "#cbd5e1" }}>
-              Example: <code>https://your-provider.example/prizepicks</code> or an Apify run-sync JSON URL.
+              PrizePicks requires a proxy URL that returns JSON with <code>data</code> +{" "}
+              <code>included</code>. Set <strong>VITE_PRIZEPICKS_PROXY_URL</strong> in Settings or{" "}
+              <code>.env.local</code>. Local dev: run <code>npm run proxy</code>, then use{" "}
+              <code>http://localhost:4000/api/prizepicks/mlb</code>.
             </p>
           </label>
         </div>

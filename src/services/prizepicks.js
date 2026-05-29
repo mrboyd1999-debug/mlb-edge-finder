@@ -187,7 +187,7 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
   updatePrizePicksDiagnostics({
     requestUrl,
     proxyConfigured: true,
-    proxyMode: "browser → /api/prizepicks?proxyUrl=… → server fetches external proxy",
+    proxyMode: "browser → VITE_PRIZEPICKS_PROXY_URL",
     externalProxyHost,
     httpExecuted: false,
     lastError: "",
@@ -565,10 +565,7 @@ async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
 function prizePicksEndpoints() {
   const proxyUrl = getProxyUrl("prizepicks");
   if (!proxyUrl) return [];
-  const url = new URL("/api/prizepicks", window.location.origin);
-  if (MLB_ONLY_MODE) url.searchParams.set("league_id", PRIZEPICKS_MLB_LEAGUE_ID);
-  url.searchParams.set("proxyUrl", proxyUrl);
-  return [url.pathname + url.search];
+  return [proxyUrl];
 }
 
 function notConfiguredPrizePicksProviderResult(message = "PrizePicks proxy URL missing") {

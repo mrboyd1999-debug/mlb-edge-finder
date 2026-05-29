@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "vercel-dev": "vercel dev",
-    "server": "node server.js"
+    "server": "node server.js",
+    "proxy": "node server/prizepicks-proxy.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
