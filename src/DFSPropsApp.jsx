@@ -315,6 +315,7 @@ import {
   ALLOWED_SCORING_SPORTS,
 } from "./utils/standardPropMetrics.js";
 import { getLineProviderPreflight } from "./utils/providerProxy.js";
+import { getPrizePicksDiagnostics, updatePrizePicksDiagnostics } from "./utils/prizepicksDiagnostics.js";
 import { buildContextFromProp, resolveIngestionSport } from "./utils/ingestionFilter.js";
 import { isParserMergeComboBug } from "./utils/comboMarkets.js";
 import {
@@ -1048,6 +1049,7 @@ function applySourceResult({
     const detail = result.warnings?.[0] || "PrizePicks proxy URL missing";
     sourceStatus.PrizePicks = "Not configured";
     if (!sourceWarnings.includes(detail)) sourceWarnings.push(detail);
+    const ppDiag = result.diagnostics || getPrizePicksDiagnostics();
     debugInfo.sources.PrizePicks = {
       ...debugInfo.sources.PrizePicks,
       status: "Not configured",
@@ -1056,6 +1058,8 @@ function applySourceResult({
       message: detail,
       lineSourceBadge: HEALTH_STATES.NOT_CONFIGURED,
       timedOut: false,
+      diagnostics: ppDiag,
+      failureClass: ppDiag.failureClass || "MISSING_PROXY",
     };
     return false;
   }
@@ -1153,6 +1157,17 @@ function applySourceResult({
       }
       sourceStatus[label] = props.length ? "Degraded" : "Failed";
     }
+    const failPpDiag =
+      label === "PrizePicks"
+        ? {
+            ...getPrizePicksDiagnostics(),
+            ...(result.diagnostics || {}),
+            uiConnectionTier: connectionTier,
+            lastError: health.message || result.debug?.message || detailWarnings.join(" | "),
+            validationCount: usableCount,
+          }
+        : null;
+    if (label === "PrizePicks") updatePrizePicksDiagnostics(failPpDiag);
     debugInfo.sources[label] = {
       ...debugInfo.sources[label],
       status: connectionTier,
@@ -1168,6 +1183,7 @@ function applySourceResult({
       lineSourceBadge:
         connectionTier === CONNECTION_TIERS.FAILED ? HEALTH_STATES.FAILED : health.badge,
       statusLabel: health.message,
+      ...(failPpDiag ? { diagnostics: failPpDiag, failureClass: failPpDiag.failureClass } : {}),
     };
     return usableCount > 0 || props.length > 0;
   }
@@ -1188,6 +1204,19 @@ function applySourceResult({
 
   if (props.length) rawProps.push(...props);
 
+  const ppDiagnostics =
+    label === "PrizePicks"
+      ? {
+          ...(result.diagnostics || getPrizePicksDiagnostics()),
+          uiConnectionTier: connectionTier,
+          validationCount: usableCount,
+          rawPropCount: rawCount,
+        }
+      : null;
+  if (label === "PrizePicks") {
+    updatePrizePicksDiagnostics(ppDiagnostics);
+  }
+
   debugInfo.sources[label] = {
     ...debugInfo.sources[label],
     status: connectionTier,
@@ -1204,6 +1233,7 @@ function applySourceResult({
     statusLabel: health.message,
     underdogParser: result.debug?.underdogParser || null,
     rawUnderdogSamples: result.debug?.rawUnderdogSamples || [],
+    ...(ppDiagnostics ? { diagnostics: ppDiagnostics, failureClass: ppDiagnostics.failureClass } : {}),
   };
   return usableCount > 0;
 }
@@ -1637,6 +1667,14 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         sourceFailures.push(sourceFailureMessage(detail, new Error(detail)));
       }
       if (notConfigured && !sourceWarnings.includes(detail)) sourceWarnings.push(detail);
+      const failDiag = {
+        ...getPrizePicksDiagnostics(),
+        uiConnectionTier: notConfigured ? CONNECTION_TIERS.DEGRADED : CONNECTION_TIERS.FAILED,
+        lastError: detail,
+        httpExecuted: ppEntry.durationMs > 0,
+        timedOut: Boolean(ppEntry.timedOut),
+      };
+      updatePrizePicksDiagnostics(failDiag);
       debugInfo.sources.PrizePicks = {
         ...debugInfo.sources.PrizePicks,
         status: notConfigured ? "Not configured" : "Failed",
@@ -1645,6 +1683,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         message: detail,
         lineSourceBadge: notConfigured ? HEALTH_STATES.NOT_CONFIGURED : "",
         timedOut: Boolean(ppEntry.timedOut),
+        diagnostics: failDiag,
       };
     }
   }

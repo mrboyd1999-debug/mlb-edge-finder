@@ -49,6 +49,12 @@ import { getProxyUrl, getRawProxyUrl } from "../config/apiConfig.js";
 import { assessProxyUrl } from "../utils/providerProxy.js";
 import { recordProviderResponse } from "../utils/rawResponseDebug.js";
 import {
+  classifyPrizePicksFailure,
+  getPrizePicksDiagnostics,
+  resetPrizePicksDiagnostics,
+  updatePrizePicksDiagnostics,
+} from "../utils/prizepicksDiagnostics.js";
+import {
   buildPlayerAttributeMap,
   logPrizePicksRawSample,
   normalizePrizePicksResponse,
@@ -118,13 +124,31 @@ export async function fetchPrizePicksProps({ sport = "all", statType = "all", si
 }
 
 async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", signal } = {}) {
+  resetPrizePicksDiagnostics();
   const proxyUrl = getProxyUrl("prizepicks");
-  const proxyAssessment = assessProxyUrl(getRawProxyUrl("prizepicks"));
+  const rawProxy = getRawProxyUrl("prizepicks");
+  const proxyAssessment = assessProxyUrl(rawProxy);
+  const externalProxyHost = (() => {
+    try {
+      return proxyUrl ? new URL(proxyUrl).host : "";
+    } catch {
+      return "";
+    }
+  })();
+
   if (!proxyUrl) {
     const message = proxyAssessment.invalid
       ? "PrizePicks proxy URL is invalid. Set VITE_PRIZEPICKS_PROXY_URL in Settings."
       : "PrizePicks proxy URL missing";
     console.info("[PrizePicks]", message, "— fetch skipped");
+    updatePrizePicksDiagnostics({
+      proxyConfigured: false,
+      proxyMode: "none — client requires VITE_PRIZEPICKS_PROXY_URL",
+      httpExecuted: false,
+      lastError: message,
+      providerStatus: "Not configured",
+      failureClass: classifyPrizePicksFailure({ notConfigured: true, lastError: message }),
+    });
     return notConfiguredPrizePicksProviderResult(message);
   }
 
@@ -153,15 +177,18 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
   };
 
   const endpoints = prizePicksEndpoints();
+  const requestUrl = endpoints[0] ? absoluteUrl(endpoints[0]) : "";
+  updatePrizePicksDiagnostics({
+    requestUrl,
+    proxyConfigured: true,
+    proxyMode: "browser → /api/prizepicks?proxyUrl=… → server fetches external proxy",
+    externalProxyHost,
+    httpExecuted: false,
+    lastError: "",
+  });
   console.info("[PrizePicks] proxy configured — starting fetch", {
-    requestUrl: absoluteUrl(endpoints[0]),
-    proxyHost: (() => {
-      try {
-        return new URL(proxyUrl).host;
-      } catch {
-        return "(invalid)";
-      }
-    })(),
+    requestUrl,
+    proxyHost: externalProxyHost,
   });
 
   for (const endpoint of endpoints) {
@@ -169,11 +196,28 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
     const parsed = await fetchPrizePicksEndpoint(endpoint, fetchInit, { signal });
     attempts.push(parsed.attempt);
 
+    const responseSize = Number(parsed.attempt?.responseSize ?? 0);
+    const rawPropCount = parsed.ok && parsed.payload ? rawPrizePicksRecordCount(parsed.payload) : 0;
+    updatePrizePicksDiagnostics({
+      httpExecuted: true,
+      statusCode: parsed.attempt?.status ?? null,
+      responseSize,
+      rawPropCount,
+      lastError: parsed.attempt?.error || "",
+      attempts: attempts.map((item) => ({
+        url: item.url,
+        status: item.status,
+        error: item.error,
+        durationMs: item.durationMs,
+      })),
+    });
+
     if (parsed.ok && parsed.payload) {
       console.info("[PrizePicks] response", {
         requestUrl: parsed.attempt?.url || absoluteUrl(endpoint),
         responseStatus: parsed.attempt?.status ?? null,
-        rawResponseCount: rawPrizePicksRecordCount(parsed.payload),
+        rawResponseCount: rawPropCount,
+        responseSize,
       });
       const isFallback = parsed.payload?.fallback === true;
       const isRateLimited = Boolean(
@@ -265,6 +309,24 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
             ? "Empty"
             : "Empty";
 
+      updatePrizePicksDiagnostics({
+        mlbScopedCount: audit.fetched,
+        normalizedCount: audit.normalized ?? normalizedProps.length,
+        validationCount: usableCount,
+        mlbUsableCount: usableMlbCount,
+        filterReasons: audit.filterReasons || {},
+        providerStatus: pipelineStatus,
+        lastError: warnings[0] || parsed.attempt?.error || "",
+        failureClass: classifyPrizePicksFailure({
+          httpExecuted: true,
+          statusCode: parsed.attempt?.status ?? null,
+          rawPropCount: rawCount,
+          validationCount: usableCount,
+          providerStatus: pipelineStatus,
+          lastError: warnings[0] || "",
+        }),
+      });
+
       return {
         source: "PrizePicks",
         status: pipelineStatus,
@@ -274,6 +336,7 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
         lineSourceBadge,
         rateLimited: isRateLimited,
         cached: isFallback,
+        diagnostics: getPrizePicksDiagnostics(),
         lastSuccessfulFetchAt: isFallback
           ? parsed.payload.cachedAt || readCachedPayloadSavedAt()
           : new Date().toISOString(),
@@ -302,6 +365,29 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
   }
 
   recordSourceFailure(SOURCE_IDS.PRIZEPICKS, PRIZEPICKS_TEMPORARY_MESSAGE);
+
+  const lastAttempt = attempts.at(-1) || {};
+  updatePrizePicksDiagnostics({
+    httpExecuted: attempts.length > 0,
+    statusCode: lastAttempt.status ?? null,
+    responseSize: lastAttempt.responseSize ?? 0,
+    lastError: lastAttempt.error || PRIZEPICKS_TEMPORARY_MESSAGE,
+    providerStatus: "Failed",
+    failureClass: classifyPrizePicksFailure({
+      httpExecuted: attempts.length > 0,
+      timedOut: /timed out|abort/i.test(String(lastAttempt.error || "")),
+      statusCode: lastAttempt.status ?? null,
+      networkError: Boolean(lastAttempt.networkError),
+      lastError: lastAttempt.error || "",
+      providerStatus: "Failed",
+    }),
+    attempts: attempts.map((item) => ({
+      url: item.url,
+      status: item.status,
+      error: item.error,
+      durationMs: item.durationMs,
+    })),
+  });
 
   const cachedResult = buildCachedPrizePicksResult({ sport, statType, attempts, endpoint: attempts.at(-1)?.url || prizePicksEndpoints()[0], reason: "fetch-failed" });
   if (cachedResult) return cachedResult;
@@ -380,6 +466,7 @@ async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
     attempt.rateLimited = response.status === 429;
 
     const text = await response.text();
+    attempt.responseSize = text.length;
     attempt.preview = text.slice(0, 200).replace(/\s+/g, " ").trim();
 
     console.info("[PrizePicks] fetch attempt", {
@@ -489,6 +576,7 @@ function notConfiguredPrizePicksProviderResult(message = "PrizePicks proxy URL m
     notConfigured: true,
     disabled: true,
     timedOut: false,
+    diagnostics: getPrizePicksDiagnostics(),
     debug: buildDebug("", "Not configured", 0, 0, message, []),
   };
 }

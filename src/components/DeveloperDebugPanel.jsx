@@ -6,6 +6,7 @@ import MlbPipelineStatusPanel from "./MlbPipelineStatusPanel.jsx";
 import UnderdogDebugPanel from "./UnderdogDebugPanel.jsx";
 import ParsedUnderdogDebugCard from "./ParsedUnderdogDebugCard.jsx";
 import RawApiDebugPanel from "./RawApiDebugPanel.jsx";
+import PrizePicksDiagnosticsPanel from "./PrizePicksDiagnosticsPanel.jsx";
 import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 
 function DeveloperDebugPanel({
@@ -20,9 +21,12 @@ function DeveloperDebugPanel({
   showDebugPanels = false,
   onShowDebugPanelsChange,
   debugModeEnabled = false,
+  prizePicksDiagnostics = null,
 }) {
+  const ppFeed = feedHealthContext?.PrizePicks || apiHealth?.PrizePicks || {};
   return (
     <div className="developer-debug-panel">
+      <PrizePicksDiagnosticsPanel diagnostics={prizePicksDiagnostics} feedRow={ppFeed} />
       {debugModeEnabled ? (
         <label className="developer-debug-panel__toggle">
           <input
