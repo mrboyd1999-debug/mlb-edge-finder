@@ -63,51 +63,16 @@ function BestPlaysTab({
   onOpen,
   filterDiagnostics = null,
 }) {
-  const { topVerifiedSection, verifiedSection, researchSection, probabilitySection, edgeSection, debugBanner } =
+  const { topVerifiedSection, verifiedSection, researchSection, probabilitySection, edgeSection } =
     useMemo(() => {
-      const topVerified = findSection(sections, "top-verified-plays");
-      const verified = findSection(sections, "verified-plays");
-      const research = findSection(sections, "research-plays");
-      const probability = findSection(sections, "highest-probability");
-      const edge = findSection(sections, "highest-edge");
-      const counts = filterDiagnostics?.pipelineCounts;
-      const invalidReasons = filterDiagnostics?.invalidReasons;
-      const audit = filterDiagnostics?.verificationAudit;
-
-      let banner = null;
-      if (counts || invalidReasons || audit) {
-        const reasonText = invalidReasons
-          ? Object.entries(invalidReasons)
-              .slice(0, 6)
-              .map(([reason, count]) => `${reason}: ${count}`)
-              .join(" · ")
-          : "";
-        const auditText = audit
-          ? Object.entries(audit)
-              .filter(([, count]) => Number(count) > 0)
-              .map(([key, count]) => `${key}: ${count}`)
-              .join(" · ")
-          : "";
-        banner = [
-          counts
-            ? `Pipeline: ${counts.rawProps ?? 0} raw · ${counts.normalized ?? 0} normalized · ${counts.withProjections ?? 0} projected · ${counts.filtered ?? 0} verified · ${counts.researchPool ?? 0} research`
-            : null,
-          auditText ? `Audit: ${auditText}` : null,
-          reasonText ? `Rejected: ${reasonText}` : null,
-        ]
-          .filter(Boolean)
-          .join(" | ");
-      }
-
       return {
-        topVerifiedSection: topVerified,
-        verifiedSection: verified,
-        researchSection: research,
-        probabilitySection: probability,
-        edgeSection: edge,
-        debugBanner: banner,
+        topVerifiedSection: findSection(sections, "top-verified-plays"),
+        verifiedSection: findSection(sections, "verified-plays"),
+        researchSection: findSection(sections, "research-plays"),
+        probabilitySection: findSection(sections, "highest-probability"),
+        edgeSection: findSection(sections, "highest-edge"),
       };
-    }, [sections, filterDiagnostics]);
+    }, [sections]);
 
   const highestProbabilityPicks = probabilitySection?.picks || [];
   const topVerifiedPicks = topVerifiedSection?.picks || [];
@@ -120,6 +85,12 @@ function BestPlaysTab({
     verifiedGroups.reduce((sum, group) => sum + group.props.length, 0) +
     researchGroups.reduce((sum, group) => sum + group.props.length, 0) +
     edgeGroups.reduce((sum, group) => sum + group.props.length, 0);
+
+  const projectedCount =
+    filterDiagnostics?.verificationDashboard?.projected ??
+    filterDiagnostics?.pipelineCounts?.displayPool ??
+    filterDiagnostics?.pipelineCounts?.withProjections ??
+    0;
 
   const failureReason =
     pipelineDiagnostics?.failureReason || loadError || filterDiagnostics?.error || "";
@@ -141,12 +112,9 @@ function BestPlaysTab({
     <div className="compact-tab-panel">
       <PropPipelineCounters counts={pipelineDiagnostics} compact />
       <VerificationDashboard dashboard={filterDiagnostics?.verificationDashboard} />
-      {debugBanner ? (
-        <p className="compact-form-notice" style={{ marginBottom: 12 }}>
-          {debugBanner}
-        </p>
+      {failureReason && !totalPicks && projectedCount === 0 ? (
+        <p className="compact-form-notice">{failureReason}</p>
       ) : null}
-      {failureReason && !totalPicks ? <p className="compact-form-notice">{failureReason}</p> : null}
 
       {probabilitySection ? (
         <section className="compact-section">
@@ -203,7 +171,7 @@ function BestPlaysTab({
         </section>
       ) : null}
 
-      {!totalPicks ? (
+      {!totalPicks && projectedCount === 0 ? (
         <p className="compact-empty">Waiting for projected props to load.</p>
       ) : null}
     </div>

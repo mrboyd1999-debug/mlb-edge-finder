@@ -133,7 +133,6 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   });
   const matchupEnriched = enrichPropsWithMatchupFallback(teamEnriched);
   const enriched = matchupEnriched.map(enrichBestPlayCandidate);
-  const verificationDashboard = buildVerificationDashboard(enriched);
   const withProjections = enriched.filter((p) => {
     const proj = resolveBestPlayStatSpecificProjection(p);
     return proj != null && proj > 0;
@@ -154,16 +153,10 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   logBestPlaysPipelineStage("RESEARCH:", researchCount);
 
   const verificationAudit = logVerificationAudit(enriched);
-  const verificationDashboardResult = logVerificationDashboardAudit(enriched);
 
   const invalidReasons = summarizeInvalidReasons(enriched);
   logBestPlaysPipelineStage("INVALID REASONS:", invalidReasons);
   logBestPlaysPipelineStage("VERIFICATION AUDIT:", verificationAudit.breakdown);
-  logBestPlaysPipelineStage(
-    "VERIFICATION REGRESSION:",
-    verificationDashboardResult.regression?.regressionReasons ||
-      verificationDashboardResult.regressionReasons
-  );
   logRejectionSummary(enriched);
 
   const verifiedSelection = selectVerifiedPlaysWithFallback(
@@ -179,6 +172,11 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
     bestPlayPool: "verified",
   }));
   verifiedPicks = [...verifiedPicks].sort(compareTopPickScore);
+  const verificationDashboardResult = logVerificationDashboardAudit(enriched, {
+    displayPool,
+    verifiedPicks,
+  });
+  const verificationDashboard = verificationDashboardResult;
   const topVerifiedPicks = selectTopVerifiedByScore(verifiedPicks, BEST_PLAYS_ENGINE_SIZE);
   const highestProbabilityPicks = selectHighestTierAPlays(verifiedPicks, 1);
   const noTierAPlays = !highestProbabilityPicks.length;
