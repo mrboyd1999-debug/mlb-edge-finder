@@ -12,12 +12,17 @@ function finite(value) {
 
 /** min/max inclusive bounds by canonical market key. */
 export const MLB_PROJECTION_CAPS = {
-  totalBases: { min: 0, max: 2.5, label: "Total Bases" },
-  hits: { min: 0, max: 2.5, label: "Hits" },
-  homeRuns: { min: 0, max: 1, label: "Home Runs" },
-  hrr: { min: 0, max: 5, label: "H+R+RBI" },
-  strikeouts: { min: 0, max: 12, label: "Strikeouts" },
-  hitsAllowed: { min: 0, max: 12, label: "Hits Allowed" },
+  hits: { min: 0, max: 3, label: "Hits" },
+  runs: { min: 0, max: 2, label: "Runs" },
+  rbis: { min: 0, max: 3, label: "RBIs" },
+  totalBases: { min: 1, max: 6, label: "Total Bases" },
+  hrr: { min: 1, max: 5, label: "H+R+RBI" },
+  fantasyScore: { min: 2, max: 25, label: "Fantasy Score" },
+  strikeouts: { min: 2, max: 12, label: "Strikeouts" },
+  hitsAllowed: { min: 2, max: 10, label: "Hits Allowed" },
+  outs: { min: 12, max: 24, label: "Pitching Outs" },
+  homeRuns: { min: 0, max: 2, label: "Home Runs" },
+  earnedRuns: { min: 0, max: 6, label: "Earned Runs Allowed" },
 };
 
 export const SANITY_FAIL_FLAG = "SANITY_FAIL";

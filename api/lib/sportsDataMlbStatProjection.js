@@ -150,8 +150,13 @@ export function resolveRawStatFromSeasonRow(stat = {}, propLabel = "") {
       return pickField(stat, ["Walks", "BaseOnBalls"]);
     case "Fantasy Score":
       return pickField(stat, ["FantasyPointsDraftKings", "FantasyPoints", "FantasyPointsFanDuel"]);
-    case "Hits+Runs+RBIs":
-      return pickField(stat, ["Hits", "Runs", "RunsBattedIn"]);
+    case "Hits+Runs+RBIs": {
+      const hits = pickField(stat, ["Hits"]);
+      const runs = pickField(stat, ["Runs"]);
+      const rbis = pickField(stat, ["RunsBattedIn", "RBI", "RBIs"]);
+      if (hits == null && runs == null && rbis == null) return null;
+      return (hits || 0) + (runs || 0) + (rbis || 0);
+    }
     case "Pitcher Outs":
       return pickField(stat, ["InningsPitchedDecimal", "InningsPitched"]);
     case "Earned Runs":
@@ -170,18 +175,59 @@ export function resolveRawStatFromSeasonRow(stat = {}, propLabel = "") {
 }
 
 export function resolveSeasonGames(stat = {}) {
-  const games = pickField(stat, ["Games", "GamesPlayed", "Appearances", "Started"]);
+  const gamesPlayed = pickField(stat, ["GamesPlayed", "Games"]);
+  const appearances = pickField(stat, ["Appearances", "Started"]);
+  const atBats = pickField(stat, ["AtBats", "AB"]);
+
+  let games = gamesPlayed ?? appearances;
+  if (games != null && games > 200) games = gamesPlayed;
+  if (games != null && atBats != null && games > 200 && Math.abs(games - atBats) < 5) {
+    games = gamesPlayed ?? appearances;
+  }
+  if (games != null && games > 0 && games <= 200) return games;
+  if (appearances != null && appearances > 0 && appearances <= 200) return appearances;
   return games != null && games > 0 ? games : 1;
+}
+
+export function resolveProjectionComponents(stat = {}, propLabel = "") {
+  if (!stat || !propLabel) return null;
+  const games = resolveSeasonGames(stat);
+
+  if (propLabel === "Hits+Runs+RBIs") {
+    const hitsAvg = Number(((stat?.Hits || 0) / games).toFixed(4));
+    const runsAvg = Number(((stat?.Runs || 0) / games).toFixed(4));
+    const rbisAvg = Number(((stat?.RunsBattedIn || stat?.RBI || 0) / games).toFixed(4));
+    return {
+      hitsAvg,
+      runsAvg,
+      rbisAvg,
+      finalProjection: Number((hitsAvg + runsAvg + rbisAvg).toFixed(4)),
+      formula: "Hits/G + Runs/G + RBIs/G",
+      gamesCount: games,
+    };
+  }
+
+  const projection = safeProjection({ prop: propLabel, statType: propLabel }, stat);
+  const rawTotal = resolveRawStatFromSeasonRow(stat, propLabel);
+  return {
+    rawTotal,
+    perGameAverage: projection,
+    finalProjection: projection,
+    formula: `${propLabel}: season total ÷ games`,
+    gamesCount: games,
+  };
 }
 
 export function computePerGameProjectionFromSeasonRow(stat = {}, propLabel = "", prop = {}) {
   const projection = safeProjection({ prop: propLabel, statType: propLabel, ...prop }, stat);
   const rawStat = resolveRawStatFromSeasonRow(stat, propLabel);
   const games = resolveSeasonGames(stat);
+  const components = resolveProjectionComponents(stat, propLabel);
   return {
     projection,
     rawStat,
     games,
+    components,
     projectionSource: projection != null ? "sportsdataio-season" : "missing",
   };
 }
@@ -247,14 +293,32 @@ export function computeProjectionForProp(prop = {}, seasonStats = [], { logDebug
     });
   }
 
+  const components = stat && propLabel ? resolveProjectionComponents(stat, propLabel) : null;
+
   return {
     projection,
     rawStat,
     games,
+    components,
     propLabel,
     team: stat?.Team || prop.team || "",
     matchReason,
     projectionSource: projection != null ? "sportsdataio-season" : "missing",
+    formulaUsed: projection != null ? "SportsDataIO season totals ÷ games" : "",
+    rawSportsDataFields: stat
+      ? {
+          Hits: stat.Hits,
+          Runs: stat.Runs,
+          RunsBattedIn: stat.RunsBattedIn ?? stat.RBI,
+          TotalBases: stat.TotalBases,
+          PitchingStrikeouts: stat.PitchingStrikeouts ?? stat.Strikeouts,
+          HitsAllowed: stat.HitsAllowed ?? stat.PitchingHits,
+          InningsPitchedDecimal: stat.InningsPitchedDecimal ?? stat.InningsPitched,
+          FantasyPointsDraftKings: stat.FantasyPointsDraftKings ?? stat.FantasyPoints,
+          HitsRunsRBIs: stat.HitsRunsRBIs,
+          Games: stat.Games ?? stat.GamesPlayed,
+        }
+      : null,
   };
 }
 

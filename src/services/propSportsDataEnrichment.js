@@ -4,11 +4,34 @@
 
 import { getSportsDataApiKey } from "../config/apiConfig.js";
 import { normalizePlayerName } from "../utils/playerNames.js";
-import { canonicalMarketKey } from "../utils/marketNormalization.js";
 import { computePerGameProjectionFromSeasonRow, resolveSportsDataPropLabel } from "../../api/lib/sportsDataMlbStatProjection.js";
+import { canonicalMarketKey } from "../utils/marketNormalization.js";
 import { fetchSlateSnapshot } from "./sportsDataService.js";
 import { recordProviderResponse } from "../utils/rawResponseDebug.js";
 import { ENRICHMENT_TIMEOUT_MESSAGE, getApiTimeoutMs, withFetchTimeout } from "../utils/apiTimeout.js";
+
+function resolveDailyProjection(row = {}, field = "", marketKey = "", statType = "") {
+  const direct = Number(row?.[field]);
+  const propLabel = resolveSportsDataPropLabel({ statType, market: statType, prop: statType });
+  const fromSeason = propLabel ? computePerGameProjectionFromSeasonRow(row, propLabel, { statType }) : null;
+  const recomputed = fromSeason?.projection;
+
+  if (Number.isFinite(direct) && direct > 0) {
+    if (marketKey === "hrr" && direct < 1 && recomputed != null && recomputed >= 1) {
+      return { projection: recomputed, source: "sportsdataio-season-recomputed", components: fromSeason?.components };
+    }
+    if (marketKey === "totalBases" && direct < 0.5 && recomputed != null && recomputed >= 0.5) {
+      return { projection: recomputed, source: "sportsdataio-season-recomputed", components: fromSeason?.components };
+    }
+    return { projection: direct, source: "sportsdataio-daily-field", components: fromSeason?.components };
+  }
+
+  if (recomputed != null && recomputed > 0) {
+    return { projection: recomputed, source: "sportsdataio-season", components: fromSeason?.components };
+  }
+
+  return { projection: null, source: "missing", components: null };
+}
 
 function projectionFieldForMarket(marketKey = "") {
   if (marketKey === "strikeouts") return "PitchingStrikeouts";
@@ -65,7 +88,12 @@ export async function enrichPropsWithSportsData(props = []) {
     const marketKey = canonicalMarketKey(prop.statType || prop.market || "");
     const field = projectionFieldForMarket(marketKey);
     const row = findProjectionRow(projections, prop.playerName || prop.player);
-    const projectionVal = field && row ? Number(row[field]) : NaN;
+    const statType = prop.statType || prop.market || "";
+    const resolved =
+      field && row
+        ? resolveDailyProjection(row, field, marketKey, statType)
+        : { projection: null, source: "missing", components: null };
+    const projectionVal = resolved.projection;
     const team = prop.team || row?.Team || "";
     const game = findGameForTeam(games, team);
     const opponent =
@@ -88,7 +116,10 @@ export async function enrichPropsWithSportsData(props = []) {
       matchup: prop.matchup || (team && opponent ? `${team} vs ${opponent}` : prop.matchup),
       projection: hasProjection ? projectionVal : prop.projection,
       projectedValue: hasProjection ? projectionVal : prop.projectedValue,
-      projectionSource: hasProjection ? "sportsdataio" : prop.projectionSource,
+      projectionSource: hasProjection ? resolved.source || "sportsdataio" : prop.projectionSource,
+      sportsDataSeason: row || prop.sportsDataSeason || null,
+      sportsDataGames: row?.Games ?? row?.GamesPlayed ?? prop.sportsDataGames,
+      projectionComponents: resolved.components || prop.projectionComponents || null,
       sportsDataEnriched: true,
       gameTime: prop.gameTime || prop.startTime || game?.DateTime || game?.Day || "",
     };
@@ -137,13 +168,13 @@ function buildProjectionRows(snapshot = {}) {
   return { rows: [], source: "none", warnings: ["SportsDataIO returned no projection rows."] };
 }
 
-function projectionValueForMarket(row = {}, field = "", source = "projections", statType = "", altField = "") {
+function projectionValueForMarket(row = {}, field = "", source = "projections", statType = "", altField = "", marketKey = "") {
   if (source === "season-stats") return perGameProjection(row, statType || field);
-  const primary = Number(row?.[field]);
-  if (Number.isFinite(primary) && primary > 0) return primary;
+  const resolved = resolveDailyProjection(row, field, marketKey || canonicalMarketKey(statType), statType);
+  if (Number.isFinite(resolved.projection) && resolved.projection > 0) return resolved.projection;
   if (altField) {
-    const alt = Number(row?.[altField]);
-    if (Number.isFinite(alt) && alt > 0) return alt;
+    const altResolved = resolveDailyProjection(row, altField, marketKey || canonicalMarketKey(statType), statType);
+    if (Number.isFinite(altResolved.projection) && altResolved.projection > 0) return altResolved.projection;
   }
   return NaN;
 }
@@ -196,7 +227,14 @@ export async function generateMlbPropsFromSportsData({ limit = 48 } = {}) {
     const team = row.Team || "";
     const opponent = inferOpponent(row, games);
     SDIO_FALLBACK_MARKETS.forEach((market) => {
-      const projection = projectionValueForMarket(row, market.field, rowSource, market.statType, market.altField);
+      const projection = projectionValueForMarket(
+        row,
+        market.field,
+        rowSource,
+        market.statType,
+        market.altField,
+        canonicalMarketKey(market.statType)
+      );
       if (!Number.isFinite(projection) || projection <= 0) return;
       const line = Math.max(0.5, roundHalf(projection * market.lineFactor));
       props.push({

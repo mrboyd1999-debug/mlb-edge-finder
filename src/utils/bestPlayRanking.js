@@ -34,6 +34,7 @@ import {
   computeTopPickScore,
   annotateTopPickRankingFields,
 } from "./bestPlayRankingScore.js";
+import { buildMlbProjectionFormulaAudit } from "./mlbProjectionFormulaAudit.js";
 import { enrichPickDirectionFields, resolveProjectionLeanDisplay } from "./pickDirectionAudit.js";
 import { isPitcherStrikeoutMarket } from "./topMlbPlaysRanking.js";
 import { isMlbPitcherMarket } from "../modules/mlbPitcherData.js";
@@ -233,6 +234,12 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     projection,
     projectedValue: projection,
   });
+  const projectionFormulaAudit = buildMlbProjectionFormulaAudit({
+    ...prop,
+    projection,
+    projectedValue: projection,
+    projectionSanityAudit: sanityAudit,
+  });
   const displayConfidence = applySanityConfidencePenalty(modelConfidence, sanityAudit);
   const playabilityBreakdown = computePlayabilityBreakdown(
     {
@@ -356,6 +363,10 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     playabilityBreakdown,
     playabilityAudit: playabilityBreakdown,
     confidenceBreakdown,
+    projectionFormulaAudit,
+    projectionFormulaValid: projectionFormulaAudit.projectionFormulaValid,
+    projectionFormulaError: projectionFormulaAudit.projectionFormulaError,
+    projectionFormulaErrorReason: projectionFormulaAudit.projectionFormulaErrorReason,
     researchReasons: playability.researchReasons,
     whyNotPlayable: playability.whyNotPlayable,
     direction,

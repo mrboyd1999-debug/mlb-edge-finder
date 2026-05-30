@@ -17,6 +17,11 @@ import {
 } from "./standardPropMetrics.js";
 import { computeTopPickScore, compareVerifiedPlaysRank } from "./bestPlayRankingScore.js";
 import { passesTopVerifiedPlaysGate, passesVerifiedTierFilter } from "./verifiedTierSystem.js";
+import {
+  buildMlbProjectionFormulaAudit,
+  PROJECTION_FORMULA_ERROR,
+  summarizeProjectionFormulaErrors,
+} from "./mlbProjectionFormulaAudit.js";
 
 const CLONE_SUSPECT_VALUES = [50, 61, 74, 75, 88];
 
@@ -100,6 +105,9 @@ export function buildVerifiedPlayScoringAuditRow(prop = {}, rank = null) {
     playabilityBreakdown.finalPlayability ??
     finite(enriched.playabilityScore);
 
+  const formulaAudit =
+    enriched.projectionFormulaAudit ?? buildMlbProjectionFormulaAudit(enriched);
+
   return {
     rank,
     player: String(enriched.playerName || enriched.player || "Unknown").trim() || "Unknown",
@@ -130,6 +138,14 @@ export function buildVerifiedPlayScoringAuditRow(prop = {}, rank = null) {
     projectionComponent: playabilityBreakdown.projectionComponent,
     penaltyComponent: playabilityBreakdown.penaltyComponent,
     verifiedTier: enriched.verifiedTier || "—",
+    projectionFormulaUsed: formulaAudit.projectionFormulaUsed,
+    rawSportsDataFields: formulaAudit.rawSportsDataFields,
+    gamesCount: formulaAudit.gamesCount,
+    sampleSize: formulaAudit.sampleSize,
+    projectionComponentsLabel: formulaAudit.projectionComponentsLabel,
+    projectionFormulaValid: formulaAudit.projectionFormulaValid,
+    projectionFormulaError: formulaAudit.projectionFormulaError,
+    projectionFormulaErrorReason: formulaAudit.projectionFormulaErrorReason,
   };
 }
 
@@ -143,6 +159,23 @@ export function buildTopVerifiedScoringAuditRows(projectedPool = [], limit = 20)
     .sort((a, b) => (b.compositeScore ?? 0) - (a.compositeScore ?? 0))
     .map((row, index) => ({ ...row, rank: index + 1 }));
 }
+
+export function buildProjectionFormulaAuditRows(projectedPool = [], limit = 20) {
+  return [...(projectedPool || [])]
+    .map((prop) => enrichBestPlayRankingFields(prop))
+    .map((prop) => buildVerifiedPlayScoringAuditRow(prop))
+    .filter((row) => row.projection != null || row.rawProjection != null)
+    .sort((a, b) => {
+      if (a.projectionFormulaValid !== b.projectionFormulaValid) {
+        return a.projectionFormulaValid ? 1 : -1;
+      }
+      return (b.compositeScore ?? 0) - (a.compositeScore ?? 0);
+    })
+    .slice(0, limit)
+    .map((row, index) => ({ ...row, rank: index + 1 }));
+}
+
+export { PROJECTION_FORMULA_ERROR, summarizeProjectionFormulaErrors } from "./mlbProjectionFormulaAudit.js";
 
 export function detectScoreClonePatterns(rows = []) {
   const probabilityCounts = {};

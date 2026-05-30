@@ -80,11 +80,13 @@ export function isResearchOnlyProp(prop = {}) {
   if (/research only/i.test(label)) return true;
   if (prop.bestPlayPool === "research") return true;
   if (prop.projectionSanityAudit?.sanityFail || prop.projectionSanityFail) return true;
+  if (prop.projectionFormulaError || prop.projectionFormulaValid === false) return true;
   return Boolean(prop.displayResearchOnly && !prop.verifiedTier);
 }
 
 export function passesTopVerifiedPlaysGate(prop = {}) {
   if (isResearchOnlyProp(prop)) return false;
+  if (prop.projectionFormulaError || prop.projectionFormulaValid === false) return false;
   const confidence = finite(
     prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence,
     NaN

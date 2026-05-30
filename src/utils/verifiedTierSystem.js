@@ -8,6 +8,7 @@ import {
   sanitizeProjectionValue,
   VERIFIED_MIN_PROJECTION,
 } from "./bestPlaysPipelineDebug.js";
+import { passesMlbProjectionFormulaValidation } from "./mlbProjectionFormulaAudit.js";
 import { hasMajorResearchGaps, isLowMatchupProp } from "./conservativeProjection.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
 import {
@@ -214,6 +215,8 @@ export function hasValidVerifiedProjection(prop = {}) {
   const projection = resolveBestPlayStatSpecificProjection(prop);
   if (projection == null || projection <= VERIFIED_MIN_PROJECTION) return false;
   if (prop.projectionUnavailable || prop.unverifiedGradeBlocked || prop.isFallbackProjection) return false;
+  if (prop.projectionFormulaError || prop.projectionFormulaValid === false) return false;
+  if (!passesMlbProjectionFormulaValidation(prop)) return false;
   return true;
 }
 
@@ -241,6 +244,9 @@ export function explainVerificationRejection(prop = {}) {
   if (!passesMinimalBestPlaysFilter(prop)) return "missing player, line, or stat type";
   if (resolvePropSport(prop) !== "MLB") return "non-MLB sport";
   if (!hasValidVerifiedProjection(prop)) return "missing or invalid stat-specific projection";
+  if (prop.projectionFormulaError || prop.projectionFormulaValid === false) {
+    return prop.projectionFormulaErrorReason || "projection formula validation failed";
+  }
 
   const { probability, confidence, playability, dataQuality, sanity, historicalPresent, historicalMissing, hitRateValidated, hitRateMissing } =
     resolveVerifiedMetrics(prop);
