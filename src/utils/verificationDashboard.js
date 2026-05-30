@@ -669,18 +669,56 @@ export function categorizeVerifiedFailure(prop = {}) {
 }
 
 export function buildVerificationDashboard(props = [], options = {}) {
-  const audit = summarizeVerificationAudit(props);
+  const skipHeavyAudit = Boolean(options.skipHeavyAudit);
   const statsMap = options.statsMap || null;
   const historicalContext = { statsMap, seasonStats: options.seasonStats || [] };
 
   const rawProps = props || [];
-  console.log("RAW", rawProps.length);
+  if (!skipHeavyAudit) console.log("RAW", rawProps.length);
 
   const projectedPoolRaw =
     options.projectedPool?.length > 0
       ? options.projectedPool
       : resolveProjectedPool(rawProps);
-  console.log("PROJECTED", projectedPoolRaw.length);
+  if (!skipHeavyAudit) console.log("PROJECTED", projectedPoolRaw.length);
+
+  if (skipHeavyAudit) {
+    const projectedPool = projectedPoolRaw;
+    const verifiedPicks = options.verifiedPicks || [];
+    const verifiedCount = verifiedPicks.length;
+    const verificationFailureBreakdown = {
+      totalProps: Number(options.totalProps ?? rawProps.length),
+      propsWithProjections: projectedPool.length,
+      projected: projectedPool.length,
+      verifiedPlays: verifiedCount,
+      verifiedTierCount: verifiedCount,
+      historicalDataCoveragePercent: 0,
+      propsMissingHistoricalData: 0,
+      propsUsingNeutralHistoricalFallback: 0,
+    };
+    return {
+      projected: projectedPool.length,
+      projectedCount: projectedPool.length,
+      verifiedCount,
+      verifiedPasses: verifiedCount,
+      researchPasses: 0,
+      verifiedFailures: 0,
+      usedVerifiedFallback: Boolean(options.usedVerifiedFallback),
+      verificationFailureBreakdown,
+      historicalCoverageAudit: null,
+      rejectedPlayabilityAudits: [],
+      topConfidenceProps: [],
+      topPlayabilityProps: [],
+      topVerifiedPlays: [],
+      topProjectedProps: [],
+      probabilityDistribution: null,
+      scoreCloneAudit: null,
+      total: rawProps.length,
+      lightweight: true,
+    };
+  }
+
+  const audit = summarizeVerificationAudit(props);
 
   const auditedProps = annotateHistoricalCoverage(
     attachHistoricalStatsToProps(projectedPoolRaw, historicalContext)

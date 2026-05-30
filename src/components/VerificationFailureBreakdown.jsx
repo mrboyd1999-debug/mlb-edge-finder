@@ -166,7 +166,7 @@ const HISTORICAL_PIPELINE_COLUMNS = [
   },
 ];
 
-function VerificationFailureBreakdown({ filterDiagnostics = null }) {
+function VerificationFailureBreakdown({ filterDiagnostics = null, heavyAuditEnabled = false }) {
   const dashboard = filterDiagnostics?.verificationDashboard || null;
   const breakdown = dashboard?.verificationFailureBreakdown;
   const pipelineCounts = filterDiagnostics?.pipelineCounts || null;
@@ -296,7 +296,7 @@ function VerificationFailureBreakdown({ filterDiagnostics = null }) {
         </p>
       ) : null}
 
-      {historicalCoverageAudit ? (
+      {heavyAuditEnabled && historicalCoverageAudit ? (
         <p className="verification-diagnostics__meta">
           Historical pipeline: statsMap {historicalCoverageAudit.statsMapSize ?? 0} profiles · matched{" "}
           {historicalCoverageAudit.profileMatchCount ?? 0} · with game logs{" "}
@@ -305,6 +305,8 @@ function VerificationFailureBreakdown({ filterDiagnostics = null }) {
         </p>
       ) : null}
 
+      {heavyAuditEnabled ? (
+        <>
       <AuditTable
         title="Historical Stats Sample (10 projected props)"
         rows={historicalSampleRows}
@@ -349,6 +351,8 @@ function VerificationFailureBreakdown({ filterDiagnostics = null }) {
         emptyMessage="No rejected projected props."
         scrollable
       />
+        </>
+      ) : null}
     </section>
   );
 }

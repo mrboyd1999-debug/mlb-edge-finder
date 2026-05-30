@@ -1,8 +1,10 @@
 export const LIVE_BOARD_LOADING_STAGES = {
-  FETCH: "Loading live MLB props...",
+  FETCH: "Loading feeds...",
+  NORMALIZE: "Normalizing props...",
+  PROJECT: "Generating projections...",
+  RANK: "Ranking top plays...",
+  DONE: "Done.",
   MATCH: "Matching players...",
-  PROJECT: "Building projections...",
-  RANK: "Ranking best plays...",
 };
 
 export const LIVE_BOARD_UNAVAILABLE_MESSAGE =

@@ -39,8 +39,12 @@ export function isDebugPanelEnabled(showDebugPanels = readShowDebugPanelsPrefere
   return showDebugPanels === true;
 }
 
-export function isHeavyDebugEnabled() {
-  return DEV_MODE;
+export function isDeveloperDebugEnabled(showDebugPanels = readShowDebugPanelsPreference()) {
+  return isDebugModeEnabled() && isDebugPanelEnabled(showDebugPanels);
+}
+
+export function isHeavyDebugEnabled(showDebugPanels = readShowDebugPanelsPreference()) {
+  return isDeveloperDebugEnabled(showDebugPanels);
 }
 
 export function shouldTrackGroupedDebug() {

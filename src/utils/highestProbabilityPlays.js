@@ -174,15 +174,25 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
     bestPlayPool: "verified",
   }));
   verifiedPicks = [...verifiedPicks].sort(compareVerifiedPlaysRank);
-  const verificationDashboardResult = logVerificationDashboardAudit(enriched, {
-    projectedPool: engineProjectedPool,
-    displayPool,
-    verifiedPicks,
-    usedVerifiedFallback: usedVerifiedScoreFallback,
-    statsMap: options.statsMap,
-    seasonStats: options.seasonStats,
-    totalProps: rawProps.length,
-  });
+  const verificationDashboardResult = options.skipHeavyAudit
+    ? buildVerificationDashboard(enriched, {
+        projectedPool: engineProjectedPool,
+        verifiedPicks,
+        usedVerifiedFallback: usedVerifiedScoreFallback,
+        statsMap: options.statsMap,
+        seasonStats: options.seasonStats,
+        totalProps: rawProps.length,
+        skipHeavyAudit: true,
+      })
+    : logVerificationDashboardAudit(enriched, {
+        projectedPool: engineProjectedPool,
+        displayPool,
+        verifiedPicks,
+        usedVerifiedFallback: usedVerifiedScoreFallback,
+        statsMap: options.statsMap,
+        seasonStats: options.seasonStats,
+        totalProps: rawProps.length,
+      });
   const verificationDashboard = verificationDashboardResult;
   const topVerifiedPicks = selectTopVerifiedByScore(verifiedPicks, BEST_PLAYS_ENGINE_SIZE);
   const highestProbabilityPicks = selectHeroOverallPlay(verifiedPicks, 1);

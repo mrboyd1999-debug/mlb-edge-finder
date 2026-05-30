@@ -8,6 +8,7 @@ import {
   NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
 } from "../utils/verifiedTierSystem.js";
 import { safeArray } from "../utils/safeStats.js";
+import { liveBoardLoadingMessage } from "../utils/liveBoardLoading.js";
 
 function findSection(sections, id) {
   return (sections || []).find((row) => row.id === id) || null;
@@ -38,7 +39,8 @@ function BestPlaysTab({
     return (
       <div className="compact-tab-panel">
         <p className="compact-empty">
-          Loading MLB verified plays…{loadingStage ? ` (${loadingStage})` : ""}
+          Loading MLB verified plays…
+          {loadingStage ? ` (${liveBoardLoadingMessage(loadingStage)})` : ""}
         </p>
       </div>
     );
