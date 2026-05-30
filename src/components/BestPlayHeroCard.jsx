@@ -27,7 +27,11 @@ function BestPlayHeroCard({ prop, onOpen }) {
         ? `${Math.round(Number(enriched.confidenceScore))}%`
         : "—";
   const sideLabel = side === "WATCH" ? "PASS" : formatPlatformSideLabel(enriched);
-  const outlierFlag = enriched.projectionOutlierFlag || enriched.projectionSanityAudit?.outlierFlags?.[0] || "";
+  const outlierFlag =
+    enriched.projectionOutlierFlag ||
+    enriched.projectionSanityAudit?.outlierWarning ||
+    enriched.projectionMismatchFlag ||
+    "";
   const reason =
     enriched.verifiedPlayExplanation?.reason ||
     enriched.qualifyReason ||

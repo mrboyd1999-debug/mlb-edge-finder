@@ -194,6 +194,7 @@ function VerificationDashboard({ dashboard = null }) {
     failedMatchupCount = failedMatchup,
     topFailedMatchupReasons = [],
     projectionOutlierCount = 0,
+    projectionMismatchCount = 0,
     topProjectionOutliers = [],
     tierA = 0,
     tierB = 0,
@@ -236,6 +237,7 @@ function VerificationDashboard({ dashboard = null }) {
         <Metric label="Passed Matchup Count" value={passedMatchupCount} />
         <Metric label="Failed Matchup Count" value={failedMatchupCount} />
         <Metric label="Projection Outliers" value={projectionOutlierCount} />
+        <Metric label="Projection Mismatch" value={projectionMismatchCount} />
         <Metric label="Tier A Count" value={tierA} />
         <Metric label="Tier B Count" value={tierB} />
         <Metric label="Tier C Count" value={tierC} />
@@ -262,7 +264,10 @@ function VerificationDashboard({ dashboard = null }) {
           <ul className="verification-diagnostics__rejection-list">
             {topProjectionOutliers.map((row) => (
               <li key={`${row.player}-${row.market}-${row.projection}`}>
-                {row.player} · {row.market} · proj {row.projection} vs season {row.season} · sanity {row.sanityScore}
+                {row.player} · {row.market} · proj {row.projection} vs season {row.season}
+                {row.recentOverRate ? ` · recent ${row.recentOverRate}` : ""}
+                {row.projectionProbability ? ` · model ${row.projectionProbability}` : ""}
+                {` · ${row.flag || "Outlier"} · sanity ${row.sanityScore}`}
               </li>
             ))}
           </ul>

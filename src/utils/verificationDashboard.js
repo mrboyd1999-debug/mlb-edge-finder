@@ -270,11 +270,13 @@ function buildMatchupFailureAudit(projectedPool = []) {
 
 function buildProjectionOutlierAudit(projectedPool = []) {
   let projectionOutlierCount = 0;
+  let projectionMismatchCount = 0;
   const topProjectionOutliers = [];
 
   for (const prop of projectedPool || []) {
     const audit = buildProjectionSanityAudit(prop);
-    if (!audit.isOutlier) continue;
+    if (audit.projectionMismatch) projectionMismatchCount += 1;
+    if (!audit.isOutlier && !audit.projectionMismatch) continue;
     projectionOutlierCount += 1;
     if (topProjectionOutliers.length < 8) {
       topProjectionOutliers.push({
@@ -283,11 +285,14 @@ function buildProjectionOutlierAudit(projectedPool = []) {
         projection: audit.projectionLabel,
         season: audit.seasonLabel,
         sanityScore: audit.sanityScore,
+        flag: audit.projectionMismatch ? "ProjectionMismatch" : audit.outlierWarning || "Outlier",
+        recentOverRate: audit.recentOverRateLabel,
+        projectionProbability: audit.projectionProbabilityLabel,
       });
     }
   }
 
-  return { projectionOutlierCount, topProjectionOutliers };
+  return { projectionOutlierCount, projectionMismatchCount, topProjectionOutliers };
 }
 
 function buildRuleRejectionCounts(projectedPool = []) {
@@ -410,6 +415,7 @@ export function buildVerificationDashboard(props = [], options = {}) {
     failedMatchupCount: matchupAudit.failedMatchupCount,
     topFailedMatchupReasons: matchupAudit.topFailedMatchupReasons,
     projectionOutlierCount: outlierAudit.projectionOutlierCount,
+    projectionMismatchCount: outlierAudit.projectionMismatchCount,
     topProjectionOutliers: outlierAudit.topProjectionOutliers,
     tierA: tierCounts.tierA,
     tierB: tierCounts.tierB,

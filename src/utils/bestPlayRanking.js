@@ -23,6 +23,7 @@ import { attachBestPlayExplanation } from "./bestPlayExplanation.js";
 import { attachModelValidationFields } from "./modelValidation.js";
 import {
   applySanityConfidencePenalty,
+  applySanityPlayabilityPenalty,
   attachProjectionSanityAudit,
   buildProjectionSanityAudit,
 } from "./projectionSanityAudit.js";
@@ -212,12 +213,13 @@ export function enrichBestPlayRankingFields(prop = {}) {
     projectedValue: projection,
   });
   const displayConfidence = applySanityConfidencePenalty(rawDisplayConfidence, sanityAudit);
-  const playabilityScore = Number.isFinite(Number(prop.playabilityScore))
+  const basePlayabilityScore = Number.isFinite(Number(prop.playabilityScore))
     ? Number(prop.playabilityScore)
     : computePlayabilityScore(
         { ...prop, projection, projectedValue: projection, edge: metrics.edge, edgePercent: metrics.edgePercent },
         displayConfidence ?? prop.confidenceScore ?? prop.confidence ?? 50
       );
+  const playabilityScore = applySanityPlayabilityPenalty(basePlayabilityScore, sanityAudit);
   const tierLabel = classifyBestPlayTier({
     ...prop,
     projection,
@@ -332,6 +334,7 @@ export function enrichBestPlayRankingFields(prop = {}) {
     attachProjectionSanityAudit(ranked, {
       audit: sanityAudit,
       confidence: displayConfidence,
+      playability: playabilityScore,
     }),
     {
       edge,
