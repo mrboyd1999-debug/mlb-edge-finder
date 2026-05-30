@@ -170,6 +170,7 @@ function DfsAnalyzerLayout({
           feedHealthContext={feedHealthContext}
           underdogDebugSnapshot={underdogDebugSnapshot}
           rejectionAudit={debugInfo?.rejectionAudit}
+          projectionCoverageAudit={debugInfo?.projectionCoverageAudit}
           prizePicksDiagnostics={debugInfo?.sources?.PrizePicks?.diagnostics}
           bestPlaysFilter={topMlbPlayBoard?.filterDiagnostics}
           showDebugPanels={showDebugPanels}

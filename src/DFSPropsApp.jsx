@@ -232,7 +232,12 @@ import { resolveIngestionFallback } from "./services/ingestionFallback.js";
 import { writeLastGoodBoard, readLastGoodBoard, boardFromLastGood } from "./services/lastGoodBoardCache.js";
 import { initRawResponseDebug, dumpDebugGlobals, recordProviderStatus, recordNormalizedProps } from "./utils/rawResponseDebug.js";
 import { logLiveFetchResult, buildLiveFetchFailureSummary } from "./utils/liveFetchAudit.js";
-import { prepareMlbProjectionPipelineProps } from "./utils/mlbAllowedMarkets.js";
+import { prepareMlbSportPipelineProps, filterMlbPipelineSupportedMarkets } from "./utils/mlbAllowedMarkets.js";
+import {
+  buildProjectionCoverageAudit,
+  filterMlbProjectionGenerationCandidates,
+  logProjectionCoverageAudit,
+} from "./utils/projectionCoverageAudit.js";
 import {
   buildGuaranteedBaseFeedDisplay,
   ensureMlbSportOnProps,
@@ -2030,18 +2035,20 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   reportProgress("NORMALIZE");
 
   let deferredDisplayProps = [];
-  const startupLimited = limitStartupPropPool(allDisplayProps);
+  const normalizedBeforeStartupCap = allDisplayProps.length;
+  const startupLimited = limitStartupPropPool(workingNormalProps.length ? workingNormalProps : allDisplayProps);
   deferredDisplayProps = startupLimited.deferredProps;
-  if (startupLimited.startupProps.length) {
-    allDisplayProps = startupLimited.startupProps;
+  if (startupLimited.startupProps.length && workingNormalProps.length) {
+    workingNormalProps = startupLimited.startupProps;
+    workingActiveProps = workingActiveProps.slice(0, startupLimited.startupProps.length);
   } else if (allDisplayProps.length > STARTUP_NORMALIZED_PROP_LIMIT) {
     deferredDisplayProps = allDisplayProps.slice(STARTUP_NORMALIZED_PROP_LIMIT);
-    allDisplayProps = allDisplayProps.slice(0, STARTUP_NORMALIZED_PROP_LIMIT);
   }
   debugInfo.startupPropLimit = {
     processed: allDisplayProps.length,
+    scoringBatch: workingNormalProps.length,
     deferred: deferredDisplayProps.length,
-    eligible: startupLimited.totalEligible || allDisplayProps.length + deferredDisplayProps.length,
+    eligible: startupLimited.totalEligible || normalizedBeforeStartupCap,
   };
   endPerformanceTimer(PERFORMANCE_TIMERS.normalizeProps);
 
@@ -2311,9 +2318,20 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   if (MLB_ONLY_MODE) {
     resetProjectionFetchDebug();
 
-    allDisplayProps = prepareMlbProjectionPipelineProps(allDisplayProps, { rawPropCount: rawProps.length });
-    workingNormalProps = prepareMlbProjectionPipelineProps(workingNormalProps, { log: false });
-    workingActiveProps = prepareMlbProjectionPipelineProps(workingActiveProps, { log: false });
+    const normalizedPropsSnapshot = allDisplayProps.length;
+    const sportFilteredProps = prepareMlbSportPipelineProps(allDisplayProps, {
+      rawPropCount: rawProps.length,
+      log: false,
+    });
+    const marketFilteredProps = filterMlbPipelineSupportedMarkets(sportFilteredProps);
+    const projectionCandidates = filterMlbProjectionGenerationCandidates(sportFilteredProps);
+    allDisplayProps = projectionCandidates;
+    workingNormalProps = filterMlbProjectionGenerationCandidates(
+      prepareMlbSportPipelineProps(workingNormalProps, { log: false })
+    );
+    workingActiveProps = filterMlbProjectionGenerationCandidates(
+      prepareMlbSportPipelineProps(workingActiveProps, { log: false })
+    );
     setPipelineStageCount(PIPELINE_STAGES.NORMALIZED_PROPS_COUNT, allDisplayProps.length);
 
     const enrichmentSettled = await providerWave.awaitEnrichmentFeeds();
@@ -2382,6 +2400,24 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       workingNormalProps = mergeProjectionsOntoProps(workingNormalProps, mergeContext).props;
       workingActiveProps = mergeProjectionsOntoProps(workingActiveProps, mergeContext).props;
       debugInfo.projectionMerge = merged.debug;
+
+      const matchedPlayers = statsApplied.stats instanceof Map
+        ? summarizeStatsMap(statsApplied.stats).matchedPlayers
+        : 0;
+      const gameLogsFound = statsApplied.stats instanceof Map
+        ? summarizeStatsMap(statsApplied.stats).gameLogsFound
+        : 0;
+      debugInfo.projectionCoverageAudit = buildProjectionCoverageAudit({
+        rawPropCount: rawProps.length,
+        normalizedProps: normalizedPropsSnapshot,
+        sportFilteredProps,
+        marketFilteredProps,
+        projectedProps: allDisplayProps,
+        statsMap: statsApplied.stats instanceof Map ? statsApplied.stats : null,
+        matchedPlayers,
+        gameLogsFound,
+      });
+      logProjectionCoverageAudit(debugInfo.projectionCoverageAudit);
       if (import.meta.env.DEV && allDisplayProps[0]) {
         emitSportDetectionDebug(allDisplayProps[0]);
       }
@@ -2665,11 +2701,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   pipelineAudit.scored = scoredProps.length;
   pipelineAudit = attachDecisionDebug(pipelineAudit, scoredProps);
 
-  const projectionsGenerated = scoredProps.filter(
-    (prop) =>
-      prop?.isVerifiedProjection &&
-      Number.isFinite(Number(prop.projection ?? prop.projectedValue)) &&
-      Number(prop.projection ?? prop.projectedValue) > 0
+  const projectionsGenerated = allDisplayProps.filter(
+    (prop) => Number.isFinite(Number(prop.projection ?? prop.projectedValue)) && Number(prop.projection ?? prop.projectedValue) > 0
   ).length;
   setPipelineStageCount(PIPELINE_STAGES.PROJECTIONS_GENERATED_COUNT, projectionsGenerated);
 
@@ -3849,6 +3882,7 @@ export default function DFSPropsApp() {
       normalized: diagnostics.normalized || projectionStats.normalizedCount,
       verified: diagnostics.verified,
       projectionStats,
+      projectionCoverageAudit: debugInfo?.projectionCoverageAudit || null,
       filteredMissingProjection: audit?.filteredMissingProjection || 0,
       filteredLowConfidence: audit?.filteredLowConfidence || 0,
       filteredWeakEdge: audit?.filteredWeakEdge || 0,

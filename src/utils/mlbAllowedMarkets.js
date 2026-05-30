@@ -78,7 +78,9 @@ export function resolveSupportedMlbMarketKey(prop = {}) {
 
   if (ALLOWED_MARKET_KEYS.has(compact)) return compact;
 
-  if (/pitcher\s*strikeout|strikeouts?\s*thrown/.test(text)) return "strikeouts";
+  if (/pitcher\s*strikeout|strikeouts?\s*thrown|pitcher\s*strikeouts?/.test(text)) return "strikeouts";
+  if (/batter\s*strikeouts?|hitter\s*strikeouts?/.test(text)) return "strikeouts";
+  if (/^strikeouts?\b/.test(text) && !/allowed/.test(text)) return "strikeouts";
   if (/^hits?\b/.test(text) && !/allowed/.test(text) && !/\+/.test(text)) return "hits";
   if (/\bruns?\b/.test(text) && !/rbi|earned|allowed|\+/.test(text)) return "runs";
   if (/\brbi?s?\b/.test(text) && !/\+/.test(text)) return "rbis";
@@ -92,7 +94,6 @@ export function resolveSupportedMlbMarketKey(prop = {}) {
   if (/^walks?\b/.test(text) && !/allowed/.test(text)) return "walks";
   if (/earned\s*runs?/.test(text) && /allowed|pitcher/.test(text)) return "earnedruns";
   if (/hits?\s*allowed/.test(text)) return "hitsallowed";
-  if (/strikeouts?/.test(text) && !/hitter|batter/.test(text)) return "strikeouts";
   if (/fantasy/.test(text) && /pitch/.test(text)) return "pitchingfantasy";
   if (/fantasy/.test(text)) return "fantasyscore";
 
@@ -130,7 +131,16 @@ export function logMlbPipelineFilterAudit(rawCount = 0, mlbProps = [], supported
   console.log("AFTER MARKET FILTER", supportedProps.length);
 }
 
-/** Hard gate before projection generation — MLB sport + supported markets only. */
+/** Sport / contamination gate before projection — does NOT drop props by market. */
+export function prepareMlbSportPipelineProps(props = [], { rawPropCount = null, log = false } = {}) {
+  const mlbProps = filterMlbPipelineSportProps(props);
+  if (log) {
+    logMlbPipelineFilterAudit(rawPropCount ?? props.length, mlbProps, mlbProps);
+  }
+  return mlbProps;
+}
+
+/** Verified / ranking gate — supported MLB markets only. */
 export function prepareMlbProjectionPipelineProps(props = [], { rawPropCount = null, log = true } = {}) {
   const mlbProps = filterMlbPipelineSportProps(props);
   const supportedProps = filterMlbPipelineSupportedMarkets(mlbProps);

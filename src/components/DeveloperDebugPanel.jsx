@@ -21,15 +21,20 @@ function DeveloperDebugPanel({
   underdogDebugSnapshot = null,
   rejectionAudit = null,
   bestPlaysFilter = null,
+  projectionCoverageAudit = null,
   showDebugPanels = false,
   onShowDebugPanelsChange,
   debugModeEnabled = false,
   prizePicksDiagnostics = null,
 }) {
   const ppFeed = feedHealthContext?.PrizePicks || apiHealth?.PrizePicks || {};
+  const coverageAudit = projectionCoverageAudit || rejectionAudit?.projectionCoverageAudit || null;
   return (
     <div className="developer-debug-panel">
-      <PropPipelineCounters counts={bestPlaysFilter?.pipelineCounts || null} />
+      <PropPipelineCounters
+        counts={bestPlaysFilter?.pipelineCounts || null}
+        projectionCoverageAudit={coverageAudit}
+      />
       <ProviderFeedDiagnosticsPanel />
       <PrizePicksDiagnosticsPanel diagnostics={prizePicksDiagnostics} feedRow={ppFeed} />
       <VerificationDashboard dashboard={bestPlaysFilter?.verificationDashboard} />
@@ -96,6 +101,22 @@ function DeveloperDebugPanel({
               <p style={styles.compactFlags}>
                 MLB usable on board: {feedHealthContext?.Underdog?.boardCount ?? apiHealth?.Underdog?.usableCount ?? 0}
               </p>
+              {coverageAudit ? (
+                <div>
+                  <p style={{ ...styles.compactFlags, marginBottom: 4 }}>Projection coverage audit:</p>
+                  <p style={{ ...styles.compactFlags, margin: "2px 0" }}>
+                    Raw {coverageAudit.rawProps ?? 0} · Normalized {coverageAudit.normalizedProps ?? 0} · Sport{" "}
+                    {coverageAudit.afterSportFilter ?? 0} · Market {coverageAudit.afterMarketFilter ?? 0} · Player match{" "}
+                    {coverageAudit.matchedPlayers ?? 0} · Projected {coverageAudit.projectedProps ?? 0}
+                  </p>
+                  <p style={{ ...styles.compactFlags, margin: "2px 0" }}>
+                    Historical Matches: {coverageAudit.historicalMatches ?? 0} · Historical Missing:{" "}
+                    {coverageAudit.historicalMissing ?? 0} · Projection Coverage %:{" "}
+                    {coverageAudit.projectionCoveragePercent ?? 0}
+                    {coverageAudit.firstRejectionStage ? ` · First drop: ${coverageAudit.firstRejectionStage}` : ""}
+                  </p>
+                </div>
+              ) : null}
               {rejectionAudit?.mlbProjection ? (
                 <div>
                   <p style={{ ...styles.compactFlags, marginBottom: 4 }}>MLB projection pipeline:</p>

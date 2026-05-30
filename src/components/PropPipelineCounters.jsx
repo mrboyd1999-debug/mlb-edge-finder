@@ -13,16 +13,16 @@ function ProviderStatusLine({ label, row = {} }) {
   return `${label}: ${finalCount || parsed} props · ${ms} · HTTP ${status}${flag}${reasonSuffix}`;
 }
 
-function PropPipelineCounters({ counts = null, compact = false }) {
-  if (!counts) return null;
+function PropPipelineCounters({ counts = null, projectionCoverageAudit = null, compact = false }) {
+  if (!counts && !projectionCoverageAudit) return null;
   const providerDiag =
     counts.providerFetchDiagnostics ||
     (typeof window !== "undefined" ? window.__PROVIDER_FETCH_DIAGNOSTICS__ : null) ||
     getProviderFetchDiagnostics();
   const {
-    raw = counts.fetched ?? 0,
+    raw = counts?.fetched ?? 0,
     normalized = 0,
-    projected = counts.withProjections ?? counts.projected ?? 0,
+    projected = counts?.withProjections ?? counts?.projected ?? 0,
     verified = 0,
     rendered = 0,
     prizepicksFetch = 0,
@@ -30,13 +30,19 @@ function PropPipelineCounters({ counts = null, compact = false }) {
     fallbackMode = null,
     failureReason = "",
     bottleneckStage = null,
-  } = counts;
+  } = counts || {};
+
+  const coverageAudit = projectionCoverageAudit || counts?.projectionCoverageAudit || null;
+  const coverageLine = coverageAudit
+    ? `Coverage: ${coverageAudit.projectedProps ?? projected} projected · ${coverageAudit.historicalMatches ?? 0} historical · ${coverageAudit.historicalMissing ?? 0} missing · ${coverageAudit.projectionCoveragePercent ?? 0}%`
+    : "";
 
   if (compact) {
     return (
       <p className="prop-pipeline-counters" aria-label="Prop pipeline counts">
         Raw: {raw} · Normalized: {normalized} · Projected: {projected} · Verified: {verified} · Rendered:{" "}
         {rendered}
+        {coverageLine ? ` · ${coverageLine}` : ""}
       </p>
     );
   }
@@ -46,6 +52,13 @@ function PropPipelineCounters({ counts = null, compact = false }) {
       <p className="prop-pipeline-counters">
         Raw: {raw} · Normalized: {normalized} · Projected: {projected} · Verified: {verified} · Rendered: {rendered}
       </p>
+      {coverageAudit ? (
+        <p className="prop-pipeline-counters prop-pipeline-counters--meta" aria-label="Projection coverage audit">
+          Projected Props: {coverageAudit.projectedProps ?? projected} · Historical Matches:{" "}
+          {coverageAudit.historicalMatches ?? 0} · Historical Missing: {coverageAudit.historicalMissing ?? 0} ·
+          Projection Coverage %: {coverageAudit.projectionCoveragePercent ?? 0}
+        </p>
+      ) : null}
       <p className="prop-pipeline-counters prop-pipeline-counters--meta">
         Providers — PrizePicks: {prizepicksFetch} · Underdog: {underdogFetch}
         {fallbackMode ? ` · Fallback: ${fallbackMode}` : ""}

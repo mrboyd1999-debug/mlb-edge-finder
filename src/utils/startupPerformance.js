@@ -3,7 +3,7 @@
  */
 
 import { resolvePropSport } from "./mlbOnlyMode.js";
-import { isSupportedMlbMarket, isBlockedNonMlbPipelineProp } from "./mlbAllowedMarkets.js";
+import { isBlockedNonMlbPipelineProp } from "./mlbAllowedMarkets.js";
 import { resolveEngineProjectedPool } from "./projectionPipelineStatus.js";
 
 export const STARTUP_NORMALIZED_PROP_LIMIT = 300;
@@ -32,10 +32,15 @@ export function endPerformanceTimer(label) {
   }
 }
 
-export function isStartupMlbSupportedProp(prop = {}) {
+export function isStartupMlbSportProp(prop = {}) {
   if (resolvePropSport(prop) !== "MLB") return false;
   if (isBlockedNonMlbPipelineProp(prop)) return false;
-  return isSupportedMlbMarket(prop);
+  return true;
+}
+
+/** @deprecated alias — sport gate only; markets do not block startup pool. */
+export function isStartupMlbSupportedProp(prop = {}) {
+  return isStartupMlbSportProp(prop);
 }
 
 /** MLB + supported markets, capped for startup processing. */

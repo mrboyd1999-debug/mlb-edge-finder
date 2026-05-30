@@ -6,7 +6,7 @@ import { computeProjectionForProp, findSeasonStatRow, resolveSportsDataPropLabel
 import { findStatProfile } from "../playerStats.js";
 import { normalizePlayerName, resolvePropPlayerName } from "../../utils/playerNames.js";
 import { buildStatFallbackProjection } from "../mlb/statBasedFallbackProjection.js";
-import { isSupportedMlbMarket } from "../../utils/mlbAllowedMarkets.js";
+import { isBlockedNonMlbPipelineProp } from "../../utils/mlbAllowedMarkets.js";
 import {
   buildPlayerStatKey,
   buildPropLookupKeys,
@@ -33,7 +33,15 @@ function attachProjectionFields(prop = {}, projectionRow = {}) {
   const projectionForStatType =
     projectionRow.propLabel || prop.statType || prop.market || prop.propType || "";
 
-  if (!statTypesAlign(prop.statType || prop.market, projectionForStatType)) {
+  const skipStatAlign =
+    projectionRow.projectionFallback ||
+    projectionRow.neutralHistoricalFallback ||
+    /baseline|neutral|fallback|line|estimate/.test(String(projectionRow.projectionSource || "").toLowerCase());
+
+  if (
+    !skipStatAlign &&
+    !statTypesAlign(prop.statType || prop.market, projectionForStatType)
+  ) {
     return {
       ...prop,
       projection: null,
@@ -225,26 +233,27 @@ function resolveSeasonStatFallback(prop = {}, seasonStats = []) {
 }
 
 function resolveMarketBaselineProjection(prop = {}, seasonStats = []) {
-  if (!isSupportedMlbMarket(prop)) return null;
+  if (isBlockedNonMlbPipelineProp(prop)) return null;
+  if (resolvePropSport(prop) !== "MLB") return null;
   const line = Number(prop.line);
   if (!Number.isFinite(line) || line <= 0) return null;
 
-  let propLabel = resolveSportsDataPropLabel(prop);
-  if (!propLabel) {
-    propLabel = String(prop.statType || prop.market || prop.propType || "").trim();
-  }
+  const propLabel = String(
+    prop.statType || prop.market || prop.propType || resolveSportsDataPropLabel(prop) || ""
+  ).trim();
   if (!propLabel) return null;
 
   const statRow = resolveSeasonStatRowForProp(prop, seasonStats);
   return {
     projection: line,
-    projectionSource: statRow ? "market-baseline-season-line" : "market-baseline-line",
+    projectionSource: statRow ? "neutral-historical-season-line" : "neutral-historical-line",
     team: prop.team || statRow?.Team || "",
     playerId: statRow?.PlayerID ?? prop.playerId ?? prop.sportsDataPlayerId,
     propLabel,
     mergeKey: propMergeKey(prop),
-    historicalCoverage: false,
+    historicalCoverage: Boolean(statRow),
     projectionFallback: true,
+    neutralHistoricalFallback: true,
   };
 }
 
