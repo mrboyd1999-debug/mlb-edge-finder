@@ -128,6 +128,8 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all", sig
 
   const attempts = [];
 
+  console.log("[UD FETCH START]", { sport, statType });
+
   for (const endpoint of underdogEndpoints()) {
     if (signal?.aborted) break;
     const apiUrl = absoluteUrl(endpoint);
@@ -188,6 +190,12 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all", sig
         ? filterResolvedSportProps(parsedProps, sport === "all" ? "MLB" : sport, { selectedSportTab: "MLB" })
         : parsedProps.filter((prop) => matchesFilter(prop, sport, statType));
       const usableCount = countUsableProps(props);
+      console.log("[UD PROPS EXTRACTED]", {
+        raw: rawCount,
+        parsed: parsedProps.length,
+        filtered: props.length,
+        usable: usableCount,
+      });
       if (parsedProps.length > 0) {
         writeCachedPayload(sanitizeUnderdogPayloadForCache(payload));
         recordSourceSuccess(SOURCE_IDS.UNDERDOG);
@@ -376,6 +384,7 @@ async function attemptUnderdogEndpoint(endpoint, { signal } = {}) {
   const startedAt = Date.now();
 
   logProviderFetchPhase("Underdog", "fetch start", { url: attempt.url, timeoutMs: lineFeedTimeoutMs });
+  console.log("[UD FETCH START]", { url: attempt.url, timeoutMs: lineFeedTimeoutMs });
 
   try {
     const response = await resilientFetch(
@@ -399,6 +408,11 @@ async function attemptUnderdogEndpoint(endpoint, { signal } = {}) {
     attempt.responseSize = text.length;
 
     logProviderFetchPhase("Underdog", "response received", {
+      status: attempt.status,
+      responseSize: attempt.responseSize,
+      durationMs: attempt.durationMs,
+    });
+    console.log("[UD RESPONSE]", {
       status: attempt.status,
       responseSize: attempt.responseSize,
       durationMs: attempt.durationMs,
@@ -445,6 +459,9 @@ async function attemptUnderdogEndpoint(endpoint, { signal } = {}) {
       logProviderFetchPhase("Underdog", "JSON parsed", {
         topLevelKeys: payload && typeof payload === "object" ? Object.keys(payload).slice(0, 8) : [],
       });
+      console.log("[UD JSON PARSED]", {
+        keys: payload && typeof payload === "object" ? Object.keys(payload).slice(0, 8) : [],
+      });
     } catch (parseError) {
       console.error("Non-JSON response:", trimmed.slice(0, 300));
       attempt.error = `Underdog returned non-JSON response: ${parseError.message || "invalid JSON"}`;
@@ -459,6 +476,7 @@ async function attemptUnderdogEndpoint(endpoint, { signal } = {}) {
     logProviderFetchPhase("Underdog", "props extracted", {
       rawPropCount: rawUnderdogRecordCount(payload),
     });
+    console.log("[UD PROPS EXTRACTED]", { rawPropCount: rawUnderdogRecordCount(payload) });
 
     return { ok: true, attempt, payload };
   } catch (error) {
@@ -468,7 +486,13 @@ async function attemptUnderdogEndpoint(endpoint, { signal } = {}) {
       : message || "Failed to fetch";
     attempt.durationMs = Date.now() - startedAt;
     attempt.networkError = true;
-    return { ok: false, attempt, networkError: true };
+    if (/timed out|abort/i.test(message)) {
+      console.warn("[UD TIMEOUT] step:", "underdog.fetch.response", {
+        timeoutMs: lineFeedTimeoutMs,
+        durationMs: attempt.durationMs,
+      });
+    }
+    return { ok: false, attempt, networkError: true, timedOut: /timed out|abort/i.test(message) };
   }
 }
 

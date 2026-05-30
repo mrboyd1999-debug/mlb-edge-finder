@@ -148,7 +148,11 @@ function resolveMlbStatsStatus(stats = {}, attachmentAudit = null) {
     Number(stats.gameLogsAttached) || 0,
     Number(attachmentAudit?.gameLogsAttached) || 0
   );
-  const last5Last10Attached = Number(stats.last5Last10Attached) || 0;
+  const last5Last10Attached = Math.max(
+    Number(stats.last5Last10Attached) || 0,
+    Number(attachmentAudit?.historicalAttached) || 0
+  );
+  const usingCache = Boolean(stats.usingCache);
   const hasAttachment =
     stats.attachmentConfirmed ||
     coverage > 0 ||
@@ -163,18 +167,19 @@ function resolveMlbStatsStatus(stats = {}, attachmentAudit = null) {
     profilesMatched,
     gameLogsAttached,
     last5Last10Attached,
+    usingCache,
   });
 
   if (hasAttachment) {
     const status =
-      coverage >= 50 ||
-      gameLogsAttached >= 10 ||
-      last5Last10Attached >= 10
-        ? "Connected"
-        : "Warning";
+      usingCache
+        ? "Warning"
+        : coverage >= 10 || gameLogsAttached >= 5 || last5Last10Attached >= 5
+          ? "Connected"
+          : "Warning";
     return {
       status,
-      detail,
+      detail: usingCache ? `${detail} · cached profiles in use` : detail,
     };
   }
 
@@ -292,9 +297,13 @@ function SystemStatusCard({
   const stats = mlbPipelineStatus?.mlbStatsApi || {};
   const projection = mlbPipelineStatus?.projectionApi || {};
   const statsResolved =
-    mlbStatsTest && !stats.attachmentConfirmed && !(stats.historicalCoveragePercent > 0)
+    mlbStatsTest &&
+    !stats.attachmentConfirmed &&
+    !(stats.historicalCoveragePercent > 0) &&
+    !(feedHealthContext?.statsAttachmentAudit?.historicalAttached > 0) &&
+    !(feedHealthContext?.statsAttachmentAudit?.profilesFound > 0)
       ? {
-          status: mlbStatsTest.status,
+          status: mlbStatsTest.status === "Failed" ? "Warning" : mlbStatsTest.status,
           detail: mlbStatsTest.connected
             ? `Connected · ${mlbStatsTest.responseTimeMs}ms · ${mlbStatsTest.playerCount} players · ${mlbStatsTest.gameLogCount} game logs`
             : mlbStatsTest.detail,

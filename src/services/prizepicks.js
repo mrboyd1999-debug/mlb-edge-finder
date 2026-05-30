@@ -259,6 +259,7 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
     proxyHost: externalProxyHost,
   });
   console.log("[PrizePicks Fetch Start]", { requestUrl, proxyHost: externalProxyHost });
+  console.log("[PP FETCH START]", { requestUrl, proxyHost: externalProxyHost });
 
   for (const endpoint of endpoints) {
     if (signal?.aborted) break;
@@ -310,6 +311,7 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
           durationMs: parsed.attempt?.durationMs,
           willRetry: retryIndex < PRIZEPICKS_RETRY_TIMEOUTS_MS.length - 1,
         });
+        console.warn("[PP TIMEOUT] step:", timeoutStep, { timeoutMs, retryIndex: retryIndex + 1 });
       }
 
       if (retryIndex < PRIZEPICKS_RETRY_TIMEOUTS_MS.length - 1) {
@@ -364,6 +366,7 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
         cached: isFallback,
       });
       console.log("[PrizePicks Props Count]", usableCount);
+      console.log("[PP PROPS EXTRACTED]", { usable: usableCount, parsed: normalizedProps.length, raw: audit.fetched });
       console.info("[PrizePicks] parser output", {
         parserOutputCount: normalizedProps.length,
         usablePropsCount: usableCount,
@@ -713,6 +716,11 @@ async function fetchPrizePicksEndpoint(
       durationMs: attempt.durationMs,
       url: attempt.url,
     });
+    console.log("[PP RESPONSE]", {
+      status: attempt.status,
+      responseSize: attempt.responseSize,
+      durationMs: attempt.durationMs,
+    });
 
     logProviderFetchPhase("PrizePicks", "PrizePicks Response Received", {
       status: attempt.status,
@@ -782,6 +790,9 @@ async function fetchPrizePicksEndpoint(
       logProviderFetchPhase("PrizePicks", "JSON parsed", {
         topLevelKeys: payload && typeof payload === "object" ? Object.keys(payload).slice(0, 8) : [],
       });
+      console.log("[PP JSON PARSED]", {
+        keys: payload && typeof payload === "object" ? Object.keys(payload).slice(0, 8) : [],
+      });
     } catch (parseError) {
       console.error("Non-JSON response:", trimmed.slice(0, 300));
       attempt.error = `PrizePicks returned non-JSON response: ${parseError.message || "invalid JSON"}`;
@@ -831,6 +842,7 @@ async function fetchPrizePicksEndpoint(
       rawRecords: extractedRaw,
       parsedPreview: parsedPreview.length,
     });
+    console.log("[PP PROPS EXTRACTED]", { rawRecords: extractedRaw, parsedPreview: parsedPreview.length });
 
     if (payload?.ok === true && payload?.fallback === true) {
       attempt.rateLimited = Boolean(payload.rateLimited);
@@ -865,6 +877,7 @@ async function fetchPrizePicksEndpoint(
       timedOut,
       error: attempt.error,
     });
+    console.warn("[PP TIMEOUT] step:", timeoutLocation, { timeoutMs: lineFeedTimeoutMs, timedOut });
     return {
       ok: false,
       attempt,

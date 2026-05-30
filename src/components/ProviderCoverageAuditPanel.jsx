@@ -11,6 +11,14 @@ function CountRow({ label, value, highlight = false }) {
   );
 }
 
+function SectionLabel({ children }) {
+  return (
+    <p className="prop-pipeline-counters prop-pipeline-counters--meta" style={{ margin: "8px 0 4px", fontWeight: 600 }}>
+      {children}
+    </p>
+  );
+}
+
 function ProviderCoverageAuditPanel({ audit = null }) {
   if (!audit) return null;
 
@@ -19,56 +27,66 @@ function ProviderCoverageAuditPanel({ audit = null }) {
 
   return (
     <details className="compact-settings-details provider-coverage-audit" open>
-      <summary>Provider Coverage Audit</summary>
-      <div className="prop-pipeline-counters-block" aria-label="Provider coverage audit">
-        <CountRow label="PrizePicks fetched" value={audit.prizepicksFetched} />
-        <CountRow label="PrizePicks parsed" value={audit.prizepicksParsed} />
+      <summary>
+        Provider Coverage Debug
+        {audit.feedMode ? ` · ${audit.feedMode} MODE` : ""}
+      </summary>
+      <div className="prop-pipeline-counters-block" aria-label="Provider coverage debug">
+        <SectionLabel>PrizePicks</SectionLabel>
+        <CountRow label="Raw fetched" value={audit.prizepicksFetched} />
+        <CountRow label="Parsed" value={audit.prizepicksParsed} />
         <CountRow
-          label="PrizePicks usable"
+          label="Usable"
           value={audit.prizepicksUsable}
           highlight={audit.prizepicksUsable === 0 && audit.prizepicksTimedOut}
         />
         {audit.prizepicksTimedOut ? (
           <p className="compact-form-notice prop-pipeline-counters__failure" role="status">
-            PrizePicks timeout at: {audit.prizepicksTimeoutStep || "unknown step"}
+            Timeout at: {audit.prizepicksTimeoutStep || "unknown step"}
           </p>
         ) : null}
+
+        <SectionLabel>Underdog</SectionLabel>
+        <CountRow label="Raw fetched" value={audit.underdogFetched} />
+        <CountRow label="Parsed" value={audit.underdogParsed} />
+        <CountRow label="Usable" value={audit.underdogUsable} />
+        {ud.parserMismatch ? (
+          <p className="compact-form-notice prop-pipeline-counters__failure" role="status">
+            Parser mismatch — raw {ud.rawProps}, parsed {ud.parsedProps}
+          </p>
+        ) : null}
+        {audit.underdogTimedOut ? (
+          <p className="compact-form-notice prop-pipeline-counters__failure" role="status">
+            Timeout at: {audit.underdogTimeoutStep || "unknown step"}
+          </p>
+        ) : null}
+
+        <SectionLabel>Cache</SectionLabel>
+        <CountRow label="Cached props loaded" value={audit.cacheUsable} />
         {audit.prizepicksUsedCache ? (
-          <p className="prop-pipeline-counters prop-pipeline-counters--meta">PrizePicks source: cache fallback</p>
+          <p className="prop-pipeline-counters prop-pipeline-counters--meta">PrizePicks: cache fallback</p>
+        ) : null}
+        {audit.underdogUsedCache ? (
+          <p className="prop-pipeline-counters prop-pipeline-counters--meta">Underdog: cache fallback</p>
+        ) : null}
+        {audit.ingestionFallback ? (
+          <p className="prop-pipeline-counters prop-pipeline-counters--meta">Ingestion: {audit.ingestionFallback}</p>
         ) : null}
 
-        <CountRow label="Underdog fetched" value={audit.underdogFetched} />
-        <CountRow label="Underdog parsed" value={audit.underdogParsed} />
-        <CountRow label="Underdog usable" value={audit.underdogUsable} />
-
-        <div style={{ marginTop: 8 }}>
-          <p className="prop-pipeline-counters prop-pipeline-counters--meta" style={{ marginBottom: 4 }}>
-            Underdog breakdown:
-          </p>
-          <CountRow label="Raw props" value={ud.rawProps} />
-          <CountRow label="MLB props" value={ud.mlbProps} />
-          <CountRow label="Supported props" value={ud.supportedProps} />
-          <CountRow label="Projected props" value={ud.projectedProps} />
-          {ud.parserMismatch ? (
-            <p className="compact-form-notice prop-pipeline-counters__failure" role="status">
-              Underdog parser mismatch detected
-            </p>
-          ) : null}
-          {ud.usedCache ? (
-            <p className="prop-pipeline-counters prop-pipeline-counters--meta">Underdog source: cache</p>
-          ) : null}
-        </div>
+        <SectionLabel>Final</SectionLabel>
+        <CountRow label="Projection candidates" value={audit.projectionCandidates} />
+        <CountRow label="Projected props" value={audit.projected} />
+        <CountRow label="Verified props" value={audit.verified} />
 
         <div style={{ marginTop: 8, borderTop: "1px solid #334155", paddingTop: 8 }}>
-          <CountRow label="Combined usable" value={audit.combinedUsable} />
-          <CountRow label="Projection candidates" value={audit.projectionCandidates} />
-          <CountRow label="Projected" value={audit.projected} />
-          <CountRow label="Verified" value={audit.verified} />
+          <CountRow label="Underdog MLB props" value={ud.mlbProps} />
+          <CountRow label="Underdog supported props" value={ud.supportedProps} />
+          <CountRow label="Underdog projected props" value={ud.projectedProps} />
         </div>
 
         {diagnosis.summary ? (
           <p className="prop-pipeline-counters prop-pipeline-counters--meta" style={{ marginTop: 8 }}>
-            Likely cause: {diagnosis.summary}
+            Bottleneck: {diagnosis.summary}
           </p>
         ) : null}
       </div>

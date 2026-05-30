@@ -4836,6 +4836,7 @@ export default function DFSPropsApp() {
       pipelineRenderCounts={pipelineRenderCounts}
       prizePicksFeedProps={prizePicksFeedProps}
       statsAttachmentAudit={debugInfo?.statsAttachmentAudit || null}
+      providerCoverageAudit={debugInfo?.providerCoverageAudit || null}
     />
 
       {selectedEvaluation && (

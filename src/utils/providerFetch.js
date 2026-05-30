@@ -145,6 +145,7 @@ export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyRe
       if (label === "PrizePicks") {
         const outerStep = "outer provider wrapper (fetchProviderIsolated)";
         console.warn("[PrizePicks Timeout] step:", outerStep, { timeoutMs, durationMs });
+        console.warn("[PP TIMEOUT] step:", outerStep, { timeoutMs, durationMs });
         updatePrizePicksDiagnostics({
           outerTimeout: true,
           timedOut: true,
@@ -156,6 +157,10 @@ export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyRe
           lastError: timeoutMessage,
           failureReason: `Provider wrapper timed out after ${Math.round(timeoutMs / 1000)}s — request may not have completed.`,
         });
+      }
+      if (label === "Underdog") {
+        const outerStep = "outer provider wrapper (fetchProviderIsolated)";
+        console.warn("[UD TIMEOUT] step:", outerStep, { timeoutMs, durationMs });
       }
       console.warn(`[Provider] ${label} timed out after ${durationMs}ms (limit ${timeoutMs}ms)`);
       return {

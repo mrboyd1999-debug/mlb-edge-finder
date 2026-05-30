@@ -125,11 +125,18 @@ export function recordMlbStatsFetch({
     pipelineStatus.mlbStatsApi.status = "Connected";
     pipelineStatus.mlbStatsApi.lastSuccessAt = now;
     pipelineStatus.mlbStatsApi.lastError = "";
-  } else if (pipelineStatus.mlbStatsApi.attachmentConfirmed) {
+  } else if (
+    pipelineStatus.mlbStatsApi.attachmentConfirmed ||
+    (pipelineStatus.mlbStatsApi.last5Last10Attached ?? 0) > 0
+  ) {
     const coverage = Number(pipelineStatus.mlbStatsApi.historicalCoveragePercent) || 0;
-    pipelineStatus.mlbStatsApi.status = coverage >= 5 ? "Connected" : "Warning";
-    pipelineStatus.mlbStatsApi.lastError =
-      coverage >= 5 ? "" : error || "Partial MLB Stats API errors — historical data attached on board";
+    const usingCache = Boolean(pipelineStatus.mlbStatsApi.usingCache);
+    pipelineStatus.mlbStatsApi.status = coverage >= 5 && !usingCache ? "Connected" : "Warning";
+    pipelineStatus.mlbStatsApi.lastError = usingCache
+      ? "Using cached MLB profiles — historical stats attached on board"
+      : coverage >= 5
+        ? ""
+        : error || "Partial MLB Stats API errors — historical data attached on board";
   } else if (
     (pipelineStatus.mlbStatsApi.historicalCoveragePercent ?? 0) > 0 ||
     pipelineStatus.mlbStatsApi.lastSuccessAt ||
@@ -205,8 +212,10 @@ export function syncMlbStatsStatusFromAttachment(audit = {}, props = [], context
   );
 
   if (propsWithHistorical > 0 || gameLogsAttached > 0 || historicalAttached > 0 || coveragePercent > 0) {
-    pipelineStatus.mlbStatsApi.status = "Connected";
-    pipelineStatus.mlbStatsApi.lastError = "";
+    pipelineStatus.mlbStatsApi.status = pipelineStatus.mlbStatsApi.usingCache ? "Warning" : "Connected";
+    pipelineStatus.mlbStatsApi.lastError = pipelineStatus.mlbStatsApi.usingCache
+      ? "Using cached MLB profiles — Last5/Last10/Season attached on board"
+      : "";
   }
   notifyPipelineStatusListeners();
 }

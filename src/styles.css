@@ -1010,6 +1010,28 @@ body,
   font-size: 12px;
 }
 
+.provider-feed-mode-banner {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: #0f172a;
+}
+
+.provider-feed-mode-banner__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.provider-feed-mode-banner__detail {
+  margin: 6px 0 0;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
 .system-status-card__summary {
   font-size: 10px;
   color: #86efac;

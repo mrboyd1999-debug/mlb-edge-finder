@@ -13,6 +13,7 @@ import DeveloperDebugPanel from "./DeveloperDebugPanel.jsx";
 import ProjectionProviderWarning from "./ProjectionProviderWarning.jsx";
 import ApiSetupBanner from "./ApiSetupBanner.jsx";
 import HistoricalCoverageBanner from "./HistoricalCoverageBanner.jsx";
+import ProviderFeedModeBanner from "./ProviderFeedModeBanner.jsx";
 import { readSettingsMeta } from "../services/runtimeSettings.js";
 import { isDebugModeEnabled } from "../utils/devMode.js";
 
@@ -52,6 +53,7 @@ function DfsAnalyzerLayout({
   debugInfo,
   mlbPipelineStatus,
   statsAttachmentAudit = null,
+  providerCoverageAudit = null,
 }) {
   const [connectionReport, setConnectionReport] = useState(() => {
     const meta = readSettingsMeta();
@@ -79,6 +81,8 @@ function DfsAnalyzerLayout({
       />
 
       <CompactAppTabs activeTab={appView} onChange={setAppView} />
+
+      <ProviderFeedModeBanner audit={providerCoverageAudit} loading={loading} />
 
       <SystemStatusCard
         apiHealth={apiHealth}
