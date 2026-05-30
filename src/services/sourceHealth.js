@@ -26,6 +26,7 @@ export const CONNECTION_LABELS = {
 
 export const CONNECTION_TIERS = {
   CONNECTED: "Connected",
+  REFRESHING: "Refreshing",
   DEGRADED: "Degraded",
   WARNING: "Warning",
   FAILED: "Failed",
@@ -34,6 +35,7 @@ export const CONNECTION_TIERS = {
 
 export const HEALTH_COLORS = {
   Connected: { bg: "rgba(34,197,94,0.18)", text: "#86efac", border: "rgba(34,197,94,0.35)" },
+  Refreshing: { bg: "rgba(59,130,246,0.18)", text: "#93c5fd", border: "rgba(59,130,246,0.35)" },
   Degraded: { bg: "rgba(234,179,8,0.18)", text: "#fde047", border: "rgba(234,179,8,0.35)" },
   Warning: { bg: "rgba(234,179,8,0.18)", text: "#fde047", border: "rgba(234,179,8,0.35)" },
   Failed: { bg: "rgba(239,68,68,0.15)", text: "#fca5a5", border: "rgba(239,68,68,0.3)" },
@@ -136,7 +138,7 @@ export function resolveProviderConnectionStatus({
       };
     }
     return {
-      tier: CONNECTION_TIERS.DEGRADED,
+      tier: CONNECTION_TIERS.WARNING,
       badge: hasCached ? HEALTH_STATES.CACHED : HEALTH_STATES.DEGRADED,
       connected: true,
       degraded: true,
@@ -145,7 +147,7 @@ export function resolveProviderConnectionStatus({
 
   if (hasRefreshData && hasCached) {
     return {
-      tier: CONNECTION_TIERS.DEGRADED,
+      tier: CONNECTION_TIERS.WARNING,
       badge: HEALTH_STATES.CACHED,
       connected: true,
       degraded: true,
@@ -153,6 +155,14 @@ export function resolveProviderConnectionStatus({
   }
 
   if (refreshDegraded || timedOut || fetchFailed) {
+    if (hasCached) {
+      return {
+        tier: CONNECTION_TIERS.WARNING,
+        badge: HEALTH_STATES.CACHED,
+        connected: true,
+        degraded: true,
+      };
+    }
     return { tier: CONNECTION_TIERS.FAILED, badge: HEALTH_STATES.FAILED, connected: false, degraded: false };
   }
 
@@ -259,7 +269,12 @@ export function resolveFetchHealthBadge({
     };
   }
   if (timedOut && finiteCount(usableCount) === 0 && finiteCount(parsedCount) === 0) {
-    return { pipelineStatus: "Timed out", badge: "TIMED OUT", message: statusLabel, connectionTier: CONNECTION_TIERS.FAILED };
+    return {
+      pipelineStatus: "Timed out",
+      badge: "TIMED OUT",
+      message: statusLabel,
+      connectionTier: cached ? CONNECTION_TIERS.WARNING : CONNECTION_TIERS.FAILED,
+    };
   }
   if (rawCount > 0 && parsedCount === 0) {
     return {

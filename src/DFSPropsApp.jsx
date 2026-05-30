@@ -157,7 +157,7 @@ import {
   LIVE_LINE_PROJECTION_UNAVAILABLE,
 } from "./modules/projectionBreakdown.js";
 import { logMlbData, traceLiveBoardMlbProp, getMlbPipelineStatus, subscribeMlbPipelineStatus } from "./services/mlbDataService.js";
-import { mergeDfsSourceStatusFromApiHealth, recordMlbProjectionResult } from "./services/mlbPipelineStatus.js";
+import { mergeDfsSourceStatusFromApiHealth, recordMlbProjectionResult, setMlbPipelineRefreshing } from "./services/mlbPipelineStatus.js";
 import { NO_VERIFIED_GRADE_STATUS } from "./utils/manualPropScoring.js";
 import {
   computeGradingDataQuality,
@@ -226,6 +226,11 @@ import {
   STARTUP_NORMALIZED_PROP_LIMIT,
 } from "./utils/startupPerformance.js";
 import { persistStartupBoardSlices, readInstantStartupBoard } from "./services/startupBoardCache.js";
+import {
+  mergeBoardRefreshResult,
+  readCacheFirstStartupBundle,
+  resolveStableStatsMap,
+} from "./services/pipelineStability.js";
 import { buildPipelineDiagnostics, logPipelineDiagnostics } from "./utils/propPipelineDiagnostics.js";
 import { PICK_TIER_RESEARCH, PICK_TIER_VERIFIED } from "./utils/conservativeProjection.js";
 import { resolveIngestionFallback } from "./services/ingestionFallback.js";
@@ -1517,35 +1522,40 @@ function applyMlbStatsProviderResult(statsEntry, debugInfo) {
   let statsMap = statsResult?.stats instanceof Map ? statsResult.stats : null;
   let usedCache = false;
 
-  if ((!statsMap || statsMap.size === 0) && (timedOut || hardFailed)) {
-    const cached = readCachedMlbStatsMap();
-    if (cached?.size) {
-      statsMap = cached;
-      usedCache = true;
-    }
+  const cached = readCachedMlbStatsMap();
+  if ((!statsMap || statsMap.size === 0) && cached?.size) {
+    statsMap = cached;
+    usedCache = true;
   }
 
   const statsMapSize = statsMap?.size ?? 0;
-  const enrichmentFailed = hardFailed && statsMapSize === 0;
+  const enrichmentFailed = statsMapSize === 0 && (hardFailed || timedOut);
+  const enrichmentDegraded = usedCache || (timedOut && statsMapSize > 0) || (hardFailed && statsMapSize > 0);
 
   if (enrichmentFailed) {
     debugInfo.statsEnrichmentFailed = true;
+    debugInfo.statsEnrichmentDegraded = false;
     debugInfo.statsEnrichmentError =
       statsResult?.warnings?.[0] ||
       statsEntry?.result?.message ||
       PROJECTION_DATA_UNAVAILABLE_MESSAGE;
-    debugInfo.statsMap = statsMapSize ? statsMap : null;
-    debugInfo.statsLoadedCount = statsMapSize;
+    debugInfo.statsMap = null;
+    debugInfo.statsLoadedCount = 0;
   } else {
-    debugInfo.statsEnrichmentFailed = statsMapSize === 0;
-    debugInfo.statsEnrichmentError =
-      statsMapSize === 0
-        ? timedOut
-          ? `${PROJECTION_DATA_UNAVAILABLE_MESSAGE}: timed out — using season merge`
+    debugInfo.statsEnrichmentFailed = false;
+    debugInfo.statsEnrichmentDegraded = enrichmentDegraded;
+    debugInfo.statsEnrichmentError = enrichmentDegraded
+      ? usedCache
+        ? "MLB stats refresh failed — using cached player profiles"
+        : timedOut
+          ? "MLB stats timed out — using available profiles and season merge"
           : statsResult?.warnings?.[0] || ""
+      : statsMapSize === 0
+        ? statsResult?.warnings?.[0] || ""
         : "";
     debugInfo.statsMap = statsMap;
     debugInfo.statsLoadedCount = statsMapSize;
+    debugInfo.statsFromCache = usedCache;
   }
 
   return {
@@ -1554,6 +1564,7 @@ function applyMlbStatsProviderResult(statsEntry, debugInfo) {
     timedOut,
     failed: enrichmentFailed,
     usedCache,
+    degraded: enrichmentDegraded,
     durationMs: statsEntry?.durationMs ?? 0,
   };
 }
@@ -2312,7 +2323,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
   const background = {
     comparisons: [],
-    stats: new Map(),
+    stats: resolveStableStatsMap(null).statsMap,
     news: new Map(),
     manualStatsMap: readManualStatsMap(),
   };
@@ -2355,20 +2366,23 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     });
 
     const statsApplied = await fetchMlbProjectionStatsBlocking(statsFetchProps, debugInfo);
-    background.stats = statsApplied.stats instanceof Map ? statsApplied.stats : new Map();
+    const stableStats = resolveStableStatsMap(statsApplied.stats);
+    background.stats = stableStats.statsMap;
     statsTimedOut = statsApplied.timedOut;
     markStatsFetchTimedOut(statsTimedOut);
     backgroundWarnings.push(...(statsApplied.warnings || []));
-    debugInfo.statsMap = statsApplied.failed ? null : statsApplied.stats;
-    debugInfo.statsLoadedCount = statsApplied.stats?.size ?? 0;
+    debugInfo.statsMap = stableStats.statsMap.size ? stableStats.statsMap : null;
+    debugInfo.statsLoadedCount = stableStats.statsMap.size;
+    debugInfo.statsFromCache = stableStats.usedCache || statsApplied.usedCache;
     traceProjectionExecutionPath("fetchDFSProps:stats-fetch-done", {
-      statsMapSize: statsApplied.stats?.size ?? 0,
+      statsMapSize: stableStats.statsMap.size,
       statsTimedOut,
       statsFailed: statsApplied.failed,
-      statsMapIsMap: statsApplied.stats instanceof Map,
+      statsFromCache: stableStats.usedCache,
+      statsMapIsMap: stableStats.statsMap instanceof Map,
     });
-    if (statsApplied.stats instanceof Map && statsApplied.stats.size > 0) {
-      const { matchedPlayers, gameLogsFound } = summarizeStatsMap(statsApplied.stats);
+    if (stableStats.statsMap.size > 0) {
+      const { matchedPlayers, gameLogsFound } = summarizeStatsMap(stableStats.statsMap);
       setPipelineStageCount(PIPELINE_STAGES.MATCHED_PLAYERS_COUNT, matchedPlayers);
       setPipelineStageCount(PIPELINE_STAGES.GAME_LOGS_FOUND_COUNT, gameLogsFound);
     } else {
@@ -2391,13 +2405,13 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       },
     ]);
 
-    debugInfo.statsMap = statsApplied.stats instanceof Map ? statsApplied.stats : null;
+    debugInfo.statsMap = stableStats.statsMap.size ? stableStats.statsMap : null;
 
     const canMergeProjections = allDisplayProps.length > 0;
     if (canMergeProjections) {
       const mergeContext = {
         seasonStats: seasonStatsData,
-        statsMap: statsApplied.stats instanceof Map ? statsApplied.stats : new Map(),
+        statsMap: stableStats.statsMap,
       };
       const merged = mergeProjectionsOntoProps(allDisplayProps, mergeContext);
       allDisplayProps = merged.props;
@@ -2405,11 +2419,11 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       workingActiveProps = mergeProjectionsOntoProps(workingActiveProps, mergeContext).props;
       debugInfo.projectionMerge = merged.debug;
 
-      const matchedPlayers = statsApplied.stats instanceof Map
-        ? summarizeStatsMap(statsApplied.stats).matchedPlayers
+      const matchedPlayers = stableStats.statsMap.size
+        ? summarizeStatsMap(stableStats.statsMap).matchedPlayers
         : 0;
-      const gameLogsFound = statsApplied.stats instanceof Map
-        ? summarizeStatsMap(statsApplied.stats).gameLogsFound
+      const gameLogsFound = stableStats.statsMap.size
+        ? summarizeStatsMap(stableStats.statsMap).gameLogsFound
         : 0;
       debugInfo.projectionCoverageAudit = buildProjectionCoverageAudit({
         rawPropCount: rawProps.length,
@@ -2417,14 +2431,14 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         sportFilteredProps,
         marketFilteredProps,
         projectedProps: allDisplayProps,
-        statsMap: statsApplied.stats instanceof Map ? statsApplied.stats : null,
+        statsMap: stableStats.statsMap.size ? stableStats.statsMap : null,
         matchedPlayers,
         gameLogsFound,
       });
       logProjectionCoverageAudit(debugInfo.projectionCoverageAudit);
 
       const historicalContext = {
-        statsMap: statsApplied.stats instanceof Map ? statsApplied.stats : null,
+        statsMap: stableStats.statsMap.size ? stableStats.statsMap : null,
         seasonStats: seasonStatsData,
         logAttach: import.meta.env.DEV,
       };
@@ -2527,9 +2541,11 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   } else {
   const statsFetchProps = pickUniquePropsForStatsFetch(workingNormalProps);
   const statsApplied = await fetchMlbProjectionStatsBlocking(statsFetchProps, debugInfo);
-  background.stats = statsApplied.stats instanceof Map ? statsApplied.stats : new Map();
-  debugInfo.statsLoadedCount = statsApplied.stats?.size ?? 0;
-  debugInfo.statsMap = statsApplied.failed ? null : statsApplied.stats;
+  const stableStats = resolveStableStatsMap(statsApplied.stats);
+  background.stats = stableStats.statsMap;
+  debugInfo.statsLoadedCount = stableStats.statsMap.size;
+  debugInfo.statsMap = stableStats.statsMap.size ? stableStats.statsMap : null;
+  debugInfo.statsFromCache = stableStats.usedCache || statsApplied.usedCache;
   backgroundWarnings.push(...(statsApplied.warnings || []));
   statsTimedOut = statsApplied.timedOut;
   markStatsFetchTimedOut(statsTimedOut);
@@ -2725,7 +2741,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     statsMap: background.stats,
     emergencyDiagnostic,
   });
-  markProjectionsComplete(!statsTimedOut);
+  markProjectionsComplete((background.stats instanceof Map && background.stats.size > 0) || !statsTimedOut);
   logPipelineExecutionSummary("Post-scoring pipeline summary");
   debugInfo.mlbProjectionDiagnostics = mlbProjectionDiagnostics;
   debugInfo.verifiedProps = mlbProjectionDiagnostics.verifiedProps;
@@ -3230,7 +3246,18 @@ export default function DFSPropsApp() {
       }
 
       loadInFlightRef.current = true;
-      if (!autoRefresh) {
+      setMlbPipelineRefreshing(true);
+      const cachedForPaint =
+        !force && !autoRefresh
+          ? readCachedBoard(DEFAULT_SOURCE_STATUS) || readVerifiedCacheBoard(DEFAULT_SOURCE_STATUS)
+          : null;
+      const hasCachedPaint = Boolean(
+        cachedForPaint?.allDisplayProps?.length ||
+          cachedForPaint?.props?.length ||
+          cachedForPaint?.usableProps?.length ||
+          cachedForPaint?.qualifiedReadyProps?.length
+      );
+      if (!autoRefresh && !hasCachedPaint) {
         setLoading(true);
         setLoadingStage("FETCH");
       }
@@ -3245,7 +3272,31 @@ export default function DFSPropsApp() {
           clearApiCache({ preserveLastGood: true });
         }
 
-        if (!force && !autoRefresh) {
+        if (hasCachedPaint) {
+          const layer =
+            cachedForPaint.cacheMetadata?.freshnessTier ||
+            resolveCacheLayer(new Date(cachedForPaint.updatedAt).getTime(), DFS_CACHE_TTL_MS);
+          applyBoardState(cachedForPaint, formatCacheLayerLabel(layer).toLowerCase());
+          if (cachedForPaint.statsMap instanceof Map && cachedForPaint.statsMap.size) {
+            scoringContextRef.current = {
+              ...(scoringContextRef.current || {}),
+              stats: cachedForPaint.statsMap,
+            };
+          } else {
+            const cachedStats = resolveStableStatsMap(null);
+            if (cachedStats.statsMap.size) {
+              scoringContextRef.current = {
+                ...(scoringContextRef.current || {}),
+                stats: cachedStats.statsMap,
+              };
+            }
+          }
+          setLoading(false);
+          console.info("[DFS Refresh] board cache served — continuing background refresh", {
+            updatedAt: cachedForPaint.updatedAt,
+            durationMs: Date.now() - fetchStartedAt,
+          });
+        } else if (!force && !autoRefresh) {
           const cached = readCachedBoard(DEFAULT_SOURCE_STATUS) || readVerifiedCacheBoard(DEFAULT_SOURCE_STATUS);
           if (cached?.allDisplayProps?.length || cached?.props?.length || cached?.usableProps?.length || cached?.qualifiedReadyProps?.length) {
             const layer = cached.cacheMetadata?.freshnessTier || resolveCacheLayer(new Date(cached.updatedAt).getTime(), DFS_CACHE_TTL_MS);
@@ -3274,7 +3325,12 @@ export default function DFSPropsApp() {
         if (!result) {
           throw new Error("Board fetch returned no result");
         }
-        scoringContextRef.current = result.scoringContext || null;
+        const stableStats = resolveStableStatsMap(result.scoringContext?.stats);
+        scoringContextRef.current = {
+          ...(scoringContextRef.current || {}),
+          ...(result.scoringContext || {}),
+          stats: stableStats.statsMap,
+        };
         const boardSourceStatus = finalizeSourceStatus(result.sourceStatus || DEFAULT_SOURCE_STATUS);
         const boardProps = result.allDisplayProps?.length
           ? result.allDisplayProps
@@ -3286,7 +3342,7 @@ export default function DFSPropsApp() {
           boardProps,
           boardSourceStatus
         );
-        const board = {
+        let board = {
           props: boardProps,
           allDisplayProps: result.allDisplayProps || boardProps,
           displayDebugCounts: result.debugInfo?.displayDebugCounts || {},
@@ -3317,6 +3373,20 @@ export default function DFSPropsApp() {
           board.cacheMetadata = cacheMeta;
           board.cacheAnalytics = cacheMeta.cacheAnalytics;
           board.debugInfo = { ...board.debugInfo, cacheAnalytics: cacheMeta.cacheAnalytics };
+        }
+
+        const mergeResult = mergeBoardRefreshResult(previousBoard || {}, board);
+        board = mergeResult.board;
+        const mergedBoardProps = board.allDisplayProps?.length
+          ? board.allDisplayProps
+          : board.props?.length
+            ? board.props
+            : board.usableProps || [];
+        board.props = mergedBoardProps;
+        board.allDisplayProps = board.allDisplayProps?.length ? board.allDisplayProps : mergedBoardProps;
+        board.usableProps = board.usableProps?.length ? board.usableProps : mergedBoardProps;
+        if (mergeResult.keptPrevious || mergeResult.merged) {
+          board.pipelineFallback = true;
         }
 
         const rateLimited =
@@ -3477,6 +3547,7 @@ export default function DFSPropsApp() {
         }
       } finally {
         loadInFlightRef.current = false;
+        setMlbPipelineRefreshing(false);
         setLoading(false);
         setLoadingStage("DONE");
       }
@@ -3567,7 +3638,8 @@ export default function DFSPropsApp() {
     if (initialLoadRef.current) return;
     initialLoadRef.current = true;
     beginPerformanceTimer(PERFORMANCE_TIMERS.renderDashboard);
-    const instant = readInstantStartupBoard(DEFAULT_SOURCE_STATUS);
+    const startupBundle = readCacheFirstStartupBundle(DEFAULT_SOURCE_STATUS);
+    const instant = startupBundle.instant;
     if (instant?.board) {
       applyBoardState(
         {
@@ -3576,8 +3648,20 @@ export default function DFSPropsApp() {
         },
         instant.layer || "cached"
       );
+      if (startupBundle.statsMap?.size) {
+        scoringContextRef.current = {
+          ...(scoringContextRef.current || {}),
+          stats: startupBundle.statsMap,
+        };
+      }
       setLoading(false);
       endPerformanceTimer(PERFORMANCE_TIMERS.renderDashboard);
+      console.info("[DFS Startup] cache-first paint", {
+        props: instant.board.allDisplayProps?.length || instant.board.props?.length || 0,
+        statsProfiles: startupBundle.statsMap?.size || 0,
+        statsFromCache: startupBundle.statsFromCache,
+        projectionSlice: startupBundle.projections?.length || 0,
+      });
     }
     loadProps();
   }, [loadProps, applyBoardState]);

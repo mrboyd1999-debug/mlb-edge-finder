@@ -50,8 +50,8 @@ function StatusRow({ label, row = {}, lastSuccessAt, lastError, details = [], ex
           {row.ingestionSummary}
         </p>
       ) : null}
-      {lastError && tier === CONNECTION_TIERS.FAILED ? (
-        <p style={{ ...styles.compactFlags, margin: 0, color: "#fca5a5" }}>{lastError}</p>
+      {lastError && (tier === CONNECTION_TIERS.FAILED || tier === CONNECTION_TIERS.WARNING) ? (
+        <p style={{ ...styles.compactFlags, margin: 0, color: tier === CONNECTION_TIERS.FAILED ? "#fca5a5" : "#fde047" }}>{lastError}</p>
       ) : null}
       {details.map((line) => (
         <p key={line} style={{ ...styles.compactFlags, margin: 0, color: "#64748b", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 10 }}>
@@ -81,11 +81,15 @@ function MlbPipelineStatusPanel({ pipelineStatus = null, apiHealth = null, compa
   ].filter(Boolean);
 
   const projectionTier =
-    projection.lastProjectionGeneratedAt || projection.lastSuccessAt
-      ? CONNECTION_TIERS.CONNECTED
-      : projection.status === "Failed"
-        ? CONNECTION_TIERS.FAILED
-        : projection.status || CONNECTION_TIERS.PENDING;
+    projection.status === "Refreshing"
+      ? CONNECTION_TIERS.REFRESHING
+      : projection.status === "Warning"
+        ? CONNECTION_TIERS.WARNING
+        : projection.lastProjectionGeneratedAt || projection.lastSuccessAt
+          ? CONNECTION_TIERS.CONNECTED
+          : projection.status === "Failed"
+            ? CONNECTION_TIERS.FAILED
+            : projection.status || CONNECTION_TIERS.PENDING;
 
   return (
     <div className="mlb-pipeline-status-panel" style={{ display: "grid", gap: compact ? "6px" : "8px", marginTop: compact ? "8px" : "10px" }}>
@@ -113,7 +117,14 @@ function MlbPipelineStatusPanel({ pipelineStatus = null, apiHealth = null, compa
         label={stats.label || "MLB Stats API"}
         row={{
           status: stats.status,
-          connectionTier: stats.status === "Connected" ? CONNECTION_TIERS.CONNECTED : stats.status,
+          connectionTier:
+            stats.status === "Connected"
+              ? CONNECTION_TIERS.CONNECTED
+              : stats.status === "Refreshing"
+                ? CONNECTION_TIERS.REFRESHING
+                : stats.status === "Warning"
+                  ? CONNECTION_TIERS.WARNING
+                  : stats.status,
           statusLabel: stats.status,
         }}
         lastSuccessAt={stats.lastSuccessAt}

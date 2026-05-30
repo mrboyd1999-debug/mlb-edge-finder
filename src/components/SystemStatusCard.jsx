@@ -21,6 +21,8 @@ function formatCheckedAt(value) {
 function statusTier(status) {
   const key = String(status || "").toLowerCase();
   if (key === "connected") return CONNECTION_TIERS.CONNECTED;
+  if (key === "refreshing") return CONNECTION_TIERS.REFRESHING;
+  if (key === "warning") return CONNECTION_TIERS.WARNING;
   if (key === "degraded" || key === "not configured" || key === "not tested" || key === "limited") {
     return CONNECTION_TIERS.DEGRADED;
   }
@@ -30,7 +32,10 @@ function statusTier(status) {
 function indicatorTier(status) {
   const key = String(status || "").toLowerCase();
   if (key === "connected") return "ok";
-  if (key === "degraded" || key === "not configured" || key === "not tested" || key === "limited") return "warn";
+  if (key === "refreshing") return "info";
+  if (key === "warning" || key === "degraded" || key === "not configured" || key === "not tested" || key === "limited") {
+    return "warn";
+  }
   return "fail";
 }
 
@@ -82,6 +87,17 @@ function resolveLineFeedStatus(feed = {}) {
     if (tier === CONNECTION_TIERS.CONNECTED) {
       return { status: "Connected", detail: `${active} props in use (live refresh)` };
     }
+    if (tier === CONNECTION_TIERS.REFRESHING) {
+      return { status: "Refreshing", detail: `${active} props in use while refresh runs` };
+    }
+    if (tier === CONNECTION_TIERS.WARNING) {
+      return {
+        status: "Warning",
+        detail: timedOut
+          ? `Refresh timed out — ${active} cached props in use`
+          : `${active} props in use (cached)`,
+      };
+    }
     return {
       status: "Degraded",
       detail: timedOut
@@ -120,6 +136,12 @@ function resolveLineFeedStatus(feed = {}) {
 function resolveMlbStatsStatus(stats = {}) {
   if (stats.status === "Connected") {
     return { status: "Connected", detail: stats.lastError ? stats.lastError : "Game logs OK" };
+  }
+  if (stats.status === "Refreshing") {
+    return { status: "Refreshing", detail: "Refreshing MLB player profiles" };
+  }
+  if (stats.status === "Warning") {
+    return { status: "Warning", detail: stats.lastError || "Using cached MLB player profiles" };
   }
   return { status: "Failed", detail: stats.lastError || stats.failureReason || "Stats API unavailable" };
 }

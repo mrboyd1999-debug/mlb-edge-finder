@@ -81,6 +81,24 @@ export function getMlbPipelineStatus() {
   return cloneStatus();
 }
 
+export function setMlbPipelineRefreshing(isRefreshing = false) {
+  if (isRefreshing) {
+    if (pipelineStatus.mlbStatsApi.lastSuccessAt) {
+      pipelineStatus.mlbStatsApi.status = "Refreshing";
+    }
+    if (pipelineStatus.projectionApi.lastProjectionGeneratedAt || pipelineStatus.projectionApi.lastSuccessAt) {
+      pipelineStatus.projectionApi.status = "Refreshing";
+    }
+    ["PrizePicks", "Underdog"].forEach((name) => {
+      if (pipelineStatus.dfsSources[name].lastSuccessAt) {
+        pipelineStatus.dfsSources[name].status = "Refreshing";
+        pipelineStatus.dfsSources[name].connectionTier = "Refreshing";
+      }
+    });
+  }
+  notifyPipelineStatusListeners();
+}
+
 export function recordMlbStatsFetch({
   ok = false,
   url = "",
@@ -102,7 +120,7 @@ export function recordMlbStatsFetch({
     pipelineStatus.mlbStatsApi.lastSuccessAt = now;
     pipelineStatus.mlbStatsApi.lastError = "";
   } else {
-    pipelineStatus.mlbStatsApi.status = "Failed";
+    pipelineStatus.mlbStatsApi.status = pipelineStatus.mlbStatsApi.lastSuccessAt ? "Warning" : "Failed";
     pipelineStatus.mlbStatsApi.lastError = error || "MLB Stats API request failed";
   }
   notifyPipelineStatusListeners();
@@ -122,7 +140,9 @@ export function recordMlbProjectionResult({
   pipelineStatus.projectionApi.lastStat = statType || pipelineStatus.projectionApi.lastStat;
   const hasProjection = projection != null && Number.isFinite(Number(projection));
   const mlbStatsOperational =
-    engineOperational != null ? engineOperational : pipelineStatus.mlbStatsApi.status === "Connected";
+    engineOperational != null
+      ? engineOperational
+      : ["Connected", "Warning", "Refreshing"].includes(pipelineStatus.mlbStatsApi.status);
   if (ok || hasProjection) {
     pipelineStatus.projectionApi.status = "Connected";
     pipelineStatus.projectionApi.lastSuccessAt = now;
@@ -146,8 +166,8 @@ export function recordDfsSourceStatus(source = "", { ok = false, error = "" } = 
   const key = source === "Underdog" ? "Underdog" : source === "PrizePicks" ? "PrizePicks" : null;
   if (!key) return;
   const now = new Date().toISOString();
-  pipelineStatus.dfsSources[key].status = ok ? "Connected" : "Failed";
-  pipelineStatus.dfsSources[key].connectionTier = ok ? "Connected" : "Failed";
+  pipelineStatus.dfsSources[key].status = ok ? "Connected" : pipelineStatus.dfsSources[key].lastSuccessAt ? "Warning" : "Failed";
+  pipelineStatus.dfsSources[key].connectionTier = ok ? "Connected" : pipelineStatus.dfsSources[key].lastSuccessAt ? "Warning" : "Failed";
   if (ok) {
     pipelineStatus.dfsSources[key].lastSuccessAt = now;
     pipelineStatus.dfsSources[key].lastError = "";
