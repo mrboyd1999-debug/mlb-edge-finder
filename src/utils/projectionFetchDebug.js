@@ -100,7 +100,7 @@ export function buildProjectionProviderSummary({
   const mergedWithProjection = countMergedWithProjection(mergedProps);
   const seasonStatRows = Array.isArray(seasonStats) ? seasonStats.length : 0;
   const sportsDataConfigured = Boolean(getSportsDataApiKey());
-  const unavailable = mergedWithProjection === 0 || statsEnrichmentFailed;
+  const unavailable = mergedWithProjection === 0 && statsEnrichmentFailed;
   const reason = unavailable
     ? resolveUnavailableReason({
         sportsDataConfigured,

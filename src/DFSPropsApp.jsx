@@ -11,7 +11,7 @@ import { enrichLineMovementWithTags } from "./services/lineMovementTrust.js";
 import { fetchSportsbookComparison } from "./services/sportsbookOdds";
 import { fetchOddsApiDisplayProps } from "./services/oddsApiPlayerProps.js";
 import { isOddsApiKeyUsable, ODDS_API_INVALID_KEY_MESSAGE, sanitizeOddsApiUiMessage } from "./services/oddsApiClient.js";
-import { fetchPlayerStats, findStatProfile, statProfileKey, buildMlbStatProfileFromLogs, pickUniquePropsForStatsFetch } from "./services/playerStats";
+import { fetchPlayerStats, findStatProfile, statProfileKey, buildMlbStatProfileFromLogs, pickUniquePropsForStatsFetch, readCachedMlbStatsMap } from "./services/playerStats";
 import { fetchPlayerSeasonStats } from "./services/sportsDataService.js";
 import { playerNamesMatch } from "./utils/playerNames.js";
 import { PRIZEPICKS_HTML_BANNER } from "./services/prizepicks";
@@ -1501,38 +1501,49 @@ function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderd
 }
 
 function applyMlbStatsProviderResult(statsEntry, debugInfo) {
-  const failed = Boolean(
-    statsEntry?.error ||
-      statsEntry?.result?.error ||
-      statsEntry?.result?.failed ||
-      statsEntry?.result?.stats == null
-  );
+  const hardFailed = Boolean(statsEntry?.error && !statsEntry?.timedOut);
   const timedOut = Boolean(statsEntry?.timedOut || statsEntry?.result?.timedOut);
   const statsResult = statsEntry?.result;
-  const statsMap = statsResult?.stats instanceof Map ? statsResult.stats : null;
-  const statsMapSize = statsMap?.size ?? 0;
+  let statsMap = statsResult?.stats instanceof Map ? statsResult.stats : null;
+  let usedCache = false;
 
-  const enrichmentFailed = failed || statsMapSize === 0;
+  if ((!statsMap || statsMap.size === 0) && (timedOut || hardFailed)) {
+    const cached = readCachedMlbStatsMap();
+    if (cached?.size) {
+      statsMap = cached;
+      usedCache = true;
+    }
+  }
+
+  const statsMapSize = statsMap?.size ?? 0;
+  const enrichmentFailed = hardFailed && statsMapSize === 0;
+
   if (enrichmentFailed) {
     debugInfo.statsEnrichmentFailed = true;
     debugInfo.statsEnrichmentError =
       statsResult?.warnings?.[0] ||
       statsEntry?.result?.message ||
       PROJECTION_DATA_UNAVAILABLE_MESSAGE;
-    debugInfo.statsMap = null;
-    debugInfo.statsLoadedCount = 0;
+    debugInfo.statsMap = statsMapSize ? statsMap : null;
+    debugInfo.statsLoadedCount = statsMapSize;
   } else {
-    debugInfo.statsEnrichmentFailed = false;
-    debugInfo.statsEnrichmentError = "";
+    debugInfo.statsEnrichmentFailed = statsMapSize === 0;
+    debugInfo.statsEnrichmentError =
+      statsMapSize === 0
+        ? timedOut
+          ? `${PROJECTION_DATA_UNAVAILABLE_MESSAGE}: timed out — using season merge`
+          : statsResult?.warnings?.[0] || ""
+        : "";
     debugInfo.statsMap = statsMap;
     debugInfo.statsLoadedCount = statsMapSize;
   }
 
   return {
-    stats: statsMap,
+    stats: statsMap || new Map(),
     warnings: statsResult?.warnings || [],
     timedOut,
     failed: enrichmentFailed,
+    usedCache,
     durationMs: statsEntry?.durationMs ?? 0,
   };
 }
@@ -2352,17 +2363,13 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       },
     ]);
 
-    debugInfo.statsMap = statsApplied.failed ? null : statsApplied.stats;
+    debugInfo.statsMap = statsApplied.stats instanceof Map ? statsApplied.stats : null;
 
     const canMergeProjections = allDisplayProps.length > 0;
-    const hasProjectionSources = hasUsableProjectionSources({
-      statsMap: statsApplied.stats,
-      seasonStats: seasonStatsData,
-    });
-    if (canMergeProjections && hasProjectionSources) {
+    if (canMergeProjections) {
       const mergeContext = {
         seasonStats: seasonStatsData,
-        statsMap: statsApplied.stats,
+        statsMap: statsApplied.stats instanceof Map ? statsApplied.stats : new Map(),
       };
       const merged = mergeProjectionsOntoProps(allDisplayProps, mergeContext);
       allDisplayProps = merged.props;
@@ -2377,8 +2384,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         seasonStats: seasonStatsData,
         mergeDebug: merged.debug,
         mergedProps: merged.props,
-        statsTimedOut: false,
-        statsEnrichmentFailed: Boolean(debugInfo.statsEnrichmentFailed),
+        statsTimedOut,
+        statsEnrichmentFailed: Boolean(debugInfo.statsEnrichmentFailed) && merged.debug?.projectionCandidateCount === 0,
         statsEnrichmentError: debugInfo.statsEnrichmentError || "",
       });
       if (typeof onCoreReady === "function" && allDisplayProps.length) {
@@ -2395,29 +2402,6 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
           console.warn("[DFS Pipeline] onCoreReady failed after stats merge", error);
         }
       }
-    } else if (canMergeProjections) {
-      const unavailableReason =
-        debugInfo.statsEnrichmentError || PROJECTION_DATA_UNAVAILABLE_MESSAGE;
-      debugInfo.statsEnrichmentFailed = true;
-      debugInfo.statsEnrichmentError = unavailableReason;
-      allDisplayProps = markProjectionDataUnavailable(allDisplayProps, unavailableReason);
-      workingNormalProps = markProjectionDataUnavailable(workingNormalProps, unavailableReason);
-      workingActiveProps = markProjectionDataUnavailable(workingActiveProps, unavailableReason);
-      debugInfo.projectionProvider = buildProjectionProviderSummary({
-        statsMap: statsApplied.stats,
-        seasonStats: seasonStatsData,
-        mergeDebug: null,
-        mergedProps: allDisplayProps,
-        statsTimedOut,
-        statsEnrichmentFailed: true,
-        statsEnrichmentError: unavailableReason,
-      });
-      console.error("[MLB Projection Pipeline] projection merge skipped — no usable stats sources", {
-        statsMapSize: statsApplied.stats?.size ?? 0,
-        seasonStatRows: seasonStatsData.length,
-        statsFetchPropCount: statsFetchProps.length,
-        reason: unavailableReason,
-      });
     } else {
       debugInfo.projectionProvider = buildProjectionProviderSummary({
         statsMap: background.stats,

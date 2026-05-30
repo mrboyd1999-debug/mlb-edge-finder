@@ -1,9 +1,10 @@
 import { cachedFetch } from "./fetchUtil.js";
 import { readSmartCacheIfFresh, writeSmartCache, CACHE_TTL } from "./smartCache.js";
 import { SOURCE_LABELS } from "./statEnrichment.js";
-import { normalizePlayerName, statProfileKey } from "../utils/playerNames.js";
-import { mlbTeamsMatch } from "../utils/mlbTeamMatch.js";
+import { normalizePlayerName, statProfileKey, resolvePropPlayerName, buildPlayerMatchKeys } from "../utils/playerNames.js";
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
+import { resolvePropSport } from "../utils/mlbOnlyMode.js";
+import { mlbTeamsMatch } from "../utils/mlbTeamMatch.js";
 import {
   logIncomingProp,
   logFetchError,
@@ -922,6 +923,37 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
   };
 }
 
+function indexMlbStatProfile(stats, prop, profile) {
+  const playerName = resolvePropPlayerName(prop);
+  const statKey = canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
+  const sport = String(profile.sport || prop.sport || resolvePropSport(prop) || "MLB").toLowerCase();
+  const enriched = {
+    ...profile,
+    sport: profile.sport || prop.sport || resolvePropSport(prop) || "MLB",
+    statType: profile.statType || prop.statType || prop.market,
+    playerName: profile.playerName || playerName,
+    playerId:
+      profile.playerId ??
+      profile.sportsDataPlayerId ??
+      profile.mlbPlayerId ??
+      prop.playerId ??
+      prop.sportsDataPlayerId ??
+      prop.mlbPlayerId ??
+      null,
+  };
+  const keys = new Set([statProfileKey({ ...prop, playerName })]);
+  for (const playerKey of buildPlayerMatchKeys(playerName)) {
+    keys.add([sport, playerKey, statKey].filter(Boolean).join("|"));
+  }
+  const playerId = enriched.playerId;
+  if (playerId != null && playerId !== "") {
+    keys.add([sport, `id:${String(playerId)}`, statKey].filter(Boolean).join("|"));
+  }
+  for (const key of keys) {
+    stats.set(key, enriched);
+  }
+}
+
 export async function fetchMlbDataForProps(props = [], { buildProfile = null } = {}) {
   traceProjectionExecutionPath("fetchMlbDataForProps:enter", {
     propCount: props.length,
@@ -930,10 +962,9 @@ export async function fetchMlbDataForProps(props = [], { buildProfile = null } =
 
   const stats = new Map();
   const warnings = [];
-  const players = [...new Set((props || []).map((prop) => String(prop.playerName || "").trim()).filter(Boolean))].slice(
-    0,
-    MLB_DATA_FETCH_LIMIT
-  );
+  const players = [
+    ...new Set((props || []).map((prop) => resolvePropPlayerName(prop)).filter(Boolean)),
+  ].slice(0, MLB_DATA_FETCH_LIMIT);
 
   logMlbData("batch.start", { props: props.length, players: players.length });
 
@@ -952,16 +983,17 @@ export async function fetchMlbDataForProps(props = [], { buildProfile = null } =
     props,
     async (prop) => {
       try {
-        const data = await buildMlbPropDataPackage(prop, { buildProfile });
+        const playerName = resolvePropPlayerName(prop);
+        const data = await buildMlbPropDataPackage({ ...prop, playerName }, { buildProfile });
         if (data.profile) {
-          const key = statProfileKey(prop);
-          stats.set(key, { ...data.profile, sport: "MLB", statType: prop.statType });
+          indexMlbStatProfile(stats, { ...prop, playerName }, { ...data.profile, sport: "MLB", statType: prop.statType });
         } else {
-          warnings.push(`${prop.playerName}: ${data.reason}`);
+          warnings.push(`${playerName}: ${data.reason}`);
         }
       } catch (error) {
-        warnings.push(`${prop.playerName}: ${error.message}`);
-        logMlbData("batch.propFailed", { player: prop.playerName, reason: error.message });
+        const playerName = resolvePropPlayerName(prop);
+        warnings.push(`${playerName}: ${error.message}`);
+        logMlbData("batch.propFailed", { player: playerName, reason: error.message });
       }
     },
     MLB_PROP_PACKAGE_CONCURRENCY

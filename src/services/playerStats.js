@@ -1,5 +1,5 @@
 import { cachedFetch } from "./fetchUtil.js";
-import { readSmartCacheIfFresh, writeSmartCache, CACHE_TTL } from "./smartCache.js";
+import { readSmartCacheIfFresh, readSmartCacheAllowStale, writeSmartCache, CACHE_TTL } from "./smartCache.js";
 import {
   SOURCE_LABELS,
   mlbRoleContext,
@@ -41,9 +41,31 @@ const SOCCER_PLAYER_FETCH_LIMIT = 40;
 const API_FOOTBALL_KEY = import.meta.env?.VITE_API_FOOTBALL_KEY || "";
 const API_FOOTBALL_BASE = "/api/api-football";
 const API_FOOTBALL_LEAGUE_IDS = [253, 39, 2, 140, 78, 61, 135];
-const MLB_STATS_FETCH_CAP = 300;
+const MLB_STATS_FETCH_CAP = 80;
+const MLB_STATS_MAP_CACHE_KEY = "latest";
 
-/** Pick props for stats fetch — unique players first, then unique player/market pairs. */
+export function readCachedMlbStatsMap() {
+  const cached = readSmartCacheAllowStale("mlb-stats-map", MLB_STATS_MAP_CACHE_KEY, CACHE_TTL.STATS_MS);
+  const entries = cached?.payload?.entries;
+  if (!Array.isArray(entries) || !entries.length) return null;
+  return new Map(entries);
+}
+
+export function writeCachedMlbStatsMap(statsMap) {
+  if (!(statsMap instanceof Map) || !statsMap.size) return;
+  const entries = [...statsMap.entries()].slice(0, 4000);
+  writeSmartCache("mlb-stats-map", MLB_STATS_MAP_CACHE_KEY, { entries }, { source: "fetchPlayerStats" });
+}
+
+export function persistStatProfile(stats, prop, profile) {
+  storeStatProfile(stats, prop, profile);
+}
+
+export function isSupportedMlbStatProp(statType = "") {
+  return isSupportedMlbStat(statType);
+}
+
+/** Pick props for stats fetch — unique players with supported markets first. */
 export function pickUniquePropsForStatsFetch(props = [], max = MLB_STATS_FETCH_CAP) {
   const out = [];
   const seenPlayers = new Set();
@@ -58,23 +80,34 @@ export function pickUniquePropsForStatsFetch(props = [], max = MLB_STATS_FETCH_C
     ].join("|");
   };
 
+  const tryAdd = (prop) => {
+    const playerName = resolvePropPlayerName(prop);
+    if (!playerName) return false;
+    const playerKey = normalizePlayerName(playerName);
+    if (!playerKey) return false;
+    const statKey = playerStatKey(prop);
+    if (seenPlayerStat.has(statKey)) return false;
+    seenPlayerStat.add(statKey);
+    seenPlayers.add(playerKey);
+    out.push({ ...prop, playerName: prop.playerName || playerName });
+    return out.length >= max;
+  };
+
+  for (const prop of props || []) {
+    if (!isSupportedMlbStat(prop.statType || prop.market || prop.propType || "")) continue;
+    if (tryAdd(prop)) return out;
+  }
+
   for (const prop of props || []) {
     const playerName = resolvePropPlayerName(prop);
     if (!playerName) continue;
     const playerKey = normalizePlayerName(playerName);
-    if (!playerKey || seenPlayers.has(playerKey)) continue;
-    seenPlayers.add(playerKey);
-    seenPlayerStat.add(playerStatKey(prop));
-    out.push(prop);
-    if (out.length >= max) return out;
+    if (seenPlayers.has(playerKey)) continue;
+    if (tryAdd(prop)) return out;
   }
 
   for (const prop of props || []) {
-    const key = playerStatKey(prop);
-    if (seenPlayerStat.has(key)) continue;
-    seenPlayerStat.add(key);
-    out.push(prop);
-    if (out.length >= max) break;
+    if (tryAdd(prop)) return out;
   }
 
   return out;
@@ -190,7 +223,12 @@ export async function fetchPlayerStats({ props = [] } = {}) {
       label: "fetchPlayerStats",
       endpoint: "MLB StatsAPI + optional SportsDataIO",
       status: "empty",
+      allowSkip: true,
     });
+  }
+
+  if (stats.size > 0) {
+    writeCachedMlbStatsMap(stats);
   }
 
   return {
@@ -219,12 +257,12 @@ async function fetchMlbStats(props) {
       props.length > 0
         ? `No supported MLB stat types among ${props.length} props after isSupportedMlbStat filter`
         : "no supported MLB stat types";
-    console.error("[MLB StatsAPI] fetchMlbStats failed", {
+    console.warn("[MLB StatsAPI] fetchMlbStats skipped", {
       incoming: props.length,
       sampleStatTypes: props.slice(0, 8).map((p) => p.statType),
     });
     traceProjectionExecutionPath("fetchMlbStats:skip", { reason: message });
-    throw new Error(message);
+    return { stats: new Map(), warnings: [message] };
   }
 
   const fetched = await fetchMlbDataForProps(supportedProps, {
@@ -241,9 +279,10 @@ async function fetchMlbStats(props) {
   const enrichedProfiles = sportsDataEnrichment.profiles || profiles;
 
   supportedProps.forEach((prop) => {
-    const key = statProfileKey(prop);
+    const playerName = resolvePropPlayerName(prop);
+    const key = statProfileKey({ ...prop, playerName });
     const existing = stats.get(key);
-    const enriched = enrichedProfiles.get(normalizePlayerName(prop.playerName));
+    const enriched = enrichedProfiles.get(normalizePlayerName(playerName));
     if (existing && enriched) {
       stats.set(key, {
         ...enriched,
@@ -286,6 +325,7 @@ async function fetchMlbStats(props) {
       label: "MLB StatsAPI game logs",
       endpoint: "/api/mlb (player game logs + profiles)",
       status: 204,
+      allowSkip: true,
     });
   }
 
