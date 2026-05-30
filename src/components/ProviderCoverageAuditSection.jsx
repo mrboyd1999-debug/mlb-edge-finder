@@ -31,8 +31,13 @@ function ProviderCoverageAuditSection({ audit = null, loading = false }) {
         <MetricRow label="Combined Props" value={audit?.combinedProps ?? audit?.combinedUsable} />
         <MetricRow label="Projection Candidates" value={audit?.projectionCandidates} />
         <MetricRow label="Projected Props" value={audit?.projected} />
-        <MetricRow label="Verified Props" value={audit?.verified} />
+        <MetricRow label="Verified Props" value={audit?.verifiedPlaysCount ?? audit?.verified ?? audit?.verifiedProps} />
       </div>
+      {audit?.dataIntegrityMismatch && audit?.integrityWarning ? (
+        <p className="provider-coverage-audit-section__bottleneck" role="alert">
+          {audit.integrityWarning}
+        </p>
+      ) : null}
       {audit?.cacheFallbackStage ? (
         <p className="provider-coverage-audit-section__note">Cache fallback: {audit.cacheFallbackStage}</p>
       ) : null}

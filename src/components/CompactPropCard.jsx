@@ -1,4 +1,5 @@
 import { memo, useState } from "react";
+import DataSourceTag from "./DataSourceTag.jsx";
 import { formatNumber, formatSignedNumber } from "../utils/formatters.js";
 import { displayMarketLabel } from "../utils/propLabels.js";
 import { formatRecommendationLabel, recommendationPalette, resolvePickSide } from "../utils/pickRecommendation.js";
@@ -29,6 +30,7 @@ function CompactPropCard({
   defaultExpanded = false,
   showSave = true,
   qualifyReason = "",
+  cacheStatus = "",
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   if (!prop) return null;
@@ -85,6 +87,7 @@ function CompactPropCard({
       }}
     >
       <div className="compact-prop-card__head">
+        <DataSourceTag prop={prop} cacheStatus={cacheStatus} compact />
         <div className="compact-prop-card__title-row">
           {rank != null ? <span className="compact-prop-card__rank">#{rank}</span> : null}
           <strong className="compact-prop-card__player">{prop.playerName || prop.player}</strong>

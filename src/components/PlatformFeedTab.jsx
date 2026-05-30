@@ -1,7 +1,7 @@
 import { memo } from "react";
 import CompactPropCard from "./CompactPropCard.jsx";
 
-function PlatformFeedTab({ platformLabel = "Feed", picks = [], loading = false, onOpen, onSave }) {
+function PlatformFeedTab({ platformLabel = "Feed", picks = [], loading = false, onOpen, onSave, cacheStatus = "" }) {
   if (loading && !picks.length) {
     return <p className="compact-tab-empty">Loading {platformLabel} props…</p>;
   }
@@ -20,6 +20,7 @@ function PlatformFeedTab({ platformLabel = "Feed", picks = [], loading = false, 
             rank={index + 1}
             onOpen={onOpen}
             onSave={onSave}
+            cacheStatus={cacheStatus}
             qualifyReason={prop.projectionUnavailable ? "Live line — projection pending" : prop.qualificationReason || ""}
           />
         ))}

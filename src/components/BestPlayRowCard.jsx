@@ -19,9 +19,10 @@ import {
   validatePickDirectionBeforeRender,
 } from "../utils/pickDirectionAudit.js";
 import ProjectionSanityAuditPanel from "./ProjectionSanityAuditPanel.jsx";
+import DataSourceTag from "./DataSourceTag.jsx";
 import { safeArray, safeFixed } from "../utils/safeStats.js";
 
-function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
+function BestPlayRowCard({ prop, onOpen, rank, grouped = false, cacheStatus = "" }) {
   const enriched = withPlayerImageUrl(prop || {});
 
   useEffect(() => {
@@ -109,6 +110,7 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
           <div className="best-play-row-top-line">
             {rank != null ? <span style={styles.bestPlayRowRank}>#{rank}</span> : null}
             {!grouped ? <h3 style={styles.bestPlayRowPlayer}>{playerName}</h3> : null}
+            {!grouped ? <DataSourceTag prop={enriched} cacheStatus={cacheStatus} compact /> : null}
             {!grouped ? (
               <span
                 style={{

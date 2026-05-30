@@ -1,5 +1,6 @@
 import { memo } from "react";
 import PlayerImage from "./PlayerImage.jsx";
+import DataSourceTag from "./DataSourceTag.jsx";
 import { styles } from "../theme/styles.js";
 import { formatNumber } from "../utils/formatters.js";
 import { withPlayerImageUrl } from "../utils/playerImageFields.js";
@@ -7,7 +8,7 @@ import { formatPlatformSideLabel, recommendationPalette, resolvePickSide } from 
 import { displayFullMarketLabel } from "../utils/propLabels.js";
 import { resolveProjectionValue } from "../utils/projectionQuality.js";
 
-function BestPlayHeroCard({ prop, onOpen }) {
+function BestPlayHeroCard({ prop, onOpen, cacheStatus = "" }) {
   if (!prop) return null;
 
   const enriched = withPlayerImageUrl(prop);
@@ -61,6 +62,7 @@ function BestPlayHeroCard({ prop, onOpen }) {
       <p className="best-play-hero-card__eyebrow">
         #1 Overall Play{outlierFlag ? ` · ${outlierFlag}` : ""}
       </p>
+      <DataSourceTag prop={enriched} cacheStatus={cacheStatus} compact />
       <div className="best-play-hero-card__head">
         <PlayerImage prop={enriched} />
         <div>

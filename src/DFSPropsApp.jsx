@@ -253,6 +253,7 @@ import {
   countHistoricalAttachment,
 } from "./utils/pipelinePropCountAudit.js";
 import { buildProviderCoverageAudit, logProviderCoverageSummary } from "./utils/providerCoverageAudit.js";
+import { buildRenderSourceAudit } from "./utils/renderDataSourceAudit.js";
 import {
   beginRefreshDiagnostics,
   endRefreshDiagnostics,
@@ -4506,21 +4507,38 @@ export default function DFSPropsApp() {
   ]);
   const lastUpdatedLabel = lastUpdated ? `${formatDateTime(lastUpdated)}${cacheStatus === "cached" ? " (cached)" : ""}` : "Never";
   const providerCoverageAuditDisplay = useMemo(() => {
-    const base = debugInfo?.providerCoverageAudit;
-    if (!base) return null;
+    const fetchAudit = debugInfo?.providerCoverageAudit;
+    const renderAudit = buildRenderSourceAudit({
+      allDisplayProps,
+      boardDisplayProps,
+      topMlbPlayBoard,
+      providerFetchAudit: fetchAudit,
+      cacheStatus,
+      debugInfo,
+      lastUpdated,
+    });
+    if (!renderAudit) return null;
     const boardCached = /cached|stale|expired/i.test(String(cacheStatus || ""));
-    const timestamp = lastUpdated || base.boardCacheTimestamp || "";
-    if (!boardCached && base.feedMode === "LIVE") return base;
+    const timestamp = lastUpdated || renderAudit.boardCacheTimestamp || "";
+    if (!boardCached && renderAudit.feedMode === "LIVE") return renderAudit;
     return {
-      ...base,
+      ...renderAudit,
       feedMode: "CACHE",
-      boardCacheActive: boardCached || base.boardCacheActive,
+      boardCacheActive: boardCached || renderAudit.boardCacheActive,
       boardCacheTimestamp: timestamp,
       cacheBoardMessage: timestamp
         ? `Running on cached board from ${formatDateTime(timestamp)}`
-        : base.cacheBoardMessage || "Running on cached provider/board data",
+        : renderAudit.cacheBoardMessage || "Running on cached provider/board data",
     };
-  }, [debugInfo?.providerCoverageAudit, cacheStatus, lastUpdated]);
+  }, [
+    allDisplayProps,
+    boardDisplayProps,
+    topMlbPlayBoard,
+    debugInfo?.providerCoverageAudit,
+    debugInfo,
+    cacheStatus,
+    lastUpdated,
+  ]);
   const lastUpdatedMs = lastUpdated ? new Date(lastUpdated).getTime() : NaN;
   const staleDataWarning =
     Number.isFinite(lastUpdatedMs) && Date.now() - lastUpdatedMs > DFS_CACHE_TTL_MS
@@ -4918,6 +4936,7 @@ export default function DFSPropsApp() {
       prizePicksFeedProps={prizePicksFeedProps}
       statsAttachmentAudit={debugInfo?.statsAttachmentAudit || null}
       providerCoverageAudit={providerCoverageAuditDisplay}
+      renderSourceAudit={providerCoverageAuditDisplay}
       cacheStatus={cacheStatus}
       boardCacheTimestamp={lastUpdated}
     />

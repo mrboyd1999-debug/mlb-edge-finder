@@ -16,6 +16,7 @@ import HistoricalCoverageBanner from "./HistoricalCoverageBanner.jsx";
 import ProviderFeedModeBanner from "./ProviderFeedModeBanner.jsx";
 import ProviderFailureReasons from "./ProviderFailureReasons.jsx";
 import ProviderCoverageAuditSection from "./ProviderCoverageAuditSection.jsx";
+import RenderingSourceDiagnosticsPanel from "./RenderingSourceDiagnosticsPanel.jsx";
 import { readSettingsMeta } from "../services/runtimeSettings.js";
 import { isDebugModeEnabled } from "../utils/devMode.js";
 
@@ -56,6 +57,7 @@ function DfsAnalyzerLayout({
   mlbPipelineStatus,
   statsAttachmentAudit = null,
   providerCoverageAudit = null,
+  renderSourceAudit = null,
   cacheStatus = "",
   boardCacheTimestamp = "",
 }) {
@@ -106,6 +108,8 @@ function DfsAnalyzerLayout({
 
       <ProviderCoverageAuditSection audit={providerCoverageAudit} loading={loading} />
 
+      <RenderingSourceDiagnosticsPanel audit={renderSourceAudit} />
+
       <HistoricalCoverageBanner audit={statsAttachmentAudit} loading={loading} />
 
       {debugPanelsVisible ? (
@@ -132,6 +136,8 @@ function DfsAnalyzerLayout({
             onOpen={onOpenProp}
             onSave={onSavePick}
             filterDiagnostics={topMlbPlayBoard?.filterDiagnostics}
+            renderSourceAudit={renderSourceAudit}
+            cacheStatus={cacheStatus}
           />
         </SectionErrorBoundary>
       ) : null}
@@ -159,6 +165,7 @@ function DfsAnalyzerLayout({
             loading={loading}
             onOpen={onOpenProp}
             onSave={onSavePick}
+            cacheStatus={cacheStatus}
           />
         </SectionErrorBoundary>
       ) : null}

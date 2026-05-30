@@ -1,6 +1,7 @@
 import { memo } from "react";
 import PlayerImage from "./PlayerImage.jsx";
 import DataQualityBadge from "./DataQualityBadge.jsx";
+import DataSourceTag from "./DataSourceTag.jsx";
 import { formatLeanSide, formatNumber, shortReason } from "../utils/formatters.js";
 import { confidenceTier, displayMarketLabel, displaySport } from "../utils/propLabels.js";
 import { lineMovementArrow, lineSourceBadgeStyle, resultStatusBadge, sportsbookCardTag } from "../utils/cardSignals.js";
@@ -105,7 +106,7 @@ function resolveCardStatusLabel(prop = {}) {
   return "Research Only";
 }
 
-function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, cardStyle, savedResult }) {
+function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, cardStyle, savedResult, cacheStatus = "" }) {
   const isManual = isManualAnalyzerProp(prop);
   const hasProjection = hasValidProjection(prop);
   const passPlay = isManual && (prop.passPlay || prop.displayStatus === PASS_STATUS || prop.bettingLabel === PASS_STATUS);
@@ -281,6 +282,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
                 {prop.platform} · {displaySport(prop)}
               </p>
               <h3 className="prop-card-player-name" style={styles.playerName}>{prop.playerName}</h3>
+              <DataSourceTag prop={prop} cacheStatus={cacheStatus} compact />
               {!compact && (
                 <p style={styles.gameLine}>
                   {prop.team || "—"} vs {prop.opponent || "—"}

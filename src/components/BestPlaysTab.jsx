@@ -7,6 +7,7 @@ import {
   VERIFIED_DISPLAY_MAX,
   NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
 } from "../utils/verifiedTierSystem.js";
+import { NO_LIVE_VERIFIED_PROPS_MESSAGE, shouldBlockVerifiedPlayRender } from "../utils/renderDataSourceAudit.js";
 import { safeArray } from "../utils/safeStats.js";
 import { liveBoardLoadingMessage } from "../utils/liveBoardLoading.js";
 
@@ -21,6 +22,8 @@ function BestPlaysTab({
   loadError = "",
   onOpen,
   filterDiagnostics = null,
+  renderSourceAudit = null,
+  cacheStatus = "",
 }) {
   const verifiedSection = useMemo(() => findSection(sections, "verified-plays"), [sections]);
 
@@ -34,6 +37,7 @@ function BestPlaysTab({
     return verifiedPicks.find(passesHeroOverallPlayGate) || null;
   }, [verifiedPicks]);
   const failureReason = loadError || filterDiagnostics?.error || "";
+  const blockStaleRender = shouldBlockVerifiedPlayRender(renderSourceAudit);
 
   if (loading) {
     return (
@@ -48,13 +52,23 @@ function BestPlaysTab({
 
   return (
     <div className="compact-tab-panel">
+      {renderSourceAudit?.dataIntegrityMismatch && renderSourceAudit?.integrityWarning ? (
+        <p className="compact-form-notice prop-pipeline-counters__failure" role="alert">
+          {renderSourceAudit.integrityWarning}
+        </p>
+      ) : null}
+
+      {blockStaleRender ? (
+        <p className="compact-empty">{NO_LIVE_VERIFIED_PROPS_MESSAGE}</p>
+      ) : (
+        <>
       {failureReason && !verifiedPicks.length ? (
         <p className="compact-form-notice">{failureReason}</p>
       ) : null}
 
       {heroPlay ? (
         <SectionErrorBoundary name="Hero Card">
-          <BestPlayHeroCard prop={heroPlay} onOpen={onOpen} />
+          <BestPlayHeroCard prop={heroPlay} onOpen={onOpen} cacheStatus={cacheStatus} />
         </SectionErrorBoundary>
       ) : null}
 
@@ -77,6 +91,7 @@ function BestPlaysTab({
                   prop={prop}
                   rank={index + 1}
                   onOpen={onOpen}
+                  cacheStatus={cacheStatus}
                 />
               </SectionErrorBoundary>
             ))}
@@ -87,6 +102,8 @@ function BestPlaysTab({
           </p>
         )}
       </section>
+        </>
+      )}
     </div>
   );
 }
