@@ -70,7 +70,7 @@ export function isAllowedScoringSportProp(prop = {}) {
   return !getScoringSportRejectReason(prop);
 }
 
-/** Raw edge: projection minus line (positive favors OVER). */
+/** Raw edge: projection minus line (absolute units). */
 export function computeStandardEdge(projection, line) {
   const proj = Number(projection);
   const ln = Number(line);
@@ -78,12 +78,22 @@ export function computeStandardEdge(projection, line) {
   return round(proj - ln);
 }
 
-/** Display edge percent — actual value, not capped. */
+export const MAX_RELATIVE_EDGE_PERCENT = 100;
+
+/** Uncapped relative edge percent — prefer computeRelativeEdgePercent for display. */
 export function computeStandardEdgePercent(edge, line) {
   const e = Number(edge);
   const ln = Number(line);
   if (!Number.isFinite(e) || !Number.isFinite(ln) || ln <= 0) return null;
   return Math.round((e / ln) * 100);
+}
+
+/** Normalized relative edge percent capped at ±100%. */
+export function computeRelativeEdgePercent(edge, line) {
+  const pct = computeStandardEdgePercent(edge, line);
+  if (pct == null) return null;
+  const sign = pct >= 0 ? 1 : -1;
+  return sign * Math.min(Math.abs(pct), MAX_RELATIVE_EDGE_PERCENT);
 }
 
 /** @deprecated Use computeConservativeProbability from conservativeProjection.js */
@@ -98,7 +108,8 @@ export function computeStandardPropMetrics({ projection, line, edge = null } = {
     edge != null && Number.isFinite(Number(edge)) ? round(Number(edge)) : computeStandardEdge(projection, line);
   return {
     edge: rawEdge,
-    edgePercent: computeStandardEdgePercent(rawEdge, line),
+    edgePercent: computeRelativeEdgePercent(rawEdge, line),
+    relativeEdgePercent: computeRelativeEdgePercent(rawEdge, line),
     probabilityScore: null,
   };
 }

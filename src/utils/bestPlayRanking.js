@@ -327,6 +327,7 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     confidenceScore: displayConfidence ?? prop.confidenceScore ?? prop.confidence,
     rawEdgeLabel: edgeLabels.rawEdgeLabel,
     displayEdgeLabel: edgeLabels.displayEdgeLabel,
+    relativeEdgePercent: edgePercent,
     verified,
     isDisplayPlayable: tierLabel === "Verified Play" || playability.isDisplayPlayable,
     displayResearchOnly: tierLabel !== "Verified Play",

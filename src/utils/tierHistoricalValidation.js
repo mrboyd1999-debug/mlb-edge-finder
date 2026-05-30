@@ -8,8 +8,13 @@ function finite(value) {
 }
 
 export const HISTORICAL_DATA_UNAVAILABLE_WARNING = "⚠ Historical data unavailable";
-export const TIER_A_MIN_SANITY_SCORE = 70;
-export const MAX_SANITY_WITHOUT_HISTORY = 60;
+export const TIER_A_MIN_SANITY_SCORE = 80;
+export const TIER_B_MIN_SANITY_SCORE = 65;
+export const TIER_C_MIN_SANITY_SCORE = 50;
+export const MAX_SANITY_WITHOUT_HISTORY = 50;
+export const MAX_CONFIDENCE_WITHOUT_HISTORY = 50;
+export const MAX_PLAYABILITY_WITHOUT_HISTORY = 25;
+export const RESEARCH_ONLY_TIER_LABEL = "Research Only";
 
 const TIER_RANK = { A: 0, B: 1, C: 2 };
 
@@ -72,16 +77,17 @@ export function resolveHitRateValidationPresent(prop = {}) {
   };
 }
 
-export function resolveMaximumTier({ playability, historicalPresent = true } = {}) {
+export function resolveMaximumTier({ playability, historicalPresent = true, sanityFail = false } = {}) {
+  if (!historicalPresent || sanityFail) return "RESEARCH";
   const play = finite(playability);
   if (play != null && play < 40) return "C";
   if (play != null && play < 50) return "B";
-  if (!historicalPresent) return "B";
   return "A";
 }
 
 export function capTierToMaximum(tier, maximumTier) {
   if (!tier || !maximumTier) return tier;
+  if (maximumTier === "RESEARCH") return null;
   const current = TIER_RANK[tier];
   const max = TIER_RANK[maximumTier];
   if (current == null || max == null) return tier;

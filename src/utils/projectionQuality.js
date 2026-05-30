@@ -3,6 +3,7 @@
  */
 
 import { playerRoleStatMismatchReason } from "./propPlayerRole.js";
+import { getSportsDataApiKey } from "../config/apiConfig.js";
 import {
   DEMON_MAX_CONFIDENCE,
   DEMON_MIN_CONFIDENCE,
@@ -111,6 +112,13 @@ export function resolveProjectionQuality(prop = {}) {
     return PROJECTION_QUALITY.MISSING;
   }
 
+  const sportsDataConfigured = Boolean(getSportsDataApiKey());
+  const fromSportsData = /sportsdata|mlb-verified|player-stats-model|merged/.test(key);
+
+  if (!sportsDataConfigured || !fromSportsData) {
+    return PROJECTION_QUALITY.ESTIMATED;
+  }
+
   if (prop.estimatedProjection || ESTIMATED_SOURCES.has(key)) {
     return PROJECTION_QUALITY.ESTIMATED;
   }
@@ -120,6 +128,17 @@ export function resolveProjectionQuality(prop = {}) {
   }
 
   return PROJECTION_QUALITY.ESTIMATED;
+}
+
+function resolveProjectionDisplayLabel(prop = {}, quality = PROJECTION_QUALITY.MISSING) {
+  const sportsDataConfigured = Boolean(getSportsDataApiKey());
+  const key = normalizeProjectionSourceKey(prop.projectionSource);
+  const fromSportsData = /sportsdata|mlb-verified|player-stats-model|merged/.test(key);
+
+  if (quality === PROJECTION_QUALITY.MISSING) return "No projection data available";
+  if (!sportsDataConfigured || !fromSportsData) return "Fallback Projection";
+  if (quality === PROJECTION_QUALITY.VERIFIED) return "Verified Projection";
+  return "Fallback Projection";
 }
 
 export function hasRenderableProjection(prop = {}) {
@@ -322,12 +341,7 @@ export function annotateProjectionFields(prop = {}) {
     edge: edge > 0 ? edge : prop.edge ?? 0,
     projectionQuality: quality,
     projectionSourceLabel: sourceLabel,
-    projectionLabel:
-      quality === PROJECTION_QUALITY.VERIFIED
-        ? "Verified Projection"
-        : quality === PROJECTION_QUALITY.ESTIMATED
-          ? "Awaiting verified projection"
-          : "No projection data available",
+    projectionLabel: resolveProjectionDisplayLabel(prop, quality),
     noProjectionData: noProjection,
     hideFromRankedSections: noProjection || edge <= 0,
   };

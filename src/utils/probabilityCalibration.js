@@ -4,7 +4,7 @@
 
 import {
   computeStandardEdge,
-  computeStandardEdgePercent,
+  computeRelativeEdgePercent,
 } from "./standardPropMetrics.js";
 
 export const CALIBRATION_MIN_PROBABILITY = 40;
@@ -102,7 +102,7 @@ function alignmentBonus(lean, rate) {
 }
 
 export function computeEdgeContribution(edge, edgePercent, hitRates = {}, lean = "pass") {
-  const edgePct = Math.abs(finite(edgePercent) ?? 0);
+  const edgePct = Math.min(Math.abs(finite(edgePercent) ?? 0), 100);
   let points = round1(Math.min(edgePct * 0.5, 26));
   points += alignmentBonus(lean, hitRates.last5HitRate);
   points += alignmentBonus(lean, hitRates.last10HitRate) * 0.65;
@@ -191,7 +191,7 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
   if (projection == null || line == null || line <= 0) return null;
 
   const edge = finite(metrics.edge ?? computeStandardEdge(projection, line));
-  const edgePercent = finite(metrics.edgePercent ?? computeStandardEdgePercent(edge, line) ?? 0);
+  const edgePercent = finite(metrics.edgePercent ?? computeRelativeEdgePercent(edge, line) ?? 0);
   const lean = resolveLean(edge);
   const hitRates = resolveCalibrationHitRates(prop, line);
 

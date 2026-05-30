@@ -1,5 +1,6 @@
 import { computeDataQualityFromEnrichment, hasVerifiedStats } from "./statEnrichment.js";
 import { isManualAnalyzerProp } from "../utils/manualPropBuilder.js";
+import { resolveHistoricalDataPresent } from "../utils/tierHistoricalValidation.js";
 
 export function dataQualityBadge(prop = {}) {
   if (isManualAnalyzerProp(prop)) {
@@ -21,6 +22,14 @@ export function dataQualityBadge(prop = {}) {
     return { label: "Unverified source", tone: "weak" };
   }
   if (prop.sportsbookVerified || prop.verifiedBadge === "VERIFIED") {
+    const historical = resolveHistoricalDataPresent(prop);
+    const hasHistory = historical.present || hasVerifiedStats(prop);
+    if (!hasHistory) {
+      if (dataQualityScore >= 50 || sampleSize >= 3) {
+        return { label: "Partial data", tone: "partial" };
+      }
+      return { label: "Weak data", tone: "weak" };
+    }
     if (dataQualityScore >= 85 && hasVerifiedStats(prop)) {
       return { label: "Verified · full context", tone: "full" };
     }

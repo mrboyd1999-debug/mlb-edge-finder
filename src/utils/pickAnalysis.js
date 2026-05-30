@@ -10,17 +10,20 @@ import {
   formatSignedPercent,
   unique,
 } from "./formatters.js";
-import { computeStandardEdgePercent } from "./standardPropMetrics.js";
+import { computeRelativeEdgePercent } from "./standardPropMetrics.js";
 import { displaySport } from "./propLabels.js";
 
 export function edgePercentForProp(prop) {
+  if (prop.relativeEdgePercent != null && Number.isFinite(Number(prop.relativeEdgePercent))) {
+    return Number(prop.relativeEdgePercent);
+  }
   if (prop.edgePercent != null && Number.isFinite(Number(prop.edgePercent))) {
     return Number(prop.edgePercent);
   }
   const edge = Number(prop.edge ?? prop.projectionEdge);
   const line = Number(prop.line);
   if (!Number.isFinite(edge) || !Number.isFinite(line) || line <= 0) return null;
-  return computeStandardEdgePercent(edge, line);
+  return computeRelativeEdgePercent(edge, line);
 }
 
 export function dataSourcesUsed(prop) {

@@ -3,7 +3,9 @@ import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import {
   PROJECTION_MISMATCH_FLAG,
   PROJECTION_OUTLIER_WARNING,
+  SANITY_FAIL_FLAG,
   TIER_A_MIN_SANITY_SCORE,
+  TIER_B_MIN_SANITY_SCORE,
 } from "../utils/projectionSanityAudit.js";
 import { safeFixed } from "../utils/safeStats.js";
 
@@ -30,6 +32,11 @@ function ProjectionSanityAuditPanel({ audit = null, compact = false }) {
         <strong>Projection sanity audit</strong>
         {audit.outlierWarning ? (
           <span className="projection-sanity-audit__flag">{audit.outlierWarning}</span>
+        ) : null}
+        {audit.sanityFail ? (
+          <span className="projection-sanity-audit__flag projection-sanity-audit__flag--mismatch">
+            {SANITY_FAIL_FLAG}
+          </span>
         ) : null}
         {audit.projectionMismatch ? (
           <span className="projection-sanity-audit__flag projection-sanity-audit__flag--mismatch">
@@ -67,7 +74,7 @@ function ProjectionSanityAuditPanel({ audit = null, compact = false }) {
       {audit.summary ? <p className="projection-sanity-audit__summary">{audit.summary}</p> : null}
       {sanityScore < TIER_A_MIN_SANITY_SCORE ? (
         <p className="projection-sanity-audit__penalty">
-          Tier A blocked — sanity score must be ≥{TIER_A_MIN_SANITY_SCORE}.
+          Tier A blocked — sanity score must be ≥{TIER_A_MIN_SANITY_SCORE} (Tier B ≥{TIER_B_MIN_SANITY_SCORE}).
         </p>
       ) : null}
       {confidencePenalty > 0 || playabilityPenalty > 0 ? (

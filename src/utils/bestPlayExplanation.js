@@ -5,6 +5,7 @@
 import { buildHitRateSnapshot, buildProbabilityAudit } from "./modelValidation.js";
 import { resolveProjectionSourceLabel, normalizeProjectionSourceKey } from "./projectionQuality.js";
 import { classifyVerifiedTier } from "./verifiedTierSystem.js";
+import { getSportsDataApiKey } from "../config/apiConfig.js";
 
 function finite(value) {
   const num = Number(value);
@@ -28,7 +29,14 @@ function formatStat(value) {
 
 /** User-facing projection source label for Best Plays cards. */
 export function formatBestPlayProjectionSource(prop = {}) {
+  const sportsDataConfigured = Boolean(getSportsDataApiKey());
   const key = normalizeProjectionSourceKey(prop.projectionSource);
+  const fromSportsData = /sportsdata|mlb-verified|player-stats-model|merged/.test(key);
+
+  if (!sportsDataConfigured || !fromSportsData) {
+    return "Fallback Projection";
+  }
+
   if (/sportsdata|mlb-verified|player-stats-model|merged/.test(key)) return "SportsDataIO";
   if (/rolling|recent-games|recent|last5|last10|l5|l10|season/.test(key)) return "Rolling Average";
   if (/fallback|estimate|manual|stat-fallback|line-neutral|missing|unavailable/.test(key)) {

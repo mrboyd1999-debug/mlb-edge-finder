@@ -1,7 +1,7 @@
 /** Confidence floors, consensus, risk, playability, flags, and premium copy. */
 
 import { computeConservativeProbability } from "./conservativeProjection.js";
-import { computeStandardEdgePercent, computeStandardPropMetrics } from "./standardPropMetrics.js";
+import { computeRelativeEdgePercent, computeStandardPropMetrics } from "./standardPropMetrics.js";
 
 function finiteOr(value, fallback = NaN) {
   const num = Number(value);
@@ -23,7 +23,7 @@ function normalizeSport(prop = {}) {
 export function computeEdgePercent(prop = {}, edge = null) {
   const e = finiteOr(edge ?? prop.edge, NaN);
   const line = finiteOr(prop.line, NaN);
-  return computeStandardEdgePercent(e, line);
+  return computeRelativeEdgePercent(e, line);
 }
 
 export function hasMajorRiskFlags(prop = {}) {

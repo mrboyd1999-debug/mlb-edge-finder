@@ -13,10 +13,16 @@ import { resolveCalibrationHitRates } from "./probabilityCalibration.js";
 import { formatNumber } from "./formatters.js";
 import {
   MAX_SANITY_WITHOUT_HISTORY,
+  MAX_CONFIDENCE_WITHOUT_HISTORY,
+  MAX_PLAYABILITY_WITHOUT_HISTORY,
+  RESEARCH_ONLY_TIER_LABEL,
   TIER_A_MIN_SANITY_SCORE,
+  TIER_B_MIN_SANITY_SCORE,
+  TIER_C_MIN_SANITY_SCORE,
   resolveHistoricalDataPresent,
   resolveHitRateValidationPresent,
 } from "./tierHistoricalValidation.js";
+import { SANITY_FAIL_FLAG, validateProjectionAgainstCap } from "./projectionMarketCaps.js";
 import { classifyVerifiedTier, enforceVerifiedTierFields } from "./verifiedTierSystem.js";
 
 function finite(value) {
@@ -40,7 +46,12 @@ function pctWeight(weight) {
 export const PROJECTION_OUTLIER_FLAG = "PROJECTION OUTLIER";
 export const PROJECTION_MISMATCH_FLAG = "ProjectionMismatch";
 export const PROJECTION_OUTLIER_WARNING = "⚠ Projection Outlier";
-export { TIER_A_MIN_SANITY_SCORE } from "./tierHistoricalValidation.js";
+export {
+  TIER_A_MIN_SANITY_SCORE,
+  TIER_B_MIN_SANITY_SCORE,
+  TIER_C_MIN_SANITY_SCORE,
+} from "./tierHistoricalValidation.js";
+export { SANITY_FAIL_FLAG } from "./projectionMarketCaps.js";
 export const PROBABILITY_MISMATCH_THRESHOLD = 20;
 
 /** Market-specific absolute drift limits. */
@@ -79,7 +90,7 @@ export const MARKET_SANITY_RULES = {
     label: "Total Bases",
     seasonOutlierPct: 0.35,
     last10OutlierPct: 0.35,
-    maxAbsolute: 8,
+    maxAbsolute: 2.5,
   },
 };
 
@@ -188,14 +199,11 @@ function resolveProjectionProbability(prop = {}, projection = null, line = null,
   return side === "UNDER" ? round1(100 - overProb) : round1(overProb);
 }
 
-function computeAgreementSanityScore(projectionProbability, recentOverRate, seasonOverRate) {
-  if (projectionProbability == null) return null;
-  const diffs = [];
-  if (recentOverRate != null) diffs.push(Math.abs(projectionProbability - recentOverRate));
-  if (seasonOverRate != null) diffs.push(Math.abs(projectionProbability - seasonOverRate));
-  if (!diffs.length) return 85;
-  const avgDiff = diffs.reduce((sum, value) => sum + value, 0) / diffs.length;
-  return clamp(Math.round(100 - avgDiff * 2), 0, 100);
+function computePhaseSanityScore({ historicalPresent, capValidation }) {
+  if (capValidation?.sanityFail) return 0;
+  if (!historicalPresent) return MAX_SANITY_WITHOUT_HISTORY;
+  if (capValidation?.inRange !== false) return 100;
+  return 0;
 }
 
 function hasProjectionMismatch(projectionProbability, recentOverRate, seasonOverRate) {
@@ -258,23 +266,25 @@ function resolveAverageOutlier({ projection, last10, season, rule }) {
 
 function confidencePenaltyFromAudit(audit = {}) {
   let penalty = 0;
+  if (audit.sanityFail) penalty += 24;
   if (audit.projectionMismatch) penalty += 20;
   if (audit.isOutlier) penalty += 12;
   if (audit.sanityScore != null && audit.sanityScore < TIER_A_MIN_SANITY_SCORE) penalty += 8;
 
-  if (penalty > 0) return clamp(penalty, 0, 32);
+  if (penalty > 0) return clamp(penalty, 0, 40);
 
-  if (audit.sanityScore >= 85) return 0;
-  if (audit.sanityScore >= 75) return 4;
+  if (audit.sanityScore >= 90) return 0;
+  if (audit.sanityScore >= 80) return 4;
   if (audit.sanityScore >= 65) return 8;
   return 12;
 }
 
 function playabilityPenaltyFromAudit(audit = {}) {
+  if (audit.sanityFail) return 30;
   if (audit.projectionMismatch) return 20;
   if (audit.isOutlier) return 15;
   if (audit.sanityScore != null && audit.sanityScore < TIER_A_MIN_SANITY_SCORE) return 12;
-  if (audit.sanityScore != null && audit.sanityScore < 80) return 6;
+  if (audit.sanityScore != null && audit.sanityScore < TIER_B_MIN_SANITY_SCORE) return 6;
   return 0;
 }
 
@@ -355,11 +365,8 @@ function buildProjectionSanityAuditUnsafe(prop = {}) {
   }
 
   const scoreFlags = [];
-  const agreementScore = computeAgreementSanityScore(
-    projectionProbability,
-    overRates.recentOverRate,
-    overRates.seasonOverRate
-  );
+  const capValidation = validateProjectionAgainstCap(prop, projection);
+  if (capValidation.sanityFail) scoreFlags.push(SANITY_FAIL_FLAG);
   const averageDriftScore = computeAverageDriftScore({
     projection,
     line,
@@ -369,14 +376,10 @@ function buildProjectionSanityAuditUnsafe(prop = {}) {
     rule,
     flags: scoreFlags,
   });
-  let sanityScore =
-    agreementScore != null
-      ? clamp(Math.round(agreementScore * 0.7 + averageDriftScore * 0.3), 0, 100)
-      : averageDriftScore;
-
-  if (!historical.present) {
-    sanityScore = Math.min(sanityScore, MAX_SANITY_WITHOUT_HISTORY);
-  }
+  const sanityScore = computePhaseSanityScore({
+    historicalPresent: historical.present,
+    capValidation,
+  });
 
   const projectionMismatch = hasProjectionMismatch(
     projectionProbability,
@@ -384,9 +387,10 @@ function buildProjectionSanityAuditUnsafe(prop = {}) {
     overRates.seasonOverRate
   );
   const isAverageOutlier = resolveAverageOutlier({ projection, last10, season, rule });
-  const isOutlier = isAverageOutlier || projectionMismatch;
+  const isOutlier = isAverageOutlier || projectionMismatch || capValidation.sanityFail;
   const mismatchFlags = projectionMismatch ? [PROJECTION_MISMATCH_FLAG] : [];
   const outlierFlags = [];
+  if (capValidation.sanityFail) outlierFlags.push(SANITY_FAIL_FLAG);
   if (isAverageOutlier) outlierFlags.push(PROJECTION_OUTLIER_WARNING);
   if (projectionMismatch && !outlierFlags.length) outlierFlags.push(PROJECTION_MISMATCH_FLAG);
 
@@ -395,6 +399,7 @@ function buildProjectionSanityAuditUnsafe(prop = {}) {
   const blocksTierA =
     !historical.present ||
     !hitRateValidation.present ||
+    capValidation.sanityFail ||
     sanityScore < TIER_A_MIN_SANITY_SCORE ||
     isOutlier ||
     projectionMismatch;
@@ -439,9 +444,17 @@ function buildProjectionSanityAuditUnsafe(prop = {}) {
     isOutlier,
     isAverageOutlier,
     outlierFlags,
-    outlierWarning: isAverageOutlier ? PROJECTION_OUTLIER_WARNING : "",
+    outlierWarning: capValidation.sanityFail
+      ? SANITY_FAIL_FLAG
+      : isAverageOutlier
+        ? PROJECTION_OUTLIER_WARNING
+        : "",
+    sanityFail: capValidation.sanityFail,
+    sanityFailReason: capValidation.reason || "",
+    projectionCap: capValidation.cap,
+    projectionInRange: capValidation.inRange,
     sanityScore,
-    agreementScore,
+    agreementScore: null,
     averageDriftScore,
     blocksTierA,
     recommendedSide,
@@ -454,7 +467,9 @@ function buildProjectionSanityAuditUnsafe(prop = {}) {
   audit.confidencePenalty = confidencePenaltyFromAudit(audit);
   audit.playabilityPenalty = playabilityPenaltyFromAudit(audit);
 
-  if (projectionMismatch) {
+  if (capValidation.sanityFail) {
+    audit.summary = `${SANITY_FAIL_FLAG}: ${capValidation.reason}`;
+  } else if (projectionMismatch) {
     audit.summary = `${PROJECTION_MISMATCH_FLAG}: projection probability ${audit.projectionProbabilityLabel} vs recent ${audit.recentOverRateLabel} / season ${audit.seasonOverRateLabel}`;
   } else if (isAverageOutlier) {
     audit.summary = `${PROJECTION_OUTLIER_WARNING}: projection ${audit.projectionLabel} vs season ${audit.seasonLabel}${
@@ -486,10 +501,11 @@ export function applySanityPlayabilityPenalty(playability, audit = {}) {
 }
 
 export function demoteTierForProjectionSanity(tier, audit = {}) {
-  if (!tier || tier !== "A") return tier;
-  if (audit.blocksTierA || (audit.sanityScore != null && audit.sanityScore < TIER_A_MIN_SANITY_SCORE)) {
-    return "B";
-  }
+  if (!tier) return tier;
+  const sanity = audit.sanityScore ?? 0;
+  if (audit.sanityFail || sanity < TIER_C_MIN_SANITY_SCORE) return null;
+  if (tier === "A" && (audit.blocksTierA || sanity < TIER_A_MIN_SANITY_SCORE)) return "B";
+  if (tier === "B" && sanity < TIER_B_MIN_SANITY_SCORE) return "C";
   return tier;
 }
 
@@ -501,14 +517,26 @@ export function passesTierASanityGate(audit = {}) {
 export function attachProjectionSanityAudit(prop = {}, options = {}) {
   try {
     const audit = options.audit || buildProjectionSanityAudit(prop);
+    const historicalPresent = audit?.historicalDataPresent ?? resolveHistoricalDataPresent(prop).present;
     const rawConfidence =
       options.confidence ??
       prop.displayConfidenceScore ??
       prop.confidenceScore ??
       prop.confidence;
     const rawPlayability = options.playability ?? prop.playabilityScore;
-    const adjustedConfidence = applySanityConfidencePenalty(rawConfidence, audit);
-    const adjustedPlayability = applySanityPlayabilityPenalty(rawPlayability, audit);
+    let adjustedConfidence = applySanityConfidencePenalty(rawConfidence, audit);
+    let adjustedPlayability = applySanityPlayabilityPenalty(rawPlayability, audit);
+
+    if (!historicalPresent) {
+      adjustedConfidence =
+        adjustedConfidence != null
+          ? Math.min(Math.round(adjustedConfidence), MAX_CONFIDENCE_WITHOUT_HISTORY)
+          : MAX_CONFIDENCE_WITHOUT_HISTORY;
+      adjustedPlayability =
+        adjustedPlayability != null
+          ? Math.min(Math.round(adjustedPlayability), MAX_PLAYABILITY_WITHOUT_HISTORY)
+          : MAX_PLAYABILITY_WITHOUT_HISTORY;
+    }
 
     const merged = {
       ...prop,
@@ -518,12 +546,23 @@ export function attachProjectionSanityAudit(prop = {}, options = {}) {
       projectionMismatchFlag: audit?.projectionMismatch ? PROJECTION_MISMATCH_FLAG : "",
       projectionOutlier: audit?.isOutlier ?? false,
       projectionOutlierFlag: audit?.outlierWarning || audit?.outlierFlags?.[0] || "",
-      historicalDataPresent: audit?.historicalDataPresent ?? false,
+      projectionSanityFail: audit?.sanityFail ?? false,
+      historicalDataPresent: historicalPresent,
       displayConfidenceScore: adjustedConfidence,
       confidenceScore: adjustedConfidence,
       confidence: adjustedConfidence,
       playabilityScore: adjustedPlayability,
     };
+
+    if (!historicalPresent) {
+      merged.displayResearchOnly = true;
+      merged.pickTierLabel = RESEARCH_ONLY_TIER_LABEL;
+      merged.bettingLabel = RESEARCH_ONLY_TIER_LABEL;
+      merged.verifiedTier = null;
+      merged.verifiedTierLabel = null;
+      return merged;
+    }
+
     return enforceVerifiedTierFields(merged);
   } catch (error) {
     console.error("[ProjectionSanity] attach failed", prop?.playerName || prop?.player, error);

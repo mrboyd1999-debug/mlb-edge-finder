@@ -19,6 +19,8 @@ import {
 } from "./bestPlayRankingScore.js";
 import {
   TIER_A_MIN_SANITY_SCORE,
+  TIER_B_MIN_SANITY_SCORE,
+  TIER_C_MIN_SANITY_SCORE,
   capTierToMaximum,
   resolveHistoricalDataPresent,
   resolveHitRateValidationPresent,
@@ -39,10 +41,12 @@ export const VERIFIED_TIER_B = {
   id: "B",
   minProbability: 58,
   minPlayability: 50,
+  minSanity: TIER_B_MIN_SANITY_SCORE,
   rank: 1,
 };
 export const VERIFIED_TIER_C = {
   id: "C",
+  minSanity: TIER_C_MIN_SANITY_SCORE,
   rank: 2,
 };
 
@@ -90,8 +94,16 @@ function qualifiesTierA({ probability, confidence, playability, sanity, historic
   );
 }
 
-function qualifiesTierB({ probability, playability }) {
+function qualifiesTierB({ probability, playability, sanity, audit }) {
+  if (audit?.sanityFail) return false;
+  if (sanity != null && sanity < TIER_B_MIN_SANITY_SCORE) return false;
   return probability >= VERIFIED_TIER_B.minProbability && playability >= VERIFIED_TIER_B.minPlayability;
+}
+
+function qualifiesTierC({ sanity, audit }) {
+  if (audit?.sanityFail) return false;
+  if (sanity == null) return true;
+  return sanity >= TIER_C_MIN_SANITY_SCORE;
 }
 
 export function resolveVerifiedMetrics(prop = {}) {
@@ -139,15 +151,21 @@ export function classifyVerifiedTier(prop = {}) {
   const hitRates = resolveHitRateValidationPresent(prop);
   const audit = prop.projectionSanityAudit || null;
 
+  if (!historical.present || audit?.sanityFail) return null;
   if (!Number.isFinite(probability) || !Number.isFinite(confidence)) return null;
   if (probability < VERIFIED_BASE_MIN_PROBABILITY || confidence < VERIFIED_BASE_MIN_CONFIDENCE) {
     return null;
   }
   if (!Number.isFinite(playability)) return null;
+  if (sanity != null && sanity < TIER_C_MIN_SANITY_SCORE) return null;
 
-  let tier = VERIFIED_TIER_C.id;
+  let tier = null;
 
-  if (qualifiesTierB({ probability, playability })) {
+  if (qualifiesTierC({ sanity, audit })) {
+    tier = VERIFIED_TIER_C.id;
+  }
+
+  if (qualifiesTierB({ probability, playability, sanity, audit })) {
     tier = VERIFIED_TIER_B.id;
   }
 
@@ -168,6 +186,7 @@ export function classifyVerifiedTier(prop = {}) {
   const maximumTier = resolveMaximumTier({
     playability,
     historicalPresent: historical.present,
+    sanityFail: audit?.sanityFail,
   });
   return capTierToMaximum(tier, maximumTier);
 }

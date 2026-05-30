@@ -4,7 +4,7 @@
 
 import {
   computeStandardEdge,
-  computeStandardEdgePercent,
+  computeRelativeEdgePercent,
 } from "./standardPropMetrics.js";
 import { hasMissingOpponentData, resolveProjectionValue } from "./conservativeProjection.js";
 import { computeCalibratedProbability } from "./probabilityCalibration.js";
@@ -148,7 +148,7 @@ function buildProbabilityAuditUnsafe(prop = {}, metrics = {}) {
   const projection = finite(metrics.projection ?? resolveProjectionValue(prop));
   const line = finite(prop.line);
   const edge = finite(metrics.edge ?? computeStandardEdge(projection, line));
-  const edgePercent = finite(metrics.edgePercent ?? computeStandardEdgePercent(edge, line));
+  const edgePercent = finite(metrics.edgePercent ?? metrics.relativeEdgePercent ?? computeRelativeEdgePercent(edge, line));
   const hitRateSnapshot = buildHitRateSnapshot(prop);
   const historical = resolveHistoricalDataPresent(prop);
   const hitRateValidation = resolveHitRateValidationPresent(prop);
@@ -164,7 +164,7 @@ function buildProbabilityAuditUnsafe(prop = {}, metrics = {}) {
     last10HitRate: hitRateSnapshot.last10Label,
     seasonHitRate: hitRateSnapshot.seasonLabel,
     last5HitRate: hitRateSnapshot.last5Label,
-    projectionVsLine: edgePercent != null ? signedPct(edgePercent) : "—",
+    projectionVsLine: edgePercent != null ? signedPct(edgePercent) : edge != null ? `${edge > 0 ? "+" : ""}${round1(edge)}` : "—",
     opponentAdjustment: signedPct(opponent.points),
     parkAdjustment: signedPct(park.points),
     matchupAdjustment: calibrated?.inputs?.matchupAdjustment ?? signedPct(breakdown.matchupAdjustment ?? 0),
@@ -220,13 +220,15 @@ export function buildEdgeValidation(prop = {}, metrics = {}) {
   const projection = finite(metrics.projection ?? resolveProjectionValue(prop));
   const line = finite(prop.line);
   const edge = finite(metrics.edge ?? computeStandardEdge(projection, line));
-  const computedPercent = computeStandardEdgePercent(edge, line);
-  const storedPercent = finite(prop.edgePercent ?? metrics.edgePercent);
-  const formula = "Edge = ((Projection - Line) / Line) × 100";
+  const computedPercent = computeRelativeEdgePercent(edge, line);
+  const storedPercent = finite(prop.relativeEdgePercent ?? prop.edgePercent ?? metrics.edgePercent);
+  const formula = "Edge = Projection − Line";
   const substitution =
-    projection != null && line != null && line > 0
-      ? `((${projection} - ${line}) / ${line}) × 100 = ${signedPct(computedPercent)}`
+    projection != null && line != null
+      ? `${projection} − ${line} = ${edge != null ? (edge > 0 ? "+" : "") + round1(edge) : "—"}`
       : "Missing projection or line";
+  const relativeNote =
+    computedPercent != null ? `Relative edge (capped ±100%): ${computedPercent > 0 ? "+" : ""}${computedPercent}%` : "";
 
   const delta =
     storedPercent != null && computedPercent != null
@@ -236,6 +238,7 @@ export function buildEdgeValidation(prop = {}, metrics = {}) {
   return {
     formula,
     substitution,
+    relativeNote,
     projection,
     line,
     rawEdge: edge,
@@ -247,7 +250,7 @@ export function buildEdgeValidation(prop = {}, metrics = {}) {
     unusuallyLarge: computedPercent != null && Math.abs(computedPercent) >= 60,
     note:
       computedPercent != null && Math.abs(computedPercent) >= 60
-        ? "Large edge — verify projection source and line scale for this market."
+        ? "Large relative edge — verify projection source and line scale for this market."
         : "",
   };
 }

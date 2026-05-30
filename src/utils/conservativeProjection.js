@@ -1,6 +1,6 @@
 /** Realistic probability, playability tiers, and lean helpers for MLB props. */
 
-import { computeStandardEdge, computeStandardEdgePercent, computeStandardPropMetrics } from "./standardPropMetrics.js";
+import { computeStandardEdge, computeRelativeEdgePercent } from "./standardPropMetrics.js";
 import { computeMlbPlayConfidence } from "./mlbPlayConfidence.js";
 import { classifyVerifiedTier } from "./verifiedTierSystem.js";
 import { resolveProjectionLeanDisplay, resolveProjectionLean } from "./pickDirectionAudit.js";
@@ -156,14 +156,22 @@ export function formatEdgeDisplay(prop = {}) {
   const line = finiteOr(prop.line, NaN);
   const raw = finiteOr(prop.edge, NaN);
   if (!Number.isFinite(raw) || !Number.isFinite(line) || line <= 0) {
-    return { rawEdgeLabel: "—", displayEdgeLabel: "—", edgeCapped: false };
+    return { rawEdgeLabel: "—", displayEdgeLabel: "—", relativeEdgeLabel: "—", edgeCapped: false };
   }
-  const displayPct = finiteOr(prop.edgePercent, computeStandardEdgePercent(raw, line));
+  const relativePct =
+    finiteOr(prop.relativeEdgePercent, NaN) ||
+    finiteOr(prop.edgePercent, NaN) ||
+    computeRelativeEdgePercent(raw, line);
   const rawEdgeLabel = `${raw > 0 ? "+" : ""}${round1(raw)}`;
-  const displayEdgeLabel = Number.isFinite(displayPct)
-    ? `${displayPct > 0 ? "+" : ""}${displayPct}%`
+  const displayEdgeLabel = Number.isFinite(relativePct)
+    ? `${relativePct > 0 ? "+" : ""}${Math.round(relativePct)}%`
     : "—";
-  return { rawEdgeLabel, displayEdgeLabel, edgeCapped: false };
+  return {
+    rawEdgeLabel,
+    displayEdgeLabel,
+    relativeEdgeLabel: displayEdgeLabel,
+    edgeCapped: false,
+  };
 }
 
 export function resolveResearchReasons(prop = {}) {
