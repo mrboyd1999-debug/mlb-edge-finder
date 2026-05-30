@@ -176,6 +176,7 @@ function DfsAnalyzerLayout({
           rejectionAudit={debugInfo?.rejectionAudit}
           projectionCoverageAudit={debugInfo?.projectionCoverageAudit}
           statsAttachmentAudit={debugInfo?.statsAttachmentAudit}
+          pipelinePropCountAudit={debugInfo?.pipelinePropCountAudit}
           prizePicksDiagnostics={debugInfo?.sources?.PrizePicks?.diagnostics}
           bestPlaysFilter={topMlbPlayBoard?.filterDiagnostics}
           showDebugPanels={showDebugPanels}

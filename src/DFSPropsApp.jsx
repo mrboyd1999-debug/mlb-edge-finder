@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchPrizePicksProps, PRIZEPICKS_RATE_LIMIT_MESSAGE, PRIZEPICKS_TEMPORARY_MESSAGE } from "./services/prizepicks";
+import { fetchPrizePicksProps, PRIZEPICKS_RATE_LIMIT_MESSAGE, PRIZEPICKS_TEMPORARY_MESSAGE, resolvePrizePicksCachedProviderResult } from "./services/prizepicks";
 import { UNDERDOG_TEMPORARY_MESSAGE } from "./services/underdog";
 import {
   fetchUnderdogProviderProps,
@@ -157,7 +157,7 @@ import {
   LIVE_LINE_PROJECTION_UNAVAILABLE,
 } from "./modules/projectionBreakdown.js";
 import { logMlbData, traceLiveBoardMlbProp, getMlbPipelineStatus, subscribeMlbPipelineStatus } from "./services/mlbDataService.js";
-import { mergeDfsSourceStatusFromApiHealth, recordMlbProjectionResult, setMlbPipelineRefreshing } from "./services/mlbPipelineStatus.js";
+import { mergeDfsSourceStatusFromApiHealth, recordMlbProjectionResult, setMlbPipelineRefreshing, syncMlbStatsStatusFromAttachment } from "./services/mlbPipelineStatus.js";
 import { NO_VERIFIED_GRADE_STATUS } from "./utils/manualPropScoring.js";
 import {
   computeGradingDataQuality,
@@ -247,6 +247,11 @@ import {
   attachHistoricalStatsToProps,
   buildStatsAttachmentMetrics,
 } from "./utils/historicalStatsLoader.js";
+import {
+  buildPipelinePropCountAudit,
+  countVerifiedFilterProps,
+  logPipelinePropCountAudit,
+} from "./utils/pipelinePropCountAudit.js";
 import {
   buildGuaranteedBaseFeedDisplay,
   ensureMlbSportOnProps,
@@ -1434,8 +1439,19 @@ function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderd
         timeoutMs: PRIZEPICKS_PROVIDER_TIMEOUT_MS,
         preflight: () => getLineProviderPreflight("PrizePicks"),
         fetchFn: ({ signal }) => fetchPrizePicksProps({ sport: fetchSport, statType: "all", signal }),
-        emptyResult: ({ timedOut, message, notConfigured }) =>
-          emptyPrizePicksProviderResult({
+        emptyResult: ({ timedOut, message, notConfigured }) => {
+          if (timedOut && !notConfigured) {
+            const cached = resolvePrizePicksCachedProviderResult({
+              sport: fetchSport,
+              statType: "all",
+              reason: "timeout",
+              message:
+                message ||
+                `PrizePicks timed out after ${PRIZEPICKS_PROVIDER_TIMEOUT_MS / 1000}s`,
+            });
+            if (cached?.props?.length) return cached;
+          }
+          return emptyPrizePicksProviderResult({
             timedOut,
             notConfigured,
             message:
@@ -1445,7 +1461,8 @@ function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderd
                 : timedOut
                   ? `PrizePicks timed out after ${PRIZEPICKS_PROVIDER_TIMEOUT_MS / 1000}s`
                   : "PrizePicks fetch failed"),
-          }),
+          });
+        },
       })
     : skippedProviderResult("PrizePicks");
 
@@ -1745,6 +1762,22 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
   if (wantsPrizePicks) {
     prizePicksResult = ppEntry.result;
+    if (
+      (!prizePicksResult?.props?.length || prizePicksResult?.error) &&
+      (ppEntry.timedOut || ppEntry.error) &&
+      !ppEntry.notConfigured &&
+      !prizePicksResult?.notConfigured
+    ) {
+      const cached = resolvePrizePicksCachedProviderResult({
+        sport: fetchSport,
+        statType: "all",
+        reason: ppEntry.timedOut ? "timeout" : "fetch-failed",
+        message: ppEntry.statusReason || prizePicksResult?.warnings?.[0] || "",
+      });
+      if (cached?.props?.length) {
+        prizePicksResult = cached;
+      }
+    }
     if (ppEntry.skipped && ppEntry.notConfigured) {
       const detail = PRIZEPICKS_NOT_CONFIGURED_DETAIL;
       const ppDiag = getPrizePicksDiagnostics();
@@ -2329,6 +2362,13 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   };
   const backgroundWarnings = [];
   let statsTimedOut = false;
+  let pipelinePropCountSnapshot = {
+    normalizedProps: allDisplayProps.length,
+    afterSportFilter: 0,
+    afterMarketFilter: 0,
+    afterProjectionFilter: 0,
+    afterProjectionMerge: 0,
+  };
 
   if (MLB_ONLY_MODE) {
     resetProjectionFetchDebug();
@@ -2340,13 +2380,20 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     });
     const marketFilteredProps = filterMlbPipelineSupportedMarkets(sportFilteredProps);
     const projectionCandidates = filterMlbProjectionGenerationCandidates(sportFilteredProps);
-    allDisplayProps = projectionCandidates;
-    workingNormalProps = filterMlbProjectionGenerationCandidates(
+    allDisplayProps = marketFilteredProps.length ? marketFilteredProps : sportFilteredProps;
+    workingNormalProps = filterMlbPipelineSupportedMarkets(
       prepareMlbSportPipelineProps(workingNormalProps, { log: false })
     );
-    workingActiveProps = filterMlbProjectionGenerationCandidates(
+    workingActiveProps = filterMlbPipelineSupportedMarkets(
       prepareMlbSportPipelineProps(workingActiveProps, { log: false })
     );
+    pipelinePropCountSnapshot = {
+      normalizedProps: normalizedPropsSnapshot,
+      afterSportFilter: sportFilteredProps.length,
+      afterMarketFilter: marketFilteredProps.length,
+      afterProjectionFilter: projectionCandidates.length,
+      afterProjectionMerge: allDisplayProps.length,
+    };
     setPipelineStageCount(PIPELINE_STAGES.NORMALIZED_PROPS_COUNT, allDisplayProps.length);
 
     const enrichmentSettled = await providerWave.awaitEnrichmentFeeds();
@@ -2355,7 +2402,11 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     background.sportsDataSeasonStats = seasonStatsData;
 
     const statsFetchProps = pickUniquePropsForStatsFetch(
-      allDisplayProps.length ? allDisplayProps : workingNormalProps
+      projectionCandidates.length
+        ? projectionCandidates
+        : allDisplayProps.length
+          ? allDisplayProps
+          : workingNormalProps
     );
     traceProjectionExecutionPath("fetchDFSProps:stats-fetch-start", {
       statsFetchPropCount: statsFetchProps.length,
@@ -2417,6 +2468,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       allDisplayProps = merged.props;
       workingNormalProps = mergeProjectionsOntoProps(workingNormalProps, mergeContext).props;
       workingActiveProps = mergeProjectionsOntoProps(workingActiveProps, mergeContext).props;
+      pipelinePropCountSnapshot.afterProjectionMerge = allDisplayProps.length;
       debugInfo.projectionMerge = merged.debug;
 
       const matchedPlayers = stableStats.statsMap.size
@@ -2446,6 +2498,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       workingNormalProps = attachHistoricalStatsToProps(workingNormalProps, historicalContext);
       workingActiveProps = attachHistoricalStatsToProps(workingActiveProps, historicalContext);
       debugInfo.statsAttachmentAudit = buildStatsAttachmentMetrics(allDisplayProps, historicalContext);
+      syncMlbStatsStatusFromAttachment(debugInfo.statsAttachmentAudit, allDisplayProps);
       if (import.meta.env.DEV && allDisplayProps[0]) {
         emitSportDetectionDebug(allDisplayProps[0]);
       }
@@ -2991,6 +3044,23 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   });
   debugInfo.pipelineDiagnostics = pipelineDiagnostics;
   logPipelineDiagnostics(pipelineDiagnostics);
+
+  const verificationPool = acceptedPropsForRender.length
+    ? acceptedPropsForRender
+    : allDisplayProps.length
+      ? allDisplayProps
+      : displayProps;
+  debugInfo.pipelinePropCountAudit = buildPipelinePropCountAudit({
+    rawPropsFetched: rawProps.length,
+    normalizedProps: pipelinePropCountSnapshot.normalizedProps || parsedCount || allDisplayProps.length,
+    afterSportFilter: pipelinePropCountSnapshot.afterSportFilter || allDisplayProps.length,
+    afterMarketFilter: pipelinePropCountSnapshot.afterMarketFilter || allDisplayProps.length,
+    afterProjectionFilter: pipelinePropCountSnapshot.afterProjectionFilter || allDisplayProps.length,
+    afterProjectionMerge: pipelinePropCountSnapshot.afterProjectionMerge || allDisplayProps.length,
+    afterVerificationFilter: countVerifiedFilterProps(verificationPool),
+    displayedProps: acceptedPropsForRender.length || liveRenderResult.counts?.rendered || displayProps.length || 0,
+  });
+  logPipelinePropCountAudit(debugInfo.pipelinePropCountAudit);
 
   if (!MLB_ONLY_MODE) {
     const perfSettled = await providerWave.awaitAllForPerf();

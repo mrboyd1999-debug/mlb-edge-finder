@@ -23,6 +23,7 @@ function DeveloperDebugPanel({
   bestPlaysFilter = null,
   projectionCoverageAudit = null,
   statsAttachmentAudit = null,
+  pipelinePropCountAudit = null,
   showDebugPanels = false,
   onShowDebugPanelsChange,
   debugModeEnabled = false,
@@ -37,6 +38,7 @@ function DeveloperDebugPanel({
         counts={bestPlaysFilter?.pipelineCounts || null}
         projectionCoverageAudit={coverageAudit}
         statsAttachmentAudit={attachAudit}
+        pipelinePropCountAudit={pipelinePropCountAudit}
       />
       <ProviderFeedDiagnosticsPanel />
       <PrizePicksDiagnosticsPanel diagnostics={prizePicksDiagnostics} feedRow={ppFeed} />

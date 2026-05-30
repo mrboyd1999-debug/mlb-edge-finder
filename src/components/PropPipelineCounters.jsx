@@ -17,9 +17,10 @@ function PropPipelineCounters({
   counts = null,
   projectionCoverageAudit = null,
   statsAttachmentAudit = null,
+  pipelinePropCountAudit = null,
   compact = false,
 }) {
-  if (!counts && !projectionCoverageAudit && !statsAttachmentAudit) return null;
+  if (!counts && !projectionCoverageAudit && !statsAttachmentAudit && !pipelinePropCountAudit) return null;
   const providerDiag =
     counts.providerFetchDiagnostics ||
     (typeof window !== "undefined" ? window.__PROVIDER_FETCH_DIAGNOSTICS__ : null) ||
@@ -39,12 +40,20 @@ function PropPipelineCounters({
 
   const coverageAudit = projectionCoverageAudit || counts?.projectionCoverageAudit || null;
   const attachAudit = statsAttachmentAudit || counts?.statsAttachmentAudit || null;
+  const stageAudit = pipelinePropCountAudit || counts?.pipelinePropCountAudit || null;
   const coverageLine = coverageAudit
     ? `Coverage: ${coverageAudit.projectedProps ?? projected} projected · ${coverageAudit.historicalMatches ?? 0} historical · ${coverageAudit.historicalMissing ?? 0} missing · ${coverageAudit.projectionCoveragePercent ?? 0}%`
     : "";
   const attachLine = attachAudit
     ? `Attach: ${attachAudit.profilesFound ?? 0} found · ${attachAudit.profilesMissing ?? 0} missing · ${attachAudit.gameLogsAttached ?? 0} logs · ${attachAudit.historicalCoveragePercent ?? 0}%`
     : "";
+  const stageLine = stageAudit
+    ? `Stages: raw ${stageAudit.rawPropsFetched ?? 0} · norm ${stageAudit.normalizedProps ?? 0} · sport ${stageAudit.afterSportFilter ?? 0} · market ${stageAudit.afterMarketFilter ?? 0} · proj filt ${stageAudit.afterProjectionFilter ?? 0} · merge ${stageAudit.afterProjectionMerge ?? 0} · verify ${stageAudit.afterVerificationFilter ?? 0} · shown ${stageAudit.displayedProps ?? 0}`
+    : "";
+  const dropOffLine =
+    stageAudit?.dropOffStage && stageAudit?.dropOffDetail
+      ? `Drop-off at ${stageAudit.dropOffStage}: ${stageAudit.dropOffDetail}`
+      : "";
 
   if (compact) {
     return (
@@ -53,6 +62,7 @@ function PropPipelineCounters({
         {rendered}
         {coverageLine ? ` · ${coverageLine}` : ""}
         {attachLine ? ` · ${attachLine}` : ""}
+        {stageLine ? ` · ${stageLine}` : ""}
       </p>
     );
   }
@@ -62,6 +72,20 @@ function PropPipelineCounters({
       <p className="prop-pipeline-counters">
         Raw: {raw} · Normalized: {normalized} · Projected: {projected} · Verified: {verified} · Rendered: {rendered}
       </p>
+      {stageAudit ? (
+        <p className="prop-pipeline-counters prop-pipeline-counters--meta" aria-label="Pipeline stage counts">
+          Raw fetched: {stageAudit.rawPropsFetched ?? 0} · Normalized: {stageAudit.normalizedProps ?? 0} · After sport
+          filter: {stageAudit.afterSportFilter ?? 0} · After market filter: {stageAudit.afterMarketFilter ?? 0} · After
+          projection filter: {stageAudit.afterProjectionFilter ?? 0} · After projection merge:{" "}
+          {stageAudit.afterProjectionMerge ?? 0} · After verification filter: {stageAudit.afterVerificationFilter ?? 0}{" "}
+          · Displayed: {stageAudit.displayedProps ?? 0}
+        </p>
+      ) : null}
+      {dropOffLine ? (
+        <p className="compact-form-notice prop-pipeline-counters__failure" role="status">
+          {dropOffLine}
+        </p>
+      ) : null}
       {attachAudit ? (
         <p className="prop-pipeline-counters prop-pipeline-counters--meta" aria-label="Historical stats attachment">
           Profiles Found: {attachAudit.profilesFound ?? 0} · Profiles Missing: {attachAudit.profilesMissing ?? 0} ·

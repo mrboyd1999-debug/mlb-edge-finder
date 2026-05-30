@@ -570,6 +570,7 @@ function buildCachedPrizePicksResult({ sport, statType, attempts, endpoint, reas
     rateLimited: reason === "rate-limit" || reason === "cooldown",
     liveFetchFailed: true,
     usedCacheFallback: true,
+    timedOut: /timeout|timed out/i.test(String(liveFailure)),
     warnings: [explicitReason, warning],
     diagnostics: getPrizePicksDiagnostics(),
     debug: buildDebug(
@@ -581,6 +582,27 @@ function buildCachedPrizePicksResult({ sport, statType, attempts, endpoint, reas
       attempts
     ),
   };
+}
+
+/** Serve cached PrizePicks lines when live fetch or provider wrapper times out. */
+export function resolvePrizePicksCachedProviderResult({
+  sport = "all",
+  statType = "all",
+  attempts = [],
+  reason = "fetch-failed",
+  message = "",
+} = {}) {
+  const resolvedAttempts =
+    attempts?.length > 0
+      ? attempts
+      : [{ error: message || reason, timedOut: /timeout|timed out/i.test(String(message || reason)) }];
+  return buildCachedPrizePicksResult({
+    sport,
+    statType,
+    attempts: resolvedAttempts,
+    endpoint: "cache-fallback",
+    reason: reason === "timeout" ? "fetch-failed" : reason,
+  });
 }
 
 async function fetchPrizePicksEndpoint(

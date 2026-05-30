@@ -135,6 +135,16 @@ function resolveLineFeedStatus(feed = {}) {
 }
 
 function resolveMlbStatsStatus(stats = {}) {
+  if (stats.attachmentConfirmed || (stats.historicalCoveragePercent ?? 0) > 0) {
+    if (stats.status === "Failed") {
+      return {
+        status: stats.historicalCoveragePercent >= 50 ? "Connected" : "Warning",
+        detail:
+          stats.lastError ||
+          `Historical stats attached (${stats.historicalCoveragePercent ?? 0}% coverage)`,
+      };
+    }
+  }
   if (stats.status === "Connected") {
     return { status: "Connected", detail: stats.lastError ? stats.lastError : "Game logs OK" };
   }

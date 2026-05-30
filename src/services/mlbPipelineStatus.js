@@ -10,6 +10,8 @@ const DEFAULT_STATUS = {
     playersReturned: null,
     matchedPlayer: null,
     playerId: null,
+    attachmentConfirmed: false,
+    historicalCoveragePercent: 0,
   },
   projectionApi: {
     label: "MLB Projection Engine",
@@ -119,9 +121,81 @@ export function recordMlbStatsFetch({
     pipelineStatus.mlbStatsApi.status = "Connected";
     pipelineStatus.mlbStatsApi.lastSuccessAt = now;
     pipelineStatus.mlbStatsApi.lastError = "";
-  } else {
-    pipelineStatus.mlbStatsApi.status = pipelineStatus.mlbStatsApi.lastSuccessAt ? "Warning" : "Failed";
+  } else if (
+    pipelineStatus.mlbStatsApi.attachmentConfirmed ||
+    (pipelineStatus.mlbStatsApi.historicalCoveragePercent ?? 0) > 0 ||
+    pipelineStatus.mlbStatsApi.lastSuccessAt ||
+    (pipelineStatus.mlbStatsApi.playersReturned ?? 0) > 0
+  ) {
+    pipelineStatus.mlbStatsApi.status = "Warning";
     pipelineStatus.mlbStatsApi.lastError = error || "MLB Stats API request failed";
+  } else {
+    pipelineStatus.mlbStatsApi.status = "Failed";
+    pipelineStatus.mlbStatsApi.lastError = error || "MLB Stats API request failed";
+  }
+  notifyPipelineStatusListeners();
+}
+
+function countPropsWithHistoricalFields(props = []) {
+  let count = 0;
+  for (const prop of props || []) {
+    const last5 = Number(prop?.last5Average ?? prop?.last5);
+    const last10 = Number(prop?.last10Average ?? prop?.last10);
+    const season = Number(prop?.seasonAverage ?? prop?.seasonAvg);
+    if (
+      (Number.isFinite(last5) && last5 >= 0) ||
+      (Number.isFinite(last10) && last10 >= 0) ||
+      (Number.isFinite(season) && season >= 0)
+    ) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+/** Reflect successful historical attachment on the board — never show Failed when stats landed. */
+export function syncMlbStatsStatusFromAttachment(audit = {}, props = []) {
+  const profilesFound = Number(audit.profilesFound) || 0;
+  const gameLogsAttached = Number(audit.gameLogsAttached) || 0;
+  const historicalAttached = Number(audit.historicalAttached) || 0;
+  const auditCoverage = Number(audit.historicalCoveragePercent) || 0;
+  const propsWithHistorical = countPropsWithHistoricalFields(props);
+  const propCoverage =
+    props.length > 0 ? Math.round((propsWithHistorical / props.length) * 1000) / 10 : 0;
+  const coveragePercent = Math.max(auditCoverage, propCoverage);
+  const hasAttachment =
+    profilesFound > 0 ||
+    gameLogsAttached > 0 ||
+    historicalAttached > 0 ||
+    propsWithHistorical > 0 ||
+    coveragePercent > 0;
+
+  if (!hasAttachment) return;
+
+  const now = new Date().toISOString();
+  pipelineStatus.mlbStatsApi.lastAttemptAt = now;
+  pipelineStatus.mlbStatsApi.lastSuccessAt = pipelineStatus.mlbStatsApi.lastSuccessAt || now;
+  pipelineStatus.mlbStatsApi.attachmentConfirmed = true;
+  pipelineStatus.mlbStatsApi.historicalCoveragePercent = coveragePercent;
+  pipelineStatus.mlbStatsApi.playersReturned = Math.max(
+    pipelineStatus.mlbStatsApi.playersReturned ?? 0,
+    profilesFound,
+    propsWithHistorical
+  );
+
+  if (
+    coveragePercent >= 50 ||
+    propsWithHistorical >= Math.max(10, Math.floor((props.length || profilesFound) * 0.4)) ||
+    gameLogsAttached >= Math.max(10, Math.floor(profilesFound * 0.4))
+  ) {
+    pipelineStatus.mlbStatsApi.status = "Connected";
+    pipelineStatus.mlbStatsApi.lastError = "";
+  } else {
+    pipelineStatus.mlbStatsApi.status = "Warning";
+    pipelineStatus.mlbStatsApi.lastError =
+      coveragePercent > 0
+        ? `Partial historical attachment — ${coveragePercent}% coverage`
+        : "Historical stats partially attached";
   }
   notifyPipelineStatusListeners();
 }
