@@ -35,16 +35,23 @@ export function computeFormConfidenceScore(prop = {}, projection = null) {
   if (!line || line <= 0) return 50;
 
   const samples = [last5, last10, season].filter((v) => v != null);
-  if (!samples.length && proj == null) return 48;
+  if (!samples.length && proj == null) return 50;
 
   let score = 50;
   const leanOver = proj != null ? proj >= line : samples[0] >= line;
 
-  samples.forEach((avg, index) => {
-    const weight = index === 0 ? 0.45 : index === 1 ? 0.35 : 0.2;
-    const favor = leanOver ? avg - line : line - avg;
-    score += Math.max(-12, Math.min(12, favor * 8)) * weight;
-  });
+  if (last5 != null) {
+    const favor = leanOver ? last5 - line : line - last5;
+    score += Math.max(-12, Math.min(12, favor * 8)) * 0.45;
+  }
+  if (last10 != null) {
+    const favor = leanOver ? last10 - line : line - last10;
+    score += Math.max(-12, Math.min(12, favor * 8)) * 0.35;
+  }
+  if (season != null) {
+    const favor = leanOver ? season - line : line - season;
+    score += Math.max(-12, Math.min(12, favor * 8)) * 0.2;
+  }
 
   if (proj != null) {
     const edge = Math.abs(proj - line) / line;
@@ -54,7 +61,6 @@ export function computeFormConfidenceScore(prop = {}, projection = null) {
   const sampleSize = finite(prop.sampleSize ?? prop.games ?? prop.gamesPlayed) ?? samples.length * 5;
   if (sampleSize >= 15) score += 4;
   else if (sampleSize >= 8) score += 2;
-  else score -= 2;
 
   return Math.max(35, Math.min(78, Math.round(score)));
 }

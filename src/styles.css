@@ -1920,8 +1920,13 @@ body,
   margin: 0 0 14px;
 }
 
-.verification-failure-breakdown__rejected {
-  margin-top: 10px;
+.verification-failure-breakdown__section {
+  margin-top: 12px;
+}
+
+.verification-failure-breakdown__table-scroll {
+  max-height: 320px;
+  overflow-y: auto;
 }
 
 .verification-failure-breakdown__table {

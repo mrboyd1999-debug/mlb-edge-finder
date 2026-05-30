@@ -2,6 +2,7 @@
 
 import { computeConservativeProbability } from "./conservativeProjection.js";
 import { computeRelativeEdgePercent, computeStandardPropMetrics } from "./standardPropMetrics.js";
+import { computePlayabilityScoreFromBreakdown } from "./playabilityScoring.js";
 
 function finiteOr(value, fallback = NaN) {
   const num = Number(value);
@@ -187,28 +188,10 @@ export function buildSmartFlags(prop = {}, edge = null) {
 }
 
 export function computePlayabilityScore(prop = {}, confidence = 50) {
-  let score = clamp(Math.round(confidence * 0.55), 0, 100);
-  const edge = finiteOr(prop.edge, 0);
-  const hit = finiteOr(prop.last10HitRate ?? prop.recentHitRate, 0.5);
-  const mult = finiteOr(prop.multiplier, 1);
-  const vol = finiteOr(prop.volatility, 2.5);
-  const risk = String(prop.riskLevel || computeTrueRiskLevel(prop)).toUpperCase();
-
-  score += clamp(edge * 4, 0, 16);
-  score += clamp((hit - 0.45) * 30, -6, 12);
-
-  if (risk === "LOW") score += 10;
-  if (risk === "HIGH") score -= 12;
-
-  if (mult <= 1.05 && confidence >= 78) score += 8;
-  if (mult > 1.2 && edge >= 2) score += 6;
-  if (vol <= 2) score += 5;
-  if (vol >= 3.5) score -= 8;
-
-  if (prop.isGoblin || /goblin/i.test(String(prop.statType || ""))) score += 4;
-  if (prop.isDemon || /demon/i.test(String(prop.statType || ""))) score += 2;
-
-  return clamp(Math.round(score), 0, 100);
+  return computePlayabilityScoreFromBreakdown(
+    { ...prop, displayConfidenceScore: confidence, confidenceScore: confidence, confidence },
+    { confidence, metrics: prop }
+  );
 }
 
 export function isDisplayResearchOnly(prop = {}) {

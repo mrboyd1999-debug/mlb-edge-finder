@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { VERIFICATION_FAILURE_GATE_LABELS } from "../utils/verificationDashboard.js";
+import { safeArray } from "../utils/safeStats.js";
 
 function Metric({ label, value, highlight = false }) {
   return (
@@ -20,9 +21,83 @@ function formatMetric(value, suffix = "") {
   return `${value}${suffix}`;
 }
 
+function AuditTable({ title, rows = [], columns = [], emptyMessage = "None", scrollable = false }) {
+  const safeRows = safeArray(rows);
+  if (!safeRows.length) {
+    return (
+      <div className="verification-failure-breakdown__section">
+        <h4 className="verification-diagnostics__subtitle">{title}</h4>
+        <p className="verification-diagnostics__empty">{emptyMessage}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="verification-failure-breakdown__section">
+      <h4 className="verification-diagnostics__subtitle">{title}</h4>
+      <div
+        className={`verification-diagnostics__table-wrap${
+          scrollable ? " verification-failure-breakdown__table-scroll" : ""
+        }`}
+      >
+        <table className="verification-diagnostics__table verification-failure-breakdown__table">
+          <thead>
+            <tr>
+              {columns.map((column) => (
+                <th key={column.key}>{column.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {safeRows.map((row, index) => (
+              <tr key={`${row?.player || "row"}-${row?.market || "market"}-${index}`}>
+                {columns.map((column) => (
+                  <td key={column.key}>
+                    {column.render ? column.render(row) : formatMetric(row?.[column.key], column.suffix || "")}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+const PLAYABILITY_AUDIT_COLUMNS = [
+  { key: "player", label: "Player" },
+  { key: "market", label: "Market" },
+  { key: "probability", label: "Probability", suffix: "%" },
+  { key: "confidence", label: "Confidence", suffix: "%" },
+  { key: "historicalComponent", label: "Historical" },
+  { key: "trendComponent", label: "Trend" },
+  { key: "projectionComponent", label: "Projection" },
+  { key: "penaltyComponent", label: "Penalty" },
+  { key: "finalPlayability", label: "Final Playability" },
+  { key: "reasonRejected", label: "Reason Rejected" },
+];
+
+const TOP_SCORE_COLUMNS = [
+  { key: "player", label: "Player" },
+  { key: "market", label: "Market" },
+  { key: "probability", label: "Probability", suffix: "%" },
+  { key: "confidence", label: "Confidence", suffix: "%" },
+  { key: "finalPlayability", label: "Playability" },
+  {
+    key: "reasonRejected",
+    label: "Verification",
+    render: (row) => row.reasonRejected || "Fails gate",
+  },
+];
+
 function VerificationFailureBreakdown({ filterDiagnostics = null }) {
-  const breakdown = filterDiagnostics?.verificationDashboard?.verificationFailureBreakdown;
+  const dashboard = filterDiagnostics?.verificationDashboard || null;
+  const breakdown = dashboard?.verificationFailureBreakdown;
   const pipelineCounts = filterDiagnostics?.pipelineCounts || null;
+  const rejectedAudits = safeArray(dashboard?.rejectedPlayabilityAudits);
+  const topConfidenceProps = safeArray(dashboard?.topConfidenceProps);
+  const topPlayabilityProps = safeArray(dashboard?.topPlayabilityProps);
 
   const totalProps = breakdown?.totalProps ?? pipelineCounts?.rawProps ?? 0;
   const propsWithProjections =
@@ -36,7 +111,7 @@ function VerificationFailureBreakdown({ filterDiagnostics = null }) {
   const failedHistoricalData = breakdown?.failedHistoricalData ?? 0;
   const failedTierGate = breakdown?.failedTierGate ?? 0;
   const bottleneckLabel = breakdown?.primaryBottleneck;
-  const rejected = breakdown?.highestScoringRejectedProp;
+  const rejected = breakdown?.highestScoringRejectedProp || rejectedAudits[0] || null;
 
   const summaryRows = [
     { key: "totalProps", label: VERIFICATION_FAILURE_GATE_LABELS.totalProps, value: totalProps },
@@ -91,7 +166,8 @@ function VerificationFailureBreakdown({ filterDiagnostics = null }) {
     <section className="verification-diagnostics verification-failure-breakdown" aria-label="Verification failure breakdown">
       <h3 className="verification-diagnostics__title">Verification Failure Breakdown</h3>
       <p className="verification-diagnostics__meta">
-        Sequential gate audit — each projected prop is counted at the first gate it fails.
+        Sequential gate audit — each projected prop is counted at the first gate it fails. Full rejected-prop
+        playability audits are logged to the browser console as <code>[PlayabilityAudit]</code>.
       </p>
 
       <div className="verification-diagnostics__grid">
@@ -113,39 +189,45 @@ function VerificationFailureBreakdown({ filterDiagnostics = null }) {
         </p>
       ) : null}
 
-      <div className="verification-failure-breakdown__rejected">
-        <h4 className="verification-diagnostics__subtitle">Highest Scoring Rejected Prop</h4>
-        {rejected ? (
-          <div className="verification-diagnostics__table-wrap">
-            <table className="verification-diagnostics__table verification-failure-breakdown__table">
-              <thead>
-                <tr>
-                  <th>Player</th>
-                  <th>Market</th>
-                  <th>Probability</th>
-                  <th>Confidence</th>
-                  <th>Playability</th>
-                  <th>Sanity</th>
-                  <th>Reason Rejected</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>{rejected.player}</td>
-                  <td>{rejected.market}</td>
-                  <td>{formatMetric(rejected.probability, "%")}</td>
-                  <td>{formatMetric(rejected.confidence, "%")}</td>
-                  <td>{formatMetric(rejected.playability)}</td>
-                  <td>{formatMetric(rejected.sanity)}</td>
-                  <td>{rejected.reasonRejected || "—"}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="verification-diagnostics__empty">No rejected projected props to rank yet.</p>
-        )}
-      </div>
+      <AuditTable
+        title="Highest Scoring Rejected Prop"
+        rows={rejected ? [rejected] : []}
+        columns={[
+          { key: "player", label: "Player" },
+          { key: "market", label: "Market" },
+          { key: "probability", label: "Probability", suffix: "%" },
+          { key: "confidence", label: "Confidence", suffix: "%" },
+          { key: "historicalComponent", label: "Historical Component" },
+          { key: "trendComponent", label: "Trend Component" },
+          { key: "projectionComponent", label: "Projection Component" },
+          { key: "penaltyComponent", label: "Penalty Component" },
+          { key: "finalPlayability", label: "Final Playability" },
+          { key: "reasonRejected", label: "Reason Rejected" },
+        ]}
+        emptyMessage="No rejected projected props to rank yet."
+      />
+
+      <AuditTable
+        title="Top 10 Highest Confidence Props (includes non-verified)"
+        rows={topConfidenceProps}
+        columns={TOP_SCORE_COLUMNS}
+        emptyMessage="No projected props with confidence scores yet."
+      />
+
+      <AuditTable
+        title="Top 10 Highest Playability Props (includes non-verified)"
+        rows={topPlayabilityProps}
+        columns={TOP_SCORE_COLUMNS}
+        emptyMessage="No projected props with playability scores yet."
+      />
+
+      <AuditTable
+        title={`Rejected Prop Playability Audit (${rejectedAudits.length})`}
+        rows={rejectedAudits}
+        columns={PLAYABILITY_AUDIT_COLUMNS}
+        emptyMessage="No rejected projected props."
+        scrollable
+      />
     </section>
   );
 }

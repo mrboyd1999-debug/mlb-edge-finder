@@ -34,6 +34,10 @@ export function resolveNormalizedEdgeScore(prop = {}) {
 }
 
 export function resolvePlayabilityScore(prop = {}) {
+  const breakdown = prop.playabilityBreakdown ?? prop.playabilityAudit;
+  if (breakdown?.finalPlayability != null && Number.isFinite(Number(breakdown.finalPlayability))) {
+    return Number(breakdown.finalPlayability);
+  }
   const existing = finite(prop.playabilityScore, NaN);
   if (Number.isFinite(existing)) return existing;
   const confidence = finite(

@@ -27,7 +27,9 @@ import {
   attachProjectionSanityAudit,
   buildProjectionSanityAudit,
 } from "./projectionSanityAudit.js";
-import { computePlayabilityScore } from "./propCalibration.js";
+import {
+  computePlayabilityBreakdown,
+} from "./playabilityScoring.js";
 import {
   computeTopPickScore,
   annotateTopPickRankingFields,
@@ -217,9 +219,9 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     metrics
   );
   const verifiedProbability = playability.probabilityScore ?? metrics.probabilityScore;
-  const rawDisplayConfidence =
-    playability.displayConfidenceScore ??
+  const modelConfidence =
     metrics.adjustedConfidence ??
+    computeMlbPlayConfidence({ ...prop, projection }, projection) ??
     prop.displayConfidenceScore ??
     prop.confidenceScore ??
     prop.confidence;
@@ -228,14 +230,25 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     projection,
     projectedValue: projection,
   });
-  const displayConfidence = applySanityConfidencePenalty(rawDisplayConfidence, sanityAudit);
-  const basePlayabilityScore = Number.isFinite(Number(prop.playabilityScore))
-    ? Number(prop.playabilityScore)
-    : computePlayabilityScore(
-        { ...prop, projection, projectedValue: projection, edge: metrics.edge, edgePercent: metrics.edgePercent },
-        displayConfidence ?? prop.confidenceScore ?? prop.confidence ?? 50
-      );
-  const playabilityScore = applySanityPlayabilityPenalty(basePlayabilityScore, sanityAudit);
+  const displayConfidence = applySanityConfidencePenalty(modelConfidence, sanityAudit);
+  const playabilityBreakdown = computePlayabilityBreakdown(
+    {
+      ...prop,
+      projection,
+      projectedValue: projection,
+      edge: metrics.edge,
+      edgePercent: metrics.edgePercent,
+      displayConfidenceScore: displayConfidence,
+      probabilityScore: verifiedProbability,
+    },
+    {
+      metrics,
+      sanityAudit,
+      confidence: displayConfidence,
+      probability: verifiedProbability,
+    }
+  );
+  const playabilityScore = playabilityBreakdown.finalPlayability;
   const tierLabel = classifyBestPlayTier({
     ...prop,
     projection,
@@ -337,6 +350,8 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     verifiedTier,
     verifiedTierLabel: verifiedTier ? `Tier ${verifiedTier}` : null,
     playabilityScore,
+    playabilityBreakdown,
+    playabilityAudit: playabilityBreakdown,
     researchReasons: playability.researchReasons,
     whyNotPlayable: playability.whyNotPlayable,
     direction,
@@ -352,6 +367,7 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
       audit: sanityAudit,
       confidence: displayConfidence,
       playability: playabilityScore,
+      skipSanityRescore: true,
     }),
     {
       edge,

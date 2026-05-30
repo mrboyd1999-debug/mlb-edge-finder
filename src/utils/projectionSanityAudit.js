@@ -13,8 +13,6 @@ import { resolveCalibrationHitRates } from "./probabilityCalibration.js";
 import { formatNumber } from "./formatters.js";
 import {
   MAX_SANITY_WITHOUT_HISTORY,
-  MAX_CONFIDENCE_WITHOUT_HISTORY,
-  MAX_PLAYABILITY_WITHOUT_HISTORY,
   RESEARCH_ONLY_TIER_LABEL,
   TIER_A_MIN_SANITY_SCORE,
   TIER_B_MIN_SANITY_SCORE,
@@ -545,19 +543,12 @@ export function attachProjectionSanityAudit(prop = {}, options = {}) {
       prop.confidenceScore ??
       prop.confidence;
     const rawPlayability = options.playability ?? prop.playabilityScore;
-    let adjustedConfidence = applySanityConfidencePenalty(rawConfidence, audit);
-    let adjustedPlayability = applySanityPlayabilityPenalty(rawPlayability, audit);
-
-    if (!historicalPresent) {
-      adjustedConfidence =
-        adjustedConfidence != null
-          ? Math.min(Math.round(adjustedConfidence), MAX_CONFIDENCE_WITHOUT_HISTORY)
-          : MAX_CONFIDENCE_WITHOUT_HISTORY;
-      adjustedPlayability =
-        adjustedPlayability != null
-          ? Math.min(Math.round(adjustedPlayability), MAX_PLAYABILITY_WITHOUT_HISTORY)
-          : MAX_PLAYABILITY_WITHOUT_HISTORY;
-    }
+    let adjustedConfidence = options.skipSanityRescore
+      ? rawConfidence
+      : applySanityConfidencePenalty(rawConfidence, audit);
+    let adjustedPlayability = options.skipSanityRescore
+      ? rawPlayability
+      : applySanityPlayabilityPenalty(rawPlayability, audit);
 
     const merged = {
       ...prop,

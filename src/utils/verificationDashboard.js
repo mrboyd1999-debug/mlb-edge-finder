@@ -42,6 +42,8 @@ import { buildProbabilityDistributionAudit,
   resolveProbabilityPipelineValues,
 } from "./probabilityDistributionAudit.js";
 import { buildProjectionSanityAudit } from "./projectionSanityAudit.js";
+import { enrichBestPlayRankingFields } from "./bestPlayRanking.js";
+import { computePlayabilityBreakdown } from "./playabilityScoring.js";
 
 export { PROBABILITY_HISTOGRAM_BUCKETS } from "./probabilityDistributionAudit.js";
 
@@ -150,26 +152,82 @@ export function resolveVerificationWaterfallRejection(prop = {}, metrics = null)
   return "Eligible";
 }
 
-function buildHighestScoringRejectedProp(projectedPool = []) {
-  const rejected = (projectedPool || [])
-    .filter((prop) => !passesVerifiedTierFilter(prop))
-    .map((prop) => annotateTopPickRankingFields(prop))
-    .sort(compareTopPickScore);
+function buildPlayabilityAuditRow(prop = {}, { withRejection = false } = {}) {
+  const enriched = prop?.playabilityBreakdown ? prop : enrichBestPlayRankingFields(prop);
+  const breakdown =
+    enriched.playabilityBreakdown ??
+    computePlayabilityBreakdown(enriched, {
+      confidence: enriched.displayConfidenceScore ?? enriched.confidenceScore ?? enriched.confidence,
+      probability: enriched.probabilityScore ?? enriched.verifiedProbability,
+      sanityAudit: enriched.projectionSanityAudit,
+      metrics: {
+        edge: enriched.edge,
+        edgePercent: enriched.edgePercent,
+        probabilityScore: enriched.probabilityScore,
+      },
+    });
 
-  const prop = rejected[0];
-  if (!prop) return null;
-
-  const metrics = resolveVerifiedMetrics(prop);
   return {
-    player: String(prop.playerName || prop.player || "Unknown").trim() || "Unknown",
-    market: String(prop.statType || prop.market || prop.propType || "N/A").trim() || "N/A",
-    probability: Number.isFinite(metrics.probability) ? Math.round(metrics.probability) : null,
-    confidence: Number.isFinite(metrics.confidence) ? Math.round(metrics.confidence) : null,
-    playability: Math.round(resolvePlayabilityScore(prop)),
-    sanity: resolveBreakdownSanityScore(prop, metrics),
-    reasonRejected: resolveVerificationWaterfallRejection(prop, metrics),
-    score: Number(prop.topPickScore ?? 0).toFixed(1),
+    player: String(enriched.playerName || enriched.player || "Unknown").trim() || "Unknown",
+    market: String(enriched.statType || enriched.market || enriched.propType || "N/A").trim() || "N/A",
+    probability: breakdown.probability,
+    confidence: breakdown.confidence,
+    historicalComponent: breakdown.historicalComponent,
+    trendComponent: breakdown.trendComponent,
+    projectionComponent: breakdown.projectionComponent,
+    penaltyComponent: breakdown.penaltyComponent,
+    finalPlayability: breakdown.finalPlayability,
+    playability: breakdown.finalPlayability,
+    sanity: resolveBreakdownSanityScore(enriched, resolveVerifiedMetrics(enriched)),
+    reasonRejected: withRejection ? resolveVerificationWaterfallRejection(enriched) : undefined,
+    score: Number(enriched.topPickScore ?? 0).toFixed(1),
   };
+}
+
+export function buildRejectedPlayabilityAudits(projectedPool = []) {
+  const rows = [];
+  for (const prop of projectedPool || []) {
+    const enriched = enrichBestPlayRankingFields(prop);
+    if (passesVerifiedTierFilter(enriched)) continue;
+    rows.push(buildPlayabilityAuditRow(enriched, { withRejection: true }));
+  }
+  return rows.sort((a, b) => Number(b.score) - Number(a.score));
+}
+
+export function buildTopConfidenceProps(projectedPool = [], limit = 10) {
+  return [...(projectedPool || [])]
+    .map((prop) => buildPlayabilityAuditRow(prop))
+    .sort(
+      (a, b) =>
+        (b.confidence ?? 0) - (a.confidence ?? 0) ||
+        (b.finalPlayability ?? 0) - (a.finalPlayability ?? 0)
+    )
+    .slice(0, limit);
+}
+
+export function buildTopPlayabilityProps(projectedPool = [], limit = 10) {
+  return [...(projectedPool || [])]
+    .map((prop) => buildPlayabilityAuditRow(prop))
+    .sort(
+      (a, b) =>
+        (b.finalPlayability ?? 0) - (a.finalPlayability ?? 0) ||
+        (b.confidence ?? 0) - (a.confidence ?? 0)
+    )
+    .slice(0, limit);
+}
+
+export function logRejectedPlayabilityAudits(rows = []) {
+  if (!rows.length) return rows;
+  console.info("[MLB Pipeline] rejected prop playability audit", { count: rows.length });
+  rows.forEach((row) => {
+    console.info("[PlayabilityAudit]", row);
+  });
+  return rows;
+}
+
+function buildHighestScoringRejectedProp(projectedPool = []) {
+  const rejected = buildRejectedPlayabilityAudits(projectedPool);
+  return rejected[0] || null;
 }
 
 function failsProbabilityGate(metrics = {}) {
@@ -607,6 +665,11 @@ export function buildVerificationDashboard(props = [], options = {}) {
     verifiedTierCount: verifiedPasses,
     totalProps: (props || []).length,
   });
+  const rejectedPlayabilityAudits = logRejectedPlayabilityAudits(
+    buildRejectedPlayabilityAudits(projectedPool)
+  );
+  const topConfidenceProps = buildTopConfidenceProps(projectedPool, 10);
+  const topPlayabilityProps = buildTopPlayabilityProps(projectedPool, 10);
 
   let researchPasses = 0;
   for (const prop of props || []) {
@@ -660,6 +723,9 @@ export function buildVerificationDashboard(props = [], options = {}) {
     probabilityDistribution,
     failureBreakdown,
     verificationFailureBreakdown,
+    rejectedPlayabilityAudits,
+    topConfidenceProps,
+    topPlayabilityProps,
     ruleRejectionCounts,
     rejectionCounts: verifiedPasses === 0 ? ruleRejectionCounts : null,
     regressionReasons: audit.regressionReasons,
