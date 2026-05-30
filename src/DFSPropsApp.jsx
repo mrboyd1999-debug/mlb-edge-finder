@@ -215,6 +215,12 @@ import {
 import { enrichPropsWithSportsData, generateMlbPropsFromSportsData } from "./services/propSportsDataEnrichment.js";
 import { mergeProjectionsOntoProps } from "./services/mlb/projectionMergePipeline.js";
 import { buildLiveRenderBoard, filterPlatformProps, isFakeOrFallbackProp } from "./utils/livePropRender.js";
+import {
+  buildBypassLiveRenderResult,
+  isPipelineBypassProjectionEnabled,
+  logPipelineStageTrace,
+  pickUnderdogBypassRenderProps,
+} from "./utils/pipelineStageTrace.js";
 import { resolvePipelineProjectionStats, countPropsWithProjections, resolveEngineProjectedPool } from "./utils/projectionPipelineStatus.js";
 import { buildVerificationDashboard } from "./utils/verificationDashboard.js";
 import {
@@ -2146,6 +2152,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   endPerformanceTimer(PERFORMANCE_TIMERS.normalizeProps);
 
   debugInfo.allDisplayPropsCount = allDisplayProps.length;
+  let pipelineTraceNormalizedPool = [...allDisplayProps];
+  console.log("NORMALIZED", allDisplayProps.length);
   debugInfo.displayDebugCounts = buildDisplayDebugCounts({
     raw: rawProps.length,
     parsed: parsedCount,
@@ -2450,6 +2458,11 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       afterHistoricalAttachment: 0,
       rejections: { ...boardPool.rejections },
     };
+    console.log("COMBINED", allDisplayProps.length);
+    console.log("CANDIDATES", projectionCandidates.length);
+    if (import.meta.env.DEV && normalizedPropsSnapshot > 0 && allDisplayProps.length === 0) {
+      console.warn("[Pipeline Trace] COMBINED dropped to 0 after buildMlbProjectionBoardPool", boardPool.rejections);
+    }
     setPipelineStageCount(PIPELINE_STAGES.NORMALIZED_PROPS_COUNT, allDisplayProps.length);
 
     const enrichmentSettled = await providerWave.awaitEnrichmentFeeds();
@@ -2522,6 +2535,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       workingActiveProps = mergeProjectionsOntoProps(workingActiveProps, mergeContext).props;
       pipelinePropCountSnapshot.afterProjectionMerge = allDisplayProps.length;
       pipelinePropCountSnapshot.projectedProps = countMergedProjections(allDisplayProps);
+      console.log("PROJECTED", pipelinePropCountSnapshot.projectedProps);
       pipelinePropCountSnapshot.rejections = {
         ...pipelinePropCountSnapshot.rejections,
         noProjectionFormula: Math.max(
@@ -2929,9 +2943,31 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   const allowFallbackRender = Boolean(
     pipelineFallback && /sportsdata/i.test(String(debugInfo.ingestionFallback || ""))
   );
-  const liveRenderResult = buildLiveRenderBoard(allDisplayProps, { allowFallbackProps: allowFallbackRender });
+  const bypassRenderProps = isPipelineBypassProjectionEnabled()
+    ? pickUnderdogBypassRenderProps(pipelineTraceNormalizedPool, 20)
+    : [];
+  let liveRenderResult;
+  if (bypassRenderProps.length) {
+    console.warn(
+      "[Pipeline Trace] Bypassing projection engine — direct render of",
+      bypassRenderProps.length,
+      "Underdog props (window.__PIPELINE_BYPASS_PROJECTION__ = true)"
+    );
+    allDisplayProps = bypassRenderProps;
+    liveRenderResult = buildBypassLiveRenderResult(bypassRenderProps);
+  } else {
+    liveRenderResult = buildLiveRenderBoard(allDisplayProps, { allowFallbackProps: allowFallbackRender });
+    if (import.meta.env.DEV && allDisplayProps.length > 0 && liveRenderResult.props.length === 0) {
+      console.warn("[Pipeline Trace] RENDERED dropped to 0 in buildLiveRenderBoard", liveRenderResult.counts);
+    }
+  }
   const acceptedPropsForRender = liveRenderResult.props;
   debugInfo.pipelineRenderCounts = liveRenderResult.counts;
+  const verifiedForTrace = countVerifiedFilterProps(
+    acceptedPropsForRender.length ? acceptedPropsForRender : allDisplayProps
+  );
+  console.log("VERIFIED", verifiedForTrace);
+  console.log("RENDERED", liveRenderResult.props.length);
   const modelSignalMap = buildModelSignalMap(filterVerifiedSportsbookProps(qualBoards.allDisplayable));
   let streakProps = [];
 
@@ -3150,6 +3186,20 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     rejections: pipelinePropCountSnapshot.rejections || {},
   });
   logPipelinePropCountAudit(debugInfo.pipelinePropCountAudit);
+  logPipelineStageTrace({
+    normalized: pipelinePropCountSnapshot.normalizedProps || pipelineTraceNormalizedPool.length || allDisplayProps.length,
+    combined: pipelinePropCountSnapshot.afterProjectionMerge || allDisplayProps.length,
+    candidates:
+      pipelinePropCountSnapshot.afterProjectionFilter ||
+      pipelinePropCountSnapshot.projectionCandidates ||
+      0,
+    projected:
+      pipelinePropCountSnapshot.projectedProps ||
+      countMergedProjections(allDisplayProps) ||
+      0,
+    verified: countVerifiedFilterProps(verificationPool),
+    rendered: liveRenderResult.props.length,
+  });
 
   debugInfo.providerCoverageAudit = buildProviderCoverageAudit({
     debugInfo,
