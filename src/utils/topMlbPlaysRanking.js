@@ -1,4 +1,4 @@
-import { canonicalMarketKey } from "./marketNormalization.js";
+import { resolvePropMarketKey } from "./marketNormalization.js";
 import { normalizeSource } from "./normalizeSource.js";
 import { resolvePlayerRole } from "./propPlayerRole.js";
 import { computeBestPlayRankScore, resolveEdgeMagnitude } from "./bestPlayRanking.js";
@@ -22,7 +22,7 @@ function statBlob(prop = {}) {
 }
 
 function isPitcherStrikeoutMarket(prop = {}) {
-  const key = canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
+  const key = resolvePropMarketKey(prop);
   return key === "strikeouts" || /pitcher\s*strikeout|strikeouts?\s*thrown/i.test(statBlob(prop));
 }
 
@@ -31,12 +31,12 @@ function isFantasyMarket(prop = {}) {
 }
 
 function isTotalBasesMarket(prop = {}) {
-  const key = canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
+  const key = resolvePropMarketKey(prop);
   return key === "totalbases" || /total\s*bases?/.test(statBlob(prop));
 }
 
 function isHrrMarket(prop = {}) {
-  const key = canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
+  const key = resolvePropMarketKey(prop);
   return key === "hrr" || /hits?\s*(\+|and|&)\s*runs?\s*(\+|and|&)\s*rbis?/.test(statBlob(prop));
 }
 

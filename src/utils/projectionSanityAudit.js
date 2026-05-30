@@ -2,7 +2,7 @@
  * Projection sanity audit — history alignment, mismatch detection, Tier A gates.
  */
 
-import { canonicalMarketKey } from "./marketNormalization.js";
+import { resolvePropMarketKey } from "./marketNormalization.js";
 import {
   resolveProjectionValue,
   resolveProjectionSourceLabel,
@@ -22,7 +22,7 @@ import {
   resolveHistoricalDataPresent,
   resolveHitRateValidationPresent,
 } from "./tierHistoricalValidation.js";
-import { SANITY_FAIL_FLAG, validateProjectionAgainstCap } from "./projectionMarketCaps.js";
+import { SANITY_FAIL_FLAG, validateProjectionAgainstCap, applyMissingMarketKeyFallback, MISSING_MARKET_KEY_REASON } from "./projectionMarketCaps.js";
 import { classifyVerifiedTier, enforceVerifiedTierFields } from "./verifiedTierSystem.js";
 
 function finite(value) {
@@ -102,7 +102,7 @@ const DEFAULT_SOURCE_WEIGHTS = {
 };
 
 function resolveMarketKey(prop = {}) {
-  return canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
+  return resolvePropMarketKey(prop);
 }
 
 function breakdownWeight(prop = {}, labelPattern) {
@@ -309,13 +309,29 @@ export function buildProjectionSanityAudit(prop = {}) {
 }
 
 function buildProjectionSanityAuditUnsafe(prop = {}) {
-  const marketKey = resolveMarketKey(prop);
-  const rule = MARKET_SANITY_RULES[marketKey] || null;
+  const marketKey = resolvePropMarketKey(prop);
+  if (!marketKey) {
+    return {
+      marketKey: "",
+      marketLabel: "Unknown",
+      supported: false,
+      missingMarketKey: true,
+      historicalDataPresent: false,
+      hitRateValidated: false,
+      sanityScore: 0,
+      sanityFail: true,
+      blocksTierA: true,
+      summary: MISSING_MARKET_KEY_REASON,
+    };
+  }
+
+  const resolvedMarketKey = marketKey;
+  const rule = MARKET_SANITY_RULES[resolvedMarketKey] || null;
   const projection = resolveProjectionValue(prop);
   const line = finite(prop.line);
   const supported = projection != null && line != null && line > 0;
   const { last5, last10, season } = resolveHistoricalAverages(prop);
-  const sourceWeights = resolveSourceWeightPercents(prop, marketKey);
+  const sourceWeights = resolveSourceWeightPercents(prop, resolvedMarketKey);
   const projectionSourceWeight = resolveProjectionSourceWeight(prop);
   const projectionSourceLabel = resolveProjectionSourceLabel(prop);
   const recommendedSide = resolveRecommendedSide(prop, projection, line);
@@ -328,8 +344,8 @@ function buildProjectionSanityAuditUnsafe(prop = {}) {
 
   if (!supported) {
     return {
-      marketKey,
-      marketLabel: rule?.label || marketKey || "Unknown",
+      marketKey: resolvedMarketKey,
+      marketLabel: rule?.label || resolvedMarketKey || "Unknown",
       supported: false,
       last5Average: last5,
       last10Average: last10,
@@ -405,7 +421,7 @@ function buildProjectionSanityAuditUnsafe(prop = {}) {
     projectionMismatch;
 
   const audit = {
-    marketKey,
+    marketKey: resolvedMarketKey,
     marketLabel: rule?.label || marketKey || "Prop",
     supported: true,
     historicalDataPresent: historical.present,
@@ -516,6 +532,11 @@ export function passesTierASanityGate(audit = {}) {
 
 export function attachProjectionSanityAudit(prop = {}, options = {}) {
   try {
+    const marketKey = resolvePropMarketKey(prop);
+    if (!marketKey) {
+      return applyMissingMarketKeyFallback(prop, MISSING_MARKET_KEY_REASON);
+    }
+
     const audit = options.audit || buildProjectionSanityAudit(prop);
     const historicalPresent = audit?.historicalDataPresent ?? resolveHistoricalDataPresent(prop).present;
     const rawConfidence =

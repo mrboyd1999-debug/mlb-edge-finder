@@ -1,6 +1,6 @@
 /** Realistic probability, playability tiers, and lean helpers for MLB props. */
 
-import { computeStandardEdge, computeRelativeEdgePercent } from "./standardPropMetrics.js";
+import { computeStandardEdge, computeRelativeEdgePercent, computeStandardPropMetrics } from "./standardPropMetrics.js";
 import { computeMlbPlayConfidence } from "./mlbPlayConfidence.js";
 import { classifyVerifiedTier } from "./verifiedTierSystem.js";
 import { resolveProjectionLeanDisplay, resolveProjectionLean } from "./pickDirectionAudit.js";

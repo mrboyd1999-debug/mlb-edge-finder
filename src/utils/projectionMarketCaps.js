@@ -2,7 +2,8 @@
  * MLB sport-specific projection bounds — out-of-range projections fail sanity.
  */
 
-import { canonicalMarketKey } from "./marketNormalization.js";
+import { resolvePropMarketKey } from "./marketNormalization.js";
+import { RESEARCH_ONLY_TIER_LABEL } from "./tierHistoricalValidation.js";
 
 function finite(value) {
   const num = Number(value);
@@ -20,16 +21,55 @@ export const MLB_PROJECTION_CAPS = {
 };
 
 export const SANITY_FAIL_FLAG = "SANITY_FAIL";
+export const MISSING_MARKET_KEY_REASON = "Missing market key";
 
 export function resolveMlbProjectionCap(prop = {}) {
-  const marketKey = canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
-  const cap = MLB_PROJECTION_CAPS[marketKey] || null;
+  const marketKey = resolvePropMarketKey(prop);
+  const cap = marketKey ? MLB_PROJECTION_CAPS[marketKey] || null : null;
   return { marketKey, cap };
 }
 
+export function applyMissingMarketKeyFallback(prop = {}, reason = MISSING_MARKET_KEY_REASON) {
+  return {
+    ...prop,
+    marketKey: "",
+    projectionSanityFail: true,
+    sanityFail: true,
+    pickTierLabel: RESEARCH_ONLY_TIER_LABEL,
+    bettingLabel: RESEARCH_ONLY_TIER_LABEL,
+    displayResearchOnly: true,
+    verifiedTier: null,
+    verifiedTierLabel: null,
+    marketKeyMissing: true,
+    enrichmentError: reason,
+    projectionSanityAudit: {
+      supported: false,
+      sanityFail: true,
+      missingMarketKey: true,
+      blocksTierA: true,
+      sanityScore: 0,
+      summary: reason,
+    },
+  };
+}
+
 export function validateProjectionAgainstCap(prop = {}, projection = null) {
-  const { marketKey, cap } = resolveMlbProjectionCap(prop);
+  const marketKey = resolvePropMarketKey(prop);
   const proj = finite(projection ?? prop.projection ?? prop.projectedValue);
+
+  if (!marketKey) {
+    return {
+      marketKey: "",
+      cap: null,
+      projection: proj,
+      inRange: false,
+      sanityFail: true,
+      missingMarketKey: true,
+      reason: MISSING_MARKET_KEY_REASON,
+    };
+  }
+
+  const cap = MLB_PROJECTION_CAPS[marketKey] || null;
 
   if (!cap || proj == null) {
     return {

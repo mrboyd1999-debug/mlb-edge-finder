@@ -1,3 +1,4 @@
+import { resolvePropMarketKey } from "../utils/marketNormalization.js";
 import { computeStandardEdgePercent, computeStandardProbabilityScore } from "../utils/standardPropMetrics.js";
 import {
   isMlbHitterPhase2Market,
@@ -38,7 +39,7 @@ const MLB_VOLATILITY = {
 };
 
 function getVolatility(statType = "") {
-  const key = canonicalMarketKey(statType);
+  const key = resolvePropMarketKey({ statType });
   return MLB_VOLATILITY[key] || { tier: "MEDIUM", score: 0.5, label: "Medium variance" };
 }
 
@@ -104,7 +105,7 @@ export function buildProjectionUnavailableFields({
 export function buildMlbPropProjection(prop = {}, profile = {}, context = {}) {
   const line = Number(prop.line);
   const statType = prop.statType || "";
-  const marketKey = canonicalMarketKey(statType);
+  const marketKey = resolvePropMarketKey({ statType, ...prop });
   const volatility = getVolatility(statType);
   const payoutType = prop.payoutType || prop.oddsType || prop.payoutRole || "standard";
 

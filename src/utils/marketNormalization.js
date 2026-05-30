@@ -409,6 +409,26 @@ export function canonicalMarketKey(statType = "") {
   return compact;
 }
 
+/** Resolve canonical market key from prop fields — never throws. */
+export function resolvePropMarketKey(prop = {}) {
+  const raw =
+    prop?.canonicalMarketKey ||
+    prop?.marketKey ||
+    prop?.market ||
+    prop?.statType ||
+    prop?.propType ||
+    prop?.stat ||
+    prop?.type ||
+    "";
+
+  if (typeof raw === "string" && COMPACT_ALIASES[compactMarketKey(raw)]) {
+    return COMPACT_ALIASES[compactMarketKey(raw)];
+  }
+
+  const key = canonicalMarketKey(String(raw || ""));
+  return key || "";
+}
+
 /** @deprecated alias kept for existing imports */
 export function canonicalStatType(statType = "") {
   return canonicalMarketKey(statType);

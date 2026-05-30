@@ -12,6 +12,7 @@ export {
 
 export {
   canonicalMarketKey,
+  resolvePropMarketKey,
   normalizeMarketStatType,
   marketDisplayLabel,
 } from "../utils/marketNormalization.js";

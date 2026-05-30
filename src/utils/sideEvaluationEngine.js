@@ -2,7 +2,7 @@
  * Dual-side evaluation — recommendation follows projection vs line; under preference affects rank only.
  */
 
-import { canonicalMarketKey } from "./marketNormalization.js";
+import { resolvePropMarketKey } from "./marketNormalization.js";
 import {
   hasRenderableProjection,
   resolveProjectionQuality,
@@ -47,7 +47,7 @@ function statBlob(prop = {}) {
 }
 
 function marketKey(prop = {}) {
-  return canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
+  return resolvePropMarketKey(prop);
 }
 
 export function isUnderPreferredMarket(prop = {}) {
