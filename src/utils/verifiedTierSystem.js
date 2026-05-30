@@ -15,13 +15,13 @@ import {
   compareTopPickScore,
   computeTopPickScore,
   resolvePlayabilityScore,
-  selectHighestTierAPlays,
   NO_TIER_A_PLAYS_MESSAGE,
 } from "./bestPlayRankingScore.js";
 import {
   TIER_A_MIN_SANITY_SCORE,
   capTierToMaximum,
   resolveHistoricalDataPresent,
+  resolveHitRateValidationPresent,
   resolveMaximumTier,
 } from "./tierHistoricalValidation.js";
 
@@ -78,8 +78,9 @@ function resolveSanityScore(prop = {}) {
   return finite(prop.projectionSanityScore ?? prop.projectionSanityAudit?.sanityScore);
 }
 
-function qualifiesTierA({ probability, confidence, playability, sanity, historicalPresent, audit }) {
+function qualifiesTierA({ probability, confidence, playability, sanity, historicalPresent, hitRateValidated, audit }) {
   if (!historicalPresent) return false;
+  if (!hitRateValidated) return false;
   if (audit?.blocksTierA) return false;
   if (sanity == null || sanity < VERIFIED_TIER_A.minSanity) return false;
   return (
@@ -100,6 +101,7 @@ export function resolveVerifiedMetrics(prop = {}) {
   const dataQuality = Number(prop.dataQualityScore);
   const sanity = resolveSanityScore(prop);
   const historical = resolveHistoricalDataPresent(prop);
+  const hitRates = resolveHitRateValidationPresent(prop);
   return {
     probability,
     confidence,
@@ -108,12 +110,33 @@ export function resolveVerifiedMetrics(prop = {}) {
     sanity,
     historicalPresent: historical.present,
     historicalMissing: historical.missingLabels,
+    hitRateValidated: hitRates.present,
+    hitRateMissing: hitRates.missingLabels,
+  };
+}
+
+export function passesTierAGates(prop = {}) {
+  return classifyVerifiedTier(prop) === VERIFIED_TIER_A.id;
+}
+
+export function enforceVerifiedTierFields(prop = {}) {
+  const playabilityScore = resolvePlayabilityScore(prop);
+  const tier = classifyVerifiedTier({ ...prop, playabilityScore });
+  const historical = resolveHistoricalDataPresent(prop);
+  return {
+    ...prop,
+    playabilityScore,
+    verifiedTier: tier,
+    verifiedTierLabel: tier ? `Tier ${tier}` : null,
+    historicalDataPresent: historical.present,
+    hitRateValidated: resolveHitRateValidationPresent(prop).present,
   };
 }
 
 export function classifyVerifiedTier(prop = {}) {
   const { probability, confidence, playability, sanity } = resolveVerifiedMetrics(prop);
   const historical = resolveHistoricalDataPresent(prop);
+  const hitRates = resolveHitRateValidationPresent(prop);
   const audit = prop.projectionSanityAudit || null;
 
   if (!Number.isFinite(probability) || !Number.isFinite(confidence)) return null;
@@ -135,6 +158,7 @@ export function classifyVerifiedTier(prop = {}) {
       playability,
       sanity,
       historicalPresent: historical.present,
+      hitRateValidated: hitRates.present,
       audit,
     })
   ) {
@@ -190,7 +214,7 @@ export function explainVerificationRejection(prop = {}) {
   if (resolvePropSport(prop) !== "MLB") return "non-MLB sport";
   if (!hasValidVerifiedProjection(prop)) return "missing or invalid stat-specific projection";
 
-  const { probability, confidence, playability, dataQuality, sanity, historicalPresent, historicalMissing } =
+  const { probability, confidence, playability, dataQuality, sanity, historicalPresent, historicalMissing, hitRateValidated, hitRateMissing } =
     resolveVerifiedMetrics(prop);
 
   if (!Number.isFinite(probability)) return "probability missing";
@@ -208,6 +232,9 @@ export function explainVerificationRejection(prop = {}) {
   }
   if (!historicalPresent) {
     return `historical data missing (${historicalMissing.join(", ") || "Last5/Last10/Season"}) — max tier B`;
+  }
+  if (!hitRateValidated) {
+    return `hit-rate validation missing (${hitRateMissing.join(", ") || "Last5/Last10/Season"}) — Tier A blocked`;
   }
   if (Number.isFinite(dataQuality) && dataQuality < VERIFIED_MIN_DATA_QUALITY) {
     return `data quality ${Math.round(dataQuality)}% below ${VERIFIED_MIN_DATA_QUALITY}%`;
@@ -387,17 +414,14 @@ export function compareVerifiedTierPlays(a = {}, b = {}) {
 }
 
 export function annotateVerifiedTier(prop = {}) {
-  const tier = classifyVerifiedTier(prop);
-  const historical = resolveHistoricalDataPresent(prop);
-  return annotateTopPickRankingFields({
-    ...prop,
-    verifiedTier: tier,
-    verifiedTierLabel: tier ? `Tier ${tier}` : null,
-    historicalDataPresent: historical.present,
-    pickTierLabel: tier ? "Verified Play" : prop.pickTierLabel,
-    verified: Boolean(tier),
-    bestPlayPool: tier ? "verified" : prop.bestPlayPool,
-  });
+  return annotateTopPickRankingFields(
+    enforceVerifiedTierFields({
+      ...prop,
+      pickTierLabel: classifyVerifiedTier(prop) ? "Verified Play" : prop.pickTierLabel,
+      verified: Boolean(classifyVerifiedTier(prop)),
+      bestPlayPool: classifyVerifiedTier(prop) ? "verified" : prop.bestPlayPool,
+    })
+  );
 }
 
 export function selectVerifiedPlaysByTier(props = [], options = {}) {
@@ -426,9 +450,8 @@ export function selectVerifiedPlaysWithFallback(props = [], options = {}) {
       })
       .map((prop) =>
         annotateTopPickRankingFields(
-          annotateVerifiedTier({
+          enforceVerifiedTierFields({
             ...prop,
-            verifiedTier: classifyVerifiedTier(prop) || VERIFIED_TIER_C.id,
             verifiedTierFallback: true,
             verified: true,
             pickTierLabel: "Verified Play",
@@ -449,7 +472,24 @@ export function selectVerifiedPlaysWithFallback(props = [], options = {}) {
   return { picks, usedFallback };
 }
 
-export { selectHighestTierAPlays };
+export function selectHighestTierAPlays(props = [], limit = 1) {
+  return [...(props || [])]
+    .map((prop) => enforceVerifiedTierFields(prop))
+    .filter((prop) => prop.verifiedTier === VERIFIED_TIER_A.id)
+    .sort(compareTopPickScore)
+    .slice(0, limit)
+    .map((prop, index) =>
+      annotateTopPickRankingFields(
+        {
+          ...prop,
+          topVerifiedRank: index + 1,
+          isHighestProbabilityPick: true,
+          bestPlayPool: "highest-probability",
+        },
+        index + 1
+      )
+    );
+}
 
 export function selectTopByProbability(props = [], limit = BEST_PLAYS_ENGINE_SIZE) {
   const seen = new Set();

@@ -67,12 +67,13 @@ export function buildTopPickRankingReason(prop = {}, rank = 1) {
 }
 
 export function annotateTopPickRankingFields(prop = {}, rank = null) {
-  const score = computeTopPickScore(prop);
+  const playabilityScore = resolvePlayabilityScore(prop);
+  const score = computeTopPickScore({ ...prop, playabilityScore });
   const resolvedRank = rank ?? prop.topVerifiedRank ?? prop.topMlbPlayRank ?? 1;
-  const rankingReason = buildTopPickRankingReason(prop, resolvedRank);
+  const rankingReason = buildTopPickRankingReason({ ...prop, playabilityScore }, resolvedRank);
   return {
     ...prop,
-    playabilityScore: resolvePlayabilityScore(prop),
+    playabilityScore,
     topPickScore: score,
     verifiedRankingScore: score,
     weightedBestPlayScore: score,
@@ -80,24 +81,6 @@ export function annotateTopPickRankingFields(prop = {}, rank = null) {
     topPickRankingReason: rankingReason,
     topVerifiedRank: prop.topVerifiedRank ?? resolvedRank,
   };
-}
-
-export function selectHighestTierAPlays(props = [], limit = 1) {
-  return [...(props || [])]
-    .filter((prop) => prop.verifiedTier === "A")
-    .sort(compareTopPickScore)
-    .slice(0, limit)
-    .map((prop, index) =>
-      annotateTopPickRankingFields(
-        {
-          ...prop,
-          topVerifiedRank: index + 1,
-          isHighestProbabilityPick: true,
-          bestPlayPool: "highest-probability",
-        },
-        index + 1
-      )
-    );
 }
 
 export function selectTopVerifiedByScore(props = [], limit = 10) {

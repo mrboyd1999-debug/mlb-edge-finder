@@ -15,8 +15,9 @@ import {
   MAX_SANITY_WITHOUT_HISTORY,
   TIER_A_MIN_SANITY_SCORE,
   resolveHistoricalDataPresent,
+  resolveHitRateValidationPresent,
 } from "./tierHistoricalValidation.js";
-import { classifyVerifiedTier } from "./verifiedTierSystem.js";
+import { classifyVerifiedTier, enforceVerifiedTierFields } from "./verifiedTierSystem.js";
 
 function finite(value) {
   const num = Number(value);
@@ -294,6 +295,7 @@ export function buildProjectionSanityAudit(prop = {}) {
   const recommendedSide = resolveRecommendedSide(prop, projection, line);
   const overRates = supported ? resolveOverRates(prop, line, recommendedSide) : {};
   const historical = resolveHistoricalDataPresent(prop);
+  const hitRateValidation = resolveHitRateValidationPresent(prop);
   const projectionProbability = supported
     ? resolveProjectionProbability(prop, projection, line, recommendedSide)
     : null;
@@ -376,6 +378,7 @@ export function buildProjectionSanityAudit(prop = {}) {
   const last10DeviationPct = deviationPct(projection, last10);
   const blocksTierA =
     !historical.present ||
+    !hitRateValidation.present ||
     sanityScore < TIER_A_MIN_SANITY_SCORE ||
     isOutlier ||
     projectionMismatch;
@@ -386,6 +389,8 @@ export function buildProjectionSanityAudit(prop = {}) {
     supported: true,
     historicalDataPresent: historical.present,
     historicalMissing: historical.missingLabels,
+    hitRateValidated: hitRateValidation.present,
+    hitRateMissing: hitRateValidation.missingLabels,
     last5Average: last5,
     last10Average: last10,
     seasonAverage: season,
@@ -502,11 +507,5 @@ export function attachProjectionSanityAudit(prop = {}, options = {}) {
     confidence: adjustedConfidence,
     playabilityScore: adjustedPlayability,
   };
-  const verifiedTier = classifyVerifiedTier(merged);
-
-  return {
-    ...merged,
-    verifiedTier: verifiedTier ?? prop.verifiedTier,
-    verifiedTierLabel: verifiedTier ? `Tier ${verifiedTier}` : prop.verifiedTierLabel,
-  };
+  return enforceVerifiedTierFields(merged);
 }

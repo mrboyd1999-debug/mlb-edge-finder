@@ -26,6 +26,7 @@ import { buildVerificationDashboard, logVerificationDashboardAudit } from "./ver
 import {
   BEST_PLAYS_ENGINE_SIZE,
   logVerificationAudit,
+  selectHighestTierAPlays,
   selectVerifiedPlaysWithFallback,
   selectTopByEdge,
   selectTopByProbability,
@@ -41,7 +42,6 @@ import {
 } from "./bestPlayRanking.js";
 import {
   compareTopPickScore,
-  selectHighestTierAPlays,
   selectTopVerifiedByScore,
 } from "./bestPlayRankingScore.js";
 

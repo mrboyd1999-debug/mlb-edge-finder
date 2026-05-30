@@ -13,6 +13,7 @@ import { formatHitRatePercent } from "./pickDirectionAudit.js";
 import {
   HISTORICAL_DATA_UNAVAILABLE_WARNING,
   resolveHistoricalDataPresent,
+  resolveHitRateValidationPresent,
 } from "./tierHistoricalValidation.js";
 
 function finite(value) {
@@ -103,8 +104,9 @@ export function buildProbabilityAudit(prop = {}, metrics = {}) {
   const line = finite(prop.line);
   const edge = finite(metrics.edge ?? computeStandardEdge(projection, line));
   const edgePercent = finite(metrics.edgePercent ?? computeStandardEdgePercent(edge, line));
-  const hitRates = buildHitRateSnapshot(prop);
+  const hitRateSnapshot = buildHitRateSnapshot(prop);
   const historical = resolveHistoricalDataPresent(prop);
+  const hitRateValidation = resolveHitRateValidationPresent(prop);
   const opponent = resolveOpponentAdjustment(prop);
   const park = resolveParkAdjustment(prop);
 
@@ -114,9 +116,9 @@ export function buildProbabilityAudit(prop = {}, metrics = {}) {
     finite(prop.probabilityScore ?? prop.verifiedProbability) ?? calibrated?.probability ?? null;
 
   const inputs = {
-    last10HitRate: hitRates.last10Label,
-    seasonHitRate: hitRates.seasonLabel,
-    last5HitRate: hitRates.last5Label,
+    last10HitRate: hitRateSnapshot.last10Label,
+    seasonHitRate: hitRateSnapshot.seasonLabel,
+    last5HitRate: hitRateSnapshot.last5Label,
     projectionVsLine: edgePercent != null ? signedPct(edgePercent) : "—",
     opponentAdjustment: signedPct(opponent.points),
     parkAdjustment: signedPct(park.points),
@@ -128,9 +130,9 @@ export function buildProbabilityAudit(prop = {}, metrics = {}) {
   };
 
   const explanationLines = [
-    `Last 5 hit rate: ${hitRates.last5Label} (${signedPct(breakdown.last5Contribution ?? 0)})`,
-    `Last 10 hit rate: ${hitRates.last10Label} (${signedPct(breakdown.last10Contribution ?? 0)})`,
-    `Season hit rate: ${hitRates.seasonLabel} (${signedPct(breakdown.seasonContribution ?? 0)})`,
+    `Last 5 hit rate: ${hitRateSnapshot.last5Label} (${signedPct(breakdown.last5Contribution ?? 0)})`,
+    `Last 10 hit rate: ${hitRateSnapshot.last10Label} (${signedPct(breakdown.last10Contribution ?? 0)})`,
+    `Season hit rate: ${hitRateSnapshot.seasonLabel} (${signedPct(breakdown.seasonContribution ?? 0)})`,
     `Projection edge: ${edgePercent != null ? signedPct(edgePercent) : "—"} (${signedPct(breakdown.edgeContribution ?? 0)})`,
     `Matchup adjustment: ${calibrated?.inputs?.matchupAdjustment ?? signedPct(breakdown.matchupAdjustment ?? 0)}`,
     `Final Probability: ${pct(finalProbability)}`,
@@ -152,11 +154,16 @@ export function buildProbabilityAudit(prop = {}, metrics = {}) {
     finalProbability: finalProbability != null ? round1(finalProbability) : null,
     explanationLines,
     summary: explanationLines.join(" · "),
-    hitRates,
+    hitRates: hitRateSnapshot,
     calibration: calibrated,
     historicalDataPresent: historical.present,
     historicalMissing: historical.missingLabels,
-    historicalDataWarning: historical.present ? "" : HISTORICAL_DATA_UNAVAILABLE_WARNING,
+    hitRateValidated: hitRateValidation.present,
+    hitRateMissing: hitRateValidation.missingLabels,
+    historicalDataWarning:
+      historical.present && hitRateValidation.present
+        ? ""
+        : HISTORICAL_DATA_UNAVAILABLE_WARNING,
   };
 }
 

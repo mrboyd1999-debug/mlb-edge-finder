@@ -13,38 +13,32 @@ export const MAX_SANITY_WITHOUT_HISTORY = 60;
 
 const TIER_RANK = { A: 0, B: 1, C: 2 };
 
-function hasBreakdownValue(prop = {}, pattern) {
-  const row = (prop.projectionBreakdown || []).find((item) => pattern.test(String(item?.label || "")));
-  return finite(row?.value) != null;
-}
-
-function hasHistoricalLast5(prop = {}) {
+function hasStoredLast5(prop = {}) {
   if (finite(prop.last5HitRate) != null) return true;
   if (finite(prop.last5Average) != null) return true;
-  if (finite(prop.pitcherInputs?.last5Average) != null) return true;
-  return hasBreakdownValue(prop, /last\s*5/i);
+  if (finite(prop.recentForm) != null) return true;
+  return finite(prop.pitcherInputs?.last5Average) != null;
 }
 
-function hasHistoricalLast10(prop = {}) {
+function hasStoredLast10(prop = {}) {
   if (finite(prop.last10HitRate) != null) return true;
   if (finite(prop.recentHitRate) != null) return true;
   if (finite(prop.last10Average) != null) return true;
-  if (finite(prop.pitcherInputs?.last10Average) != null) return true;
-  return hasBreakdownValue(prop, /last\s*10/i);
+  return finite(prop.pitcherInputs?.last10Average) != null;
 }
 
-function hasHistoricalSeason(prop = {}) {
+function hasStoredSeason(prop = {}) {
   if (finite(prop.seasonHitRate) != null) return true;
   if (finite(prop.historicalHitRate) != null) return true;
   if (finite(prop.seasonAverage) != null) return true;
-  if (finite(prop.pitcherInputs?.seasonAverage) != null) return true;
-  return hasBreakdownValue(prop, /season/i);
+  return finite(prop.pitcherInputs?.seasonAverage) != null;
 }
 
+/** Last5 + Last10 + Season present on the prop (averages or hit rates). */
 export function resolveHistoricalDataPresent(prop = {}) {
-  const last5Present = hasHistoricalLast5(prop);
-  const last10Present = hasHistoricalLast10(prop);
-  const seasonPresent = hasHistoricalSeason(prop);
+  const last5Present = hasStoredLast5(prop);
+  const last10Present = hasStoredLast10(prop);
+  const seasonPresent = hasStoredSeason(prop);
   const missingLabels = [];
   if (!last5Present) missingLabels.push("Last5");
   if (!last10Present) missingLabels.push("Last10");
@@ -55,6 +49,25 @@ export function resolveHistoricalDataPresent(prop = {}) {
     last5Present,
     last10Present,
     seasonPresent,
+    missingLabels,
+  };
+}
+
+/** Tier A requires actual stored hit rates — not line-estimated substitutes. */
+export function resolveHitRateValidationPresent(prop = {}) {
+  const last5HitRate = finite(prop.last5HitRate);
+  const last10HitRate = finite(prop.last10HitRate) ?? finite(prop.recentHitRate);
+  const seasonHitRate = finite(prop.seasonHitRate) ?? finite(prop.historicalHitRate);
+  const missingLabels = [];
+  if (last5HitRate == null) missingLabels.push("Last5");
+  if (last10HitRate == null) missingLabels.push("Last10");
+  if (seasonHitRate == null) missingLabels.push("Season");
+
+  return {
+    present: last5HitRate != null && last10HitRate != null && seasonHitRate != null,
+    last5HitRate,
+    last10HitRate,
+    seasonHitRate,
     missingLabels,
   };
 }
