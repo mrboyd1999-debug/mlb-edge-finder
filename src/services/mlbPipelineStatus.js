@@ -125,8 +125,12 @@ export function recordMlbStatsFetch({
     pipelineStatus.mlbStatsApi.status = "Connected";
     pipelineStatus.mlbStatsApi.lastSuccessAt = now;
     pipelineStatus.mlbStatsApi.lastError = "";
+  } else if (pipelineStatus.mlbStatsApi.attachmentConfirmed) {
+    const coverage = Number(pipelineStatus.mlbStatsApi.historicalCoveragePercent) || 0;
+    pipelineStatus.mlbStatsApi.status = coverage >= 5 ? "Connected" : "Warning";
+    pipelineStatus.mlbStatsApi.lastError =
+      coverage >= 5 ? "" : error || "Partial MLB Stats API errors — historical data attached on board";
   } else if (
-    pipelineStatus.mlbStatsApi.attachmentConfirmed ||
     (pipelineStatus.mlbStatsApi.historicalCoveragePercent ?? 0) > 0 ||
     pipelineStatus.mlbStatsApi.lastSuccessAt ||
     (pipelineStatus.mlbStatsApi.playersReturned ?? 0) > 0

@@ -3,6 +3,7 @@ import { styles } from "../theme/styles.js";
 import { HIDDEN_SETTING_DEFS, getEffectiveSetting } from "../services/runtimeSettings.js";
 import PropPipelineCounters from "./PropPipelineCounters.jsx";
 import PipelineCoverageAuditPanel from "./PipelineCoverageAuditPanel.jsx";
+import ProviderCoverageAuditPanel from "./ProviderCoverageAuditPanel.jsx";
 import VerificationDashboard from "./VerificationDashboard.jsx";
 import ApiHealthPanel from "./ApiHealthPanel.jsx";
 import MlbPipelineStatusPanel from "./MlbPipelineStatusPanel.jsx";
@@ -25,6 +26,7 @@ function DeveloperDebugPanel({
   projectionCoverageAudit = null,
   statsAttachmentAudit = null,
   pipelinePropCountAudit = null,
+  providerCoverageAudit = null,
   showDebugPanels = false,
   onShowDebugPanelsChange,
   debugModeEnabled = false,
@@ -42,6 +44,7 @@ function DeveloperDebugPanel({
         pipelinePropCountAudit={pipelinePropCountAudit}
       />
       <PipelineCoverageAuditPanel audit={pipelinePropCountAudit} />
+      <ProviderCoverageAuditPanel audit={providerCoverageAudit} />
       <ProviderFeedDiagnosticsPanel />
       <PrizePicksDiagnosticsPanel diagnostics={prizePicksDiagnostics} feedRow={ppFeed} />
       <VerificationDashboard dashboard={bestPlaysFilter?.verificationDashboard} />

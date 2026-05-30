@@ -124,8 +124,11 @@ function MlbPipelineStatusPanel({ pipelineStatus = null, apiHealth = null, compa
                 ? CONNECTION_TIERS.REFRESHING
                 : stats.status === "Warning"
                   ? CONNECTION_TIERS.WARNING
-                  : stats.status,
-          statusLabel: stats.status,
+                  : stats.status === "Failed" && stats.attachmentConfirmed
+                    ? CONNECTION_TIERS.WARNING
+                    : stats.status,
+          statusLabel:
+            stats.status === "Failed" && stats.attachmentConfirmed ? "Warning" : stats.status,
         }}
         lastSuccessAt={stats.lastSuccessAt}
         lastError={stats.lastError}

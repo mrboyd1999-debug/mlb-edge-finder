@@ -252,6 +252,7 @@ import {
   buildMlbProjectionBoardPool,
   countHistoricalAttachment,
 } from "./utils/pipelinePropCountAudit.js";
+import { buildProviderCoverageAudit, logProviderCoverageSummary } from "./utils/providerCoverageAudit.js";
 import { countMergedProjections } from "./utils/projectionCoverageAudit.js";
 import {
   buildGuaranteedBaseFeedDisplay,
@@ -3131,6 +3132,17 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     rejections: pipelinePropCountSnapshot.rejections || {},
   });
   logPipelinePropCountAudit(debugInfo.pipelinePropCountAudit);
+
+  debugInfo.providerCoverageAudit = buildProviderCoverageAudit({
+    debugInfo,
+    pipelinePropCountAudit: debugInfo.pipelinePropCountAudit,
+    prizePicksResult,
+    underdogResult,
+    prizePicksProps,
+    underdogProps,
+    providerFetchDiagnostics: debugInfo.providerFetchDiagnostics,
+  });
+  logProviderCoverageSummary(debugInfo.providerCoverageAudit);
 
   if (!MLB_ONLY_MODE) {
     const perfSettled = await providerWave.awaitAllForPerf();

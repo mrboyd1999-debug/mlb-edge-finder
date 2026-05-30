@@ -143,9 +143,12 @@ export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyRe
         failureCategory: "OUTER_TIMEOUT",
       });
       if (label === "PrizePicks") {
+        const outerStep = "outer provider wrapper (fetchProviderIsolated)";
+        console.warn("[PrizePicks Timeout] step:", outerStep, { timeoutMs, durationMs });
         updatePrizePicksDiagnostics({
           outerTimeout: true,
           timedOut: true,
+          lastTimeoutLocation: outerStep,
           responseTimeMs: durationMs,
           finalPropsCount: 0,
           parsedPropsCount: 0,

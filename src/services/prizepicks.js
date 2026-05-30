@@ -258,7 +258,7 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
     requestUrl,
     proxyHost: externalProxyHost,
   });
-  console.log("[PrizePicks] fetch start");
+  console.log("[PrizePicks Fetch Start]", { requestUrl, proxyHost: externalProxyHost });
 
   for (const endpoint of endpoints) {
     if (signal?.aborted) break;
@@ -303,8 +303,8 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
       }
 
       if (timedOut) {
-        console.warn("[PrizePicks] timeout location", {
-          timeoutLocation: parsed.timeoutLocation || timeoutLocation,
+        const timeoutStep = parsed.timeoutLocation || timeoutLocation;
+        console.warn("[PrizePicks Timeout] step:", timeoutStep, {
           timeoutMs,
           retryIndex: retryIndex + 1,
           durationMs: parsed.attempt?.durationMs,
@@ -356,6 +356,14 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
       const usableMlbCount = MLB_ONLY_MODE
         ? normalizedProps.filter((prop) => String(prop.sport || "").toUpperCase() === "MLB").length
         : usableCount;
+      console.log("[PrizePicks Parse Complete]", {
+        parsed: normalizedProps.length,
+        usable: usableCount,
+        usableMlb: usableMlbCount,
+        rawRecords: audit.fetched,
+        cached: isFallback,
+      });
+      console.log("[PrizePicks Props Count]", usableCount);
       console.info("[PrizePicks] parser output", {
         parserOutputCount: normalizedProps.length,
         usablePropsCount: usableCount,
@@ -699,6 +707,12 @@ async function fetchPrizePicksEndpoint(
 
     console.info("[PrizePicks] response headers", attempt.responseHeaders);
     console.info("[PrizePicks] response body length", attempt.responseSize);
+    console.log("[PrizePicks Response Received]", {
+      status: attempt.status,
+      responseSize: attempt.responseSize,
+      durationMs: attempt.durationMs,
+      url: attempt.url,
+    });
 
     logProviderFetchPhase("PrizePicks", "PrizePicks Response Received", {
       status: attempt.status,
@@ -813,6 +827,10 @@ async function fetchPrizePicksEndpoint(
       rawResponseCount: extractedRaw,
       parsedPropsCount: parsedPreview.length,
     });
+    console.log("[PrizePicks Parse Complete]", {
+      rawRecords: extractedRaw,
+      parsedPreview: parsedPreview.length,
+    });
 
     if (payload?.ok === true && payload?.fallback === true) {
       attempt.rateLimited = Boolean(payload.rateLimited);
@@ -842,8 +860,7 @@ async function fetchPrizePicksEndpoint(
       : message || "Failed to fetch";
     attempt.durationMs = Date.now() - startedAt;
     attempt.networkError = !timedOut;
-    console.warn("[PrizePicks] timeout location", {
-      timeoutLocation,
+    console.warn("[PrizePicks Timeout] step:", timeoutLocation, {
       timeoutMs: lineFeedTimeoutMs,
       timedOut,
       error: attempt.error,
