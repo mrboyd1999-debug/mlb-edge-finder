@@ -27,7 +27,7 @@ export const PROJECTION_JOIN_DEBUG = import.meta.env?.VITE_PROJECTION_JOIN_DEBUG
 export const VERIFIED_MIN_PROJECTION = 0.01;
 /** Temporary stabilization thresholds — restore stricter gates once pipeline is stable. */
 export const VERIFIED_MIN_CONFIDENCE = 50;
-export const VERIFIED_MIN_PROBABILITY = 55;
+export const VERIFIED_MIN_PROBABILITY = 45;
 export const VERIFIED_MIN_DATA_QUALITY = 50;
 export const VERIFIED_MIN_EDGE = 0.02;
 

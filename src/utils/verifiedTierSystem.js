@@ -21,22 +21,22 @@ import {
 
 export { NO_TIER_A_PLAYS_MESSAGE };
 
-/** Temporary stabilization thresholds — playability used in score only, not tier gates. */
+/** Tier gates aligned with calibrated probability floor (40–92), not legacy 54–70% compression. */
 export const VERIFIED_TIER_A = {
   id: "A",
-  minProbability: 65,
+  minProbability: 58,
   minConfidence: 60,
   rank: 0,
 };
 export const VERIFIED_TIER_B = {
   id: "B",
-  minProbability: 60,
+  minProbability: 50,
   minConfidence: 55,
   rank: 1,
 };
 export const VERIFIED_TIER_C = {
   id: "C",
-  minProbability: 55,
+  minProbability: 45,
   minConfidence: 50,
   rank: 2,
 };
@@ -269,12 +269,19 @@ export function logVerificationRegressionAudit(props = []) {
       confidence >= VERIFIED_BASE_MIN_CONFIDENCE
     );
   }).length;
+  const wouldPassLegacy55Prob = projected.filter((prop) => {
+    const { probability, confidence } = resolveVerifiedMetrics(prop);
+    return Number.isFinite(probability) && Number.isFinite(confidence) && probability >= 55 && confidence >= 50;
+  }).length;
   const currentlyVerified = projected.filter(passesVerifiedTierFilter).length;
 
   console.info("[MLB Pipeline] verification regression audit", {
     projected: projected.length,
     currentlyVerified,
+    tierFloorProbability: VERIFIED_BASE_MIN_PROBABILITY,
+    tierFloorConfidence: VERIFIED_BASE_MIN_CONFIDENCE,
     wouldPassProbConfFloor: wouldPassOldProbConf,
+    blockedByLegacy55ProbabilityFloor: wouldPassOldProbConf - wouldPassLegacy55Prob,
     removedByStrictPlayabilityGate: audit.regressionReasons,
     failureBreakdown: audit.breakdown,
     sampleRejections: audit.samples.slice(0, 12),

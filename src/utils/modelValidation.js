@@ -6,7 +6,7 @@ import {
   computeStandardEdge,
   computeStandardEdgePercent,
 } from "./standardPropMetrics.js";
-import { resolveProjectionValue } from "./conservativeProjection.js";
+import { hasMissingOpponentData, resolveProjectionValue } from "./conservativeProjection.js";
 import { computeCalibratedProbability } from "./probabilityCalibration.js";
 import { computeFormConfidenceScore } from "./matchupEnrichment.js";
 import { formatHitRatePercent } from "./pickDirectionAudit.js";

@@ -61,6 +61,8 @@ import {
 } from "../utils/providerFetchDiagnostics.js";
 import {
   buildPlayerAttributeMap,
+  countPrizePicksRawRecords,
+  isPrizePicksBlockPayload,
   logPrizePicksRawSample,
   normalizePrizePicksResponse,
   parsePrizePicksProjections,
@@ -552,6 +554,8 @@ async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
     let payload;
     try {
       payload = JSON.parse(trimmed);
+      console.log("PrizePicks response keys", Object.keys(payload));
+      console.log("PrizePicks sample", JSON.stringify(payload).slice(0, 5000));
       logProviderFetchPhase("PrizePicks", "JSON parsed", {
         topLevelKeys: payload && typeof payload === "object" ? Object.keys(payload).slice(0, 8) : [],
       });
@@ -562,8 +566,24 @@ async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
     }
 
     logPrizePicksRawSample(payload);
-    const extractedRaw = rawPrizePicksRecordCount(payload);
-    logProviderFetchPhase("PrizePicks", "props extracted", { rawPropCount: extractedRaw });
+    if (isPrizePicksBlockPayload(payload)) {
+      attempt.error = "PrizePicks returned bot-protection payload instead of projections";
+      console.warn("[PrizePicks] block payload detected — no projection rows", {
+        keys: Object.keys(payload),
+      });
+      return { ok: false, attempt, htmlError: false, rateLimited: false, blockPayload: true };
+    }
+
+    const extractedRaw = countPrizePicksRawRecords(payload);
+    const parsedPreview = parsePrizePicksProjections(unwrapProxyPayload(payload));
+    logProviderFetchPhase("PrizePicks", "props extracted", {
+      rawPropCount: extractedRaw,
+      parsedPropsCount: parsedPreview.length,
+    });
+    console.info("[PrizePicks] parse counts", {
+      rawResponseCount: extractedRaw,
+      parsedPropsCount: parsedPreview.length,
+    });
 
     if (payload?.ok === true && payload?.fallback === true) {
       attempt.rateLimited = Boolean(payload.rateLimited);
@@ -679,9 +699,8 @@ function buildDebug(apiUrl, apiStatus, rawPropsLoaded, propsAfterParsing, messag
 
 function rawPrizePicksRecordCount(payload) {
   const normalizedPayload = unwrapProxyPayload(payload);
-  if (Array.isArray(normalizedPayload)) return normalizedPayload.length;
-  const rows = normalizedPayload.data || normalizedPayload.items || normalizedPayload.results || [];
-  return Array.isArray(rows) ? rows.length : 0;
+  if (normalizedPayload?.blocked) return 0;
+  return countPrizePicksRawRecords(normalizedPayload);
 }
 
 function absoluteUrl(endpoint) {
@@ -705,6 +724,10 @@ function normalizePrizePicksPayloadInternal(payload, sport, statType, lineSource
   try {
     audit = createEmptyPipelineAudit();
     const normalizedPayload = unwrapProxyPayload(payload);
+    if (normalizedPayload?.blocked || isPrizePicksBlockPayload(payload)) {
+      console.warn("[PrizePicks] normalize skipped — bot-protection payload, 0 props");
+      return { props: [], audit: coercePipelineAudit(audit) };
+    }
     const parsedPreview = parsePrizePicksProjections(normalizedPayload);
     if (parsedPreview.length) {
       console.info("[PrizePicks] parsed preview", {
@@ -714,6 +737,13 @@ function normalizePrizePicksPayloadInternal(payload, sport, statType, lineSource
           statType: row.statType,
           line: row.line,
         })),
+      });
+    } else if ((normalizedPayload.data || []).length) {
+      console.warn("[PrizePicks] raw rows present but parser extracted 0 props", {
+        rawResponseCount: normalizedPayload.data.length,
+        parsedPropsCount: 0,
+        sampleKeys: Object.keys(normalizedPayload.data[0] || {}),
+        attributeKeys: Object.keys(normalizedPayload.data[0]?.attributes || {}),
       });
     }
     const rows = normalizedPayload.data || [];

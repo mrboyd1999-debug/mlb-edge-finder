@@ -2,8 +2,13 @@
 
 export const EMPTY_PRIZEPICKS_PAYLOAD = Object.freeze({ data: [], included: [] });
 
+export function isPrizePicksBlockPayload(raw) {
+  return Boolean(raw && typeof raw === "object" && raw.appId && (raw.blockScript || raw.jsClientSrc));
+}
+
 export function normalizePrizePicksResponse(raw) {
   if (!raw) return { ...EMPTY_PRIZEPICKS_PAYLOAD };
+  if (isPrizePicksBlockPayload(raw)) return { ...EMPTY_PRIZEPICKS_PAYLOAD, blocked: true };
   if (Array.isArray(raw)) return { data: raw, included: [] };
   if (Array.isArray(raw?.data?.data)) {
     return { data: raw.data.data, included: raw.data.included || [] };
@@ -94,9 +99,21 @@ export function parsePrizePicksProjections(payload = {}) {
 
 export function logPrizePicksRawSample(payload, { label = "PRIZEPICKS RAW" } = {}) {
   try {
+    if (payload && typeof payload === "object") {
+      console.log("PrizePicks response keys", Object.keys(payload));
+      console.log("PrizePicks sample", JSON.stringify(payload).slice(0, 5000));
+    }
     const text = JSON.stringify(payload, null, 2);
     console.log(label + ":", text.slice(0, 5000));
   } catch {
     console.log(label + ":", "unserializable payload");
   }
+}
+
+export function countPrizePicksRawRecords(payload) {
+  if (!payload || typeof payload !== "object") return 0;
+  if (isPrizePicksBlockPayload(payload)) return 0;
+  if (Array.isArray(payload)) return payload.length;
+  const rows = payload.data || payload.items || payload.results || payload.props || [];
+  return Array.isArray(rows) ? rows.length : 0;
 }
