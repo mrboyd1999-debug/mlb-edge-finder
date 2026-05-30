@@ -3,7 +3,7 @@
  */
 
 import { resolvePropSport } from "./mlbOnlyMode.js";
-import { isSupportedMlbMarket } from "./mlbAllowedMarkets.js";
+import { isSupportedMlbMarket, isBlockedNonMlbPipelineProp } from "./mlbAllowedMarkets.js";
 import { resolveEngineProjectedPool } from "./projectionPipelineStatus.js";
 
 export const STARTUP_NORMALIZED_PROP_LIMIT = 300;
@@ -34,6 +34,7 @@ export function endPerformanceTimer(label) {
 
 export function isStartupMlbSupportedProp(prop = {}) {
   if (resolvePropSport(prop) !== "MLB") return false;
+  if (isBlockedNonMlbPipelineProp(prop)) return false;
   return isSupportedMlbMarket(prop);
 }
 

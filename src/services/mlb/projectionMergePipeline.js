@@ -6,6 +6,7 @@ import { computeProjectionForProp, findSeasonStatRow, resolveSportsDataPropLabel
 import { findStatProfile } from "../playerStats.js";
 import { normalizePlayerName, resolvePropPlayerName } from "../../utils/playerNames.js";
 import { buildStatFallbackProjection } from "../mlb/statBasedFallbackProjection.js";
+import { isSupportedMlbMarket } from "../../utils/mlbAllowedMarkets.js";
 import {
   buildPlayerStatKey,
   buildPropLookupKeys,
@@ -224,6 +225,7 @@ function resolveSeasonStatFallback(prop = {}, seasonStats = []) {
 }
 
 function resolveMarketBaselineProjection(prop = {}, seasonStats = []) {
+  if (!isSupportedMlbMarket(prop)) return null;
   const line = Number(prop.line);
   if (!Number.isFinite(line) || line <= 0) return null;
 

@@ -8,6 +8,7 @@ import { buildPropDedupeKey } from "./displayPropScoring.js";
 import { isFakeOrFallbackProp } from "./livePropRender.js";
 import { isMinimalRenderableProp } from "./normalizeProp.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
+import { isBlockedNonMlbPipelineProp, isSupportedMlbMarket } from "./mlbAllowedMarkets.js";
 import {
   BEST_PLAYS_DEBUG_MODE,
   logBestPlaysPipelineStage,
@@ -58,6 +59,8 @@ export const HIGHEST_PROBABILITY_MIN_VERIFIED_TO_SHOW = 1;
 function isRenderableCandidate(prop = {}) {
   if (!prop || prop.isDemoData || isFakeOrFallbackProp(prop)) return false;
   if (resolvePropSport(prop) !== "MLB") return false;
+  if (isBlockedNonMlbPipelineProp(prop)) return false;
+  if (!isSupportedMlbMarket(prop)) return false;
   return isMinimalRenderableProp(prop);
 }
 

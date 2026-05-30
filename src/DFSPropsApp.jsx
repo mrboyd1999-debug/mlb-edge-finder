@@ -232,6 +232,7 @@ import { resolveIngestionFallback } from "./services/ingestionFallback.js";
 import { writeLastGoodBoard, readLastGoodBoard, boardFromLastGood } from "./services/lastGoodBoardCache.js";
 import { initRawResponseDebug, dumpDebugGlobals, recordProviderStatus, recordNormalizedProps } from "./utils/rawResponseDebug.js";
 import { logLiveFetchResult, buildLiveFetchFailureSummary } from "./utils/liveFetchAudit.js";
+import { prepareMlbProjectionPipelineProps } from "./utils/mlbAllowedMarkets.js";
 import {
   buildGuaranteedBaseFeedDisplay,
   ensureMlbSportOnProps,
@@ -2309,6 +2310,11 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
   if (MLB_ONLY_MODE) {
     resetProjectionFetchDebug();
+
+    allDisplayProps = prepareMlbProjectionPipelineProps(allDisplayProps, { rawPropCount: rawProps.length });
+    workingNormalProps = prepareMlbProjectionPipelineProps(workingNormalProps, { log: false });
+    workingActiveProps = prepareMlbProjectionPipelineProps(workingActiveProps, { log: false });
+    setPipelineStageCount(PIPELINE_STAGES.NORMALIZED_PROPS_COUNT, allDisplayProps.length);
 
     const enrichmentSettled = await providerWave.awaitEnrichmentFeeds();
     const seasonEntry = unwrapProviderSettled(enrichmentSettled[0]);

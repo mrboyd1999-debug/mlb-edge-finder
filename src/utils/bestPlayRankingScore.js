@@ -3,6 +3,7 @@
  */
 
 import { computePlayabilityScore } from "./propCalibration.js";
+import { isBlockedNonMlbPipelineProp, isSupportedMlbMarket } from "./mlbAllowedMarkets.js";
 
 function finite(value, fallback = 0) {
   const num = Number(value);
@@ -85,6 +86,7 @@ export function isResearchOnlyProp(prop = {}) {
 }
 
 export function passesTopVerifiedPlaysGate(prop = {}) {
+  if (isBlockedNonMlbPipelineProp(prop) || !isSupportedMlbMarket(prop)) return false;
   if (isResearchOnlyProp(prop)) return false;
   if (prop.projectionFormulaError || prop.projectionFormulaValid === false) return false;
   const confidence = finite(

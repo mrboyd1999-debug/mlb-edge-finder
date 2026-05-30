@@ -31,6 +31,7 @@ import {
   resolveHitRateValidationPresent,
   resolveMaximumTier,
 } from "./tierHistoricalValidation.js";
+import { isSupportedMlbMarket, isBlockedNonMlbPipelineProp } from "./mlbAllowedMarkets.js";
 
 export { NO_TIER_A_PLAYS_MESSAGE, NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE };
 export {
@@ -233,6 +234,8 @@ export function hasValidVerifiedProjection(prop = {}) {
 export function passesVerifiedTierFilter(prop = {}) {
   if (!passesMinimalBestPlaysFilter(prop)) return false;
   if (resolvePropSport(prop) !== "MLB") return false;
+  if (isBlockedNonMlbPipelineProp(prop)) return false;
+  if (!isSupportedMlbMarket(prop)) return false;
   if (!hasValidVerifiedProjection(prop)) return false;
   return classifyVerifiedTier(prop) != null;
 }
