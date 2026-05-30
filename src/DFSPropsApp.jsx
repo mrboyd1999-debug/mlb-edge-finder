@@ -253,6 +253,11 @@ import {
   countHistoricalAttachment,
 } from "./utils/pipelinePropCountAudit.js";
 import { buildProviderCoverageAudit, logProviderCoverageSummary } from "./utils/providerCoverageAudit.js";
+import {
+  buildLiveProviderPipelineAudit,
+  logLiveProviderPipelineTrace,
+  mergeLiveFeedDiagnosticsIntoAudit,
+} from "./utils/liveProviderPipelineAudit.js";
 import { buildRenderSourceAudit } from "./utils/renderDataSourceAudit.js";
 import {
   beginRefreshDiagnostics,
@@ -3156,6 +3161,20 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     providerFetchDiagnostics: debugInfo.providerFetchDiagnostics,
     refreshSession: getRefreshDiagnosticsSession(),
   });
+  debugInfo.liveProviderPipelineAudit = buildLiveProviderPipelineAudit({
+    prizePicksResult,
+    underdogResult,
+    prizePicksProps,
+    underdogProps,
+    providerFetchDiagnostics: debugInfo.providerFetchDiagnostics,
+    debugInfo,
+    allDisplayProps,
+  });
+  logLiveProviderPipelineTrace(debugInfo.liveProviderPipelineAudit);
+  debugInfo.providerCoverageAudit = mergeLiveFeedDiagnosticsIntoAudit(
+    debugInfo.providerCoverageAudit,
+    debugInfo.liveProviderPipelineAudit
+  );
   logProviderCoverageSummary(debugInfo.providerCoverageAudit);
   logTotalPropsAvailable(debugInfo.providerCoverageAudit.combinedUsable ?? 0, {
     feedMode: debugInfo.providerCoverageAudit.feedMode,

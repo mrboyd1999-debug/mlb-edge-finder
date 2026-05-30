@@ -4,6 +4,8 @@ import {
   LINE_FEED_MAX_RETRIES,
   LINE_FEED_RETRY_DELAY_MS,
   UNDERDOG_PROVIDER_TIMEOUT_MS,
+  UNDERDOG_RETRY_TIMEOUTS_MS,
+  PROVIDER_RETRY_DELAY_MS,
   isAbortOrTimeoutError,
 } from "../utils/apiTimeout.js";
 import { safeParseJSON } from "../utils/safeParseJSON.js";
@@ -135,8 +137,51 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all", sig
     const apiUrl = absoluteUrl(endpoint);
     console.info(`${UNDERDOG_AUDIT_PREFIX} calling API/proxy URL`, apiUrl);
 
-    const parsed = await fetchUnderdogEndpoint(endpoint, { signal });
-    attempts.push(parsed.attempt);
+    let parsed = null;
+    for (let retryIndex = 0; retryIndex < UNDERDOG_RETRY_TIMEOUTS_MS.length; retryIndex += 1) {
+      if (signal?.aborted) break;
+      const timeoutMs = UNDERDOG_RETRY_TIMEOUTS_MS[retryIndex];
+      const timeoutLocation = `underdog.fetch.retry-${retryIndex + 1}-${timeoutMs}ms`;
+      parsed = await fetchUnderdogEndpoint(endpoint, {
+        signal,
+        timeoutMs,
+        retryIndex,
+        timeoutLocation,
+      });
+      attempts.push(parsed.attempt);
+
+      const timedOut = Boolean(parsed.timedOut || /timed out|abort/i.test(String(parsed.attempt?.error || "")));
+      const rawCount = parsed.ok && parsed.payload ? rawUnderdogRecordCount(parsed.payload) : 0;
+
+      console.log("[Underdog Fetch Result]", {
+        retryIndex: retryIndex + 1,
+        timeoutMs,
+        urlStatus: parsed.attempt?.status,
+        responseSize: parsed.attempt?.responseSize,
+        rawCount,
+        timedOut,
+      });
+
+      if (parsed.ok && rawCount > 0) {
+        console.info("[Underdog] recovery success", { retryIndex: retryIndex + 1, timeoutMs, rawCount });
+        break;
+      }
+
+      if (timedOut) {
+        console.warn("[UD TIMEOUT] step:", parsed.timeoutLocation || timeoutLocation, {
+          timeoutMs,
+          retryIndex: retryIndex + 1,
+          willRetry: retryIndex < UNDERDOG_RETRY_TIMEOUTS_MS.length - 1,
+        });
+      }
+
+      if (retryIndex < UNDERDOG_RETRY_TIMEOUTS_MS.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, PROVIDER_RETRY_DELAY_MS));
+        continue;
+      }
+    }
+
+    if (!parsed) continue;
 
     if (!parsed.ok) {
       if (parsed.rateLimited) {
@@ -350,10 +395,10 @@ function buildCachedUnderdogResult({ sport, statType, attempts, reason = "fetch-
   };
 }
 
-async function fetchUnderdogEndpoint(endpoint, { signal } = {}) {
+async function fetchUnderdogEndpoint(endpoint, { signal, timeoutMs, retryIndex = 0, timeoutLocation = "underdog.fetch.single" } = {}) {
   return withSourceRetryQueue(
     SOURCE_IDS.UNDERDOG,
-    () => attemptUnderdogEndpoint(endpoint, { signal }),
+    () => attemptUnderdogEndpoint(endpoint, { signal, timeoutMs, retryIndex, timeoutLocation }),
     {
       maxAttempts: 3,
       signal,
@@ -371,8 +416,11 @@ async function fetchUnderdogEndpoint(endpoint, { signal } = {}) {
   );
 }
 
-async function attemptUnderdogEndpoint(endpoint, { signal } = {}) {
-  const lineFeedTimeoutMs = Math.min(getLineFeedTimeoutMs(), UNDERDOG_PROVIDER_TIMEOUT_MS);
+async function attemptUnderdogEndpoint(endpoint, { signal, timeoutMs, retryIndex = 0, timeoutLocation = "underdog.fetch.single" } = {}) {
+  const lineFeedTimeoutMs =
+    Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0
+      ? Number(timeoutMs)
+      : Math.min(getLineFeedTimeoutMs(), UNDERDOG_PROVIDER_TIMEOUT_MS);
   const attempt = {
     url: absoluteUrl(endpoint),
     status: null,
@@ -380,11 +428,18 @@ async function attemptUnderdogEndpoint(endpoint, { signal } = {}) {
     preview: "",
     error: "",
     durationMs: 0,
+    retryIndex,
+    timeoutLocation,
   };
   const startedAt = Date.now();
 
-  logProviderFetchPhase("Underdog", "fetch start", { url: attempt.url, timeoutMs: lineFeedTimeoutMs });
-  console.log("[UD FETCH START]", { url: attempt.url, timeoutMs: lineFeedTimeoutMs });
+  logProviderFetchPhase("Underdog", "fetch start", {
+    url: attempt.url,
+    timeoutMs: lineFeedTimeoutMs,
+    retryIndex: retryIndex + 1,
+    timeoutLocation,
+  });
+  console.log("[UD FETCH START]", { url: attempt.url, timeoutMs: lineFeedTimeoutMs, retryIndex: retryIndex + 1 });
 
   try {
     const response = await resilientFetch(

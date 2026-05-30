@@ -9,10 +9,26 @@ export const SPORTSDATA_TIMEOUT_MS = 8_000;
 /** MLB player stat profiles — fail fast and fall back to season merge + cache. */
 export const MLB_STATS_FETCH_TIMEOUT_MS = 8_000;
 /** Per-provider caps — independent; do not use global mobile/desktop caps. */
-export const PRIZEPICKS_RETRY_TIMEOUTS_MS = [5_000];
-/** Startup feed cap — fail fast and fall back to cache. */
-export const PRIZEPICKS_PROVIDER_TIMEOUT_MS = 5_000;
-export const UNDERDOG_PROVIDER_TIMEOUT_MS = 5_000;
+/** Progressive per-attempt timeouts before declaring fetch failure. */
+export const PRIZEPICKS_RETRY_TIMEOUTS_MS = [500, 1_000, 2_000];
+export const UNDERDOG_RETRY_TIMEOUTS_MS = [500, 1_000, 2_000];
+export const PROVIDER_RETRY_DELAY_MS = 250;
+
+export function getProviderRetryAttemptBudgetMs(retryTimeouts = PRIZEPICKS_RETRY_TIMEOUTS_MS) {
+  const attempts = Array.isArray(retryTimeouts) ? retryTimeouts : [retryTimeouts];
+  const attemptMs = attempts.reduce((sum, ms) => sum + finiteRetryMs(ms), 0);
+  const delayMs = Math.max(0, attempts.length - 1) * PROVIDER_RETRY_DELAY_MS;
+  return attemptMs + delayMs + 500;
+}
+
+function finiteRetryMs(value) {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? num : 0;
+}
+
+/** Outer wrapper must outlive inner retry loop (500 + 1000 + 2000 + delays). */
+export const PRIZEPICKS_PROVIDER_TIMEOUT_MS = getProviderRetryAttemptBudgetMs(PRIZEPICKS_RETRY_TIMEOUTS_MS);
+export const UNDERDOG_PROVIDER_TIMEOUT_MS = getProviderRetryAttemptBudgetMs(UNDERDOG_RETRY_TIMEOUTS_MS);
 export const LINE_FEED_RETRY_DELAY_MS = 2_000;
 export const LINE_FEED_MAX_RETRIES = 2;
 

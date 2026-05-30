@@ -150,6 +150,8 @@ export function buildRenderSourceAudit({
 
   const audit = {
     ...(providerFetchAudit || {}),
+    prizepicksFetched: providerFetchAudit?.prizepicksLiveFetched ?? providerFetchAudit?.prizepicksFetched,
+    underdogFetched: providerFetchAudit?.underdogLiveFetched ?? providerFetchAudit?.underdogFetched,
     prizepicksUsable: countUsableProps(ppBoard),
     underdogUsable: countUsableProps(udBoard),
     combinedProps,

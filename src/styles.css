@@ -1211,6 +1211,95 @@ body,
   font-size: 12px;
 }
 
+.live-feed-diagnostics {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0a1018;
+}
+
+.live-feed-diagnostics__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: #e2e8f0;
+  font-size: 13px;
+}
+
+.live-feed-diagnostics__mode {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #fde68a;
+}
+
+.live-feed-diagnostics__summary,
+.live-feed-diagnostics__provider {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #1e293b;
+}
+
+.live-feed-diagnostics__provider-title {
+  display: block;
+  margin-bottom: 6px;
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
+.live-feed-diagnostics__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.live-feed-diagnostics__label {
+  color: #94a3b8;
+}
+
+.live-feed-diagnostics__value {
+  color: #e2e8f0;
+  font-weight: 700;
+  text-align: right;
+  word-break: break-all;
+}
+
+.live-feed-diagnostics__stages {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.live-feed-diagnostics__stage {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: #0f172a;
+  font-size: 9px;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.live-feed-diagnostics__stage strong {
+  color: #e2e8f0;
+  font-size: 14px;
+}
+
+.live-feed-diagnostics__error {
+  margin: 8px 0 0;
+  color: #fca5a5;
+  font-size: 11px;
+}
+
 .system-status-card__summary {
   font-size: 10px;
   color: #86efac;

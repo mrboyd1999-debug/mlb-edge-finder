@@ -4,20 +4,36 @@ import { logPipelineStage } from "./mlbPipelineDebug.js";
 
 export function logLiveFetchResult(label = "", result = {}) {
   const debug = result.debug || {};
+  const rawCount = Number(debug.rawPropsLoaded ?? result.pipelineAudit?.fetched ?? 0);
+  const parsedCount = Number(debug.propsAfterParsing ?? result.parsedProps?.length ?? result.props?.length ?? 0);
+  const normalizedCount = Number(result.props?.length ?? parsedCount);
   const payload = {
     url: debug.apiUrl || result.apiUrl || "",
     status: result.status || debug.apiStatus || "Unknown",
     httpStatus: debug.httpStatus || result.httpStatus || null,
-    rawCount: Number(debug.rawPropsLoaded ?? result.pipelineAudit?.fetched ?? 0),
-    parsedCount: Number(debug.propsAfterParsing ?? result.parsedProps?.length ?? result.props?.length ?? 0),
+    rawCount,
+    parsedCount,
+    normalizedCount,
     failedCount: result.status === "Failed" ? 1 : 0,
     rateLimited: Boolean(result.rateLimited || result.cached),
     timedOut: /timed?\s*out/i.test(String(debug.message || result.warnings?.join(" ") || "")),
+    usedCache: Boolean(result.usedCacheFallback || result.status === "Cached"),
+    liveFetchFailed: Boolean(result.liveFetchFailed || result.error),
     message: debug.message || result.warnings?.[0] || "",
   };
 
   logPipelineStage(`fetch.${label}`, payload);
-  console.info(`[Live Fetch] ${label}`, payload);
+  console.info(`[Live Fetch] ${label} fetch result`, payload);
+  console.info(`[Live Fetch] ${label} parser result`, {
+    raw: rawCount,
+    parsed: parsedCount,
+    failure: rawCount > 0 && parsedCount === 0 ? "parser failure" : "",
+  });
+  console.info(`[Live Fetch] ${label} normalization result`, {
+    parsed: parsedCount,
+    normalized: normalizedCount,
+    failure: parsedCount > 0 && normalizedCount === 0 ? "normalization failure" : "",
+  });
   return payload;
 }
 

@@ -5,6 +5,7 @@ import {
   LINE_FEED_RETRY_DELAY_MS,
   PRIZEPICKS_PROVIDER_TIMEOUT_MS,
   PRIZEPICKS_RETRY_TIMEOUTS_MS,
+  PROVIDER_RETRY_DELAY_MS,
 } from "../utils/apiTimeout.js";
 import { safeParseJSON } from "../utils/safeParseJSON.js";
 import { normalizeGameStartTime, startTimeUncertainty } from "../utils/normalizeGameStartTime.js";
@@ -315,7 +316,7 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
       }
 
       if (retryIndex < PRIZEPICKS_RETRY_TIMEOUTS_MS.length - 1) {
-        const retryDelayMs = 250;
+        const retryDelayMs = PROVIDER_RETRY_DELAY_MS;
         await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
         continue;
       }
