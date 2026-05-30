@@ -26,11 +26,12 @@ import { buildVerificationDashboard, logVerificationDashboardAudit } from "./ver
 import {
   BEST_PLAYS_ENGINE_SIZE,
   logVerificationAudit,
-  selectHighestTierAPlays,
+  selectHeroOverallPlay,
   selectVerifiedPlaysWithFallback,
   selectTopByEdge,
   selectTopByProbability,
   NO_TIER_A_PLAYS_MESSAGE,
+  NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
   VERIFIED_MAX_PLAYS,
 } from "./verifiedTierSystem.js";
 import {
@@ -41,7 +42,7 @@ import {
   compareWeightedBestPlays,
 } from "./bestPlayRanking.js";
 import {
-  compareTopPickScore,
+  compareVerifiedPlaysRank,
   selectTopVerifiedByScore,
 } from "./bestPlayRankingScore.js";
 
@@ -159,19 +160,16 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   logBestPlaysPipelineStage("VERIFICATION AUDIT:", verificationAudit.breakdown);
   logRejectionSummary(enriched);
 
-  const verifiedSelection = selectVerifiedPlaysWithFallback(
-    verifiedPool.length ? verifiedPool : displayPool,
-    { max: VERIFIED_MAX_PLAYS }
-  );
+  const verifiedSelection = selectVerifiedPlaysWithFallback(verifiedPool, { max: VERIFIED_MAX_PLAYS });
   const rankedVerified = verifiedSelection.picks;
-  let usedVerifiedScoreFallback = verifiedSelection.usedFallback;
+  const usedVerifiedScoreFallback = verifiedSelection.usedFallback;
   const rankedResearch = sortHighestProbabilityPlays(researchPool);
   let verifiedPicks = rankedVerified.map((prop) => ({
     ...prop,
     verified: true,
     bestPlayPool: "verified",
   }));
-  verifiedPicks = [...verifiedPicks].sort(compareTopPickScore);
+  verifiedPicks = [...verifiedPicks].sort(compareVerifiedPlaysRank);
   const verificationDashboardResult = logVerificationDashboardAudit(enriched, {
     displayPool,
     verifiedPicks,
@@ -179,7 +177,7 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   });
   const verificationDashboard = verificationDashboardResult;
   const topVerifiedPicks = selectTopVerifiedByScore(verifiedPicks, BEST_PLAYS_ENGINE_SIZE);
-  const highestProbabilityPicks = selectHighestTierAPlays(verifiedPicks, 1);
+  const highestProbabilityPicks = selectHeroOverallPlay(verifiedPicks, 1);
   const noTierAPlays = !highestProbabilityPicks.length;
   const researchPicks = dedupeAndTake(
     rankedResearch.map((prop) => ({
@@ -213,11 +211,6 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   );
   let usedVerifiedFallback = usedVerifiedScoreFallback;
 
-  if (verifiedPicks.some((p) => p.verifiedTierFallback)) {
-    usedVerifiedFallback = true;
-    logBestPlaysPipelineStage("VERIFIED TIER FALLBACK:", verifiedPicks.length);
-  }
-
   if (!picks.length) {
     const fallbackPool = displayPool.length ? displayPool : enriched;
     const fallbackPicks = selectTopProjectedFallback(fallbackPool, HIGHEST_PROBABILITY_FALLBACK_MAX);
@@ -235,7 +228,9 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
       topVerifiedPicks,
       highestProbabilityPicks,
       noTierAPlays,
-      noTierAPlaysMessage: NO_TIER_A_PLAYS_MESSAGE,
+      noTierAPlaysMessage: noTierAPlays
+        ? NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE
+        : NO_TIER_A_PLAYS_MESSAGE,
       researchPicks,
       topProbabilityPicks,
       topEdgePicks,

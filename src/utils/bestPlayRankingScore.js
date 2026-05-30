@@ -3,6 +3,7 @@
  */
 
 import { computePlayabilityScore } from "./propCalibration.js";
+import { resolveHistoricalDataPresent } from "./tierHistoricalValidation.js";
 
 function finite(value, fallback = 0) {
   const num = Number(value);
@@ -10,6 +11,14 @@ function finite(value, fallback = 0) {
 }
 
 export const NO_TIER_A_PLAYS_MESSAGE = "No Tier A Plays Today";
+export const NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE = "No high-quality verified plays yet";
+
+export const TOP_VERIFIED_MIN_PLAYABILITY = 50;
+export const TOP_VERIFIED_MIN_CONFIDENCE = 55;
+export const HERO_MIN_PROBABILITY = 60;
+export const HERO_MIN_CONFIDENCE = 60;
+export const HERO_MIN_PLAYABILITY = 60;
+export const HERO_MIN_SANITY = 65;
 
 export function resolveRankingEdgePercent(prop = {}) {
   const direct = finite(prop.edgePercent, NaN);
@@ -53,7 +62,75 @@ export function compareTopPickScore(a = {}, b = {}) {
   return computeTopPickScore(b) - computeTopPickScore(a);
 }
 
-export const compareVerifiedRankingPlays = compareTopPickScore;
+export function resolveSanityScore(prop = {}) {
+  const num = Number(prop.projectionSanityScore ?? prop.projectionSanityAudit?.sanityScore);
+  return Number.isFinite(num) ? num : null;
+}
+
+export function isResearchOnlyProp(prop = {}) {
+  if (prop.displayResearchOnly) return true;
+  if (prop.verifiedTierFallback || prop.verifiedFallbackPick) return true;
+  const label = String(prop.pickTierLabel || prop.bettingLabel || "").trim();
+  if (/research/i.test(label)) return true;
+  if (prop.bestPlayPool === "research") return true;
+  if (prop.historicalDataPresent === false) return true;
+  if (prop.projectionSanityAudit?.sanityFail || prop.projectionSanityFail) return true;
+  return false;
+}
+
+export function passesTopVerifiedPlaysGate(prop = {}) {
+  if (isResearchOnlyProp(prop)) return false;
+  const confidence = finite(
+    prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence,
+    NaN
+  );
+  const playability = resolvePlayabilityScore(prop);
+  if (!Number.isFinite(playability) || playability < TOP_VERIFIED_MIN_PLAYABILITY) return false;
+  if (!Number.isFinite(confidence) || confidence < TOP_VERIFIED_MIN_CONFIDENCE) return false;
+  return true;
+}
+
+export function passesHeroOverallPlayGate(prop = {}) {
+  if (!passesTopVerifiedPlaysGate(prop)) return false;
+
+  const probability = finite(prop.probabilityScore ?? prop.verifiedProbability, NaN);
+  const confidence = finite(
+    prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence,
+    NaN
+  );
+  const playability = resolvePlayabilityScore(prop);
+  const sanity = resolveSanityScore(prop);
+  const historicalPresent =
+    prop.historicalDataPresent ?? resolveHistoricalDataPresent(prop).present;
+  const audit = prop.projectionSanityAudit;
+
+  if (!historicalPresent) return false;
+  if (audit?.sanityFail || prop.projectionSanityFail) return false;
+  if (!Number.isFinite(probability) || probability < HERO_MIN_PROBABILITY) return false;
+  if (!Number.isFinite(confidence) || confidence < HERO_MIN_CONFIDENCE) return false;
+  if (!Number.isFinite(playability) || playability < HERO_MIN_PLAYABILITY) return false;
+  if (sanity == null || sanity < HERO_MIN_SANITY) return false;
+  return true;
+}
+
+/** Top Verified sort: playability → confidence → probability → edge */
+export function compareVerifiedPlaysRank(a = {}, b = {}) {
+  const playA = resolvePlayabilityScore(a);
+  const playB = resolvePlayabilityScore(b);
+  if (playB !== playA) return playB - playA;
+
+  const confA = finite(a.displayConfidenceScore ?? a.confidenceScore ?? a.confidence, 0);
+  const confB = finite(b.displayConfidenceScore ?? b.confidenceScore ?? b.confidence, 0);
+  if (confB !== confA) return confB - confA;
+
+  const probA = finite(a.probabilityScore ?? a.verifiedProbability, 0);
+  const probB = finite(b.probabilityScore ?? b.verifiedProbability, 0);
+  if (probB !== probA) return probB - probA;
+
+  return resolveRankingEdgePercent(b) - resolveRankingEdgePercent(a);
+}
+
+export const compareVerifiedRankingPlays = compareVerifiedPlaysRank;
 export const compareWeightedBestPlays = compareTopPickScore;
 
 export function buildTopPickRankingReason(prop = {}, rank = 1) {
@@ -85,7 +162,8 @@ export function annotateTopPickRankingFields(prop = {}, rank = null) {
 
 export function selectTopVerifiedByScore(props = [], limit = 10) {
   return [...(props || [])]
-    .sort(compareTopPickScore)
+    .filter(passesTopVerifiedPlaysGate)
+    .sort(compareVerifiedPlaysRank)
     .slice(0, limit)
     .map((prop, index) =>
       annotateTopPickRankingFields(

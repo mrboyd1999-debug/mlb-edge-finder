@@ -2,8 +2,11 @@ import { memo, useMemo } from "react";
 import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import BestPlayHeroCard from "./BestPlayHeroCard.jsx";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
-import { compareTopPickScore } from "../utils/bestPlayRankingScore.js";
-import { VERIFIED_DISPLAY_MAX } from "../utils/verifiedTierSystem.js";
+import { compareVerifiedPlaysRank, passesHeroOverallPlayGate } from "../utils/bestPlayRankingScore.js";
+import {
+  VERIFIED_DISPLAY_MAX,
+  NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
+} from "../utils/verifiedTierSystem.js";
 import { safeArray } from "../utils/safeStats.js";
 
 function findSection(sections, id) {
@@ -22,11 +25,13 @@ function BestPlaysTab({
 
   const verifiedPicks = useMemo(() => {
     return safeArray(verifiedSection?.picks)
-      .sort(compareTopPickScore)
+      .sort(compareVerifiedPlaysRank)
       .slice(0, VERIFIED_DISPLAY_MAX);
   }, [verifiedSection]);
 
-  const heroPlay = verifiedPicks[0] || null;
+  const heroPlay = useMemo(() => {
+    return verifiedPicks.find(passesHeroOverallPlayGate) || null;
+  }, [verifiedPicks]);
   const failureReason = loadError || filterDiagnostics?.error || "";
 
   if (loading) {
@@ -56,7 +61,7 @@ function BestPlaysTab({
           <h2>{verifiedSection?.title || "Top Verified Plays"}</h2>
           <p>
             {verifiedSection?.eyebrow ||
-              `Top ${VERIFIED_DISPLAY_MAX} by probability, confidence, playability, and edge`}
+              `Top ${VERIFIED_DISPLAY_MAX} sorted by playability, confidence, probability, then edge`}
           </p>
         </div>
         {verifiedPicks.length ? (
@@ -75,7 +80,9 @@ function BestPlaysTab({
             ))}
           </div>
         ) : (
-          <p className="compact-empty">No verified plays passed thresholds.</p>
+          <p className="compact-empty">
+            {verifiedSection?.emptyMessage || NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE}
+          </p>
         )}
       </section>
     </div>

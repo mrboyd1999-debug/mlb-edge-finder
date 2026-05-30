@@ -13,9 +13,13 @@ import { resolvePropSport } from "./mlbOnlyMode.js";
 import {
   annotateTopPickRankingFields,
   compareTopPickScore,
+  compareVerifiedPlaysRank,
   computeTopPickScore,
   resolvePlayabilityScore,
   NO_TIER_A_PLAYS_MESSAGE,
+  NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
+  passesHeroOverallPlayGate,
+  passesTopVerifiedPlaysGate,
 } from "./bestPlayRankingScore.js";
 import {
   TIER_A_MIN_SANITY_SCORE,
@@ -27,7 +31,13 @@ import {
   resolveMaximumTier,
 } from "./tierHistoricalValidation.js";
 
-export { NO_TIER_A_PLAYS_MESSAGE };
+export { NO_TIER_A_PLAYS_MESSAGE, NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE };
+export {
+  passesTopVerifiedPlaysGate,
+  passesHeroOverallPlayGate,
+  compareVerifiedPlaysRank,
+  isResearchOnlyProp,
+} from "./bestPlayRankingScore.js";
 
 export const VERIFIED_TIER_A = {
   id: "A",
@@ -429,7 +439,7 @@ export function logVerificationRegressionAudit(props = []) {
 }
 
 export function compareVerifiedTierPlays(a = {}, b = {}) {
-  return compareTopPickScore(a, b);
+  return compareVerifiedPlaysRank(a, b);
 }
 
 export function annotateVerifiedTier(prop = {}) {
@@ -447,55 +457,23 @@ export function selectVerifiedPlaysByTier(props = [], options = {}) {
   const max = options.max ?? VERIFIED_MAX_PLAYS;
   const eligible = (props || [])
     .filter(passesVerifiedTierFilter)
+    .filter(passesTopVerifiedPlaysGate)
     .map(annotateVerifiedTier)
-    .sort(compareTopPickScore);
+    .sort(compareVerifiedPlaysRank);
 
   return eligible.slice(0, max);
 }
 
 export function selectVerifiedPlaysWithFallback(props = [], options = {}) {
-  const max = options.max ?? VERIFIED_MAX_PLAYS;
-  const fallbackMax = options.fallbackMax ?? VERIFIED_FALLBACK_MAX;
-  let picks = selectVerifiedPlaysByTier(props, { max });
-  let usedFallback = false;
-
-  if (!picks.length && (props || []).length) {
-    picks = [...props]
-      .filter((prop) => {
-        if (!passesMinimalBestPlaysFilter(prop) || resolvePropSport(prop) !== "MLB") return false;
-        if (hasValidVerifiedProjection(prop)) return true;
-        const loose = sanitizeProjectionValue(prop.projection ?? prop.projectedValue);
-        return loose != null && loose > 0;
-      })
-      .map((prop) =>
-        annotateTopPickRankingFields(
-          enforceVerifiedTierFields({
-            ...prop,
-            verifiedTierFallback: true,
-            verified: true,
-            pickTierLabel: "Verified Play",
-            bestPlayPool: "verified",
-          })
-        )
-      )
-      .sort(compareTopPickScore)
-      .slice(0, fallbackMax);
-    usedFallback = picks.length > 0;
-    if (usedFallback) {
-      console.info("[MLB Pipeline] verified fallback promoted top projected props", {
-        count: picks.length,
-      });
-    }
-  }
-
-  return { picks, usedFallback };
+  const picks = selectVerifiedPlaysByTier(props, options);
+  return { picks, usedFallback: false };
 }
 
-export function selectHighestTierAPlays(props = [], limit = 1) {
+export function selectHeroOverallPlay(props = [], limit = 1) {
   return [...(props || [])]
+    .filter(passesHeroOverallPlayGate)
     .map((prop) => enforceVerifiedTierFields(prop))
-    .filter((prop) => prop.verifiedTier === VERIFIED_TIER_A.id)
-    .sort(compareTopPickScore)
+    .sort(compareVerifiedPlaysRank)
     .slice(0, limit)
     .map((prop, index) =>
       annotateTopPickRankingFields(
@@ -508,6 +486,11 @@ export function selectHighestTierAPlays(props = [], limit = 1) {
         index + 1
       )
     );
+}
+
+/** @deprecated Use selectHeroOverallPlay — hero gates replaced Tier-A-only selection. */
+export function selectHighestTierAPlays(props = [], limit = 1) {
+  return selectHeroOverallPlay(props, limit);
 }
 
 export function selectTopByProbability(props = [], limit = BEST_PLAYS_ENGINE_SIZE) {

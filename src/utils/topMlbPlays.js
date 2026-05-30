@@ -33,7 +33,7 @@ import {
   auditHighestProbabilityProps,
   buildHighestProbabilityQualifyReason,
 } from "./highestProbabilityPlays.js";
-import { NO_TIER_A_PLAYS_MESSAGE } from "./verifiedTierSystem.js";
+import { NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE } from "./verifiedTierSystem.js";
 import {
   logProjectionFilterSummary,
   resetProjectionFilterCounters,
@@ -416,21 +416,17 @@ export function resolveTopMlbPlaySections(
 
   let sectionPicks = verifiedPicks.filter(Boolean).slice(0, 10);
   let sectionTitle = "Top Verified Plays";
-  let sectionEyebrow = "Top 10 by probability, confidence, playability, and edge";
-
-  if (!sectionPicks.length && highestPicks.length) {
-    sectionPicks = highestPicks.filter(Boolean).slice(0, 10);
-    sectionTitle = selection.usedVerifiedFallback ? "Top Projected Props" : "Top Verified Plays";
-    sectionEyebrow = selection.usedVerifiedFallback
-      ? "Verified tier pool empty — showing top projected props by probability, edge, and confidence"
-      : "Weighted top plays";
-  }
+  let sectionEyebrow = "Sorted by playability, confidence, probability, then edge";
+  let sectionEmptyMessage = sectionPicks.length
+    ? ""
+    : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE;
 
   const sections = [
     {
       id: "verified-plays",
       title: sectionTitle,
       eyebrow: sectionEyebrow,
+      emptyMessage: sectionEmptyMessage,
       picks: sectionPicks,
     },
   ];
