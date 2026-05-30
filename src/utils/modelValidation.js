@@ -10,6 +10,10 @@ import { hasMissingOpponentData, resolveProjectionValue } from "./conservativePr
 import { computeCalibratedProbability } from "./probabilityCalibration.js";
 import { computeFormConfidenceScore } from "./matchupEnrichment.js";
 import { formatHitRatePercent } from "./pickDirectionAudit.js";
+import {
+  HISTORICAL_DATA_UNAVAILABLE_WARNING,
+  resolveHistoricalDataPresent,
+} from "./tierHistoricalValidation.js";
 
 function finite(value) {
   const num = Number(value);
@@ -100,6 +104,7 @@ export function buildProbabilityAudit(prop = {}, metrics = {}) {
   const edge = finite(metrics.edge ?? computeStandardEdge(projection, line));
   const edgePercent = finite(metrics.edgePercent ?? computeStandardEdgePercent(edge, line));
   const hitRates = buildHitRateSnapshot(prop);
+  const historical = resolveHistoricalDataPresent(prop);
   const opponent = resolveOpponentAdjustment(prop);
   const park = resolveParkAdjustment(prop);
 
@@ -149,6 +154,9 @@ export function buildProbabilityAudit(prop = {}, metrics = {}) {
     summary: explanationLines.join(" · "),
     hitRates,
     calibration: calibrated,
+    historicalDataPresent: historical.present,
+    historicalMissing: historical.missingLabels,
+    historicalDataWarning: historical.present ? "" : HISTORICAL_DATA_UNAVAILABLE_WARNING,
   };
 }
 

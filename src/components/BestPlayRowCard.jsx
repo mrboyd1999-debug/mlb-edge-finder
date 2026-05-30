@@ -175,7 +175,12 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
           {probabilityAudit ? (
             <div className="probability-audit" aria-label="Probability audit">
               <p className="probability-audit__title">Probability inputs</p>
+              {probabilityAudit.historicalDataWarning ? (
+                <p className="probability-audit__warning">{probabilityAudit.historicalDataWarning}</p>
+              ) : null}
               <p style={{ ...styles.bestPlayRowSubline, color: "#cbd5e1", marginTop: 2, fontSize: 11 }}>
+                Last 5: <strong>{probabilityAudit.last5HitRate ?? hitRates?.last5Label ?? last5HitRate}</strong>
+                {" · "}
                 Last 10: <strong>{probabilityAudit.last10HitRate}</strong>
                 {" · "}
                 Season: <strong>{probabilityAudit.seasonHitRate}</strong>

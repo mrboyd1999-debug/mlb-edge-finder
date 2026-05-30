@@ -11,6 +11,12 @@ import {
 } from "./projectionQuality.js";
 import { resolveCalibrationHitRates } from "./probabilityCalibration.js";
 import { formatNumber } from "./formatters.js";
+import {
+  MAX_SANITY_WITHOUT_HISTORY,
+  TIER_A_MIN_SANITY_SCORE,
+  resolveHistoricalDataPresent,
+} from "./tierHistoricalValidation.js";
+import { classifyVerifiedTier } from "./verifiedTierSystem.js";
 
 function finite(value) {
   const num = Number(value);
@@ -33,7 +39,7 @@ function pctWeight(weight) {
 export const PROJECTION_OUTLIER_FLAG = "PROJECTION OUTLIER";
 export const PROJECTION_MISMATCH_FLAG = "ProjectionMismatch";
 export const PROJECTION_OUTLIER_WARNING = "⚠ Projection Outlier";
-export const TIER_A_MIN_SANITY_SCORE = 70;
+export { TIER_A_MIN_SANITY_SCORE } from "./tierHistoricalValidation.js";
 export const PROBABILITY_MISMATCH_THRESHOLD = 20;
 
 /** Market-specific absolute drift limits. */
@@ -287,6 +293,7 @@ export function buildProjectionSanityAudit(prop = {}) {
   const projectionSourceLabel = resolveProjectionSourceLabel(prop);
   const recommendedSide = resolveRecommendedSide(prop, projection, line);
   const overRates = supported ? resolveOverRates(prop, line, recommendedSide) : {};
+  const historical = resolveHistoricalDataPresent(prop);
   const projectionProbability = supported
     ? resolveProjectionProbability(prop, projection, line, recommendedSide)
     : null;
@@ -344,10 +351,14 @@ export function buildProjectionSanityAudit(prop = {}) {
     rule,
     flags: scoreFlags,
   });
-  const sanityScore =
+  let sanityScore =
     agreementScore != null
       ? clamp(Math.round(agreementScore * 0.7 + averageDriftScore * 0.3), 0, 100)
       : averageDriftScore;
+
+  if (!historical.present) {
+    sanityScore = Math.min(sanityScore, MAX_SANITY_WITHOUT_HISTORY);
+  }
 
   const projectionMismatch = hasProjectionMismatch(
     projectionProbability,
@@ -364,12 +375,17 @@ export function buildProjectionSanityAudit(prop = {}) {
   const seasonDeviationPct = deviationPct(projection, season);
   const last10DeviationPct = deviationPct(projection, last10);
   const blocksTierA =
-    sanityScore < TIER_A_MIN_SANITY_SCORE || isOutlier || projectionMismatch;
+    !historical.present ||
+    sanityScore < TIER_A_MIN_SANITY_SCORE ||
+    isOutlier ||
+    projectionMismatch;
 
   const audit = {
     marketKey,
     marketLabel: rule?.label || marketKey || "Prop",
     supported: true,
+    historicalDataPresent: historical.present,
+    historicalMissing: historical.missingLabels,
     last5Average: last5,
     last10Average: last10,
     seasonAverage: season,
@@ -471,9 +487,8 @@ export function attachProjectionSanityAudit(prop = {}, options = {}) {
   const rawPlayability = options.playability ?? prop.playabilityScore;
   const adjustedConfidence = applySanityConfidencePenalty(rawConfidence, audit);
   const adjustedPlayability = applySanityPlayabilityPenalty(rawPlayability, audit);
-  const verifiedTier = demoteTierForProjectionSanity(prop.verifiedTier, audit);
 
-  return {
+  const merged = {
     ...prop,
     projectionSanityAudit: audit,
     projectionSanityScore: audit.sanityScore,
@@ -481,10 +496,16 @@ export function attachProjectionSanityAudit(prop = {}, options = {}) {
     projectionMismatchFlag: audit.projectionMismatch ? PROJECTION_MISMATCH_FLAG : "",
     projectionOutlier: audit.isOutlier,
     projectionOutlierFlag: audit.outlierWarning || audit.outlierFlags?.[0] || "",
+    historicalDataPresent: audit.historicalDataPresent ?? false,
     displayConfidenceScore: adjustedConfidence,
     confidenceScore: adjustedConfidence,
     confidence: adjustedConfidence,
     playabilityScore: adjustedPlayability,
+  };
+  const verifiedTier = classifyVerifiedTier(merged);
+
+  return {
+    ...merged,
     verifiedTier: verifiedTier ?? prop.verifiedTier,
     verifiedTierLabel: verifiedTier ? `Tier ${verifiedTier}` : prop.verifiedTierLabel,
   };

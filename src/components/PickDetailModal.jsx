@@ -384,7 +384,11 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
         {breakdownMode && prop.probabilityAudit ? (
           <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
             <strong style={{ fontSize: "11px" }}>Probability audit</strong>
+            {prop.probabilityAudit.historicalDataWarning ? (
+              <p className="probability-audit__warning">{prop.probabilityAudit.historicalDataWarning}</p>
+            ) : null}
             <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "3px", marginTop: "4px" }}>
+              <MetricIf label="Last 5 hit rate" value={prop.probabilityAudit.last5HitRate} />
               <MetricIf label="Last 10 hit rate" value={prop.probabilityAudit.last10HitRate} />
               <MetricIf label="Season hit rate" value={prop.probabilityAudit.seasonHitRate} />
               <MetricIf label="Projection vs line" value={prop.probabilityAudit.projectionVsLine} />

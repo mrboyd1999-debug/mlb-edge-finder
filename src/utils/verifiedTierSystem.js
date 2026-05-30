@@ -1,5 +1,5 @@
 /**
- * Phase 3 verified tier system — probability/confidence gates for Verified Plays.
+ * Verified tier system — strict probability, confidence, playability, and sanity gates.
  */
 
 import {
@@ -18,32 +18,36 @@ import {
   selectHighestTierAPlays,
   NO_TIER_A_PLAYS_MESSAGE,
 } from "./bestPlayRankingScore.js";
-import { demoteTierForProjectionSanity } from "./projectionSanityAudit.js";
+import {
+  TIER_A_MIN_SANITY_SCORE,
+  capTierToMaximum,
+  resolveHistoricalDataPresent,
+  resolveMaximumTier,
+} from "./tierHistoricalValidation.js";
 
 export { NO_TIER_A_PLAYS_MESSAGE };
 
-/** Tier gates aligned with calibrated probability floor (40–92), not legacy 54–70% compression. */
 export const VERIFIED_TIER_A = {
   id: "A",
-  minProbability: 58,
-  minConfidence: 60,
+  minProbability: 65,
+  minConfidence: 65,
+  minPlayability: 65,
+  minSanity: TIER_A_MIN_SANITY_SCORE,
   rank: 0,
 };
 export const VERIFIED_TIER_B = {
   id: "B",
-  minProbability: 50,
-  minConfidence: 55,
+  minProbability: 58,
+  minPlayability: 50,
   rank: 1,
 };
 export const VERIFIED_TIER_C = {
   id: "C",
-  minProbability: 45,
-  minConfidence: 50,
   rank: 2,
 };
 
-export const VERIFIED_BASE_MIN_PROBABILITY = VERIFIED_TIER_C.minProbability;
-export const VERIFIED_BASE_MIN_CONFIDENCE = VERIFIED_TIER_C.minConfidence;
+export const VERIFIED_BASE_MIN_PROBABILITY = 45;
+export const VERIFIED_BASE_MIN_CONFIDENCE = 50;
 export const VERIFIED_MIN_DATA_QUALITY = 50;
 
 export const VERIFIED_TIERS = [VERIFIED_TIER_A, VERIFIED_TIER_B, VERIFIED_TIER_C];
@@ -61,30 +65,87 @@ export const VERIFICATION_AUDIT_KEYS = [
   "failedConfidence",
   "failedMatchup",
   "failedDataQuality",
+  "failedPlayability",
+  "failedHistoricalData",
 ];
+
+function finite(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function resolveSanityScore(prop = {}) {
+  return finite(prop.projectionSanityScore ?? prop.projectionSanityAudit?.sanityScore);
+}
+
+function qualifiesTierA({ probability, confidence, playability, sanity, historicalPresent, audit }) {
+  if (!historicalPresent) return false;
+  if (audit?.blocksTierA) return false;
+  if (sanity == null || sanity < VERIFIED_TIER_A.minSanity) return false;
+  return (
+    probability >= VERIFIED_TIER_A.minProbability &&
+    confidence >= VERIFIED_TIER_A.minConfidence &&
+    playability >= VERIFIED_TIER_A.minPlayability
+  );
+}
+
+function qualifiesTierB({ probability, playability }) {
+  return probability >= VERIFIED_TIER_B.minProbability && playability >= VERIFIED_TIER_B.minPlayability;
+}
 
 export function resolveVerifiedMetrics(prop = {}) {
   const probability = Number(prop.probabilityScore ?? prop.verifiedProbability);
   const confidence = Number(prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence);
   const playability = resolvePlayabilityScore(prop);
   const dataQuality = Number(prop.dataQualityScore);
-  return { probability, confidence, playability, dataQuality };
+  const sanity = resolveSanityScore(prop);
+  const historical = resolveHistoricalDataPresent(prop);
+  return {
+    probability,
+    confidence,
+    playability,
+    dataQuality,
+    sanity,
+    historicalPresent: historical.present,
+    historicalMissing: historical.missingLabels,
+  };
 }
 
 export function classifyVerifiedTier(prop = {}) {
-  const { probability, confidence } = resolveVerifiedMetrics(prop);
+  const { probability, confidence, playability, sanity } = resolveVerifiedMetrics(prop);
+  const historical = resolveHistoricalDataPresent(prop);
+  const audit = prop.projectionSanityAudit || null;
+
   if (!Number.isFinite(probability) || !Number.isFinite(confidence)) return null;
   if (probability < VERIFIED_BASE_MIN_PROBABILITY || confidence < VERIFIED_BASE_MIN_CONFIDENCE) {
     return null;
   }
+  if (!Number.isFinite(playability)) return null;
 
-  if (probability >= VERIFIED_TIER_A.minProbability && confidence >= VERIFIED_TIER_A.minConfidence) {
-    return demoteTierForProjectionSanity(VERIFIED_TIER_A.id, prop.projectionSanityAudit);
+  let tier = VERIFIED_TIER_C.id;
+
+  if (qualifiesTierB({ probability, playability })) {
+    tier = VERIFIED_TIER_B.id;
   }
-  if (probability >= VERIFIED_TIER_B.minProbability && confidence >= VERIFIED_TIER_B.minConfidence) {
-    return VERIFIED_TIER_B.id;
+
+  if (
+    qualifiesTierA({
+      probability,
+      confidence,
+      playability,
+      sanity,
+      historicalPresent: historical.present,
+      audit,
+    })
+  ) {
+    tier = VERIFIED_TIER_A.id;
   }
-  return VERIFIED_TIER_C.id;
+
+  const maximumTier = resolveMaximumTier({
+    playability,
+    historicalPresent: historical.present,
+  });
+  return capTierToMaximum(tier, maximumTier);
 }
 
 export function hasIncompleteSupportingData(prop = {}) {
@@ -104,7 +165,6 @@ export function hasValidVerifiedProjection(prop = {}) {
   return true;
 }
 
-/** Strong enough to recommend — tier A/B/C with valid stat-specific projection. */
 export function passesVerifiedTierFilter(prop = {}) {
   if (!passesMinimalBestPlaysFilter(prop)) return false;
   if (resolvePropSport(prop) !== "MLB") return false;
@@ -112,7 +172,6 @@ export function passesVerifiedTierFilter(prop = {}) {
   return classifyVerifiedTier(prop) != null;
 }
 
-/** Missing matchup or incomplete supporting data — not tier-qualified verified. */
 export function passesResearchTierFilter(prop = {}) {
   if (passesVerifiedTierFilter(prop)) return false;
   if (!passesMinimalBestPlaysFilter(prop)) return false;
@@ -131,7 +190,8 @@ export function explainVerificationRejection(prop = {}) {
   if (resolvePropSport(prop) !== "MLB") return "non-MLB sport";
   if (!hasValidVerifiedProjection(prop)) return "missing or invalid stat-specific projection";
 
-  const { probability, confidence, playability, dataQuality } = resolveVerifiedMetrics(prop);
+  const { probability, confidence, playability, dataQuality, sanity, historicalPresent, historicalMissing } =
+    resolveVerifiedMetrics(prop);
 
   if (!Number.isFinite(probability)) return "probability missing";
   if (probability < VERIFIED_BASE_MIN_PROBABILITY) {
@@ -141,15 +201,32 @@ export function explainVerificationRejection(prop = {}) {
   if (confidence < VERIFIED_BASE_MIN_CONFIDENCE) {
     return `confidence ${Math.round(confidence)}% below Tier C minimum ${VERIFIED_BASE_MIN_CONFIDENCE}%`;
   }
+  if (!Number.isFinite(playability)) return "playability score unavailable";
+  if (playability < 40) return `playability ${Math.round(playability)}% caps tier at C (max)`;
+  if (playability < VERIFIED_TIER_B.minPlayability) {
+    return `playability ${Math.round(playability)}% below Tier B minimum ${VERIFIED_TIER_B.minPlayability}% (max tier B)`;
+  }
+  if (!historicalPresent) {
+    return `historical data missing (${historicalMissing.join(", ") || "Last5/Last10/Season"}) — max tier B`;
+  }
   if (Number.isFinite(dataQuality) && dataQuality < VERIFIED_MIN_DATA_QUALITY) {
     return `data quality ${Math.round(dataQuality)}% below ${VERIFIED_MIN_DATA_QUALITY}%`;
   }
   if (hasIncompleteSupportingData(prop)) return "incomplete matchup or supporting data";
-  if (!Number.isFinite(playability)) return "playability score unavailable (not a tier gate)";
-  if (playability < 50) {
-    return `strict playability gate would reject (${Math.round(playability)} < 50) — tier uses prob/conf only`;
+  if (probability < VERIFIED_TIER_B.minProbability) {
+    return `probability ${Math.round(probability)}% below Tier B minimum ${VERIFIED_TIER_B.minProbability}%`;
   }
-  return "eligible under current prob/conf tiers";
+  if (
+    probability < VERIFIED_TIER_A.minProbability ||
+    confidence < VERIFIED_TIER_A.minConfidence ||
+    playability < VERIFIED_TIER_A.minPlayability
+  ) {
+    return `below Tier A thresholds (prob ${VERIFIED_TIER_A.minProbability}% / conf ${VERIFIED_TIER_A.minConfidence}% / play ${VERIFIED_TIER_A.minPlayability}%)`;
+  }
+  if (sanity == null || sanity < VERIFIED_TIER_A.minSanity) {
+    return `sanity ${sanity ?? "—"} below Tier A minimum ${VERIFIED_TIER_A.minSanity}`;
+  }
+  return "eligible under current tier rules";
 }
 
 export function auditVerificationFailure(prop = {}) {
@@ -159,13 +236,19 @@ export function auditVerificationFailure(prop = {}) {
   if (resolvePropSport(prop) !== "MLB") return "failedProjection";
   if (!hasValidVerifiedProjection(prop)) return "failedProjection";
 
-  const { probability, confidence, dataQuality } = resolveVerifiedMetrics(prop);
+  const { probability, confidence, playability, dataQuality, historicalPresent } = resolveVerifiedMetrics(prop);
 
   if (!Number.isFinite(probability) || probability < VERIFIED_BASE_MIN_PROBABILITY) {
     return "failedProbability";
   }
   if (!Number.isFinite(confidence) || confidence < VERIFIED_BASE_MIN_CONFIDENCE) {
     return "failedConfidence";
+  }
+  if (!Number.isFinite(playability) || playability < VERIFIED_TIER_B.minPlayability) {
+    return "failedPlayability";
+  }
+  if (!historicalPresent && classifyVerifiedTier(prop) !== VERIFIED_TIER_A.id) {
+    return "failedHistoricalData";
   }
   if (Number.isFinite(dataQuality) && dataQuality < VERIFIED_MIN_DATA_QUALITY) {
     return "failedDataQuality";
@@ -182,6 +265,8 @@ function emptyBreakdown() {
     failedConfidence: 0,
     failedMatchup: 0,
     failedDataQuality: 0,
+    failedPlayability: 0,
+    failedHistoricalData: 0,
   };
 }
 
@@ -221,7 +306,9 @@ export function summarizeVerificationAudit(props = []) {
       breakdown.failedProjection +
       breakdown.failedProbability +
       breakdown.failedConfidence +
-      breakdown.failedMatchup,
+      breakdown.failedMatchup +
+      breakdown.failedPlayability +
+      breakdown.failedHistoricalData,
   };
 }
 
@@ -244,6 +331,7 @@ export function logTopPickScoreAudit(props = [], limit = TOP_PICK_SCORE_AUDIT_SI
           Number(annotated.displayConfidenceScore ?? annotated.confidenceScore ?? 0)
         ),
         playability: Math.round(Number(annotated.playabilityScore ?? 0)),
+        sanity: annotated.projectionSanityScore ?? annotated.projectionSanityAudit?.sanityScore ?? "—",
         score: Number(annotated.topPickScore ?? computeTopPickScore(annotated)).toFixed(1),
         tier: classifyVerifiedTier(annotated),
         rejection: explainVerificationRejection(annotated),
@@ -271,10 +359,6 @@ export function logVerificationRegressionAudit(props = []) {
       confidence >= VERIFIED_BASE_MIN_CONFIDENCE
     );
   }).length;
-  const wouldPassLegacy55Prob = projected.filter((prop) => {
-    const { probability, confidence } = resolveVerifiedMetrics(prop);
-    return Number.isFinite(probability) && Number.isFinite(confidence) && probability >= 55 && confidence >= 50;
-  }).length;
   const currentlyVerified = projected.filter(passesVerifiedTierFilter).length;
 
   console.info("[MLB Pipeline] verification regression audit", {
@@ -283,7 +367,6 @@ export function logVerificationRegressionAudit(props = []) {
     tierFloorProbability: VERIFIED_BASE_MIN_PROBABILITY,
     tierFloorConfidence: VERIFIED_BASE_MIN_CONFIDENCE,
     wouldPassProbConfFloor: wouldPassOldProbConf,
-    blockedByLegacy55ProbabilityFloor: wouldPassOldProbConf - wouldPassLegacy55Prob,
     removedByStrictPlayabilityGate: audit.regressionReasons,
     failureBreakdown: audit.breakdown,
     sampleRejections: audit.samples.slice(0, 12),
@@ -305,17 +388,18 @@ export function compareVerifiedTierPlays(a = {}, b = {}) {
 
 export function annotateVerifiedTier(prop = {}) {
   const tier = classifyVerifiedTier(prop);
+  const historical = resolveHistoricalDataPresent(prop);
   return annotateTopPickRankingFields({
     ...prop,
     verifiedTier: tier,
     verifiedTierLabel: tier ? `Tier ${tier}` : null,
+    historicalDataPresent: historical.present,
     pickTierLabel: tier ? "Verified Play" : prop.pickTierLabel,
     verified: Boolean(tier),
     bestPlayPool: tier ? "verified" : prop.bestPlayPool,
   });
 }
 
-/** Verified plays sorted by top pick score descending. */
 export function selectVerifiedPlaysByTier(props = [], options = {}) {
   const max = options.max ?? VERIFIED_MAX_PLAYS;
   const eligible = (props || [])
@@ -326,7 +410,6 @@ export function selectVerifiedPlaysByTier(props = [], options = {}) {
   return eligible.slice(0, max);
 }
 
-/** Never return empty — promote top projected props by score when tier filter yields zero. */
 export function selectVerifiedPlaysWithFallback(props = [], options = {}) {
   const max = options.max ?? VERIFIED_MAX_PLAYS;
   const fallbackMax = options.fallbackMax ?? VERIFIED_FALLBACK_MAX;
