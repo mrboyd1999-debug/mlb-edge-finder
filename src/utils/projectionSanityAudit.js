@@ -22,6 +22,10 @@ import {
 } from "./tierHistoricalValidation.js";
 import { SANITY_FAIL_FLAG, validateProjectionAgainstCap, applyMissingMarketKeyFallback, MISSING_MARKET_KEY_REASON } from "./projectionMarketCaps.js";
 import { classifyVerifiedTier, enforceVerifiedTierFields } from "./verifiedTierSystem.js";
+import {
+  resolveProjectionHistoricalCalibration,
+  PROJECTION_MISMATCH_FLAG as HISTORICAL_MISMATCH_FLAG,
+} from "./projectionHistoricalCalibration.js";
 
 function finite(value) {
   const num = Number(value);
@@ -42,7 +46,7 @@ function pctWeight(weight) {
 }
 
 export const PROJECTION_OUTLIER_FLAG = "PROJECTION OUTLIER";
-export const PROJECTION_MISMATCH_FLAG = "ProjectionMismatch";
+export { PROJECTION_MISMATCH_FLAG } from "./projectionHistoricalCalibration.js";
 export const PROJECTION_OUTLIER_WARNING = "⚠ Projection Outlier";
 export {
   TIER_A_MIN_SANITY_SCORE,
@@ -263,10 +267,10 @@ function resolveAverageOutlier({ projection, last10, season, rule }) {
 }
 
 function confidencePenaltyFromAudit(audit = {}) {
-  let penalty = 0;
+  let penalty = finite(audit.calibrationConfidencePenalty) ?? 0;
   if (audit.sanityFail) penalty += 24;
-  if (audit.projectionMismatch) penalty += 20;
-  if (audit.isOutlier) penalty += 12;
+  if (audit.projectionMismatch && penalty <= 0) penalty += 20;
+  if (audit.isOutlier && !audit.projectionMismatch) penalty += 12;
   if (audit.sanityScore != null && audit.sanityScore < TIER_A_MIN_SANITY_SCORE) penalty += 8;
 
   if (penalty > 0) return clamp(penalty, 0, 40);
@@ -278,12 +282,13 @@ function confidencePenaltyFromAudit(audit = {}) {
 }
 
 function playabilityPenaltyFromAudit(audit = {}) {
-  if (audit.sanityFail) return 30;
-  if (audit.projectionMismatch) return 20;
-  if (audit.isOutlier) return 15;
-  if (audit.sanityScore != null && audit.sanityScore < TIER_A_MIN_SANITY_SCORE) return 12;
-  if (audit.sanityScore != null && audit.sanityScore < TIER_B_MIN_SANITY_SCORE) return 6;
-  return 0;
+  let penalty = finite(audit.calibrationPlayabilityPenalty) ?? 0;
+  if (audit.sanityFail) penalty += 30;
+  if (audit.projectionMismatch && penalty <= 0) penalty += 20;
+  if (audit.isOutlier && !audit.projectionMismatch) penalty += 15;
+  if (audit.sanityScore != null && audit.sanityScore < TIER_A_MIN_SANITY_SCORE) penalty += 12;
+  if (audit.sanityScore != null && audit.sanityScore < TIER_B_MIN_SANITY_SCORE) penalty += 6;
+  return clamp(penalty, 0, 40);
 }
 
 function formatPctLabel(value) {
@@ -395,18 +400,32 @@ function buildProjectionSanityAuditUnsafe(prop = {}) {
     capValidation,
   });
 
-  const projectionMismatch = hasProjectionMismatch(
+  const calibration =
+    historical.present && projection != null
+      ? resolveProjectionHistoricalCalibration(projection, { last5, last10, season })
+      : null;
+
+  const probabilityMismatch = hasProjectionMismatch(
     projectionProbability,
     overRates.recentOverRate,
     overRates.seasonOverRate
   );
-  const isAverageOutlier = resolveAverageOutlier({ projection, last10, season, rule });
+  const projectionMismatch = calibration
+    ? calibration.projectionMismatch
+    : probabilityMismatch;
+  const isAverageOutlier =
+    calibration?.calibrationTier === "large" ||
+    resolveAverageOutlier({ projection, last10, season, rule });
   const isOutlier = isAverageOutlier || projectionMismatch || capValidation.sanityFail;
-  const mismatchFlags = projectionMismatch ? [PROJECTION_MISMATCH_FLAG] : [];
+  const mismatchFlags = projectionMismatch
+    ? calibration?.mismatchFlags?.length
+      ? calibration.mismatchFlags
+      : [HISTORICAL_MISMATCH_FLAG]
+    : [];
   const outlierFlags = [];
   if (capValidation.sanityFail) outlierFlags.push(SANITY_FAIL_FLAG);
   if (isAverageOutlier) outlierFlags.push(PROJECTION_OUTLIER_WARNING);
-  if (projectionMismatch && !outlierFlags.length) outlierFlags.push(PROJECTION_MISMATCH_FLAG);
+  if (projectionMismatch && !outlierFlags.length) outlierFlags.push(HISTORICAL_MISMATCH_FLAG);
 
   const seasonDeviationPct = deviationPct(projection, season);
   const last10DeviationPct = deviationPct(projection, last10);
@@ -429,6 +448,12 @@ function buildProjectionSanityAuditUnsafe(prop = {}) {
     last5Average: last5,
     last10Average: last10,
     seasonAverage: season,
+    historicalProjectionCap: calibration?.historicalCap ?? null,
+    historicalBaseline: calibration?.historicalBaseline ?? null,
+    projectionHistoricalDeviationPct: calibration?.deviationPct ?? null,
+    projectionCalibrationTier: calibration?.calibrationTier ?? "none",
+    calibrationConfidencePenalty: calibration?.confidencePenalty ?? 0,
+    calibrationPlayabilityPenalty: calibration?.playabilityPenalty ?? 0,
     projection,
     line,
     last5Label: last5 != null ? formatNumber(last5) : "—",
@@ -484,7 +509,13 @@ function buildProjectionSanityAuditUnsafe(prop = {}) {
   if (capValidation.sanityFail) {
     audit.summary = `${SANITY_FAIL_FLAG}: ${capValidation.reason}`;
   } else if (projectionMismatch) {
-    audit.summary = `${PROJECTION_MISMATCH_FLAG}: projection probability ${audit.projectionProbabilityLabel} vs recent ${audit.recentOverRateLabel} / season ${audit.seasonOverRateLabel}`;
+    audit.summary = `${HISTORICAL_MISMATCH_FLAG}: projection ${audit.projectionLabel} exceeds historical cap ${calibration?.historicalCap != null ? formatNumber(calibration.historicalCap) : "—"} (+${audit.projectionHistoricalDeviationPct ?? "—"}% vs baseline)`;
+  } else if (calibration?.calibrationTier === "large") {
+    audit.summary = `Projection drift flagged — ${audit.projectionHistoricalDeviationPct ?? "—"}% above player history (large confidence penalty)`;
+  } else if (calibration?.calibrationTier === "small") {
+    audit.summary = `Projection moderately above history — ${audit.projectionHistoricalDeviationPct ?? "—"}% above baseline (small confidence penalty)`;
+  } else if (probabilityMismatch) {
+    audit.summary = `${HISTORICAL_MISMATCH_FLAG}: projection probability ${audit.projectionProbabilityLabel} vs recent ${audit.recentOverRateLabel} / season ${audit.seasonOverRateLabel}`;
   } else if (isAverageOutlier) {
     audit.summary = `${PROJECTION_OUTLIER_WARNING}: projection ${audit.projectionLabel} vs season ${audit.seasonLabel}${
       audit.seasonDeviationPct != null ? ` (+${audit.seasonDeviationPct}%)` : ""
@@ -561,7 +592,7 @@ export function attachProjectionSanityAudit(prop = {}, options = {}) {
       projectionSanityAudit: audit,
       projectionSanityScore: audit?.sanityScore ?? 0,
       projectionMismatch: audit?.projectionMismatch ?? false,
-      projectionMismatchFlag: audit?.projectionMismatch ? PROJECTION_MISMATCH_FLAG : "",
+      projectionMismatchFlag: audit?.projectionMismatch ? HISTORICAL_MISMATCH_FLAG : "",
       projectionOutlier: audit?.isOutlier ?? false,
       projectionOutlierFlag: audit?.outlierWarning || audit?.outlierFlags?.[0] || "",
       projectionSanityFail: audit?.sanityFail ?? false,

@@ -53,7 +53,21 @@ function ProjectionSanityAuditPanel({ audit = null, compact = false }) {
         <SideBySideCell label="Last 10 Avg" value={audit.last10Label} />
         <SideBySideCell label="Season Avg" value={audit.seasonLabel} />
         <SideBySideCell label="Projection" value={audit.projectionLabel} highlight />
+        {audit.historicalProjectionCap != null ? (
+          <SideBySideCell label="History cap" value={safeFixed(audit.historicalProjectionCap, 1)} />
+        ) : null}
       </div>
+
+      {audit.projectionHistoricalDeviationPct != null ? (
+        <div className="projection-sanity-audit__rates">
+          <span>
+            History drift: <strong>{audit.projectionHistoricalDeviationPct}%</strong>
+          </span>
+          <span>
+            Calibration tier: <strong>{audit.projectionCalibrationTier || "none"}</strong>
+          </span>
+        </div>
+      ) : null}
 
       <div className="projection-sanity-audit__rates">
         <span>Recent over rate: <strong>{audit.recentOverRateLabel}</strong></span>
