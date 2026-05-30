@@ -179,8 +179,19 @@ function VerificationFailureBreakdown({ filterDiagnostics = null }) {
   const historicalSampleRows = safeArray(historicalCoverageAudit?.sampleRows);
 
   const projectedProps =
-    breakdown?.propsWithProjections ?? pipelineCounts?.withProjections ?? breakdown?.projected ?? 0;
-  const verifiedProps = breakdown?.verifiedPlays ?? filterDiagnostics?.verifiedPicksCount ?? 0;
+    breakdown?.propsWithProjections ??
+    dashboard?.projectedCount ??
+    pipelineCounts?.engineProjectedCount ??
+    pipelineCounts?.withProjections ??
+    breakdown?.projected ??
+    0;
+  const verifiedProps =
+    breakdown?.verifiedTierCount ??
+    breakdown?.passedTierGate ??
+    breakdown?.verifiedPlays ??
+    dashboard?.verifiedPasses ??
+    filterDiagnostics?.verifiedPicksCount ??
+    0;
   const propsMissingHistoricalData = breakdown?.propsMissingHistoricalData ?? 0;
   const propsUsingNeutralHistoricalFallback = breakdown?.propsUsingNeutralHistoricalFallback ?? 0;
   const historicalDataCoveragePercent =

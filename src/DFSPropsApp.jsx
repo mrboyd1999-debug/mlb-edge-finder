@@ -215,7 +215,8 @@ import {
 import { enrichPropsWithSportsData, generateMlbPropsFromSportsData } from "./services/propSportsDataEnrichment.js";
 import { mergeProjectionsOntoProps } from "./services/mlb/projectionMergePipeline.js";
 import { buildLiveRenderBoard, filterPlatformProps, isFakeOrFallbackProp } from "./utils/livePropRender.js";
-import { resolvePipelineProjectionStats, countPropsWithProjections } from "./utils/projectionPipelineStatus.js";
+import { resolvePipelineProjectionStats, countPropsWithProjections, resolveEngineProjectedPool } from "./utils/projectionPipelineStatus.js";
+import { buildVerificationDashboard } from "./utils/verificationDashboard.js";
 import { buildPipelineDiagnostics, logPipelineDiagnostics } from "./utils/propPipelineDiagnostics.js";
 import { PICK_TIER_RESEARCH, PICK_TIER_VERIFIED } from "./utils/conservativeProjection.js";
 import { resolveIngestionFallback } from "./services/ingestionFallback.js";
@@ -3677,9 +3678,42 @@ export default function DFSPropsApp() {
       };
     }
   }, [boardDisplayProps, props, parsedUnderdogProps, sourceStatus, lastUpdated, debugInfo, error, allDisplayProps.length]);
+  const verificationFilterDiagnostics = useMemo(() => {
+    const base = topMlbPlayBoard?.filterDiagnostics || null;
+    const projectedFromBoard =
+      base?.verificationDashboard?.projectedCount ??
+      base?.pipelineCounts?.engineProjectedCount ??
+      base?.pipelineCounts?.withProjections ??
+      0;
+    if (projectedFromBoard > 0) return base;
+
+    const statsMap = debugInfo?.statsMap || scoringContextRef.current?.stats || null;
+    const projectedPool = resolveEngineProjectedPool(allDisplayProps);
+    if (!projectedPool.length && !allDisplayProps.length) return base;
+
+    const dashboard = buildVerificationDashboard(allDisplayProps, {
+      projectedPool,
+      statsMap,
+      seasonStats: debugInfo?.sportsDataSeasonStats || [],
+      totalProps: allDisplayProps.length,
+    });
+
+    return {
+      ...(base || {}),
+      verificationDashboard: dashboard,
+      pipelineCounts: {
+        ...(base?.pipelineCounts || {}),
+        rawProps: allDisplayProps.length,
+        normalized: allDisplayProps.length,
+        withProjections: projectedPool.length,
+        engineProjectedCount: projectedPool.length,
+        filtered: dashboard.verifiedPasses,
+      },
+    };
+  }, [topMlbPlayBoard, allDisplayProps, debugInfo?.statsMap, debugInfo?.sportsDataSeasonStats]);
   const pipelineRenderCounts = useMemo(() => {
     const base = liveRenderBoard.counts;
-    const audit = topMlbPlayBoard?.filterDiagnostics;
+    const audit = verificationFilterDiagnostics || topMlbPlayBoard?.filterDiagnostics;
     const projectionStats = resolvePipelineProjectionStats({
       allDisplayProps,
       filterDiagnostics: audit,
@@ -3728,6 +3762,7 @@ export default function DFSPropsApp() {
   }, [
     liveRenderBoard,
     topMlbPlayBoard,
+    verificationFilterDiagnostics,
     allDisplayProps,
     debugInfo?.pipelineRenderCounts,
     debugInfo?.pipelineDiagnostics,
@@ -4379,6 +4414,7 @@ export default function DFSPropsApp() {
       onOpenProp={setSelectedEvaluation}
       onSavePick={saveThisPick}
       topMlbPlayBoard={topMlbPlayBoard}
+      verificationFilterDiagnostics={verificationFilterDiagnostics}
       savedDisplayPicks={savedDisplayPicks}
       onRemoveSavedPick={removeSavedPick}
       onClearSavedPicks={clearHistory}

@@ -23,6 +23,7 @@ import {
 import { enrichPropsWithTeamLookup } from "./teamEnrichment.js";
 import { enrichPropsWithMatchupFallback } from "./matchupEnrichment.js";
 import { attachHistoricalStatsToProps } from "./historicalStatsLoader.js";
+import { resolveEngineProjectedPool } from "./projectionPipelineStatus.js";
 import { buildVerificationDashboard, logVerificationDashboardAudit } from "./verificationDashboard.js";
 import {
   BEST_PLAYS_ENGINE_SIZE,
@@ -138,10 +139,9 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   });
   const matchupEnriched = enrichPropsWithMatchupFallback(teamEnriched);
   const enriched = matchupEnriched.map(enrichBestPlayCandidate);
-  const withProjections = enriched.filter((p) => {
-    const proj = resolveBestPlayStatSpecificProjection(p);
-    return proj != null && proj > 0;
-  }).length;
+  const engineProjectedPool =
+    options.projectedPool?.length > 0 ? options.projectedPool : resolveEngineProjectedPool(enriched);
+  const withProjections = engineProjectedPool.length;
   logBestPlaysPipelineStage("WITH PROJECTIONS:", withProjections);
 
   const displayPool = enriched.filter((p) => {
@@ -175,10 +175,13 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
   }));
   verifiedPicks = [...verifiedPicks].sort(compareVerifiedPlaysRank);
   const verificationDashboardResult = logVerificationDashboardAudit(enriched, {
+    projectedPool: engineProjectedPool,
     displayPool,
     verifiedPicks,
     usedVerifiedFallback: usedVerifiedScoreFallback,
     statsMap: options.statsMap,
+    seasonStats: options.seasonStats,
+    totalProps: rawProps.length,
   });
   const verificationDashboard = verificationDashboardResult;
   const topVerifiedPicks = selectTopVerifiedByScore(verifiedPicks, BEST_PLAYS_ENGINE_SIZE);
@@ -251,6 +254,7 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
         rawProps: rawProps.length,
         normalized: normalized.length,
         withProjections,
+        engineProjectedCount: engineProjectedPool.length,
         filtered: verifiedPool.length,
         researchPool: researchCount,
         displayPool: displayPool.length,

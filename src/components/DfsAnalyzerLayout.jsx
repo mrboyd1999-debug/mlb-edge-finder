@@ -35,6 +35,7 @@ function DfsAnalyzerLayout({
   onOpenProp,
   onSavePick,
   topMlbPlayBoard,
+  verificationFilterDiagnostics = null,
   prizePicksFeedProps,
   pipelineRenderCounts,
   savedDisplayPicks,
@@ -85,7 +86,9 @@ function DfsAnalyzerLayout({
         pipelineProjectionStats={pipelineRenderCounts?.projectionStats ?? null}
       />
 
-      <VerificationFailureBreakdown filterDiagnostics={topMlbPlayBoard?.filterDiagnostics} />
+      <VerificationFailureBreakdown
+        filterDiagnostics={verificationFilterDiagnostics || topMlbPlayBoard?.filterDiagnostics}
+      />
 
       <ApiSetupBanner onOpenSettings={() => setAppView("settings")} />
 

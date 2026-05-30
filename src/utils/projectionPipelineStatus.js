@@ -2,12 +2,20 @@
 
 import { resolveBestPlayProjection } from "./bestPlaysPipelineDebug.js";
 
+/** Same projection predicate used by System Status / Projection Engine. */
+export function hasEngineProjection(prop = {}) {
+  const proj = resolveBestPlayProjection(prop);
+  return proj != null && proj > 0;
+}
+
+/** Projected prop collection consumed by Projection Engine status and verification audit. */
+export function resolveEngineProjectedPool(props = []) {
+  if (!Array.isArray(props)) return [];
+  return props.filter(hasEngineProjection);
+}
+
 export function countPropsWithProjections(props = []) {
-  if (!Array.isArray(props)) return 0;
-  return props.filter((prop) => {
-    const proj = resolveBestPlayProjection(prop);
-    return proj != null && proj > 0;
-  }).length;
+  return resolveEngineProjectedPool(props).length;
 }
 
 /**
@@ -24,7 +32,10 @@ export function resolvePipelineProjectionStats({
     pipelineCounts.normalized ?? liveRenderCounts?.normalized ?? allDisplayProps.length ?? 0
   );
   const projectionCount = Number(
-    pipelineCounts.withProjections ?? countPropsWithProjections(allDisplayProps) ?? 0
+    pipelineCounts.engineProjectedCount ??
+      pipelineCounts.withProjections ??
+      countPropsWithProjections(allDisplayProps) ??
+      0
   );
   const coverage = normalized > 0 ? projectionCount / normalized : 0;
   return {

@@ -3,13 +3,9 @@
  */
 
 import {
-  passesMinimalBestPlaysFilter,
-  resolveBestPlayStatSpecificProjection,
-  sanitizeProjectionValue,
   passesVerifiedBestPlaysFilter,
   passesResearchBestPlaysFilter,
 } from "./bestPlaysPipelineDebug.js";
-import { resolvePropSport } from "./mlbOnlyMode.js";
 import {
   auditVerificationFailure,
   summarizeVerificationAudit,
@@ -53,6 +49,7 @@ import {
   attachHistoricalStatsToProps,
   buildHistoricalCoverageAudit,
 } from "./historicalStatsLoader.js";
+import { resolveEngineProjectedPool } from "./projectionPipelineStatus.js";
 
 export { PROBABILITY_HISTOGRAM_BUCKETS } from "./probabilityDistributionAudit.js";
 
@@ -377,14 +374,16 @@ export function buildVerificationFailureBreakdown(projectedPool = [], options = 
 }
 
 export function resolveProjectedPool(props = []) {
-  return (props || []).filter((prop) => {
-    const proj = resolveBestPlayStatSpecificProjection(prop);
-    return (
-      proj != null &&
-      proj > 0 &&
-      passesMinimalBestPlaysFilter(prop) &&
-      resolvePropSport(prop) === "MLB"
-    );
+  return resolveEngineProjectedPool(props);
+}
+
+function annotateHistoricalCoverage(props = []) {
+  return (props || []).map((prop) => {
+    const historical = resolveHistoricalDataPresent(prop);
+    return {
+      ...prop,
+      historicalCoverage: historical.present,
+    };
   });
 }
 
@@ -672,11 +671,23 @@ export function categorizeVerifiedFailure(prop = {}) {
 export function buildVerificationDashboard(props = [], options = {}) {
   const audit = summarizeVerificationAudit(props);
   const statsMap = options.statsMap || null;
-  const projectedPoolRaw = options.displayPool?.length
-    ? options.displayPool
-    : resolveProjectedPool(props);
   const historicalContext = { statsMap, seasonStats: options.seasonStats || [] };
-  const projectedPool = attachHistoricalStatsToProps(projectedPoolRaw, historicalContext);
+
+  const rawProps = props || [];
+  console.log("RAW", rawProps.length);
+
+  const projectedPoolRaw =
+    options.projectedPool?.length > 0
+      ? options.projectedPool
+      : resolveProjectedPool(rawProps);
+  console.log("PROJECTED", projectedPoolRaw.length);
+
+  const auditedProps = annotateHistoricalCoverage(
+    attachHistoricalStatsToProps(projectedPoolRaw, historicalContext)
+  );
+  console.log("AFTER HISTORICAL AUDIT", auditedProps.length);
+
+  const projectedPool = auditedProps;
   const historicalCoverageAudit = buildHistoricalCoverageAudit(projectedPoolRaw, historicalContext);
   const verifiedPicks = options.verifiedPicks || [];
   const gateMetrics = computeGateMetrics(projectedPool);
@@ -688,11 +699,13 @@ export function buildVerificationDashboard(props = [], options = {}) {
   );
   const verifiedCount = verifiedPicks.length;
   const verifiedPasses = tierQualified.length;
+  console.log("AFTER VERIFICATION", verifiedPasses);
+
   const ruleRejectionCounts = buildRuleRejectionCounts(projectedPool);
   const verificationFailureBreakdown = buildVerificationFailureBreakdown(projectedPool, {
-    verifiedDisplayCount: verifiedCount,
+    verifiedDisplayCount: Math.max(verifiedCount, verifiedPasses),
     verifiedTierCount: verifiedPasses,
-    totalProps: (props || []).length,
+    totalProps: Number(options.totalProps ?? rawProps.length),
     historicalCoverageAudit,
   });
   const rejectedPlayabilityAudits = logRejectedPlayabilityAudits(

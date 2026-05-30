@@ -48,6 +48,7 @@ import {
   logPipelineMergeDiagnostics,
 } from "../services/mlb/projectionMergePipeline.js";
 import { resolveBestPlayProjection, PROJECTION_JOIN_DEBUG } from "./bestPlaysPipelineDebug.js";
+import { resolveEngineProjectedPool } from "./projectionPipelineStatus.js";
 
 export const TOP_MLB_PLAYS_LIMIT = HIGHEST_PROBABILITY_MAX_PLAYS;
 export const SECTION_BEST_PLAYS = HIGHEST_PROBABILITY_MAX_PLAYS;
@@ -350,6 +351,7 @@ export function resolveTopMlbPlaySections(
     fetchSport: "MLB",
   });
   const historicalPool = attachHistoricalStatsToProps(preparedPool, mergeContext);
+  const engineProjectedPool = resolveEngineProjectedPool(enrichedPool);
 
   const strictPool = buildTopMlbPlayPool(displayProps, rawProps, parsedUnderdogProps, { relaxed: false });
   const qualityAudit = strictPool._qualityAudit || auditQualityMlbProps(historicalPool);
@@ -368,6 +370,7 @@ export function resolveTopMlbPlaySections(
     seasonStats: mergeContext.seasonStats,
     statsMap: mergeContext.statsMap,
     fetchSport: "MLB",
+    projectedPool: engineProjectedPool,
   });
   let highestPicks = (selection.picks || []).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
   let verifiedPicks = (selection.verifiedPicks || []).map((prop, idx) =>
