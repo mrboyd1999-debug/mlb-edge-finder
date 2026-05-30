@@ -49,6 +49,10 @@ import {
   buildTopVerifiedScoringAuditRows,
   detectScoreClonePatterns,
 } from "./scoringPrecisionAudit.js";
+import {
+  attachHistoricalStatsToProps,
+  buildHistoricalCoverageAudit,
+} from "./historicalStatsLoader.js";
 
 export { PROBABILITY_HISTOGRAM_BUCKETS } from "./probabilityDistributionAudit.js";
 
@@ -89,6 +93,7 @@ export const VERIFICATION_FAILURE_GATE_LABELS = {
   verifiedPlays: "Verified Props",
   propsMissingHistoricalData: "Props Missing Historical Data",
   propsUsingNeutralHistoricalFallback: "Props Using Neutral Historical Fallback",
+  historicalDataCoveragePercent: "Historical Data Coverage %",
   projected: "Projected Props",
   passedProbability: "Passed Probability",
   failedProbability: "Failed Probability",
@@ -262,8 +267,13 @@ function countHistoricalDiagnostics(projectedPool = []) {
 
   for (const prop of projectedPool || []) {
     const historical = resolveHistoricalDataPresent(prop);
-    if (!historical.present) propsMissingHistoricalData += 1;
-    if (!historical.present || !historical.last5Present || !historical.last10Present) {
+    if (!historical.present) {
+      propsMissingHistoricalData += 1;
+      propsUsingNeutralHistoricalFallback += 1;
+      continue;
+    }
+    if (prop.historicalStatsAttached || prop.hasGameLogs) continue;
+    if (!historical.last5Present || !historical.last10Present || !historical.seasonPresent) {
       propsUsingNeutralHistoricalFallback += 1;
     }
   }
@@ -340,6 +350,7 @@ export function buildVerificationFailureBreakdown(projectedPool = [], options = 
   breakdown.propsMissingHistoricalData = historicalDiagnostics.propsMissingHistoricalData;
   breakdown.propsUsingNeutralHistoricalFallback =
     historicalDiagnostics.propsUsingNeutralHistoricalFallback;
+  breakdown.historicalDataCoveragePercent = options.historicalCoverageAudit?.coveragePercent ?? 0;
 
   if (breakdown.passedTierGate > 0) {
     breakdown.blockedByDisplayRankingGate = projectedPool.filter(
@@ -660,9 +671,13 @@ export function categorizeVerifiedFailure(prop = {}) {
 
 export function buildVerificationDashboard(props = [], options = {}) {
   const audit = summarizeVerificationAudit(props);
-  const projectedPool = options.displayPool?.length
+  const statsMap = options.statsMap || null;
+  const projectedPoolRaw = options.displayPool?.length
     ? options.displayPool
     : resolveProjectedPool(props);
+  const historicalContext = { statsMap, seasonStats: options.seasonStats || [] };
+  const projectedPool = attachHistoricalStatsToProps(projectedPoolRaw, historicalContext);
+  const historicalCoverageAudit = buildHistoricalCoverageAudit(projectedPoolRaw, historicalContext);
   const verifiedPicks = options.verifiedPicks || [];
   const gateMetrics = computeGateMetrics(projectedPool);
   const matchupAudit = buildMatchupFailureAudit(projectedPool);
@@ -678,6 +693,7 @@ export function buildVerificationDashboard(props = [], options = {}) {
     verifiedDisplayCount: verifiedCount,
     verifiedTierCount: verifiedPasses,
     totalProps: (props || []).length,
+    historicalCoverageAudit,
   });
   const rejectedPlayabilityAudits = logRejectedPlayabilityAudits(
     buildRejectedPlayabilityAudits(projectedPool)
@@ -747,6 +763,7 @@ export function buildVerificationDashboard(props = [], options = {}) {
     topPlayabilityProps,
     topVerifiedPlays,
     scoreCloneAudit,
+    historicalCoverageAudit,
     ruleRejectionCounts,
     rejectionCounts: verifiedPasses === 0 ? ruleRejectionCounts : null,
     regressionReasons: audit.regressionReasons,

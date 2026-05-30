@@ -151,6 +151,21 @@ const TOP_VERIFIED_COLUMNS = [
   { key: "verifiedTier", label: "Tier" },
 ];
 
+const HISTORICAL_PIPELINE_COLUMNS = [
+  { key: "player", label: "Player" },
+  { key: "market", label: "Market" },
+  { key: "last5", label: "Last5" },
+  { key: "last10", label: "Last10" },
+  { key: "seasonAverage", label: "Season Avg" },
+  { key: "gameLogCount", label: "Game Logs" },
+  { key: "historicalSource", label: "Historical Source" },
+  {
+    key: "dropTrace",
+    label: "Drop Trace",
+    render: (row) => row.dropTrace || (row.historicalPresent ? "OK" : "—"),
+  },
+];
+
 function VerificationFailureBreakdown({ filterDiagnostics = null }) {
   const dashboard = filterDiagnostics?.verificationDashboard || null;
   const breakdown = dashboard?.verificationFailureBreakdown;
@@ -160,12 +175,16 @@ function VerificationFailureBreakdown({ filterDiagnostics = null }) {
   const topPlayabilityProps = safeArray(dashboard?.topPlayabilityProps);
   const topVerifiedPlays = safeArray(dashboard?.topVerifiedPlays);
   const scoreCloneAudit = dashboard?.scoreCloneAudit || null;
+  const historicalCoverageAudit = dashboard?.historicalCoverageAudit || null;
+  const historicalSampleRows = safeArray(historicalCoverageAudit?.sampleRows);
 
   const projectedProps =
     breakdown?.propsWithProjections ?? pipelineCounts?.withProjections ?? breakdown?.projected ?? 0;
   const verifiedProps = breakdown?.verifiedPlays ?? filterDiagnostics?.verifiedPicksCount ?? 0;
   const propsMissingHistoricalData = breakdown?.propsMissingHistoricalData ?? 0;
   const propsUsingNeutralHistoricalFallback = breakdown?.propsUsingNeutralHistoricalFallback ?? 0;
+  const historicalDataCoveragePercent =
+    breakdown?.historicalDataCoveragePercent ?? historicalCoverageAudit?.coveragePercent ?? 0;
   const failedProbability = breakdown?.failedProbability ?? 0;
   const failedConfidence = breakdown?.failedConfidence ?? 0;
   const failedPlayability = breakdown?.failedPlayability ?? 0;
@@ -194,6 +213,12 @@ function VerificationFailureBreakdown({ filterDiagnostics = null }) {
       key: "propsUsingNeutralHistoricalFallback",
       label: VERIFICATION_FAILURE_GATE_LABELS.propsUsingNeutralHistoricalFallback,
       value: propsUsingNeutralHistoricalFallback,
+    },
+    {
+      key: "historicalDataCoveragePercent",
+      label: VERIFICATION_FAILURE_GATE_LABELS.historicalDataCoveragePercent,
+      value: `${historicalDataCoveragePercent}%`,
+      highlight: historicalDataCoveragePercent < 70,
     },
     {
       key: "failedProbability",
@@ -259,6 +284,23 @@ function VerificationFailureBreakdown({ filterDiagnostics = null }) {
             : ""}
         </p>
       ) : null}
+
+      {historicalCoverageAudit ? (
+        <p className="verification-diagnostics__meta">
+          Historical pipeline: statsMap {historicalCoverageAudit.statsMapSize ?? 0} profiles · matched{" "}
+          {historicalCoverageAudit.profileMatchCount ?? 0} · with game logs{" "}
+          {historicalCoverageAudit.profileWithLogsCount ?? 0} · attached from profile{" "}
+          {historicalCoverageAudit.attachedFromProfileCount ?? 0}
+        </p>
+      ) : null}
+
+      <AuditTable
+        title="Historical Stats Sample (10 projected props)"
+        rows={historicalSampleRows}
+        columns={HISTORICAL_PIPELINE_COLUMNS}
+        emptyMessage="No projected props available for historical audit."
+        scrollable
+      />
 
       <AuditTable
         title="Top 20 Verified Plays (full precision, sorted by composite score)"

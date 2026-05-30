@@ -10,6 +10,7 @@ import { resolveBestPlayProjection } from "../../utils/bestPlaysPipelineDebug.js
 import { resolveMlbPlayerRow, buildMlbPlayerLookup } from "./playerNormalization.js";
 import { findSeasonStatRow, resolveSportsDataPropLabel } from "../../../api/lib/sportsDataMlbStatProjection.js";
 import { resolveMlbTeamAbbr } from "../../utils/mlbTeamLogos.js";
+import { attachHistoricalStatsFromProfile } from "../../utils/historicalStatsLoader.js";
 
 export const ENRICHMENT_STAGES = {
   VALIDATE_PLAYER: "validate_player",
@@ -106,6 +107,17 @@ function resolveTeamForProp(prop = {}, context = {}) {
 }
 
 function attachStatsToProp(prop = {}, context = {}) {
+  const statsMap = context.statsMap;
+  if (statsMap instanceof Map) {
+    const withHistorical = attachHistoricalStatsFromProfile(prop, context);
+    if (withHistorical.historicalStatsAttached) {
+      return {
+        ...withHistorical,
+        enrichmentStage: ENRICHMENT_STAGES.ATTACH_STATS,
+      };
+    }
+  }
+
   const lookup = context.playerLookup || buildMlbPlayerLookup(context.seasonStats || []);
   const statRow =
     resolveMlbPlayerRow(prop.playerName || prop.player, lookup, { playerId: prop.playerId }) ||
@@ -122,18 +134,21 @@ function attachStatsToProp(prop = {}, context = {}) {
   const propLabel = resolveSportsDataPropLabel(prop);
   const games = Number(statRow.Games ?? statRow.GamesPlayed) || 0;
 
-  return {
-    ...prop,
-    team: prop.team || resolveMlbTeamAbbr(statRow.Team)?.toUpperCase() || "",
-    playerId: prop.playerId ?? statRow.PlayerID,
-    sportsDataPlayerId: prop.sportsDataPlayerId ?? statRow.PlayerID,
-    position: prop.position || statRow.Position || "",
-    games: prop.games ?? games,
-    seasonAverage: prop.seasonAverage ?? null,
-    sportsDataStatRow: statRow,
-    sportsDataPropLabel: propLabel,
-    enrichmentStage: ENRICHMENT_STAGES.ATTACH_STATS,
-  };
+  return attachHistoricalStatsFromProfile(
+    {
+      ...prop,
+      team: prop.team || resolveMlbTeamAbbr(statRow.Team)?.toUpperCase() || "",
+      playerId: prop.playerId ?? statRow.PlayerID,
+      sportsDataPlayerId: prop.sportsDataPlayerId ?? statRow.PlayerID,
+      position: prop.position || statRow.Position || "",
+      games: prop.games ?? games,
+      sportsDataSeason: prop.sportsDataSeason ?? statRow,
+      sportsDataStatRow: statRow,
+      sportsDataPropLabel: propLabel,
+      enrichmentStage: ENRICHMENT_STAGES.ATTACH_STATS,
+    },
+    context
+  );
 }
 
 function mergeProjectionOntoProp(prop = {}, row = {}) {

@@ -22,6 +22,7 @@ import {
 } from "./bestPlaysPipelineDebug.js";
 import { enrichPropsWithTeamLookup } from "./teamEnrichment.js";
 import { enrichPropsWithMatchupFallback } from "./matchupEnrichment.js";
+import { attachHistoricalStatsToProps } from "./historicalStatsLoader.js";
 import { buildVerificationDashboard, logVerificationDashboardAudit } from "./verificationDashboard.js";
 import {
   BEST_PLAYS_ENGINE_SIZE,
@@ -120,7 +121,10 @@ export function selectTopProjectedFallback(props = [], max = HIGHEST_PROBABILITY
 }
 
 export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABILITY_MAX_PLAYS, options = {}) {
-  const rawProps = props || [];
+  const rawProps = attachHistoricalStatsToProps(props || [], {
+    statsMap: options.statsMap,
+    seasonStats: options.seasonStats,
+  });
 
   logBestPlaysPipelineStage("RAW ODDS:", rawProps.length);
 
@@ -174,6 +178,7 @@ export function selectHighestProbabilityPlays(props = [], max = HIGHEST_PROBABIL
     displayPool,
     verifiedPicks,
     usedVerifiedFallback: usedVerifiedScoreFallback,
+    statsMap: options.statsMap,
   });
   const verificationDashboard = verificationDashboardResult;
   const topVerifiedPicks = selectTopVerifiedByScore(verifiedPicks, BEST_PLAYS_ENGINE_SIZE);

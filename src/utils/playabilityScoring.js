@@ -22,10 +22,22 @@ function round2(value) {
   return Math.round(num * 100) / 100;
 }
 
-/** Missing historical data → neutral 50, not 0. */
+/** Missing historical data → neutral 50, not 0 — skip neutral when game logs were attached. */
 export function computeHistoricalPlayabilityComponent(prop = {}) {
   const historical = resolveHistoricalDataPresent(prop);
-  if (!historical.present) return NEUTRAL_PLAYABILITY_COMPONENT;
+  if (!historical.present) {
+    if (prop.historicalStatsAttached || prop.hasGameLogs) {
+      let score = NEUTRAL_PLAYABILITY_COMPONENT;
+      const seasonHit = finite(prop.seasonHitRate ?? prop.historicalHitRate);
+      const last10Hit = finite(prop.last10HitRate ?? prop.recentHitRate);
+      const last5Hit = finite(prop.last5HitRate);
+      if (seasonHit != null) score += (seasonHit - 0.5) * 28;
+      if (last10Hit != null) score += (last10Hit - 0.5) * 18;
+      if (last5Hit != null) score += (last5Hit - 0.5) * 14;
+      return round2(clamp(score, 30, 92));
+    }
+    return NEUTRAL_PLAYABILITY_COMPONENT;
+  }
 
   let score = NEUTRAL_PLAYABILITY_COMPONENT;
   const seasonHit = finite(prop.seasonHitRate ?? prop.historicalHitRate);

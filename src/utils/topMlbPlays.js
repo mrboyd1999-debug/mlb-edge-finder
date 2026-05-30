@@ -42,6 +42,7 @@ import {
 } from "../services/mlbProjectionPipelineLog.js";
 import { enrichMlbPropsBatch } from "../services/mlb/mlbEnrichmentPipeline.js";
 import { enrichPropsWithTeamLookup } from "./teamEnrichment.js";
+import { attachHistoricalStatsToProps } from "./historicalStatsLoader.js";
 import {
   mergeProjectionsOntoProps,
   logPipelineMergeDiagnostics,
@@ -348,11 +349,12 @@ export function resolveTopMlbPlaySections(
     statsMap: mergeContext.statsMap,
     fetchSport: "MLB",
   });
+  const historicalPool = attachHistoricalStatsToProps(preparedPool, mergeContext);
 
   const strictPool = buildTopMlbPlayPool(displayProps, rawProps, parsedUnderdogProps, { relaxed: false });
-  const qualityAudit = strictPool._qualityAudit || auditQualityMlbProps(preparedPool);
+  const qualityAudit = strictPool._qualityAudit || auditQualityMlbProps(historicalPool);
   resetProjectionFilterCounters();
-  const playAudit = auditHighestProbabilityProps(preparedPool);
+  const playAudit = auditHighestProbabilityProps(historicalPool);
   syncBestPlaysFilterAudit(playAudit);
   const filterDiagnostics = {
     ...playAudit,
@@ -361,7 +363,7 @@ export function resolveTopMlbPlaySections(
     mergeDiagnostics,
   };
   const strictEligible = playAudit.eligible || 0;
-  const selection = selectHighestProbabilityPlays(preparedPool, HIGHEST_PROBABILITY_MAX_PLAYS, {
+  const selection = selectHighestProbabilityPlays(historicalPool, HIGHEST_PROBABILITY_MAX_PLAYS, {
     withMeta: true,
     seasonStats: mergeContext.seasonStats,
     statsMap: mergeContext.statsMap,
