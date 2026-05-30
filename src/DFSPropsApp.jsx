@@ -211,15 +211,22 @@ import {
   mergeProviderRawProps,
   buildUnderdogParserFailureMessage,
   hasAnyProviderProps,
+  resolveProviderResultProps,
 } from "./services/providerOrchestration.js";
 import { enrichPropsWithSportsData, generateMlbPropsFromSportsData } from "./services/propSportsDataEnrichment.js";
 import { mergeProjectionsOntoProps } from "./services/mlb/projectionMergePipeline.js";
 import { buildLiveRenderBoard, filterPlatformProps, isFakeOrFallbackProp } from "./utils/livePropRender.js";
 import {
   buildBypassLiveRenderResult,
+  buildLiveBoardPipelineTrace,
+  countLiveProviderProps,
   isPipelineBypassProjectionEnabled,
+  logLiveBoardPipelineTrace,
   logPipelineStageTrace,
   pickUnderdogBypassRenderProps,
+  prepareLiveBoardDirectRenderProps,
+  recoverNormalizedBoardProps,
+  shouldUseLiveBoardDirectRender,
 } from "./utils/pipelineStageTrace.js";
 import { resolvePipelineProjectionStats, countPropsWithProjections, resolveEngineProjectedPool } from "./utils/projectionPipelineStatus.js";
 import { buildVerificationDashboard } from "./utils/verificationDashboard.js";
@@ -1170,7 +1177,7 @@ function applySourceResult({
     return false;
   }
 
-  const incoming = result.parsedProps?.length ? result.parsedProps : result.props;
+  const incoming = result.props?.length ? result.props : result.parsedProps || [];
   const props = (incoming || []).map((prop) =>
     normalizePropShape(
       { ...prop, playerName: prop.playerName || prop.player || "" },
@@ -1943,8 +1950,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     })
   );
 
-  const prizePicksProps = prizePicksResult?.props || [];
-  const underdogProps = underdogResult?.parsedProps || underdogResult?.props || [];
+  const prizePicksProps = resolveProviderResultProps(prizePicksResult);
+  const underdogProps = resolveProviderResultProps(underdogResult);
   console.log("PrizePicks count", prizePicksProps.length);
   console.log("Underdog count", underdogProps.length);
 
@@ -2153,7 +2160,10 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
   debugInfo.allDisplayPropsCount = allDisplayProps.length;
   let pipelineTraceNormalizedPool = [...allDisplayProps];
+  const liveProviderPlayCount = countLiveProviderProps(pipelineTraceNormalizedPool);
   console.log("NORMALIZED", allDisplayProps.length);
+  console.log("LIVE NORMALIZED", pipelineTraceNormalizedPool.length);
+  console.log("LIVE PROVIDER", liveProviderPlayCount);
   debugInfo.displayDebugCounts = buildDisplayDebugCounts({
     raw: rawProps.length,
     parsed: parsedCount,
@@ -2460,8 +2470,22 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     };
     console.log("COMBINED", allDisplayProps.length);
     console.log("CANDIDATES", projectionCandidates.length);
-    if (import.meta.env.DEV && normalizedPropsSnapshot > 0 && allDisplayProps.length === 0) {
-      console.warn("[Pipeline Trace] COMBINED dropped to 0 after buildMlbProjectionBoardPool", boardPool.rejections);
+    console.log("LIVE COMBINED", allDisplayProps.length);
+    if (normalizedPropsSnapshot > 0 && allDisplayProps.length === 0) {
+      const recovered = recoverNormalizedBoardProps(normalizedPool, boardPool);
+      if (recovered.length) {
+        allDisplayProps = recovered;
+        workingNormalProps = recovered;
+        workingActiveProps = recovered;
+        pipelinePropCountSnapshot.afterProjectionMerge = recovered.length;
+        console.warn("[Live Board Fix] Recovered combined board from normalized pool", {
+          normalized: normalizedPropsSnapshot,
+          recovered: recovered.length,
+          rejections: boardPool.rejections,
+        });
+      } else if (import.meta.env.DEV) {
+        console.warn("[Pipeline Trace] COMBINED dropped to 0 after buildMlbProjectionBoardPool", boardPool.rejections);
+      }
     }
     setPipelineStageCount(PIPELINE_STAGES.NORMALIZED_PROPS_COUNT, allDisplayProps.length);
 
@@ -2946,6 +2970,12 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   const bypassRenderProps = isPipelineBypassProjectionEnabled()
     ? pickUnderdogBypassRenderProps(pipelineTraceNormalizedPool, 20)
     : [];
+  const directRenderProps = shouldUseLiveBoardDirectRender(
+    pipelineTraceNormalizedPool.length,
+    allDisplayProps.length
+  )
+    ? prepareLiveBoardDirectRenderProps(pipelineTraceNormalizedPool, 50)
+    : [];
   let liveRenderResult;
   if (bypassRenderProps.length) {
     console.warn(
@@ -2955,6 +2985,15 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     );
     allDisplayProps = bypassRenderProps;
     liveRenderResult = buildBypassLiveRenderResult(bypassRenderProps);
+  } else if (directRenderProps.length) {
+    console.warn(
+      "[Live Board Fix] Direct render of",
+      directRenderProps.length,
+      "normalized props (pipeline combined=0 or window.__LIVE_BOARD_DIRECT_RENDER__ = true)"
+    );
+    allDisplayProps = directRenderProps;
+    liveRenderResult = buildBypassLiveRenderResult(directRenderProps);
+    pipelineFallback = false;
   } else {
     liveRenderResult = buildLiveRenderBoard(allDisplayProps, { allowFallbackProps: allowFallbackRender });
     if (import.meta.env.DEV && allDisplayProps.length > 0 && liveRenderResult.props.length === 0) {
@@ -2968,6 +3007,18 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   );
   console.log("VERIFIED", verifiedForTrace);
   console.log("RENDERED", liveRenderResult.props.length);
+  console.log("LIVE PROJECTED", pipelinePropCountSnapshot.projectedProps || countMergedProjections(allDisplayProps) || 0);
+  console.log("LIVE VERIFIED", verifiedForTrace);
+  console.log("LIVE RENDERED", liveRenderResult.props.length);
+  debugInfo.liveBoardPipelineTrace = buildLiveBoardPipelineTrace({
+    normalized: pipelineTraceNormalizedPool.length,
+    provider: liveProviderPlayCount,
+    combined: allDisplayProps.length,
+    projected: pipelinePropCountSnapshot.projectedProps || countMergedProjections(allDisplayProps) || 0,
+    verified: verifiedForTrace,
+    rendered: liveRenderResult.props.length,
+  });
+  logLiveBoardPipelineTrace(debugInfo.liveBoardPipelineTrace);
   const modelSignalMap = buildModelSignalMap(filterVerifiedSportsbookProps(qualBoards.allDisplayable));
   let streakProps = [];
 
@@ -3530,7 +3581,8 @@ export default function DFSPropsApp() {
             cachedForPaint.cacheMetadata?.freshnessTier ||
             resolveCacheLayer(new Date(cachedForPaint.updatedAt).getTime(), DFS_CACHE_TTL_MS);
           refreshCacheContext = {
-            active: true,
+            active: false,
+            painted: true,
             timestamp: cachedForPaint.updatedAt || "",
             reason: "board-cache-paint",
           };
@@ -3569,7 +3621,8 @@ export default function DFSPropsApp() {
           if (cached?.allDisplayProps?.length || cached?.props?.length || cached?.usableProps?.length || cached?.qualifiedReadyProps?.length) {
             const layer = cached.cacheMetadata?.freshnessTier || resolveCacheLayer(new Date(cached.updatedAt).getTime(), DFS_CACHE_TTL_MS);
             refreshCacheContext = {
-              active: true,
+              active: false,
+              painted: true,
               timestamp: cached.updatedAt || "",
               reason: "board-cache-fallback",
             };
@@ -3694,7 +3747,14 @@ export default function DFSPropsApp() {
           writeCachedBoard(sanitizeBoardForMlbOnly(board));
           setCacheNotice("");
         }
-        if (board.debugInfo?.providerCoverageAudit && refreshCacheContext.active) {
+        const liveBoardProps = board.allDisplayProps?.length
+          ? board.allDisplayProps
+          : board.props?.length
+            ? board.props
+            : board.usableProps || [];
+        const hasLiveBoard = liveBoardProps.length > 0;
+        const liveFetchFailed = !hasLiveBoard;
+        if (board.debugInfo?.providerCoverageAudit && refreshCacheContext.active && liveFetchFailed) {
           board.debugInfo.providerCoverageAudit = {
             ...board.debugInfo.providerCoverageAudit,
             boardCacheActive: true,
@@ -3703,8 +3763,15 @@ export default function DFSPropsApp() {
             cacheFallbackStage:
               board.debugInfo.providerCoverageAudit.cacheFallbackStage || refreshCacheContext.reason,
           };
+        } else if (board.debugInfo?.providerCoverageAudit && hasLiveBoard) {
+          board.debugInfo.providerCoverageAudit = {
+            ...board.debugInfo.providerCoverageAudit,
+            boardCacheActive: false,
+            feedMode: "LIVE",
+            cacheFallbackStage: "",
+          };
         }
-        applyBoardState(board, board.props.length || board.allDisplayProps?.length || board.usableProps?.length ? "fresh" : "cached");
+        applyBoardState(board, hasLiveBoard ? "fresh" : "cached");
         persistStartupBoardSlices(board);
         if (result.deferredDisplayProps?.length) {
           scheduleBackgroundWork(() => {
@@ -4011,7 +4078,10 @@ export default function DFSPropsApp() {
       }),
     [allDisplayProps, pipelineFallback, debugInfo?.ingestionFallback]
   );
-  const boardDisplayProps = useMemo(() => liveRenderBoard.props, [liveRenderBoard]);
+  const boardDisplayProps = useMemo(() => {
+    if (acceptedPropsForRender.length) return acceptedPropsForRender;
+    return liveRenderBoard.props;
+  }, [acceptedPropsForRender, liveRenderBoard]);
 
   const prizePicksFeedProps = useMemo(() => {
     const research = (boardDisplayProps || []).filter((prop) => {
@@ -4589,16 +4659,30 @@ export default function DFSPropsApp() {
     if (!renderAudit) return null;
     const boardCached = /cached|stale|expired/i.test(String(cacheStatus || ""));
     const timestamp = lastUpdated || renderAudit.boardCacheTimestamp || "";
-    if (!boardCached && renderAudit.feedMode === "LIVE") return renderAudit;
-    return {
-      ...renderAudit,
-      feedMode: "CACHE",
-      boardCacheActive: boardCached || renderAudit.boardCacheActive,
-      boardCacheTimestamp: timestamp,
-      cacheBoardMessage: timestamp
-        ? `Running on cached board from ${formatDateTime(timestamp)}`
-        : renderAudit.cacheBoardMessage || "Running on cached provider/board data",
-    };
+    const liveRendered =
+      Number(renderAudit.providerPlays ?? 0) > 0 || Number(renderAudit.combinedProps ?? 0) > 0;
+    const fetchLive =
+      fetchAudit?.feedMode === "LIVE" || Number(fetchAudit?.combinedUsable ?? fetchAudit?.combinedProps ?? 0) > 0;
+    if (!boardCached && (renderAudit.feedMode === "LIVE" || (liveRendered && fetchLive))) {
+      return {
+        ...renderAudit,
+        feedMode: "LIVE",
+        boardCacheActive: false,
+        cacheBoardMessage: "Provider feeds loaded live on last refresh.",
+      };
+    }
+    if (boardCached || !liveRendered) {
+      return {
+        ...renderAudit,
+        feedMode: "CACHE",
+        boardCacheActive: boardCached || renderAudit.boardCacheActive,
+        boardCacheTimestamp: timestamp,
+        cacheBoardMessage: timestamp
+          ? `Running on cached board from ${formatDateTime(timestamp)}`
+          : renderAudit.cacheBoardMessage || "Running on cached provider/board data",
+      };
+    }
+    return renderAudit;
   }, [
     allDisplayProps,
     boardDisplayProps,
@@ -5008,6 +5092,7 @@ export default function DFSPropsApp() {
       renderSourceAudit={providerCoverageAuditDisplay}
       cacheStatus={cacheStatus}
       boardCacheTimestamp={lastUpdated}
+      liveBoardPipelineTrace={debugInfo?.liveBoardPipelineTrace || null}
     />
 
       {selectedEvaluation && (

@@ -4,6 +4,7 @@
  */
 
 import { normalizeDisplayProp, buildAllDisplayProps, enrichDisplayPropsPipeline } from "./allDisplayProps.js";
+import { mergeProviderRawProps, resolveProviderResultProps } from "../services/providerOrchestration.js";
 import { normalizePropsWithSource } from "./normalizeSource.js";
 import { attachSportsbookVerifiedFields } from "./propValidation.js";
 import { normalizeSportLabel } from "./sportMappings.js";
@@ -73,20 +74,30 @@ export function buildGuaranteedBaseFeedDisplay({
   selectedSport = "MLB",
   oddsApi = [],
 } = {}) {
+  const sport = fetchSport === "all" ? selectedSport || "MLB" : fetchSport;
+  const liveMerged = mergeProviderRawProps({
+    underdogProps: resolveProviderResultProps(underdogResult),
+    prizePicksProps: resolveProviderResultProps(prizePicksResult),
+  });
+  if (liveMerged.length) {
+    const liveDisplay = mapRawToDisplayProps(liveMerged, { fetchSport, selectedSport: sport });
+    if (liveDisplay.length) return liveDisplay;
+  }
+
   const fromBuild = normalizePropsWithSource(
     buildAllDisplayProps({
       prizePicksResult,
       underdogResult,
       sport: fetchSport,
-      selectedSport: fetchSport === "all" ? selectedSport || "MLB" : fetchSport,
+      selectedSport: sport,
       oddsApi: oddsApi || [],
     })
   );
   if (fromBuild.length) return fromBuild;
 
   const merged = [
-    ...(underdogResult?.parsedProps || underdogResult?.props || []),
-    ...(prizePicksResult?.props || []),
+    ...resolveProviderResultProps(underdogResult),
+    ...resolveProviderResultProps(prizePicksResult),
     ...(rawProps || []),
   ];
   if (!merged.length) return [];

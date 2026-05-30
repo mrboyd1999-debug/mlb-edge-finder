@@ -14,6 +14,7 @@ import ProjectionProviderWarning from "./ProjectionProviderWarning.jsx";
 import ApiSetupBanner from "./ApiSetupBanner.jsx";
 import HistoricalCoverageBanner from "./HistoricalCoverageBanner.jsx";
 import ProviderFeedModeBanner from "./ProviderFeedModeBanner.jsx";
+import LiveBoardPipelineBanner from "./LiveBoardPipelineBanner.jsx";
 import ProviderFailureReasons from "./ProviderFailureReasons.jsx";
 import ProviderCoverageAuditSection from "./ProviderCoverageAuditSection.jsx";
 import LiveFeedDiagnosticsPanel from "./LiveFeedDiagnosticsPanel.jsx";
@@ -62,6 +63,7 @@ function DfsAnalyzerLayout({
   renderSourceAudit = null,
   cacheStatus = "",
   boardCacheTimestamp = "",
+  liveBoardPipelineTrace = null,
 }) {
   const [connectionReport, setConnectionReport] = useState(() => {
     const meta = readSettingsMeta();
@@ -94,6 +96,8 @@ function DfsAnalyzerLayout({
         cacheStatus={cacheStatus}
         boardCacheTimestamp={boardCacheTimestamp}
       />
+
+      <LiveBoardPipelineBanner trace={liveBoardPipelineTrace} loading={loading} />
 
       <CompactAppTabs activeTab={appView} onChange={setAppView} />
 

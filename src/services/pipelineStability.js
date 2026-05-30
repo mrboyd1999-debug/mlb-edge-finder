@@ -2,6 +2,7 @@
  * Cache-first board stability — never wipe live data before replacements are ready.
  */
 
+import { normalizeSource } from "../utils/normalizeSource.js";
 import { readCachedMlbStatsMap } from "./playerStats.js";
 import { readInstantStartupBoard, readStartupSliceCache } from "./startupBoardCache.js";
 import { CONNECTION_TIERS } from "./sourceHealth.js";
@@ -27,10 +28,28 @@ export function boardHasUsableData(board = {}) {
   return countBoardProps(board) > 0;
 }
 
+function isLiveProviderBoardProp(prop = {}) {
+  const src = normalizeSource(prop);
+  if (src !== "underdog" && src !== "prizepicks") return false;
+  if (prop.fromCache || prop.cacheLayer) return false;
+  if (String(prop.lineSourceBadge || "").toUpperCase() === "CACHED") return false;
+  return true;
+}
+
+function countLiveProviderBoardProps(board = {}) {
+  const rows = board.allDisplayProps || board.props || board.usableProps || [];
+  return rows.filter(isLiveProviderBoardProp).length;
+}
+
 /** Replace only when incoming fetch produced props; otherwise keep previous board. */
 export function mergeBoardRefreshResult(previous = {}, incoming = {}) {
   const prevCount = countBoardProps(previous);
   const nextCount = countBoardProps(incoming);
+  const liveProviderCount = countLiveProviderBoardProps(incoming);
+
+  if (nextCount > 0 && liveProviderCount > 0) {
+    return { board: incoming, replaced: true, keptPrevious: false };
+  }
 
   if (nextCount === 0 && prevCount > 0) {
     return {

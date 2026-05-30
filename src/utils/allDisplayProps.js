@@ -165,7 +165,11 @@ export function writePropSourceCache(sport = "all", source = "PrizePicks", props
 }
 
 function splitLiveCached(result = {}) {
-  const props = Array.isArray(result?.props) ? result.props : [];
+  const props = Array.isArray(result?.props) && result.props.length
+    ? result.props
+    : Array.isArray(result?.parsedProps)
+      ? result.parsedProps
+      : [];
   if (!props.length) return { live: [], cached: [] };
   const isCached =
     Boolean(result.cached) ||

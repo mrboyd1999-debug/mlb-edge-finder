@@ -10,7 +10,7 @@ function ProviderFeedModeBanner({
 }) {
   const boardIsCached = /cached|stale|expired/i.test(String(cacheStatus || ""));
   const auditSaysLive = audit?.feedMode === "LIVE";
-  const isLive = auditSaysLive && !boardIsCached && !audit?.boardCacheActive;
+  const isLive = auditSaysLive && !audit?.boardCacheActive;
   const label = isLive ? "LIVE DATA" : "CACHE DATA";
   const statusLabel = isLive ? "Live" : "Cached";
 

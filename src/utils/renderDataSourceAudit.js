@@ -64,16 +64,26 @@ export function resolvePropDataSourceTag(prop = {}, context = {}) {
 
   const badge = String(prop.lineSourceBadge || prop.status || "").toUpperCase();
   const boardCached = /cached|stale|expired/i.test(String(context.cacheStatus || ""));
-  if (badge === "CACHED" || prop.fromCache || prop.cacheLayer || boardCached) {
+  if (badge === "CACHED" || prop.fromCache || prop.cacheLayer) {
     return DATA_SOURCE_TAGS.CACHE;
   }
 
   const src = normalizeSource(prop);
   if (src === "prizepicks" || src === "underdog") {
-    if (badge === "CACHED" || /cached/i.test(String(prop.statusLabel || ""))) {
+    if (badge === "LIVE" || prop.isLiveRenderProp) {
+      return DATA_SOURCE_TAGS.LIVE_PROVIDER;
+    }
+    if (/cached/i.test(String(prop.statusLabel || ""))) {
+      return DATA_SOURCE_TAGS.CACHE;
+    }
+    if (boardCached) {
       return DATA_SOURCE_TAGS.CACHE;
     }
     return DATA_SOURCE_TAGS.LIVE_PROVIDER;
+  }
+
+  if (boardCached) {
+    return DATA_SOURCE_TAGS.CACHE;
   }
 
   if (src === "sportsdataio") return DATA_SOURCE_TAGS.FALLBACK;

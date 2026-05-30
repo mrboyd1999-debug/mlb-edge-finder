@@ -8,6 +8,12 @@ import { MLB_ONLY_MODE } from "../utils/mlbOnlyMode.js";
 
 export const PRIZEPICKS_RATE_LIMIT_OTHERS_MESSAGE = "PrizePicks rate limited, using other sources";
 
+/** Prefer MLB-filtered provider props over raw parsed pools. */
+export function resolveProviderResultProps(result = {}) {
+  if (result?.props?.length) return result.props;
+  return result?.parsedProps || [];
+}
+
 export function mergeProviderRawProps({ underdogProps = [], prizePicksProps = [] } = {}) {
   const seen = new Set();
   const merged = [];
@@ -65,8 +71,8 @@ export function resolveProviderBoardProps({
   if (allDisplayProps.length) return { props: allDisplayProps, source: "display" };
   if (rawProps.length) return { props: rawProps, source: "raw" };
 
-  const ud = underdogResult?.parsedProps || underdogResult?.props || [];
-  const pp = prizePicksResult?.props || [];
+  const ud = resolveProviderResultProps(underdogResult);
+  const pp = resolveProviderResultProps(prizePicksResult);
   const merged = mergeProviderRawProps({ underdogProps: ud, prizePicksProps: pp });
   if (merged.length) return { props: merged, source: "provider-fallback" };
   return { props: [], source: "empty" };
