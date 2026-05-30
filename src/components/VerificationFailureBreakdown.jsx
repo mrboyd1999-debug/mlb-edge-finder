@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo } from "react";
 import { VERIFICATION_FAILURE_GATE_LABELS } from "../utils/verificationDashboard.js";
 
 function Metric({ label, value, highlight = false }) {
@@ -14,71 +14,138 @@ function Metric({ label, value, highlight = false }) {
   );
 }
 
-function VerificationFailureBreakdown({ breakdown = null, verifiedCount = null }) {
-  const rows = useMemo(() => {
-    if (!breakdown) return [];
-    return [
-      { key: "projected", label: VERIFICATION_FAILURE_GATE_LABELS.projected, value: breakdown.projected },
-      { key: "passedProbability", label: VERIFICATION_FAILURE_GATE_LABELS.passedProbability, value: breakdown.passedProbability },
-      { key: "failedProbability", label: VERIFICATION_FAILURE_GATE_LABELS.failedProbability, value: breakdown.failedProbability },
-      { key: "passedConfidence", label: VERIFICATION_FAILURE_GATE_LABELS.passedConfidence, value: breakdown.passedConfidence },
-      { key: "failedConfidence", label: VERIFICATION_FAILURE_GATE_LABELS.failedConfidence, value: breakdown.failedConfidence },
-      { key: "passedPlayability", label: VERIFICATION_FAILURE_GATE_LABELS.passedPlayability, value: breakdown.passedPlayability },
-      { key: "failedPlayability", label: VERIFICATION_FAILURE_GATE_LABELS.failedPlayability, value: breakdown.failedPlayability },
-      { key: "passedSanity", label: VERIFICATION_FAILURE_GATE_LABELS.passedSanity, value: breakdown.passedSanity },
-      { key: "failedSanity", label: VERIFICATION_FAILURE_GATE_LABELS.failedSanity, value: breakdown.failedSanity },
-      { key: "passedHistoricalData", label: VERIFICATION_FAILURE_GATE_LABELS.passedHistoricalData, value: breakdown.passedHistoricalData },
-      { key: "failedHistoricalData", label: VERIFICATION_FAILURE_GATE_LABELS.failedHistoricalData, value: breakdown.failedHistoricalData },
-      { key: "passedTierGate", label: VERIFICATION_FAILURE_GATE_LABELS.passedTierGate, value: breakdown.passedTierGate },
-      { key: "failedTierGate", label: VERIFICATION_FAILURE_GATE_LABELS.failedTierGate, value: breakdown.failedTierGate },
-    ];
-  }, [breakdown]);
+function formatMetric(value, suffix = "") {
+  if (value == null || value === "") return "—";
+  if (typeof value === "number" && !Number.isFinite(value)) return "—";
+  return `${value}${suffix}`;
+}
 
-  if (!breakdown) return null;
+function VerificationFailureBreakdown({ filterDiagnostics = null }) {
+  const breakdown = filterDiagnostics?.verificationDashboard?.verificationFailureBreakdown;
+  const pipelineCounts = filterDiagnostics?.pipelineCounts || null;
 
-  const resolvedVerifiedCount = verifiedCount ?? breakdown.verifiedDisplayCount ?? 0;
-  const showZeroVerifiedSummary = resolvedVerifiedCount === 0 && breakdown.projected > 0;
-  const bottleneckLabel = breakdown.primaryBottleneck;
+  const totalProps = breakdown?.totalProps ?? pipelineCounts?.rawProps ?? 0;
+  const propsWithProjections =
+    breakdown?.propsWithProjections ?? pipelineCounts?.withProjections ?? breakdown?.projected ?? 0;
+  const verifiedPlays = breakdown?.verifiedPlays ?? filterDiagnostics?.verifiedPicksCount ?? 0;
+  const verifiedTierCount = breakdown?.verifiedTierCount ?? breakdown?.passedTierGate ?? 0;
+  const failedProbability = breakdown?.failedProbability ?? 0;
+  const failedConfidence = breakdown?.failedConfidence ?? 0;
+  const failedPlayability = breakdown?.failedPlayability ?? 0;
+  const failedSanity = breakdown?.failedSanity ?? 0;
+  const failedHistoricalData = breakdown?.failedHistoricalData ?? 0;
+  const failedTierGate = breakdown?.failedTierGate ?? 0;
+  const bottleneckLabel = breakdown?.primaryBottleneck;
+  const rejected = breakdown?.highestScoringRejectedProp;
+
+  const summaryRows = [
+    { key: "totalProps", label: VERIFICATION_FAILURE_GATE_LABELS.totalProps, value: totalProps },
+    {
+      key: "propsWithProjections",
+      label: VERIFICATION_FAILURE_GATE_LABELS.propsWithProjections,
+      value: propsWithProjections,
+    },
+    { key: "verifiedPlays", label: VERIFICATION_FAILURE_GATE_LABELS.verifiedPlays, value: verifiedPlays },
+    {
+      key: "failedProbability",
+      label: VERIFICATION_FAILURE_GATE_LABELS.failedProbability,
+      value: failedProbability,
+      highlight: bottleneckLabel === VERIFICATION_FAILURE_GATE_LABELS.failedProbability,
+    },
+    {
+      key: "failedConfidence",
+      label: VERIFICATION_FAILURE_GATE_LABELS.failedConfidence,
+      value: failedConfidence,
+      highlight: bottleneckLabel === VERIFICATION_FAILURE_GATE_LABELS.failedConfidence,
+    },
+    {
+      key: "failedPlayability",
+      label: VERIFICATION_FAILURE_GATE_LABELS.failedPlayability,
+      value: failedPlayability,
+      highlight: bottleneckLabel === VERIFICATION_FAILURE_GATE_LABELS.failedPlayability,
+    },
+    {
+      key: "failedSanity",
+      label: VERIFICATION_FAILURE_GATE_LABELS.failedSanity,
+      value: failedSanity,
+      highlight: bottleneckLabel === VERIFICATION_FAILURE_GATE_LABELS.failedSanity,
+    },
+    {
+      key: "failedHistoricalData",
+      label: VERIFICATION_FAILURE_GATE_LABELS.failedHistoricalData,
+      value: failedHistoricalData,
+      highlight: bottleneckLabel === VERIFICATION_FAILURE_GATE_LABELS.failedHistoricalData,
+    },
+    {
+      key: "failedTierGate",
+      label: VERIFICATION_FAILURE_GATE_LABELS.failedTierGate,
+      value: failedTierGate,
+      highlight: bottleneckLabel === VERIFICATION_FAILURE_GATE_LABELS.failedTierGate,
+    },
+  ];
+
+  const showTierHiddenNote =
+    verifiedTierCount > verifiedPlays && breakdown?.blockedByDisplayRankingGate > 0;
 
   return (
-    <section className="verification-diagnostics" aria-label="Verification failure breakdown">
+    <section className="verification-diagnostics verification-failure-breakdown" aria-label="Verification failure breakdown">
       <h3 className="verification-diagnostics__title">Verification Failure Breakdown</h3>
       <p className="verification-diagnostics__meta">
-        Sequential gate audit on projected props — each prop is counted at the first gate it fails.
+        Sequential gate audit — each projected prop is counted at the first gate it fails.
       </p>
 
       <div className="verification-diagnostics__grid">
-        {rows.map(({ key, label, value }) => (
-          <Metric
-            key={key}
-            label={label}
-            value={value}
-            highlight={bottleneckLabel === label && String(key).startsWith("failed")}
-          />
+        {summaryRows.map(({ key, label, value, highlight }) => (
+          <Metric key={key} label={label} value={value} highlight={highlight} />
         ))}
       </div>
 
-      {showZeroVerifiedSummary ? (
-        <div className="verification-diagnostics__rejections">
-          <h4 className="verification-diagnostics__subtitle">Why verified props = 0</h4>
-          {bottleneckLabel ? (
-            <p className="verification-diagnostics__meta">
-              Largest drop-off: <strong>{bottleneckLabel}</strong> ({breakdown.primaryBottleneckCount}{" "}
-              props).
-            </p>
-          ) : null}
-          {breakdown.passedTierGate > 0 && breakdown.blockedByDisplayRankingGate > 0 ? (
-            <p className="verification-diagnostics__meta">
-              {breakdown.passedTierGate} passed tier gates, but {breakdown.blockedByDisplayRankingGate}{" "}
-              were blocked by display ranking gates (playability/confidence/research-only filters).
-            </p>
-          ) : breakdown.passedTierGate === 0 ? (
-            <p className="verification-diagnostics__meta">
-              No props passed all tier gates — review failed counts above in order.
-            </p>
-          ) : null}
-        </div>
+      {verifiedPlays === 0 && propsWithProjections > 0 && bottleneckLabel ? (
+        <p className="verification-diagnostics__meta">
+          Largest drop-off: <strong>{bottleneckLabel}</strong> ({breakdown?.primaryBottleneckCount ?? 0} props).
+        </p>
       ) : null}
+
+      {showTierHiddenNote ? (
+        <p className="verification-diagnostics__meta">
+          {verifiedTierCount} props passed tier gates; {breakdown.blockedByDisplayRankingGate} hidden by display
+          ranking filters (not shown in Verified Plays list).
+        </p>
+      ) : null}
+
+      <div className="verification-failure-breakdown__rejected">
+        <h4 className="verification-diagnostics__subtitle">Highest Scoring Rejected Prop</h4>
+        {rejected ? (
+          <div className="verification-diagnostics__table-wrap">
+            <table className="verification-diagnostics__table verification-failure-breakdown__table">
+              <thead>
+                <tr>
+                  <th>Player</th>
+                  <th>Market</th>
+                  <th>Probability</th>
+                  <th>Confidence</th>
+                  <th>Playability</th>
+                  <th>Sanity</th>
+                  <th>Reason Rejected</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>{rejected.player}</td>
+                  <td>{rejected.market}</td>
+                  <td>{formatMetric(rejected.probability, "%")}</td>
+                  <td>{formatMetric(rejected.confidence, "%")}</td>
+                  <td>{formatMetric(rejected.playability)}</td>
+                  <td>{formatMetric(rejected.sanity)}</td>
+                  <td>{rejected.reasonRejected || "—"}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="verification-diagnostics__empty">No rejected projected props to rank yet.</p>
+        )}
+      </div>
     </section>
   );
 }

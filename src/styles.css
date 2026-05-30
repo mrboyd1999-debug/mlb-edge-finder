@@ -1916,6 +1916,18 @@ body,
   line-height: 1.35;
 }
 
+.verification-failure-breakdown {
+  margin: 0 0 14px;
+}
+
+.verification-failure-breakdown__rejected {
+  margin-top: 10px;
+}
+
+.verification-failure-breakdown__table {
+  min-width: 640px;
+}
+
 .verification-diagnostics {
   margin: 0 0 14px;
   padding: 12px;

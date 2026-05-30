@@ -30,6 +30,7 @@ import {
   annotateTopPickRankingFields,
   compareTopPickScore,
   passesTopVerifiedPlaysGate,
+  resolvePlayabilityScore,
 } from "./bestPlayRankingScore.js";
 import { TIER_C_MIN_SANITY_SCORE } from "./tierHistoricalValidation.js";
 import {
@@ -77,6 +78,9 @@ export const VERIFICATION_FAILURE_GATE_ORDER = [
 ];
 
 export const VERIFICATION_FAILURE_GATE_LABELS = {
+  totalProps: "Total Props",
+  propsWithProjections: "Props With Projections",
+  verifiedPlays: "Verified Plays",
   projected: "Projected Props",
   passedProbability: "Passed Probability",
   failedProbability: "Failed Probability",
@@ -91,6 +95,82 @@ export const VERIFICATION_FAILURE_GATE_LABELS = {
   passedTierGate: "Passed Tier Gate",
   failedTierGate: "Failed Tier Gate",
 };
+
+function resolveBreakdownSanityScore(prop = {}, metrics = {}) {
+  const direct = Number(prop.projectionSanityScore ?? prop.projectionSanityAudit?.sanityScore);
+  if (Number.isFinite(direct)) return Math.round(direct);
+  if (metrics.sanity != null && Number.isFinite(metrics.sanity)) return Math.round(metrics.sanity);
+  return null;
+}
+
+export function resolveVerificationWaterfallRejection(prop = {}, metrics = null) {
+  const resolvedMetrics = metrics || resolveVerifiedMetrics(prop);
+
+  if (failsProbabilityGate(resolvedMetrics)) {
+    const value = resolvedMetrics.probability;
+    return Number.isFinite(value)
+      ? `Failed Probability (${Math.round(value)}% below ${VERIFIED_BASE_MIN_PROBABILITY}% floor)`
+      : "Failed Probability (missing)";
+  }
+  if (failsConfidenceGate(resolvedMetrics)) {
+    const value = resolvedMetrics.confidence;
+    return Number.isFinite(value)
+      ? `Failed Confidence (${Math.round(value)}% below ${VERIFIED_BASE_MIN_CONFIDENCE}% floor)`
+      : "Failed Confidence (missing)";
+  }
+  if (failsPlayabilityGate(resolvedMetrics)) {
+    const value = resolvedMetrics.playability;
+    return Number.isFinite(value)
+      ? `Failed Playability (${Math.round(value)} below ${VERIFIED_TIER_B.minPlayability} floor)`
+      : "Failed Playability (missing)";
+  }
+  if (failsSanityGate(prop, resolvedMetrics)) {
+    const sanity = resolveBreakdownSanityScore(prop, resolvedMetrics);
+    if (prop.projectionSanityAudit?.sanityFail || prop.projectionSanityFail) {
+      return prop.projectionSanityAudit?.sanityFailReason || "Failed Sanity (projection cap exceeded)";
+    }
+    return sanity != null
+      ? `Failed Sanity (${sanity} below ${TIER_C_MIN_SANITY_SCORE} floor)`
+      : "Failed Sanity";
+  }
+  if (failsHistoricalDataGate(resolvedMetrics)) {
+    const missing = (resolvedMetrics.historicalMissing || []).join(", ") || "Last5/Last10/Season";
+    return `Failed Historical Data (${missing})`;
+  }
+  if (failsTierGate(prop)) {
+    try {
+      return explainVerificationRejection(prop) || "Failed Tier Gate";
+    } catch {
+      return "Failed Tier Gate";
+    }
+  }
+  if (passesVerifiedTierFilter(prop) && !passesTopVerifiedPlaysGate(prop)) {
+    return "Blocked by display ranking gate (playability/confidence/research-only)";
+  }
+  return "Eligible";
+}
+
+function buildHighestScoringRejectedProp(projectedPool = []) {
+  const rejected = (projectedPool || [])
+    .filter((prop) => !passesVerifiedTierFilter(prop))
+    .map((prop) => annotateTopPickRankingFields(prop))
+    .sort(compareTopPickScore);
+
+  const prop = rejected[0];
+  if (!prop) return null;
+
+  const metrics = resolveVerifiedMetrics(prop);
+  return {
+    player: String(prop.playerName || prop.player || "Unknown").trim() || "Unknown",
+    market: String(prop.statType || prop.market || prop.propType || "N/A").trim() || "N/A",
+    probability: Number.isFinite(metrics.probability) ? Math.round(metrics.probability) : null,
+    confidence: Number.isFinite(metrics.confidence) ? Math.round(metrics.confidence) : null,
+    playability: Math.round(resolvePlayabilityScore(prop)),
+    sanity: resolveBreakdownSanityScore(prop, metrics),
+    reasonRejected: resolveVerificationWaterfallRejection(prop, metrics),
+    score: Number(prop.topPickScore ?? 0).toFixed(1),
+  };
+}
 
 function failsProbabilityGate(metrics = {}) {
   const { probability } = metrics;
@@ -125,7 +205,11 @@ function failsTierGate(prop = {}) {
 /** Sequential waterfall — each prop counts toward the first gate it fails. */
 export function buildVerificationFailureBreakdown(projectedPool = [], options = {}) {
   const breakdown = {
+    totalProps: Number(options.totalProps ?? projectedPool.length),
+    propsWithProjections: projectedPool.length,
     projected: projectedPool.length,
+    verifiedPlays: Number(options.verifiedDisplayCount ?? 0),
+    verifiedTierCount: Number(options.verifiedTierCount ?? 0),
     passedProbability: 0,
     failedProbability: 0,
     passedConfidence: 0,
@@ -142,6 +226,7 @@ export function buildVerificationFailureBreakdown(projectedPool = [], options = 
     blockedByDisplayRankingGate: 0,
     primaryBottleneck: null,
     primaryBottleneckCount: 0,
+    highestScoringRejectedProp: null,
   };
 
   for (const prop of projectedPool || []) {
@@ -201,6 +286,9 @@ export function buildVerificationFailureBreakdown(projectedPool = [], options = 
     breakdown.primaryBottleneck = top.label;
     breakdown.primaryBottleneckCount = top.count;
   }
+
+  breakdown.verifiedTierCount = breakdown.passedTierGate;
+  breakdown.highestScoringRejectedProp = buildHighestScoringRejectedProp(projectedPool);
 
   return breakdown;
 }
@@ -516,6 +604,8 @@ export function buildVerificationDashboard(props = [], options = {}) {
   const ruleRejectionCounts = buildRuleRejectionCounts(projectedPool);
   const verificationFailureBreakdown = buildVerificationFailureBreakdown(projectedPool, {
     verifiedDisplayCount: verifiedCount,
+    verifiedTierCount: verifiedPasses,
+    totalProps: (props || []).length,
   });
 
   let researchPasses = 0;

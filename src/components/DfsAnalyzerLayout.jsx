@@ -3,6 +3,7 @@ import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import CompactApiHeader from "./CompactApiHeader.jsx";
 import CompactAppTabs from "./CompactAppTabs.jsx";
 import SystemStatusCard from "./SystemStatusCard.jsx";
+import VerificationFailureBreakdown from "./VerificationFailureBreakdown.jsx";
 import ManualPropsPanel from "./ManualPropsPanel.jsx";
 import BestPlaysTab from "./BestPlaysTab.jsx";
 import PlatformFeedTab from "./PlatformFeedTab.jsx";
@@ -83,6 +84,8 @@ function DfsAnalyzerLayout({
         feedHealthContext={feedHealthContext}
         pipelineProjectionStats={pipelineRenderCounts?.projectionStats ?? null}
       />
+
+      <VerificationFailureBreakdown filterDiagnostics={topMlbPlayBoard?.filterDiagnostics} />
 
       <ApiSetupBanner onOpenSettings={() => setAppView("settings")} />
 
