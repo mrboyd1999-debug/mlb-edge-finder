@@ -14,6 +14,14 @@ import {
   recordProviderFetchMetrics,
   updateProviderFetchDiagnostics,
 } from "./providerFetchDiagnostics.js";
+import {
+  logPpFetchFailed,
+  logPpFetchStart,
+  logPpFetchSuccess,
+  logUdFetchFailed,
+  logUdFetchStart,
+  logUdFetchSuccess,
+} from "./providerRefreshDiagnostics.js";
 
 export {
   PRIZEPICKS_PROVIDER_TIMEOUT_MS,
@@ -99,6 +107,8 @@ export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyRe
   let timer = null;
 
   console.log(`${logKey} START`);
+  if (label === "PrizePicks") logPpFetchStart({ timeoutMs });
+  if (label === "Underdog") logUdFetchStart({ timeoutMs });
 
   const failResult = (opts = {}) => {
     error = true;
@@ -146,6 +156,7 @@ export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyRe
         const outerStep = "outer provider wrapper (fetchProviderIsolated)";
         console.warn("[PrizePicks Timeout] step:", outerStep, { timeoutMs, durationMs });
         console.warn("[PP TIMEOUT] step:", outerStep, { timeoutMs, durationMs });
+        logPpFetchFailed({ reason: timeoutMessage, step: outerStep, durationMs });
         updatePrizePicksDiagnostics({
           outerTimeout: true,
           timedOut: true,
@@ -161,6 +172,7 @@ export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyRe
       if (label === "Underdog") {
         const outerStep = "outer provider wrapper (fetchProviderIsolated)";
         console.warn("[UD TIMEOUT] step:", outerStep, { timeoutMs, durationMs });
+        logUdFetchFailed({ reason: timeoutMessage, step: outerStep, durationMs });
       }
       console.warn(`[Provider] ${label} timed out after ${durationMs}ms (limit ${timeoutMs}ms)`);
       return {
@@ -176,8 +188,38 @@ export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyRe
     if (result?.error || result?.timedOut) {
       error = true;
       console.log(`${logKey} FAILED`);
+      if (label === "PrizePicks") {
+        logPpFetchFailed({
+          reason: result?.warnings?.[0] || result?.timedOut ? "timed out" : "fetch error",
+          durationMs,
+          props: result?.props?.length ?? 0,
+        });
+      }
+      if (label === "Underdog") {
+        logUdFetchFailed({
+          reason: result?.warnings?.[0] || result?.timedOut ? "timed out" : "fetch error",
+          durationMs,
+          props: result?.props?.length ?? result?.parsedProps?.length ?? 0,
+        });
+      }
     } else {
       console.log(`${logKey} SUCCESS`);
+      if (label === "PrizePicks") {
+        logPpFetchSuccess({
+          durationMs,
+          props: result?.props?.length ?? 0,
+          status: result?.status,
+          cached: /cached/i.test(String(result?.lineSourceBadge || result?.status || "")),
+        });
+      }
+      if (label === "Underdog") {
+        logUdFetchSuccess({
+          durationMs,
+          props: result?.props?.length ?? result?.parsedProps?.length ?? 0,
+          status: result?.status,
+          cached: /cached/i.test(String(result?.lineSourceBadge || result?.status || "")),
+        });
+      }
     }
     console.log(`${logKey} TIME MS`, durationMs);
     if (durationMs >= PROVIDER_SLOW_THRESHOLD_MS) {

@@ -1012,10 +1012,20 @@ body,
 
 .provider-feed-mode-banner {
   margin: 10px 0 0;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border-radius: 10px;
   border: 1px solid #334155;
   background: #0f172a;
+}
+
+.provider-feed-mode-banner--live {
+  border-color: #166534;
+  background: linear-gradient(180deg, #052e16 0%, #0f172a 100%);
+}
+
+.provider-feed-mode-banner--cache {
+  border-color: #854d0e;
+  background: linear-gradient(180deg, #422006 0%, #0f172a 100%);
 }
 
 .provider-feed-mode-banner__head {
@@ -1026,10 +1036,101 @@ body,
   font-size: 13px;
 }
 
+.provider-feed-mode-banner__title {
+  font-size: 15px;
+  letter-spacing: 0.04em;
+}
+
 .provider-feed-mode-banner__detail {
   margin: 6px 0 0;
+  color: #e2e8f0;
+  font-size: 13px;
+}
+
+.provider-feed-mode-banner__stage {
+  margin: 4px 0 0;
+  color: #fde047;
+  font-size: 12px;
+}
+
+.provider-failure-reasons {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #7f1d1d;
+  background: #1c0a0a;
+}
+
+.provider-failure-reasons__row {
+  margin: 0 0 4px;
+  color: #fca5a5;
+  font-size: 12px;
+}
+
+.provider-failure-reasons__row:last-child {
+  margin-bottom: 0;
+}
+
+.provider-failure-reasons__cache {
+  margin: 6px 0 0;
+  color: #fde047;
+  font-size: 12px;
+}
+
+.provider-coverage-audit-section {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: #0b1220;
+}
+
+.provider-coverage-audit-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.provider-coverage-audit-section__mode {
+  font-size: 11px;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.provider-coverage-audit-section__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 6px 12px;
+}
+
+.provider-coverage-audit-section__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.provider-coverage-audit-section__label {
+  color: #94a3b8;
+}
+
+.provider-coverage-audit-section__value {
+  color: #e2e8f0;
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+.provider-coverage-audit-section__note,
+.provider-coverage-audit-section__bottleneck {
+  margin: 8px 0 0;
   color: #94a3b8;
   font-size: 12px;
+}
+
+.provider-coverage-audit-section__bottleneck {
+  color: #fde047;
 }
 
 .system-status-card__summary {

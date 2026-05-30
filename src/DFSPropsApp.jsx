@@ -253,6 +253,13 @@ import {
   countHistoricalAttachment,
 } from "./utils/pipelinePropCountAudit.js";
 import { buildProviderCoverageAudit, logProviderCoverageSummary } from "./utils/providerCoverageAudit.js";
+import {
+  beginRefreshDiagnostics,
+  endRefreshDiagnostics,
+  getRefreshDiagnosticsSession,
+  logCacheLoad,
+  logTotalPropsAvailable,
+} from "./utils/providerRefreshDiagnostics.js";
 import { countMergedProjections } from "./utils/projectionCoverageAudit.js";
 import {
   buildGuaranteedBaseFeedDisplay,
@@ -1793,6 +1800,11 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         message: ppEntry.statusReason || prizePicksResult?.warnings?.[0] || "",
       });
       if (cached?.props?.length) {
+        logCacheLoad({
+          source: "prizepicks",
+          reason: ppEntry.timedOut ? "timeout-fallback" : "fetch-failed-fallback",
+          props: cached.props.length,
+        });
         prizePicksResult = cached;
       }
     }
@@ -3141,8 +3153,16 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     prizePicksProps,
     underdogProps,
     providerFetchDiagnostics: debugInfo.providerFetchDiagnostics,
+    refreshSession: getRefreshDiagnosticsSession(),
   });
   logProviderCoverageSummary(debugInfo.providerCoverageAudit);
+  logTotalPropsAvailable(debugInfo.providerCoverageAudit.combinedUsable ?? 0, {
+    feedMode: debugInfo.providerCoverageAudit.feedMode,
+    projectionCandidates: debugInfo.providerCoverageAudit.projectionCandidates,
+    projected: debugInfo.providerCoverageAudit.projected,
+    verified: debugInfo.providerCoverageAudit.verified,
+    cacheFallbackStage: debugInfo.providerCoverageAudit.cacheFallbackStage,
+  });
 
   if (!MLB_ONLY_MODE) {
     const perfSettled = await providerWave.awaitAllForPerf();
@@ -3371,6 +3391,8 @@ export default function DFSPropsApp() {
     }
 
     return withBoardFetchLock(async () => {
+      beginRefreshDiagnostics({ force, autoRefresh });
+      let refreshCacheContext = { active: false, timestamp: "", reason: "" };
       const sourceCooldownRemaining = getMaxCooldownRemainingMs();
       const refreshCooldownRemaining = getRefreshCooldownMs() - (Date.now() - lastRefreshAtRef.current);
       if (force && (sourceCooldownRemaining > 0 || refreshCooldownRemaining > 0)) {
@@ -3437,6 +3459,21 @@ export default function DFSPropsApp() {
           const layer =
             cachedForPaint.cacheMetadata?.freshnessTier ||
             resolveCacheLayer(new Date(cachedForPaint.updatedAt).getTime(), DFS_CACHE_TTL_MS);
+          refreshCacheContext = {
+            active: true,
+            timestamp: cachedForPaint.updatedAt || "",
+            reason: "board-cache-paint",
+          };
+          logCacheLoad({
+            source: "board",
+            reason: "cache-paint-before-live-refresh",
+            timestamp: cachedForPaint.updatedAt,
+            props:
+              cachedForPaint.allDisplayProps?.length ||
+              cachedForPaint.props?.length ||
+              cachedForPaint.usableProps?.length ||
+              0,
+          });
           applyBoardState(cachedForPaint, formatCacheLayerLabel(layer).toLowerCase());
           if (cachedForPaint.statsMap instanceof Map && cachedForPaint.statsMap.size) {
             scoringContextRef.current = {
@@ -3461,6 +3498,17 @@ export default function DFSPropsApp() {
           const cached = readCachedBoard(DEFAULT_SOURCE_STATUS) || readVerifiedCacheBoard(DEFAULT_SOURCE_STATUS);
           if (cached?.allDisplayProps?.length || cached?.props?.length || cached?.usableProps?.length || cached?.qualifiedReadyProps?.length) {
             const layer = cached.cacheMetadata?.freshnessTier || resolveCacheLayer(new Date(cached.updatedAt).getTime(), DFS_CACHE_TTL_MS);
+            refreshCacheContext = {
+              active: true,
+              timestamp: cached.updatedAt || "",
+              reason: "board-cache-fallback",
+            };
+            logCacheLoad({
+              source: "board",
+              reason: "cached-board-fallback",
+              timestamp: cached.updatedAt,
+              props: cached.allDisplayProps?.length || cached.props?.length || cached.usableProps?.length || 0,
+            });
             applyBoardState(cached, formatCacheLayerLabel(layer).toLowerCase());
             setLoading(false);
             console.info("[DFS Refresh] board cache served — continuing background refresh", {
@@ -3576,6 +3624,16 @@ export default function DFSPropsApp() {
           writeCachedBoard(sanitizeBoardForMlbOnly(board));
           setCacheNotice("");
         }
+        if (board.debugInfo?.providerCoverageAudit && refreshCacheContext.active) {
+          board.debugInfo.providerCoverageAudit = {
+            ...board.debugInfo.providerCoverageAudit,
+            boardCacheActive: true,
+            boardCacheTimestamp: refreshCacheContext.timestamp || board.updatedAt,
+            feedMode: "CACHE",
+            cacheFallbackStage:
+              board.debugInfo.providerCoverageAudit.cacheFallbackStage || refreshCacheContext.reason,
+          };
+        }
         applyBoardState(board, board.props.length || board.allDisplayProps?.length || board.usableProps?.length ? "fresh" : "cached");
         persistStartupBoardSlices(board);
         if (result.deferredDisplayProps?.length) {
@@ -3646,6 +3704,12 @@ export default function DFSPropsApp() {
             rateLimited: getMaxCooldownRemainingMs() > 0,
           })
         ) {
+          logCacheLoad({
+            source: "board",
+            reason: "verified-cache-after-fetch-error",
+            timestamp: staleBoard?.updatedAt,
+            props: staleBoard?.allDisplayProps?.length || staleBoard?.props?.length || 0,
+          });
           setError("");
           console.warn("[DFS Refresh] served verified cache after failure", {
             durationMs: Date.now() - fetchStartedAt,
@@ -3712,6 +3776,7 @@ export default function DFSPropsApp() {
         setRefreshingFeeds(false);
         endPerformanceTimer(PERFORMANCE_TIMERS.refreshProviders);
         setLoading(false);
+        endRefreshDiagnostics();
         setLoadingStage("DONE");
       }
     });
@@ -4440,6 +4505,22 @@ export default function DFSPropsApp() {
     refreshingFeeds,
   ]);
   const lastUpdatedLabel = lastUpdated ? `${formatDateTime(lastUpdated)}${cacheStatus === "cached" ? " (cached)" : ""}` : "Never";
+  const providerCoverageAuditDisplay = useMemo(() => {
+    const base = debugInfo?.providerCoverageAudit;
+    if (!base) return null;
+    const boardCached = /cached|stale|expired/i.test(String(cacheStatus || ""));
+    const timestamp = lastUpdated || base.boardCacheTimestamp || "";
+    if (!boardCached && base.feedMode === "LIVE") return base;
+    return {
+      ...base,
+      feedMode: "CACHE",
+      boardCacheActive: boardCached || base.boardCacheActive,
+      boardCacheTimestamp: timestamp,
+      cacheBoardMessage: timestamp
+        ? `Running on cached board from ${formatDateTime(timestamp)}`
+        : base.cacheBoardMessage || "Running on cached provider/board data",
+    };
+  }, [debugInfo?.providerCoverageAudit, cacheStatus, lastUpdated]);
   const lastUpdatedMs = lastUpdated ? new Date(lastUpdated).getTime() : NaN;
   const staleDataWarning =
     Number.isFinite(lastUpdatedMs) && Date.now() - lastUpdatedMs > DFS_CACHE_TTL_MS
@@ -4836,7 +4917,9 @@ export default function DFSPropsApp() {
       pipelineRenderCounts={pipelineRenderCounts}
       prizePicksFeedProps={prizePicksFeedProps}
       statsAttachmentAudit={debugInfo?.statsAttachmentAudit || null}
-      providerCoverageAudit={debugInfo?.providerCoverageAudit || null}
+      providerCoverageAudit={providerCoverageAuditDisplay}
+      cacheStatus={cacheStatus}
+      boardCacheTimestamp={lastUpdated}
     />
 
       {selectedEvaluation && (

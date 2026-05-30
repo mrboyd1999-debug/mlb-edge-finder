@@ -14,6 +14,8 @@ import ProjectionProviderWarning from "./ProjectionProviderWarning.jsx";
 import ApiSetupBanner from "./ApiSetupBanner.jsx";
 import HistoricalCoverageBanner from "./HistoricalCoverageBanner.jsx";
 import ProviderFeedModeBanner from "./ProviderFeedModeBanner.jsx";
+import ProviderFailureReasons from "./ProviderFailureReasons.jsx";
+import ProviderCoverageAuditSection from "./ProviderCoverageAuditSection.jsx";
 import { readSettingsMeta } from "../services/runtimeSettings.js";
 import { isDebugModeEnabled } from "../utils/devMode.js";
 
@@ -54,6 +56,8 @@ function DfsAnalyzerLayout({
   mlbPipelineStatus,
   statsAttachmentAudit = null,
   providerCoverageAudit = null,
+  cacheStatus = "",
+  boardCacheTimestamp = "",
 }) {
   const [connectionReport, setConnectionReport] = useState(() => {
     const meta = readSettingsMeta();
@@ -80,9 +84,16 @@ function DfsAnalyzerLayout({
         lastUpdated={lastUpdatedLabel}
       />
 
+      <ProviderFeedModeBanner
+        audit={providerCoverageAudit}
+        loading={loading}
+        cacheStatus={cacheStatus}
+        boardCacheTimestamp={boardCacheTimestamp}
+      />
+
       <CompactAppTabs activeTab={appView} onChange={setAppView} />
 
-      <ProviderFeedModeBanner audit={providerCoverageAudit} loading={loading} />
+      <ProviderFailureReasons audit={providerCoverageAudit} />
 
       <SystemStatusCard
         apiHealth={apiHealth}
@@ -92,6 +103,8 @@ function DfsAnalyzerLayout({
         feedHealthContext={feedHealthContext}
         pipelineProjectionStats={pipelineRenderCounts?.projectionStats ?? null}
       />
+
+      <ProviderCoverageAuditSection audit={providerCoverageAudit} loading={loading} />
 
       <HistoricalCoverageBanner audit={statsAttachmentAudit} loading={loading} />
 

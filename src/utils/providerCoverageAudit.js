@@ -6,6 +6,7 @@ import { countMergedProjections } from "./projectionCoverageAudit.js";
 import { isSupportedMlbMarket } from "./mlbAllowedMarkets.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
 import { getPrizePicksDiagnostics } from "./prizepicksDiagnostics.js";
+import { PRIZEPICKS_PROVIDER_TIMEOUT_MS, UNDERDOG_PROVIDER_TIMEOUT_MS } from "./apiTimeout.js";
 
 function finiteCount(value) {
   const num = Number(value);
@@ -49,15 +50,96 @@ export function resolveProviderFeedMode({
   prizepicksLive = false,
   underdogLive = false,
   ingestionFallback = "",
+  boardCacheActive = false,
 } = {}) {
   const ppLive = Boolean(prizepicksLive) || (finiteCount(prizepicksUsable) > 0 && !prizepicksUsedCache && !prizepicksTimedOut);
   const udLive = Boolean(underdogLive) || (finiteCount(underdogUsable) > 0 && !underdogUsedCache);
-  const cacheFallback = /last-good|cache|cached|board-restore/i.test(String(ingestionFallback || ""));
+  const cacheFallback =
+    boardCacheActive ||
+    /last-good|cache|cached|board-restore/i.test(String(ingestionFallback || ""));
 
   if ((ppLive || udLive) && !prizepicksUsedCache && !underdogUsedCache && !cacheFallback) {
     return "LIVE";
   }
   return "CACHE";
+}
+
+function buildPrizePicksFailureReason({
+  prizepicksUsable = 0,
+  prizepicksUsedCache = false,
+  prizepicksTimedOut = false,
+  prizepicksTimeoutStep = "",
+  ppSource = {},
+  ppDiag = {},
+  ppFetchDiag = {},
+} = {}) {
+  if (prizepicksUsable > 0 && !prizepicksUsedCache && !prizepicksTimedOut) return "";
+  if (prizepicksTimedOut) {
+    const ms =
+      Number(ppFetchDiag.responseTimeMs ?? ppDiag.responseTimeMs ?? PRIZEPICKS_PROVIDER_TIMEOUT_MS) ||
+      PRIZEPICKS_PROVIDER_TIMEOUT_MS;
+    return `Timeout after ${Math.round(ms)}ms${prizepicksTimeoutStep ? ` (${prizepicksTimeoutStep})` : ""}`;
+  }
+  const message = String(ppSource.message || ppDiag.lastError || ppFetchDiag.lastError || "").trim();
+  if (/429|rate limit/i.test(message)) return "429 rate limited";
+  if (/not configured|proxy url missing/i.test(message)) return message || "Not configured";
+  if (prizepicksUsable === 0) return message || "Live fetch returned 0 usable props";
+  if (prizepicksUsedCache) return message || "Live fetch failed — using PrizePicks cache";
+  return message;
+}
+
+function buildUnderdogFailureReason({
+  underdogUsable = 0,
+  underdogUsedCache = false,
+  underdogTimedOut = false,
+  underdogFetched = 0,
+  underdogParsed = 0,
+  underdogParserMismatch = false,
+  udSource = {},
+  udFetchDiag = {},
+  underdogResult = null,
+} = {}) {
+  const warnings = (underdogResult?.warnings || []).join(" ");
+  const message = String(udSource.message || warnings || udFetchDiag.lastError || "").trim();
+
+  if (underdogUsable > 0 && !underdogUsedCache && !underdogTimedOut && !underdogParserMismatch) return "";
+
+  if (/429|rate limit/i.test(message)) return "429 rate limited";
+  if (underdogTimedOut) {
+    const ms = Number(udFetchDiag.responseTimeMs ?? UNDERDOG_PROVIDER_TIMEOUT_MS) || UNDERDOG_PROVIDER_TIMEOUT_MS;
+    return `Timeout after ${Math.round(ms)}ms`;
+  }
+  if (underdogParserMismatch || (underdogFetched > 0 && underdogParsed === 0)) {
+    return "Parser returned 0 props";
+  }
+  if (underdogUsedCache && underdogUsable > 0) {
+    return message || "Live refresh failed — using cached Underdog props";
+  }
+  if (underdogUsable === 0) return message || "Live fetch returned 0 usable props";
+  return message;
+}
+
+function resolveCacheFallbackStage({
+  prizepicksTimedOut = false,
+  prizepicksUsedCache = false,
+  underdogUsedCache = false,
+  underdogParserMismatch = false,
+  boardCacheActive = false,
+  ingestionFallback = "",
+  refreshSession = null,
+} = {}) {
+  const cacheLoads = refreshSession?.cacheLoads || [];
+  if (cacheLoads.length) {
+    const last = cacheLoads[cacheLoads.length - 1];
+    return `${last.source || "board"}: ${last.reason || "cache-load"}`;
+  }
+  if (boardCacheActive) return "board-cache: paint-before-live-refresh";
+  if (prizepicksTimedOut && prizepicksUsedCache) return "prizepicks: timeout → payload cache";
+  if (prizepicksTimedOut && !prizepicksUsedCache) return "prizepicks: timeout → no live props";
+  if (underdogUsedCache) return "underdog: live failed → cached lines";
+  if (underdogParserMismatch) return "underdog: parser returned 0 props";
+  if (ingestionFallback) return String(ingestionFallback);
+  return "";
 }
 
 export function diagnoseProviderBottleneck(audit = {}, pipeline = {}) {
@@ -146,6 +228,9 @@ export function buildProviderCoverageAudit({
   prizePicksProps = [],
   underdogProps = [],
   providerFetchDiagnostics = null,
+  boardCacheTimestamp = "",
+  boardCacheActive = false,
+  refreshSession = null,
 } = {}) {
   const ppSource = debugInfo.sources?.PrizePicks || {};
   const udSource = debugInfo.sources?.Underdog || {};
@@ -230,7 +315,45 @@ export function buildProviderCoverageAudit({
     prizepicksLive: /live/i.test(String(ppSource.lineSourceBadge || "")) && !prizepicksUsedCache,
     underdogLive: /live/i.test(String(udSource.lineSourceBadge || "")) && !underdogUsedCache,
     ingestionFallback: debugInfo.ingestionFallback || "",
+    boardCacheActive,
   });
+
+  const prizepicksFailureReason = buildPrizePicksFailureReason({
+    prizepicksUsable,
+    prizepicksUsedCache,
+    prizepicksTimedOut,
+    prizepicksTimeoutStep:
+      ppDiag.lastTimeoutLocation ||
+      ppFetchDiag.lastPhase ||
+      (prizepicksTimedOut ? "outer provider wrapper or fetch retry" : ""),
+    ppSource,
+    ppDiag,
+    ppFetchDiag,
+  });
+
+  const underdogFailureReason = buildUnderdogFailureReason({
+    underdogUsable,
+    underdogUsedCache,
+    underdogTimedOut,
+    underdogFetched,
+    underdogParsed,
+    underdogParserMismatch: Boolean(udParser?.parserMismatch),
+    udSource,
+    udFetchDiag,
+    underdogResult,
+  });
+
+  const cacheFallbackStage = resolveCacheFallbackStage({
+    prizepicksTimedOut,
+    prizepicksUsedCache,
+    underdogUsedCache,
+    underdogParserMismatch: Boolean(udParser?.parserMismatch),
+    boardCacheActive,
+    ingestionFallback: debugInfo.ingestionFallback || "",
+    refreshSession,
+  });
+
+  const boardTs = boardCacheTimestamp || debugInfo.boardCacheTimestamp || "";
 
   const underdogAudit = {
     rawProps: underdogFetched,
@@ -255,10 +378,22 @@ export function buildProviderCoverageAudit({
     underdogUsable,
     cacheUsable,
     combinedUsable,
+    combinedProps: combinedUsable,
     projectionCandidates,
     projected,
     verified,
     feedMode,
+    boardCacheActive,
+    boardCacheTimestamp: boardTs,
+    cacheBoardMessage:
+      feedMode === "CACHE" && boardTs
+        ? `Running on cached board from ${boardTs}`
+        : feedMode === "CACHE"
+          ? "Running on cached provider/board data"
+          : "",
+    cacheFallbackStage,
+    prizepicksFailureReason,
+    underdogFailureReason,
     underdogAudit,
     prizepicksTimedOut,
     underdogTimedOut,

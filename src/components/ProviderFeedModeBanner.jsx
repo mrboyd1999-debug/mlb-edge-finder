@@ -1,25 +1,40 @@
 import { memo } from "react";
+import { formatDateTime } from "../utils/formatters.js";
 import { healthStateStyle } from "../services/sourceHealth.js";
 
-function ProviderFeedModeBanner({ audit = null, loading = false }) {
-  if (!audit && !loading) return null;
+function ProviderFeedModeBanner({
+  audit = null,
+  loading = false,
+  cacheStatus = "",
+  boardCacheTimestamp = "",
+}) {
+  const boardIsCached = /cached|stale|expired/i.test(String(cacheStatus || ""));
+  const auditSaysLive = audit?.feedMode === "LIVE";
+  const isLive = auditSaysLive && !boardIsCached && !audit?.boardCacheActive;
+  const label = isLive ? "LIVE DATA" : "CACHE DATA";
+  const statusLabel = isLive ? "Live" : "Cached";
 
-  const mode = audit?.feedMode === "LIVE" ? "LIVE" : "CACHE";
-  const isLive = mode === "LIVE";
-  const label = isLive ? "LIVE MODE" : "CACHE MODE";
-  const detail = isLive
-    ? "Provider feeds refreshed live on last load."
-    : `Running from cache — PP usable ${audit?.prizepicksUsable ?? 0} · UD usable ${audit?.underdogUsable ?? 0} · cache ${audit?.cacheUsable ?? 0}`;
+  const cacheLabel = boardCacheTimestamp ? formatDateTime(boardCacheTimestamp) : "";
+  const cacheMessage =
+    !isLive && cacheLabel
+      ? `Running on cached board from ${cacheLabel}`
+      : !isLive
+        ? audit?.cacheBoardMessage || "Live provider fetch did not populate a full board — showing cached data."
+        : "Provider feeds loaded live on last refresh.";
 
   return (
-    <section className="provider-feed-mode-banner" aria-label="Provider feed mode">
+    <section
+      className={`provider-feed-mode-banner provider-feed-mode-banner--${isLive ? "live" : "cache"}`}
+      aria-label="Provider data mode"
+    >
       <div className="provider-feed-mode-banner__head">
-        <strong>{loading ? "Loading feeds…" : label}</strong>
-        {!loading ? (
-          <span style={healthStateStyle(isLive ? "Connected" : "Warning")}>{isLive ? "Live" : "Cached"}</span>
-        ) : null}
+        <strong className="provider-feed-mode-banner__title">{loading ? "Loading feeds…" : label}</strong>
+        {!loading ? <span style={healthStateStyle(isLive ? "Connected" : "Warning")}>{statusLabel}</span> : null}
       </div>
-      {!loading ? <p className="provider-feed-mode-banner__detail">{detail}</p> : null}
+      {!loading ? <p className="provider-feed-mode-banner__detail">{cacheMessage}</p> : null}
+      {!loading && audit?.cacheFallbackStage ? (
+        <p className="provider-feed-mode-banner__stage">Fallback stage: {audit.cacheFallbackStage}</p>
+      ) : null}
     </section>
   );
 }
