@@ -39,10 +39,19 @@ function ProviderCoverageAuditSection({ audit = null, loading = false }) {
         </p>
       ) : null}
       {audit?.prizepicksFailurePoint ? (
-        <p className="provider-coverage-audit-section__note">PrizePicks failure: {audit.prizepicksFailurePoint}</p>
+        <p className="provider-coverage-audit-section__note">
+          PrizePicks root cause: {audit.prizepicksExactFailure || audit.prizepicksFailurePoint}
+        </p>
       ) : null}
       {audit?.underdogFailurePoint ? (
-        <p className="provider-coverage-audit-section__note">Underdog failure: {audit.underdogFailurePoint}</p>
+        <p className="provider-coverage-audit-section__note">
+          Underdog root cause: {audit.underdogExactFailure || audit.underdogFailurePoint}
+        </p>
+      ) : null}
+      {audit?.prizepicksEndpointDeprecated || audit?.underdogEndpointDeprecated ? (
+        <p className="provider-coverage-audit-section__bottleneck" role="alert">
+          Endpoint deprecated — live provider route may have changed
+        </p>
       ) : null}
       {audit?.cacheFallbackStage ? (
         <p className="provider-coverage-audit-section__note">Cache fallback: {audit.cacheFallbackStage}</p>

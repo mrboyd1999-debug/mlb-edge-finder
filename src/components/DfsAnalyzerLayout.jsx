@@ -17,6 +17,7 @@ import ProviderFeedModeBanner from "./ProviderFeedModeBanner.jsx";
 import ProviderFailureReasons from "./ProviderFailureReasons.jsx";
 import ProviderCoverageAuditSection from "./ProviderCoverageAuditSection.jsx";
 import LiveFeedDiagnosticsPanel from "./LiveFeedDiagnosticsPanel.jsx";
+import LiveFeedTestPanel from "./LiveFeedTestPanel.jsx";
 import RenderingSourceDiagnosticsPanel from "./RenderingSourceDiagnosticsPanel.jsx";
 import { readSettingsMeta } from "../services/runtimeSettings.js";
 import { isDebugModeEnabled } from "../utils/devMode.js";
@@ -110,6 +111,8 @@ function DfsAnalyzerLayout({
       <ProviderCoverageAuditSection audit={providerCoverageAudit} loading={loading} />
 
       <LiveFeedDiagnosticsPanel audit={providerCoverageAudit} />
+
+      <LiveFeedTestPanel />
 
       <RenderingSourceDiagnosticsPanel audit={renderSourceAudit} />
 

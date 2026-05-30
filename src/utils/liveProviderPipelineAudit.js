@@ -6,14 +6,15 @@ import { countMergedProjections } from "./projectionCoverageAudit.js";
 import { normalizeSource } from "./normalizeSource.js";
 import { getPrizePicksDiagnostics } from "./prizepicksDiagnostics.js";
 import { getProviderFetchDiagnostics } from "./providerFetchDiagnostics.js";
+import {
+  LIVE_STAGE_LABELS,
+  auditProviderEndpoints,
+  detectEndpointDeprecated,
+  resolveExactFailureReason,
+} from "./liveFeedFailureAnalysis.js";
 
-export const PIPELINE_STAGE_LABELS = {
-  FETCHED: "FETCHED",
-  PARSED: "PARSED",
-  NORMALIZED: "NORMALIZED",
-  PROJECTED: "PROJECTED",
-  VERIFIED: "VERIFIED",
-};
+/** @deprecated use LIVE_STAGE_LABELS for ingestion diagnostics display */
+export const PIPELINE_STAGE_LABELS = LIVE_STAGE_LABELS;
 
 export const FAILURE_POINTS = {
   NONE: "",
@@ -138,18 +139,43 @@ function buildProviderPipelineRow(
           props.length
       );
   const platformDisplay = filterPlatformProps(displayProps, platformKey);
+  const filtered = countUsableProps(props.length ? props : platformDisplay);
   const normalized = liveFetchFailed
-    ? finiteCount(fetchDiag.finalPropsCount)
-    : countUsableProps(props.length ? props : platformDisplay);
+    ? finiteCount(fetchDiag.finalPropsCount || fetchDiag.parsedPropsCount)
+    : finiteCount(
+        sourceMeta.propsAfterParsing ??
+          result?.debug?.propsAfterParsing ??
+          parsed
+      );
   const projected = countMergedProjections(platformDisplay.length ? platformDisplay : props);
   const verified = countVerifiedProps(platformDisplay);
 
+  const endpointDeprecated = detectEndpointDeprecated({
+    httpStatus: fetchDiag.httpStatus,
+    lastError: fetchDiag.lastError || sourceMeta.message,
+    endpointsTried: sourceMeta.endpointsTried || result?.debug?.endpointsTried,
+  });
+
+  const exactFailure = resolveExactFailureReason({
+    httpStatus: fetchDiag.httpStatus,
+    timedOut,
+    notConfigured,
+    lastError: fetchDiag.lastError || fetchDiag.failureReason || sourceMeta.message || result?.warnings?.[0] || "",
+    fetched,
+    parsed,
+    normalized,
+    filtered,
+    endpointDeprecated,
+    nonJson: Boolean(fetchDiag.blockedPayloadDetected || /non-json|invalid json/i.test(String(fetchDiag.lastError || ""))),
+    usedCache,
+    liveFetchFailed,
+  });
+
   const stages = {
-    [PIPELINE_STAGE_LABELS.FETCHED]: fetched,
-    [PIPELINE_STAGE_LABELS.PARSED]: parsed,
-    [PIPELINE_STAGE_LABELS.NORMALIZED]: normalized,
-    [PIPELINE_STAGE_LABELS.PROJECTED]: projected,
-    [PIPELINE_STAGE_LABELS.VERIFIED]: verified,
+    [LIVE_STAGE_LABELS.FETCHED]: fetched,
+    [LIVE_STAGE_LABELS.PARSED]: parsed,
+    [LIVE_STAGE_LABELS.NORMALIZED]: normalized,
+    [LIVE_STAGE_LABELS.FILTERED]: filtered,
   };
 
   const failurePoint = resolveProviderFailurePoint({
@@ -168,6 +194,7 @@ function buildProviderPipelineRow(
   return {
     platform: platformKey,
     requestUrl: fetchDiag.requestUrl || sourceMeta.apiUrl || result?.debug?.apiUrl || "",
+    endpoint: fetchDiag.requestUrl || sourceMeta.apiUrl || result?.debug?.apiUrl || "",
     urlStatus: formatUrlStatus({
       httpStatus: fetchDiag.httpStatus,
       timedOut,
@@ -177,8 +204,10 @@ function buildProviderPipelineRow(
       usedCache,
       liveFetchFailed,
     }),
-    responseSize: finiteCount(fetchDiag.payloadSize),
     httpStatus: fetchDiag.httpStatus ?? null,
+    responseSize: finiteCount(fetchDiag.payloadSize),
+    responseBytes: finiteCount(fetchDiag.payloadSize),
+    responseTimeMs: fetchDiag.responseTimeMs ?? null,
     lastSuccessfulFetchAt:
       sourceMeta.lastSuccessfulFetchAt ||
       result?.lastSuccessfulFetchAt ||
@@ -188,9 +217,13 @@ function buildProviderPipelineRow(
     fetched,
     parsed,
     normalized,
+    filtered,
     projected,
     verified,
     failurePoint,
+    exactFailureReason: exactFailure.label || "",
+    exactFailureCode: exactFailure.code || "",
+    endpointDeprecated,
     timedOut,
     notConfigured,
     usedCache,
@@ -234,12 +267,14 @@ export function buildLiveProviderPipelineAudit({
 
   const cacheBoardProps = finiteCount(debugInfo?.providerCoverageAudit?.cacheUsable);
   const liveCombinedFetched = prizepicks.fetched + underdog.fetched;
+  const endpointAudit = auditProviderEndpoints();
 
   return {
     prizepicks,
     underdog,
     cacheBoardProps,
     liveCombinedFetched,
+    endpointAudit,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -266,7 +301,20 @@ export function logLiveProviderPipelineTrace(audit = {}) {
       parsed: row.parsed,
       failurePoint: row.normalized === 0 && row.parsed > 0 ? FAILURE_POINTS.NORMALIZATION : "",
     });
+    console.log(`[Live Pipeline] ${key} filter result`, {
+      filtered: row.filtered,
+      normalized: row.normalized,
+      failurePoint: row.filtered === 0 && row.normalized > 0 ? FAILURE_POINTS.FILTER : "",
+    });
     console.log(`[Live Pipeline] ${key} stage counts`, row.stages);
+    if (row.exactFailureReason) {
+      console.warn(`[Live Pipeline] ${key} exact failure:`, row.exactFailureReason, {
+        code: row.exactFailureCode,
+        httpStatus: row.httpStatus,
+        responseTimeMs: row.responseTimeMs,
+        responseBytes: row.responseBytes,
+      });
+    }
     if (row.failurePoint) {
       console.warn(`[Live Pipeline] ${key} failure point:`, row.failurePoint, {
         lastPhase: row.lastPhase,
@@ -291,8 +339,12 @@ export function mergeLiveFeedDiagnosticsIntoAudit(coverageAudit = {}, livePipeli
     liveFeedDiagnostics: livePipelineAudit,
     prizepicksLiveFetched: pp.fetched,
     underdogLiveFetched: ud.fetched,
-    prizepicksFailurePoint: pp.failurePoint || "",
-    underdogFailurePoint: ud.failurePoint || "",
+    prizepicksFailurePoint: pp.exactFailureReason || pp.failurePoint || "",
+    underdogFailurePoint: ud.exactFailureReason || ud.failurePoint || "",
+    prizepicksExactFailure: pp.exactFailureReason || "",
+    underdogExactFailure: ud.exactFailureReason || "",
+    prizepicksEndpointDeprecated: pp.endpointDeprecated,
+    underdogEndpointDeprecated: ud.endpointDeprecated,
     prizepicksUrlStatus: pp.urlStatus,
     underdogUrlStatus: ud.urlStatus,
     prizepicksResponseSize: pp.responseSize,

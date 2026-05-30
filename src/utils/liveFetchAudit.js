@@ -34,6 +34,11 @@ export function logLiveFetchResult(label = "", result = {}) {
     normalized: normalizedCount,
     failure: parsedCount > 0 && normalizedCount === 0 ? "normalization failure" : "",
   });
+  console.info(`[Live Fetch] ${label} filter result`, {
+    normalized: normalizedCount,
+    filtered: normalizedCount,
+    failure: "",
+  });
   return payload;
 }
 
