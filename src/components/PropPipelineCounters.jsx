@@ -13,8 +13,13 @@ function ProviderStatusLine({ label, row = {} }) {
   return `${label}: ${finalCount || parsed} props · ${ms} · HTTP ${status}${flag}${reasonSuffix}`;
 }
 
-function PropPipelineCounters({ counts = null, projectionCoverageAudit = null, compact = false }) {
-  if (!counts && !projectionCoverageAudit) return null;
+function PropPipelineCounters({
+  counts = null,
+  projectionCoverageAudit = null,
+  statsAttachmentAudit = null,
+  compact = false,
+}) {
+  if (!counts && !projectionCoverageAudit && !statsAttachmentAudit) return null;
   const providerDiag =
     counts.providerFetchDiagnostics ||
     (typeof window !== "undefined" ? window.__PROVIDER_FETCH_DIAGNOSTICS__ : null) ||
@@ -33,8 +38,12 @@ function PropPipelineCounters({ counts = null, projectionCoverageAudit = null, c
   } = counts || {};
 
   const coverageAudit = projectionCoverageAudit || counts?.projectionCoverageAudit || null;
+  const attachAudit = statsAttachmentAudit || counts?.statsAttachmentAudit || null;
   const coverageLine = coverageAudit
     ? `Coverage: ${coverageAudit.projectedProps ?? projected} projected · ${coverageAudit.historicalMatches ?? 0} historical · ${coverageAudit.historicalMissing ?? 0} missing · ${coverageAudit.projectionCoveragePercent ?? 0}%`
+    : "";
+  const attachLine = attachAudit
+    ? `Attach: ${attachAudit.profilesFound ?? 0} found · ${attachAudit.profilesMissing ?? 0} missing · ${attachAudit.gameLogsAttached ?? 0} logs · ${attachAudit.historicalCoveragePercent ?? 0}%`
     : "";
 
   if (compact) {
@@ -43,6 +52,7 @@ function PropPipelineCounters({ counts = null, projectionCoverageAudit = null, c
         Raw: {raw} · Normalized: {normalized} · Projected: {projected} · Verified: {verified} · Rendered:{" "}
         {rendered}
         {coverageLine ? ` · ${coverageLine}` : ""}
+        {attachLine ? ` · ${attachLine}` : ""}
       </p>
     );
   }
@@ -52,6 +62,13 @@ function PropPipelineCounters({ counts = null, projectionCoverageAudit = null, c
       <p className="prop-pipeline-counters">
         Raw: {raw} · Normalized: {normalized} · Projected: {projected} · Verified: {verified} · Rendered: {rendered}
       </p>
+      {attachAudit ? (
+        <p className="prop-pipeline-counters prop-pipeline-counters--meta" aria-label="Historical stats attachment">
+          Profiles Found: {attachAudit.profilesFound ?? 0} · Profiles Missing: {attachAudit.profilesMissing ?? 0} ·
+          Game Logs Attached: {attachAudit.gameLogsAttached ?? 0} · Historical Coverage %:{" "}
+          {attachAudit.historicalCoveragePercent ?? 0}
+        </p>
+      ) : null}
       {coverageAudit ? (
         <p className="prop-pipeline-counters prop-pipeline-counters--meta" aria-label="Projection coverage audit">
           Projected Props: {coverageAudit.projectedProps ?? projected} · Historical Matches:{" "}

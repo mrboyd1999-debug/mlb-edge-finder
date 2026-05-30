@@ -1,4 +1,5 @@
 import { canonicalMarketKey } from "./marketNormalization.js";
+import { marketsMatchForHistoricalAttach } from "./mlbHistoricalStatMapping.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
 
 /** Common MLB broadcast / DFS aliases → canonical normalized name fragment. */
@@ -174,10 +175,23 @@ function isUsableProfile(profile = {}) {
   return Boolean(profile && !profile.fallback && !profile.sparse);
 }
 
+function isHistoricalAttachProfile(profile = {}) {
+  if (!profile || profile.fallback) return false;
+  if (isUsableProfile(profile)) return true;
+  const hasAverages =
+    Number.isFinite(Number(profile.last5Average)) ||
+    Number.isFinite(Number(profile.last10Average)) ||
+    Number.isFinite(Number(profile.seasonAverage));
+  const hasSplits = Array.isArray(profile.splits) && profile.splits.length >= 3;
+  return Boolean(hasAverages || hasSplits || profile.hasGameLogs);
+}
+
 function scoreProfileMatch(prop = {}, profile = {}, { exactStat = true } = {}) {
   const propStatKey = propStatCanonical(prop);
   const profileStatKey = profileStatCanonical(profile);
-  if (exactStat && propStatKey && profileStatKey && propStatKey !== profileStatKey) return 0;
+  if (exactStat && propStatKey && profileStatKey && !marketsMatchForHistoricalAttach(propStatKey, profileStatKey)) {
+    return 0;
+  }
 
   const propSport = String(prop.sport || resolvePropSport(prop) || "").toLowerCase();
   const profileSport = String(profile.sport || "").toLowerCase();
@@ -224,16 +238,16 @@ export function findStatProfile(statsMap, prop) {
 
   const primary = statProfileKey({ ...prop, playerName, sport: prop.sport || resolvePropSport(prop) || "MLB" });
   const direct = statsMap.get(primary);
-  if (direct && isUsableProfile(direct) && profileStatCanonical(direct) === propStatKey) {
+  if (direct && isHistoricalAttachProfile(direct) && marketsMatchForHistoricalAttach(direct.statType || propStatKey, prop.statType)) {
     return direct;
   }
 
   const playerId = resolvePropPlayerId(prop);
   if (playerId) {
     for (const profile of statsMap.values()) {
-      if (!isUsableProfile(profile)) continue;
+      if (!isHistoricalAttachProfile(profile)) continue;
       if (profilePlayerId(profile) !== playerId) continue;
-      if (profileStatCanonical(profile) !== propStatKey) continue;
+      if (!marketsMatchForHistoricalAttach(profile.statType || profileStatCanonical(profile), prop.statType)) continue;
       return profile;
     }
   }
@@ -244,7 +258,11 @@ export function findStatProfile(statsMap, prop) {
         .filter(Boolean)
         .join("|")
     );
-    if (byPlayerStat && isUsableProfile(byPlayerStat) && profileStatCanonical(byPlayerStat) === propStatKey) {
+    if (
+      byPlayerStat &&
+      isHistoricalAttachProfile(byPlayerStat) &&
+      marketsMatchForHistoricalAttach(byPlayerStat.statType || propStatKey, prop.statType)
+    ) {
       return byPlayerStat;
     }
   }
@@ -258,6 +276,22 @@ export function findStatProfile(statsMap, prop) {
 export function findPlayerHistoricalProfile(statsMap, prop) {
   const exact = findStatProfile(statsMap, prop);
   if (exact) return exact;
+
+  const playerName = resolvePropPlayerName(prop);
+  let bestSplitProfile = null;
+  let bestSplitCount = 0;
+  for (const profile of statsMap.values()) {
+    if (!profile || profile.fallback) continue;
+    if (!playerNamesMatch(playerName, profile.playerName)) continue;
+    const splitCount = Array.isArray(profile.splits)
+      ? profile.splits.length
+      : Number(profile.sampleSize) || 0;
+    if (splitCount > bestSplitCount) {
+      bestSplitCount = splitCount;
+      bestSplitProfile = profile;
+    }
+  }
+  if (bestSplitProfile?.splits?.length >= 3) return bestSplitProfile;
 
   const playerId = resolvePropPlayerId(prop);
   if (playerId) {

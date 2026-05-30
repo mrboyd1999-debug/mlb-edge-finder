@@ -1623,6 +1623,24 @@ function average(values) {
   return clean.reduce((sum, value) => sum + value, 0) / clean.length;
 }
 
+/** Compute Last5 / Last10 / Season from game log splits for a prop market. */
+export function computeMlbHistoricalAveragesFromSplits(splits = [], statType = "", line = null) {
+  const filtered = filterMlbSplitsForStatType(splits, statType);
+  const values = valuesFromMlbSplits(filtered, statType).filter(Number.isFinite);
+  const last5 = values.slice(0, 5);
+  const last10 = values.slice(0, 10);
+  return {
+    last5Average: average(last5),
+    last10Average: average(last10),
+    seasonAverage: average(values),
+    last5HitRate: hitRateVsLine(last5, line),
+    last10HitRate: hitRateVsLine(last10, line),
+    gameLogCount: filtered.length,
+    hasGameLogs: filtered.length >= 3,
+    splits: filtered,
+  };
+}
+
 function uniquePlayerNames(props) {
   return Array.from(new Set(props.map((prop) => prop.playerName).filter(Boolean)));
 }

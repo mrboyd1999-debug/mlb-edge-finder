@@ -239,6 +239,10 @@ import {
   logProjectionCoverageAudit,
 } from "./utils/projectionCoverageAudit.js";
 import {
+  attachHistoricalStatsToProps,
+  buildStatsAttachmentMetrics,
+} from "./utils/historicalStatsLoader.js";
+import {
   buildGuaranteedBaseFeedDisplay,
   ensureMlbSportOnProps,
   logPipelinePropCounts,
@@ -2418,6 +2422,16 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         gameLogsFound,
       });
       logProjectionCoverageAudit(debugInfo.projectionCoverageAudit);
+
+      const historicalContext = {
+        statsMap: statsApplied.stats instanceof Map ? statsApplied.stats : null,
+        seasonStats: seasonStatsData,
+        logAttach: import.meta.env.DEV,
+      };
+      allDisplayProps = attachHistoricalStatsToProps(allDisplayProps, historicalContext);
+      workingNormalProps = attachHistoricalStatsToProps(workingNormalProps, historicalContext);
+      workingActiveProps = attachHistoricalStatsToProps(workingActiveProps, historicalContext);
+      debugInfo.statsAttachmentAudit = buildStatsAttachmentMetrics(allDisplayProps, historicalContext);
       if (import.meta.env.DEV && allDisplayProps[0]) {
         emitSportDetectionDebug(allDisplayProps[0]);
       }
@@ -3883,6 +3897,7 @@ export default function DFSPropsApp() {
       verified: diagnostics.verified,
       projectionStats,
       projectionCoverageAudit: debugInfo?.projectionCoverageAudit || null,
+      statsAttachmentAudit: debugInfo?.statsAttachmentAudit || null,
       filteredMissingProjection: audit?.filteredMissingProjection || 0,
       filteredLowConfidence: audit?.filteredLowConfidence || 0,
       filteredWeakEdge: audit?.filteredWeakEdge || 0,

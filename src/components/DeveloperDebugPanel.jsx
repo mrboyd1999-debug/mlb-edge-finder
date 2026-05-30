@@ -22,6 +22,7 @@ function DeveloperDebugPanel({
   rejectionAudit = null,
   bestPlaysFilter = null,
   projectionCoverageAudit = null,
+  statsAttachmentAudit = null,
   showDebugPanels = false,
   onShowDebugPanelsChange,
   debugModeEnabled = false,
@@ -29,11 +30,13 @@ function DeveloperDebugPanel({
 }) {
   const ppFeed = feedHealthContext?.PrizePicks || apiHealth?.PrizePicks || {};
   const coverageAudit = projectionCoverageAudit || rejectionAudit?.projectionCoverageAudit || null;
+  const attachAudit = statsAttachmentAudit || rejectionAudit?.statsAttachmentAudit || null;
   return (
     <div className="developer-debug-panel">
       <PropPipelineCounters
         counts={bestPlaysFilter?.pipelineCounts || null}
         projectionCoverageAudit={coverageAudit}
+        statsAttachmentAudit={attachAudit}
       />
       <ProviderFeedDiagnosticsPanel />
       <PrizePicksDiagnosticsPanel diagnostics={prizePicksDiagnostics} feedRow={ppFeed} />
@@ -101,6 +104,16 @@ function DeveloperDebugPanel({
               <p style={styles.compactFlags}>
                 MLB usable on board: {feedHealthContext?.Underdog?.boardCount ?? apiHealth?.Underdog?.usableCount ?? 0}
               </p>
+              {attachAudit ? (
+                <div>
+                  <p style={{ ...styles.compactFlags, marginBottom: 4 }}>Historical stats attachment:</p>
+                  <p style={{ ...styles.compactFlags, margin: "2px 0" }}>
+                    Profiles Found: {attachAudit.profilesFound ?? 0} · Profiles Missing:{" "}
+                    {attachAudit.profilesMissing ?? 0} · Game Logs Attached: {attachAudit.gameLogsAttached ?? 0} ·
+                    Historical Coverage %: {attachAudit.historicalCoveragePercent ?? 0}
+                  </p>
+                </div>
+              ) : null}
               {coverageAudit ? (
                 <div>
                   <p style={{ ...styles.compactFlags, marginBottom: 4 }}>Projection coverage audit:</p>
