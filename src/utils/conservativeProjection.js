@@ -98,12 +98,16 @@ export function computeAdjustedConfidence(prop = {}) {
   const projection = resolveProjectionValue(prop);
   const modelConfidence = computeMlbPlayConfidence(prop, projection);
   const base = finiteOr(prop.confidenceScore ?? prop.confidence, NaN);
-  let adjusted = Number.isFinite(base) ? Math.round(base * 0.35 + modelConfidence * 0.65) : modelConfidence;
+  let adjusted = Number.isFinite(base) ? base * 0.35 + modelConfidence * 0.65 : modelConfidence;
   if (isLowMatchupProp(prop)) adjusted -= 3;
   else if (hasMissingMatchupData(prop)) adjusted -= 10;
   if (hasMissingOpponentData(prop)) adjusted -= 6;
   if (hasMissingSportsbookComparison(prop)) adjusted -= 4;
-  return clamp(Math.round(adjusted), 0, 100);
+  const line = finiteOr(prop.line, NaN);
+  if (projection != null && Number.isFinite(line) && line > 0) {
+    adjusted += Math.min(3, (Math.abs(projection - line) / line) * 8);
+  }
+  return clamp(Math.round(adjusted * 100) / 100, 0, 100);
 }
 
 export function resolveTierProjectionValue(prop = {}) {

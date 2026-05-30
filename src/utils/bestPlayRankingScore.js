@@ -34,6 +34,9 @@ export function resolveNormalizedEdgeScore(prop = {}) {
 
 export function resolvePlayabilityScore(prop = {}) {
   const breakdown = prop.playabilityBreakdown ?? prop.playabilityAudit;
+  if (breakdown?.weightedRaw != null && Number.isFinite(Number(breakdown.weightedRaw))) {
+    return Number(breakdown.weightedRaw);
+  }
   if (breakdown?.finalPlayability != null && Number.isFinite(Number(breakdown.finalPlayability))) {
     return Number(breakdown.finalPlayability);
   }
@@ -55,7 +58,8 @@ export function computeTopPickScore(prop = {}) {
   );
   const playability = resolvePlayabilityScore(prop);
   const edgeNorm = resolveNormalizedEdgeScore(prop);
-  return probability * 0.4 + confidence * 0.3 + playability * 0.2 + edgeNorm * 0.1;
+  const score = probability * 0.4 + confidence * 0.3 + playability * 0.2 + edgeNorm * 0.1;
+  return Math.round(score * 100) / 100;
 }
 
 export const computeVerifiedRankingScore = computeTopPickScore;
@@ -125,7 +129,19 @@ export function compareVerifiedPlaysRank(a = {}, b = {}) {
   const probB = finite(b.probabilityScore ?? b.verifiedProbability, 0);
   if (probB !== probA) return probB - probA;
 
-  return resolveRankingEdgePercent(b) - resolveRankingEdgePercent(a);
+  const edgeA = resolveRankingEdgePercent(a);
+  const edgeB = resolveRankingEdgePercent(b);
+  if (edgeB !== edgeA) return edgeB - edgeA;
+
+  const scoreA = computeTopPickScore(a);
+  const scoreB = computeTopPickScore(b);
+  if (scoreB !== scoreA) return scoreB - scoreA;
+
+  const projA = finite(a.projection ?? a.projectedValue, 0);
+  const projB = finite(b.projection ?? b.projectedValue, 0);
+  if (projB !== projA) return projB - projA;
+
+  return String(a.playerName || a.player || "").localeCompare(String(b.playerName || b.player || ""));
 }
 
 export const compareVerifiedRankingPlays = compareVerifiedPlaysRank;

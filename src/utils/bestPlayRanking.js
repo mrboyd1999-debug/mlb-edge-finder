@@ -18,7 +18,7 @@ import {
   classifyVerifiedTier,
   sanitizeProjectionValue,
 } from "./bestPlaysPipelineDebug.js";
-import { computeMlbPlayConfidence } from "./mlbPlayConfidence.js";
+import { computeMlbPlayConfidence, computeMlbConfidenceBreakdown } from "./mlbPlayConfidence.js";
 import { attachBestPlayExplanation } from "./bestPlayExplanation.js";
 import { attachModelValidationFields } from "./modelValidation.js";
 import {
@@ -225,6 +225,9 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     prop.displayConfidenceScore ??
     prop.confidenceScore ??
     prop.confidence;
+  const confidenceBreakdown =
+    prop.confidenceBreakdown ??
+    computeMlbConfidenceBreakdown({ ...prop, projection }, projection);
   const sanityAudit = buildProjectionSanityAudit({
     ...prop,
     projection,
@@ -352,6 +355,7 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     playabilityScore,
     playabilityBreakdown,
     playabilityAudit: playabilityBreakdown,
+    confidenceBreakdown,
     researchReasons: playability.researchReasons,
     whyNotPlayable: playability.whyNotPlayable,
     direction,

@@ -38,6 +38,22 @@ function round1(value) {
   return Math.round(Number(value) * 10) / 10;
 }
 
+function round2(value) {
+  return Math.round(Number(value) * 100) / 100;
+}
+
+function computeProjectionSpreadContribution(projection, line, edgePercent) {
+  const proj = finite(projection);
+  const ln = finite(line);
+  if (proj == null || ln == null || ln <= 0) return 0;
+  const spreadRatio = Math.abs(proj - ln) / ln;
+  let points = Math.min(spreadRatio * 32, 9);
+  const edgePct = Math.abs(finite(edgePercent) ?? 0);
+  points += Math.min(edgePct * 0.06, 3.5);
+  points += Math.min(Math.abs(proj) * 0.002, 1.2);
+  return round2(points);
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -201,6 +217,7 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
   const edgeContribution = computeEdgeContribution(edge, edgePercent, hitRates, lean);
   const matchupAdjustment = computeMatchupAdjustment(prop);
   const dataQualityAdjustment = computeDataQualityAdjustment(prop);
+  const projectionSpreadContribution = computeProjectionSpreadContribution(projection, line, edgePercent);
 
   let probability = BASE_PROBABILITY;
   probability += last5Contribution;
@@ -209,10 +226,11 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
   probability += edgeContribution;
   probability += matchupAdjustment;
   probability += dataQualityAdjustment;
+  probability += projectionSpreadContribution;
 
   const verified = Boolean(options.verified);
   const ceiling = verified ? CALIBRATION_MAX_VERIFIED : CALIBRATION_MAX_RESEARCH;
-  probability = clamp(round1(probability), CALIBRATION_MIN_PROBABILITY, ceiling);
+  probability = clamp(round2(probability), CALIBRATION_MIN_PROBABILITY, ceiling);
 
   const inputs = {
     last5HitRate: hitRates.last5Label,
@@ -227,6 +245,7 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
     edgeContribution,
     matchupAdjustmentValue: matchupAdjustment,
     dataQualityAdjustment,
+    projectionSpreadContribution,
     lean,
   };
 
@@ -242,14 +261,16 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
       edgeContribution,
       matchupAdjustment,
       dataQualityAdjustment,
-      rawTotal: round1(
+      projectionSpreadContribution,
+      rawTotal: round2(
         BASE_PROBABILITY +
           last5Contribution +
           last10Contribution +
           seasonContribution +
           edgeContribution +
           matchupAdjustment +
-          dataQualityAdjustment
+          dataQualityAdjustment +
+          projectionSpreadContribution
       ),
       ceiling,
     },

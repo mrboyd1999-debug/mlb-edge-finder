@@ -16,6 +16,12 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function round2(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  return Math.round(num * 100) / 100;
+}
+
 /** Missing historical data → neutral 50, not 0. */
 export function computeHistoricalPlayabilityComponent(prop = {}) {
   const historical = resolveHistoricalDataPresent(prop);
@@ -30,7 +36,7 @@ export function computeHistoricalPlayabilityComponent(prop = {}) {
   if (last10Hit != null) score += (last10Hit - 0.5) * 18;
   if (last5Hit != null) score += (last5Hit - 0.5) * 14;
 
-  return clamp(Math.round(score), 30, 92);
+  return round2(clamp(score, 30, 92));
 }
 
 /** Missing Last5/Last10 → neutral 50 with no negative penalty. */
@@ -58,7 +64,7 @@ export function computeTrendPlayabilityComponent(prop = {}) {
     score += Math.max(-6, Math.min(6, favor * 3));
   }
 
-  return clamp(Math.round(score), 35, 88);
+  return round2(clamp(score, 35, 88));
 }
 
 export function computeProjectionPlayabilityComponent(prop = {}, metrics = {}) {
@@ -81,7 +87,12 @@ export function computeProjectionPlayabilityComponent(prop = {}, metrics = {}) {
   const probability = finite(metrics.probabilityScore ?? prop.probabilityScore ?? prop.verifiedProbability);
   if (probability != null) score += (probability - 50) * 0.22;
 
-  return clamp(Math.round(score), 35, 92);
+  const projection = finite(metrics.projection ?? prop.projection ?? prop.projectedValue);
+  if (projection != null && line != null && line > 0) {
+    score += Math.min(12, (Math.abs(projection - line) / line) * 35);
+  }
+
+  return round2(clamp(score, 35, 92));
 }
 
 /** Sanity/risk penalties only — never penalize missing history or missing L5/L10. */
@@ -96,7 +107,7 @@ export function computePlayabilityPenaltyComponent(prop = {}, sanityAudit = null
 
   if (String(prop.riskLevel || "").toUpperCase() === "HIGH") penalty += 6;
 
-  return clamp(Math.round(penalty), 0, 35);
+  return round2(clamp(penalty, 0, 35));
 }
 
 export function computePlayabilityBreakdown(prop = {}, options = {}) {
@@ -127,13 +138,14 @@ export function computePlayabilityBreakdown(prop = {}, options = {}) {
     penaltyComponent;
 
   return {
-    probability: Math.round(probability),
-    confidence: Math.round(confidence),
-    historicalComponent,
-    trendComponent,
-    projectionComponent,
-    penaltyComponent,
-    finalPlayability: clamp(Math.round(weighted), 0, 100),
+    probability: round2(probability),
+    confidence: round2(confidence),
+    historicalComponent: round2(historicalComponent),
+    trendComponent: round2(trendComponent),
+    projectionComponent: round2(projectionComponent),
+    penaltyComponent: round2(penaltyComponent),
+    weightedRaw: round2(weighted),
+    finalPlayability: round2(clamp(weighted, 0, 100)),
   };
 }
 

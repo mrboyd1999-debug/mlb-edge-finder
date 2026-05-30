@@ -92,13 +92,63 @@ const TOP_SCORE_COLUMNS = [
 ];
 
 const TOP_VERIFIED_COLUMNS = [
+  { key: "rank", label: "#" },
   { key: "player", label: "Player" },
   { key: "market", label: "Market" },
-  { key: "probability", label: "Probability", suffix: "%" },
-  { key: "confidence", label: "Confidence", suffix: "%" },
-  { key: "finalPlayability", label: "Playability" },
+  { key: "rawProjection", label: "Raw Proj" },
+  { key: "sportsDataProjection", label: "SDIO Proj" },
+  { key: "marketAverage", label: "Mkt Avg" },
+  { key: "line", label: "Line" },
+  { key: "edge", label: "Edge" },
+  {
+    key: "probability",
+    label: "Probability (raw)",
+    render: (row) => formatMetric(row.probability),
+  },
+  {
+    key: "confidence",
+    label: "Confidence (raw)",
+    render: (row) => formatMetric(row.confidence),
+  },
+  {
+    key: "playability",
+    label: "Playability (raw)",
+    render: (row) => formatMetric(row.playability),
+  },
+  {
+    key: "probabilityFormulaOutput",
+    label: "Prob Formula",
+    render: (row) => formatMetric(row.probabilityFormulaOutput),
+  },
+  {
+    key: "confidenceFormulaOutput",
+    label: "Conf Formula",
+    render: (row) => formatMetric(row.confidenceFormulaOutput),
+  },
+  {
+    key: "playabilityFormulaOutput",
+    label: "Play Formula",
+    render: (row) => formatMetric(row.playabilityFormulaOutput),
+  },
+  { key: "compositeScore", label: "Composite" },
+  {
+    key: "probabilityDisplay",
+    label: "Prob UI",
+    suffix: "%",
+    render: (row) => formatMetric(row.probabilityDisplay, "%"),
+  },
+  {
+    key: "confidenceDisplay",
+    label: "Conf UI",
+    suffix: "%",
+    render: (row) => formatMetric(row.confidenceDisplay, "%"),
+  },
+  {
+    key: "playabilityDisplay",
+    label: "Play UI",
+    render: (row) => formatMetric(row.playabilityDisplay),
+  },
   { key: "verifiedTier", label: "Tier" },
-  { key: "tierLabel", label: "Tier Label" },
 ];
 
 function VerificationFailureBreakdown({ filterDiagnostics = null }) {
@@ -109,6 +159,7 @@ function VerificationFailureBreakdown({ filterDiagnostics = null }) {
   const topConfidenceProps = safeArray(dashboard?.topConfidenceProps);
   const topPlayabilityProps = safeArray(dashboard?.topPlayabilityProps);
   const topVerifiedPlays = safeArray(dashboard?.topVerifiedPlays);
+  const scoreCloneAudit = dashboard?.scoreCloneAudit || null;
 
   const projectedProps =
     breakdown?.propsWithProjections ?? pipelineCounts?.withProjections ?? breakdown?.projected ?? 0;
@@ -197,11 +248,24 @@ function VerificationFailureBreakdown({ filterDiagnostics = null }) {
         </p>
       ) : null}
 
+      {scoreCloneAudit?.suspects?.length ? (
+        <p className="verification-diagnostics__meta verification-failure-breakdown__clone-warning">
+          Score clone audit:{" "}
+          {scoreCloneAudit.suspects
+            .map(({ field, value, count }) => `${field}=${value} (${count} props)`)
+            .join(" · ")}
+          {scoreCloneAudit.identicalScoreGroups
+            ? ` · ${scoreCloneAudit.identicalScoreGroups} identical prob/conf/play triplets`
+            : ""}
+        </p>
+      ) : null}
+
       <AuditTable
-        title="Top 20 Verified Plays"
+        title="Top 20 Verified Plays (full precision, sorted by composite score)"
         rows={topVerifiedPlays}
         columns={TOP_VERIFIED_COLUMNS}
         emptyMessage="No props passed verification and display gates yet."
+        scrollable
       />
 
       <AuditTable

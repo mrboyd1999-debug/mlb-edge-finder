@@ -45,6 +45,10 @@ import { buildProbabilityDistributionAudit,
 import { buildProjectionSanityAudit } from "./projectionSanityAudit.js";
 import { enrichBestPlayRankingFields } from "./bestPlayRanking.js";
 import { computePlayabilityBreakdown } from "./playabilityScoring.js";
+import {
+  buildTopVerifiedScoringAuditRows,
+  detectScoreClonePatterns,
+} from "./scoringPrecisionAudit.js";
 
 export { PROBABILITY_HISTOGRAM_BUCKETS } from "./probabilityDistributionAudit.js";
 
@@ -249,16 +253,7 @@ function failsSanityGate(prop = {}, metrics = {}) {
 }
 
 export function buildTopVerifiedPlaysRows(projectedPool = [], limit = 20) {
-  return [...(projectedPool || [])]
-    .map((prop) => enrichBestPlayRankingFields(prop))
-    .filter((prop) => passesVerifiedTierFilter(prop) && passesTopVerifiedPlaysGate(prop))
-    .sort(compareVerifiedPlaysRank)
-    .slice(0, limit)
-    .map((prop) => ({
-      ...buildPlayabilityAuditRow(prop),
-      verifiedTier: prop.verifiedTier || "—",
-      tierLabel: prop.verifiedTierLabel || (prop.verifiedTier ? `Tier ${prop.verifiedTier}` : "—"),
-    }));
+  return buildTopVerifiedScoringAuditRows(projectedPool, limit);
 }
 
 function countHistoricalDiagnostics(projectedPool = []) {
@@ -689,7 +684,11 @@ export function buildVerificationDashboard(props = [], options = {}) {
   );
   const topConfidenceProps = buildTopConfidenceProps(projectedPool, 10);
   const topPlayabilityProps = buildTopPlayabilityProps(projectedPool, 10);
-  const topVerifiedPlays = buildTopVerifiedPlaysRows(projectedPool, 20);
+  const topVerifiedPlays = buildTopVerifiedScoringAuditRows(projectedPool, 20);
+  const scoreCloneAudit = detectScoreClonePatterns(topVerifiedPlays);
+  if (scoreCloneAudit.suspects.length) {
+    console.warn("[MLB Pipeline] score clone audit", scoreCloneAudit);
+  }
 
   let researchPasses = 0;
   for (const prop of props || []) {
@@ -747,6 +746,7 @@ export function buildVerificationDashboard(props = [], options = {}) {
     topConfidenceProps,
     topPlayabilityProps,
     topVerifiedPlays,
+    scoreCloneAudit,
     ruleRejectionCounts,
     rejectionCounts: verifiedPasses === 0 ? ruleRejectionCounts : null,
     regressionReasons: audit.regressionReasons,
