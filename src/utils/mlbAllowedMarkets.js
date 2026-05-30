@@ -30,6 +30,13 @@ const ALLOWED_MARKET_KEYS = new Set([
   "hitterfantasy",
   "batterfantasy",
   "pitcherfantasy",
+  "stolenbases",
+  "stolenbase",
+  "sb",
+  "pitchesthrown",
+  "pitchcount",
+  "triples",
+  "triple",
 ]);
 
 /** Golf, tennis, soccer, NBA, NFL, NHL, and other non-MLB stat labels. */
@@ -96,6 +103,9 @@ export function resolveSupportedMlbMarketKey(prop = {}) {
   if (/hits?\s*allowed/.test(text)) return "hitsallowed";
   if (/fantasy/.test(text) && /pitch/.test(text)) return "pitchingfantasy";
   if (/fantasy/.test(text)) return "fantasyscore";
+  if (/stolen\s*base|\bsb\b/.test(text)) return "stolenbases";
+  if (/pitches?\s*thrown|pitch\s*count/.test(text)) return "pitchesthrown";
+  if (/\btriple\b|\b3b\b/.test(text)) return "triples";
 
   return "";
 }

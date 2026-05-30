@@ -200,19 +200,9 @@ export function syncMlbStatsStatusFromAttachment(audit = {}, props = [], context
     propsWithHistorical
   );
 
-  if (
-    coveragePercent >= 50 ||
-    propsWithHistorical >= Math.max(10, Math.floor((props.length || profilesFound) * 0.4)) ||
-    gameLogsAttached >= Math.max(10, Math.floor(profilesFound * 0.4))
-  ) {
+  if (propsWithHistorical > 0 || gameLogsAttached > 0 || historicalAttached > 0 || coveragePercent > 0) {
     pipelineStatus.mlbStatsApi.status = "Connected";
     pipelineStatus.mlbStatsApi.lastError = "";
-  } else {
-    pipelineStatus.mlbStatsApi.status = "Warning";
-    pipelineStatus.mlbStatsApi.lastError =
-      coveragePercent > 0
-        ? `Partial historical attachment — ${coveragePercent}% coverage`
-        : "Historical stats partially attached";
   }
   notifyPipelineStatusListeners();
 }

@@ -2,6 +2,7 @@ import { memo } from "react";
 import { styles } from "../theme/styles.js";
 import { HIDDEN_SETTING_DEFS, getEffectiveSetting } from "../services/runtimeSettings.js";
 import PropPipelineCounters from "./PropPipelineCounters.jsx";
+import PipelineCoverageAuditPanel from "./PipelineCoverageAuditPanel.jsx";
 import VerificationDashboard from "./VerificationDashboard.jsx";
 import ApiHealthPanel from "./ApiHealthPanel.jsx";
 import MlbPipelineStatusPanel from "./MlbPipelineStatusPanel.jsx";
@@ -40,6 +41,7 @@ function DeveloperDebugPanel({
         statsAttachmentAudit={attachAudit}
         pipelinePropCountAudit={pipelinePropCountAudit}
       />
+      <PipelineCoverageAuditPanel audit={pipelinePropCountAudit} />
       <ProviderFeedDiagnosticsPanel />
       <PrizePicksDiagnosticsPanel diagnostics={prizePicksDiagnostics} feedRow={ppFeed} />
       <VerificationDashboard dashboard={bestPlaysFilter?.verificationDashboard} />

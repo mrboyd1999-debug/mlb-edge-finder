@@ -3,10 +3,10 @@
  */
 
 import { passesVerifiedBestPlaysFilter } from "./bestPlaysPipelineDebug.js";
-import { countMergedProjections, isMlbProjectionGenerationCandidate } from "./projectionCoverageAudit.js";
+import { countMergedProjections } from "./projectionCoverageAudit.js";
 import {
   isBlockedNonMlbPipelineProp,
-  isSupportedMlbMarket,
+  resolveSupportedMlbMarketKey,
 } from "./mlbAllowedMarkets.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
 import { resolveHistoricalDataPresent } from "./tierHistoricalValidation.js";
@@ -19,13 +19,19 @@ function finiteCount(value) {
 export function createEmptyPipelineRejections() {
   return {
     nonMLB: 0,
+    unsupportedSport: 0,
     unsupportedMarket: 0,
     missingPlayer: 0,
     missingLine: 0,
     missingMarket: 0,
+    missingTeam: 0,
+    badLine: 0,
     duplicate: 0,
     noProjectionFormula: 0,
     noHistoricalData: 0,
+    noPlayerMatch: 0,
+    providerTimeout: 0,
+    parserFailed: 0,
     other: 0,
   };
 }
@@ -34,38 +40,58 @@ export function countVerifiedFilterProps(props = []) {
   return (props || []).filter((prop) => passesVerifiedBestPlaysFilter(prop)).length;
 }
 
-/** Count rejections at each MLB pipeline gate without silently dropping props. */
-export function auditPipelineFilterStages(props = [], { seenIds = null } = {}) {
+function propDedupeKey(prop = {}) {
+  return (
+    String(prop.id || "").trim() ||
+    `${String(prop.playerName || prop.player || "").trim()}|${String(prop.statType || prop.market || prop.propType || "").trim()}|${Number(prop.line)}|${String(prop.source || prop.platform || "").trim()}`
+  );
+}
+
+function isValidPropLine(prop = {}) {
+  const line = Number(prop.line);
+  return Number.isFinite(line) && line > 0;
+}
+
+/**
+ * Build projection board pool — only hard-drop non-MLB, missing player, bad line.
+ * Unsupported markets stay on board with flags (Research Only path).
+ */
+export function buildMlbProjectionBoardPool(props = [], { seenIds = null } = {}) {
   const rejections = createEmptyPipelineRejections();
   const seen = seenIds instanceof Set ? seenIds : new Set();
+  const afterDuplicateRemoval = [];
   const afterSportFilter = [];
-  const afterMlbOnlyFilter = [];
-  const afterMarketFilter = [];
   const afterPlayerNormalization = [];
+  const afterLineValidation = [];
+  const boardProps = [];
   const projectionCandidates = [];
+  let unsupportedMarketKept = 0;
 
   for (const prop of props || []) {
     if (!prop) continue;
 
-    const id = String(prop.id || "").trim();
-    if (id && seen.has(id)) {
+    const dedupeKey = propDedupeKey(prop);
+    if (seen.has(dedupeKey)) {
       rejections.duplicate += 1;
       continue;
     }
-    if (id) seen.add(id);
+    seen.add(dedupeKey);
+    afterDuplicateRemoval.push(prop);
 
-    if (isBlockedNonMlbPipelineProp(prop) || resolvePropSport(prop) !== "MLB") {
+    if (isBlockedNonMlbPipelineProp(prop)) {
+      rejections.nonMLB += 1;
+      continue;
+    }
+    const sport = resolvePropSport(prop);
+    if (sport && sport !== "MLB") {
+      rejections.unsupportedSport += 1;
+      continue;
+    }
+    if (sport !== "MLB") {
       rejections.nonMLB += 1;
       continue;
     }
     afterSportFilter.push(prop);
-    afterMlbOnlyFilter.push(prop);
-
-    if (!isSupportedMlbMarket(prop)) {
-      rejections.unsupportedMarket += 1;
-      continue;
-    }
-    afterMarketFilter.push(prop);
 
     const playerName = String(prop.playerName || prop.player || "").trim();
     if (!playerName) {
@@ -74,28 +100,61 @@ export function auditPipelineFilterStages(props = [], { seenIds = null } = {}) {
     }
     afterPlayerNormalization.push(prop);
 
-    if (!isMlbProjectionGenerationCandidate(prop)) {
+    if (!isValidPropLine(prop)) {
       const line = Number(prop.line);
-      const statType = String(prop.statType || prop.market || prop.propType || "").trim();
-      if (!Number.isFinite(line) || line <= 0) rejections.missingLine += 1;
-      else if (!statType) rejections.missingMarket += 1;
-      else rejections.other += 1;
+      if (!Number.isFinite(line)) rejections.missingLine += 1;
+      else rejections.badLine += 1;
       continue;
     }
-    projectionCandidates.push(prop);
+    afterLineValidation.push(prop);
+
+    const statType = String(prop.statType || prop.market || prop.propType || "").trim();
+    const marketKey = resolveSupportedMlbMarketKey(prop);
+    if (!statType) rejections.missingMarket += 1;
+    if (!String(prop.team || "").trim()) rejections.missingTeam += 1;
+
+    if (!marketKey) {
+      rejections.unsupportedMarket += 1;
+      unsupportedMarketKept += 1;
+    }
+
+    const enriched = {
+      ...prop,
+      playerName: prop.playerName || playerName,
+      unsupportedMarketForProjection: !marketKey,
+      displayResearchOnly: !marketKey ? true : Boolean(prop.displayResearchOnly),
+      projectionMarketSupported: Boolean(marketKey),
+    };
+    boardProps.push(enriched);
+
+    if (statType && isValidPropLine(enriched)) {
+      projectionCandidates.push(enriched);
+    }
   }
 
+  const afterMarketFilter = boardProps.filter((prop) => prop.projectionMarketSupported);
+
   return {
+    boardProps,
     afterSportFilter,
-    afterMlbOnlyFilter,
+    afterMlbOnlyFilter: afterSportFilter,
+    afterDuplicateRemoval,
     afterMarketFilter,
     afterPlayerNormalization,
+    afterLineValidation,
     projectionCandidates,
+    unsupportedMarketKept,
     rejections,
   };
 }
 
+/** @deprecated use buildMlbProjectionBoardPool for board sizing */
+export function auditPipelineFilterStages(props = [], options = {}) {
+  return buildMlbProjectionBoardPool(props, options);
+}
+
 export function countHistoricalAttachment(props = [], statsMap = null) {
+  void statsMap;
   let attached = 0;
   let missing = 0;
   for (const prop of props || []) {
@@ -106,22 +165,59 @@ export function countHistoricalAttachment(props = [], statsMap = null) {
   return { attached, missing, total: (props || []).length };
 }
 
+export function evaluateCoverageWarning(audit = {}) {
+  const combined = finiteCount(audit.combinedRaw);
+  const board = finiteCount(audit.normalizedProps || audit.afterLineValidation);
+  const projected = finiteCount(audit.projectedProps);
+  const candidates = finiteCount(audit.projectionCandidates);
+  const rejections = audit.rejections || {};
+  const topRejection = Object.entries(rejections)
+    .filter(([, count]) => Number(count) > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))[0];
+
+  const issues = [];
+  if (combined > 0 && combined < 500) {
+    issues.push("Combined raw props under 500 — inspect PrizePicks/Underdog fetch or cache.");
+  }
+  if (combined >= 500 && board < 200) {
+    issues.push("Board collapsed after normalization — inspect parser or sport filter.");
+  }
+  if (board >= 200 && candidates < 100) {
+    issues.push("Projection eligibility under 100 — inspect line/player/statType validation.");
+  }
+  if (candidates >= 100 && projected < Math.min(400, Math.floor(candidates * 0.3))) {
+    issues.push("Projection merge underfilled — inspect MLB Stats fetch cap and player matching.");
+  }
+
+  if (!issues.length) return null;
+
+  return {
+    message: "Coverage warning: projection board is underfilled",
+    issues,
+    topRejectionReason: topRejection ? `${topRejection[0]}: ${topRejection[1]}` : null,
+    dropOffStage: audit.dropOffStage || null,
+    dropOffDetail: audit.dropOffDetail || null,
+  };
+}
+
 export function buildPipelinePropCountAudit({
   rawPrizePicks = 0,
   rawUnderdog = 0,
   combinedRaw = 0,
+  afterCacheMerge = 0,
   normalizedProps = 0,
   afterSportFilter = 0,
   afterMlbOnlyFilter = 0,
   afterMarketFilter = 0,
+  afterDuplicateRemoval = 0,
   afterPlayerNormalization = 0,
+  afterLineValidation = 0,
   projectionCandidates = 0,
   projectedProps = 0,
   afterHistoricalAttachment = 0,
   verifiedProps = 0,
   displayedProps = 0,
   rejections = null,
-  // legacy aliases
   rawPropsFetched = 0,
   afterProjectionFilter = 0,
   afterProjectionMerge = 0,
@@ -130,30 +226,38 @@ export function buildPipelinePropCountAudit({
   const rawPP = finiteCount(rawPrizePicks);
   const rawUD = finiteCount(rawUnderdog);
   const combined = finiteCount(combinedRaw || rawPropsFetched);
+  const cacheMerge = finiteCount(afterCacheMerge || combined);
+  const normalized = finiteCount(normalizedProps);
   const sport = finiteCount(afterSportFilter);
   const mlbOnly = finiteCount(afterMlbOnlyFilter || afterSportFilter);
+  const dupes = finiteCount(afterDuplicateRemoval || normalized);
   const market = finiteCount(afterMarketFilter);
-  const playerNorm = finiteCount(afterPlayerNormalization || afterMarketFilter);
+  const playerNorm = finiteCount(afterPlayerNormalization);
+  const lineValid = finiteCount(afterLineValidation);
   const projCand = finiteCount(projectionCandidates || afterProjectionFilter);
   const projected = finiteCount(projectedProps || afterProjectionMerge);
-  const historical = finiteCount(afterHistoricalAttachment || projected);
+  const historical = finiteCount(afterHistoricalAttachment);
   const verified = finiteCount(verifiedProps || afterVerificationFilter);
   const displayed = finiteCount(displayedProps);
+  const rejectionMap = rejections || createEmptyPipelineRejections();
 
   const stages = [
-    { key: "raw_prizepicks", label: "Raw PrizePicks", count: rawPP },
-    { key: "raw_underdog", label: "Raw Underdog", count: rawUD },
+    { key: "raw_prizepicks", label: "PrizePicks raw props", count: rawPP },
+    { key: "raw_underdog", label: "Underdog raw props", count: rawUD },
     { key: "combined_raw", label: "Combined raw props", count: combined },
-    { key: "normalized", label: "Normalized props", count: finiteCount(normalizedProps) },
+    { key: "cache_merge", label: "After cache merge", count: cacheMerge },
+    { key: "normalized", label: "Normalized props", count: normalized },
     { key: "sport_filter", label: "After sport filter", count: sport },
     { key: "mlb_only_filter", label: "After MLB-only filter", count: mlbOnly },
-    { key: "market_filter", label: "After market filter", count: market },
+    { key: "duplicate_removal", label: "After duplicate removal", count: dupes },
+    { key: "market_filter", label: "After market filter (supported only)", count: market },
     { key: "player_normalization", label: "After player normalization", count: playerNorm },
+    { key: "line_validation", label: "After line validation", count: lineValid },
     { key: "projection_eligibility", label: "After projection eligibility", count: projCand },
     { key: "projected", label: "Projected props", count: projected },
     { key: "historical_attachment", label: "After historical attachment", count: historical },
-    { key: "verification", label: "After verification", count: verified },
-    { key: "displayed", label: "Final displayed plays", count: displayed },
+    { key: "verification", label: "Verified props", count: verified },
+    { key: "displayed", label: "Top displayed plays", count: displayed },
   ];
 
   let dropOffStage = null;
@@ -172,17 +276,20 @@ export function buildPipelinePropCountAudit({
     }
   }
 
-  return {
+  const audit = {
     stages,
     rawPrizePicks: rawPP,
     rawUnderdog: rawUD,
     combinedRaw: combined,
     rawPropsFetched: combined,
-    normalizedProps: finiteCount(normalizedProps),
+    afterCacheMerge: cacheMerge,
+    normalizedProps: normalized,
     afterSportFilter: sport,
     afterMlbOnlyFilter: mlbOnly,
+    afterDuplicateRemoval: dupes,
     afterMarketFilter: market,
     afterPlayerNormalization: playerNorm,
+    afterLineValidation: lineValid,
     projectionCandidates: projCand,
     afterProjectionFilter: projCand,
     projectedProps: projected,
@@ -191,50 +298,41 @@ export function buildPipelinePropCountAudit({
     verifiedProps: verified,
     afterVerificationFilter: verified,
     displayedProps: displayed,
-    rejections: rejections || createEmptyPipelineRejections(),
+    rejections: rejectionMap,
     dropOffStage,
     dropOffDetail,
+    coverageWarning: null,
     updatedAt: new Date().toISOString(),
   };
+
+  audit.coverageWarning = evaluateCoverageWarning(audit);
+  return audit;
 }
 
 export function logPipelinePropCountAudit(audit = {}) {
-  const header = "[Pipeline Prop Counts]";
-  console.info(header, {
-    rawPrizePicks: audit.rawPrizePicks ?? 0,
-    rawUnderdog: audit.rawUnderdog ?? 0,
-    combinedRaw: audit.combinedRaw ?? audit.rawPropsFetched ?? 0,
-    normalizedProps: audit.normalizedProps ?? 0,
-    afterSportFilter: audit.afterSportFilter ?? 0,
-    afterMlbOnlyFilter: audit.afterMlbOnlyFilter ?? 0,
-    afterMarketFilter: audit.afterMarketFilter ?? 0,
-    afterPlayerNormalization: audit.afterPlayerNormalization ?? 0,
-    projectionCandidates: audit.projectionCandidates ?? audit.afterProjectionFilter ?? 0,
-    projectedProps: audit.projectedProps ?? audit.afterProjectionMerge ?? 0,
-    afterHistoricalAttachment: audit.afterHistoricalAttachment ?? 0,
-    verifiedProps: audit.verifiedProps ?? audit.afterVerificationFilter ?? 0,
-    displayedProps: audit.displayedProps ?? 0,
-    dropOffStage: audit.dropOffStage || null,
-    rejections: audit.rejections || {},
-  });
-  console.info(`${header} rawPrizePicks:`, audit.rawPrizePicks ?? 0);
-  console.info(`${header} rawUnderdog:`, audit.rawUnderdog ?? 0);
-  console.info(`${header} combinedRaw:`, audit.combinedRaw ?? audit.rawPropsFetched ?? 0);
-  console.info(`${header} normalizedProps:`, audit.normalizedProps ?? 0);
-  console.info(`${header} afterSportFilter:`, audit.afterSportFilter ?? 0);
-  console.info(`${header} afterMlbOnlyFilter:`, audit.afterMlbOnlyFilter ?? 0);
-  console.info(`${header} afterMarketFilter:`, audit.afterMarketFilter ?? 0);
-  console.info(`${header} afterPlayerNormalization:`, audit.afterPlayerNormalization ?? 0);
-  console.info(`${header} projectionCandidates:`, audit.projectionCandidates ?? audit.afterProjectionFilter ?? 0);
-  console.info(`${header} projectedProps:`, audit.projectedProps ?? audit.afterProjectionMerge ?? 0);
-  console.info(`${header} afterHistoricalAttachment:`, audit.afterHistoricalAttachment ?? 0);
-  console.info(`${header} verifiedProps:`, audit.verifiedProps ?? audit.afterVerificationFilter ?? 0);
-  console.info(`${header} displayedProps:`, audit.displayedProps ?? 0);
+  logPipelineCoverageAudit(audit);
+  return audit;
+}
+
+export function logPipelineCoverageAudit(audit = {}) {
+  console.log("[Pipeline] PrizePicks raw", audit.rawPrizePicks ?? 0);
+  console.log("[Pipeline] Underdog raw", audit.rawUnderdog ?? 0);
+  console.log("[Pipeline] Combined raw", audit.combinedRaw ?? audit.rawPropsFetched ?? 0);
+  console.log("[Pipeline] After cache merge", audit.afterCacheMerge ?? audit.combinedRaw ?? 0);
+  console.log("[Pipeline] After sport filter", audit.afterSportFilter ?? 0);
+  console.log("[Pipeline] After market filter", audit.afterMarketFilter ?? 0);
+  console.log("[Pipeline] After projection eligibility", audit.projectionCandidates ?? audit.afterProjectionFilter ?? 0);
+  console.log("[Pipeline] Projected props", audit.projectedProps ?? audit.afterProjectionMerge ?? 0);
+  console.log("[Pipeline] Verified props", audit.verifiedProps ?? audit.afterVerificationFilter ?? 0);
+
   if (audit.rejections && Object.values(audit.rejections).some((n) => Number(n) > 0)) {
-    console.info(`${header} rejections:`, audit.rejections);
+    console.log("[Pipeline] Rejected by reason", audit.rejections);
   }
   if (audit.dropOffStage) {
-    console.warn(`${header} Primary drop-off at "${audit.dropOffStage}":`, audit.dropOffDetail || "");
+    console.warn("[Pipeline] Primary drop-off:", audit.dropOffStage, audit.dropOffDetail || "");
+  }
+  if (audit.coverageWarning) {
+    console.warn("[Pipeline]", audit.coverageWarning.message, audit.coverageWarning);
   }
   return audit;
 }

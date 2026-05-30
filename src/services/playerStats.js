@@ -41,7 +41,7 @@ const SOCCER_PLAYER_FETCH_LIMIT = 40;
 const API_FOOTBALL_KEY = import.meta.env?.VITE_API_FOOTBALL_KEY || "";
 const API_FOOTBALL_BASE = "/api/api-football";
 const API_FOOTBALL_LEAGUE_IDS = [253, 39, 2, 140, 78, 61, 135];
-const MLB_STATS_FETCH_CAP = 80;
+const MLB_STATS_FETCH_CAP = 400;
 const MLB_STATS_MAP_CACHE_KEY = "latest";
 
 export function readCachedMlbStatsMap() {

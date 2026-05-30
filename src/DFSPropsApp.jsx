@@ -249,7 +249,7 @@ import {
   buildPipelinePropCountAudit,
   countVerifiedFilterProps,
   logPipelinePropCountAudit,
-  auditPipelineFilterStages,
+  buildMlbProjectionBoardPool,
   countHistoricalAttachment,
 } from "./utils/pipelinePropCountAudit.js";
 import { countMergedProjections } from "./utils/projectionCoverageAudit.js";
@@ -1934,6 +1934,12 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     underdog: underdogProps.length,
     merged: mergedProviderProps.length,
   };
+  debugInfo.pipelineProviderRaw = {
+    rawPrizePicks: prizePicksProps.length,
+    rawUnderdog: underdogProps.length,
+    combinedRaw: mergedProviderProps.length,
+    afterCacheMerge: 0,
+  };
   debugInfo.providerFetchDiagnostics = {
     prizepicks: buildProviderEntryDiagnostics(ppEntry, prizePicksResult || ppEntry.result),
     underdog: buildProviderEntryDiagnostics(udEntry, underdogResult || udEntry.result),
@@ -2020,6 +2026,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   }
   rawProps.length = 0;
   rawProps.push(...normalizePropsWithSource(scopedRawProps));
+  if (debugInfo.pipelineProviderRaw) {
+    debugInfo.pipelineProviderRaw.afterCacheMerge = rawProps.length;
+  }
   if (!debugInfo.parsedUnderdogProps?.length) {
     debugInfo.parsedUnderdogProps = filterUnderdogStreakPool(rawProps);
   }
@@ -2383,8 +2392,10 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     normalizedProps: allDisplayProps.length,
     afterSportFilter: 0,
     afterMlbOnlyFilter: 0,
+    afterDuplicateRemoval: 0,
     afterMarketFilter: 0,
     afterPlayerNormalization: 0,
+    afterLineValidation: 0,
     afterProjectionFilter: 0,
     afterProjectionMerge: 0,
     projectedProps: 0,
@@ -2397,30 +2408,28 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
     const normalizedPool = [...allDisplayProps];
     const normalizedPropsSnapshot = normalizedPool.length;
-    const filterStageAudit = auditPipelineFilterStages(normalizedPool);
-    const sportFilteredProps = filterStageAudit.afterSportFilter;
-    const marketFilteredProps = filterStageAudit.afterMarketFilter;
-    const projectionCandidates = filterStageAudit.projectionCandidates;
-    allDisplayProps = marketFilteredProps.length ? marketFilteredProps : sportFilteredProps;
-    const workingNormalAudit = auditPipelineFilterStages(workingNormalProps);
-    const workingActiveAudit = auditPipelineFilterStages(workingActiveProps);
-    workingNormalProps = workingNormalAudit.afterMarketFilter.length
-      ? workingNormalAudit.afterMarketFilter
-      : workingNormalAudit.afterSportFilter;
-    workingActiveProps = workingActiveAudit.afterMarketFilter.length
-      ? workingActiveAudit.afterMarketFilter
-      : workingActiveAudit.afterSportFilter;
+    const boardPool = buildMlbProjectionBoardPool(normalizedPool);
+    const sportFilteredProps = boardPool.afterSportFilter;
+    const marketFilteredProps = boardPool.afterMarketFilter;
+    const projectionCandidates = boardPool.projectionCandidates;
+    allDisplayProps = boardPool.boardProps;
+    const workingNormalPool = buildMlbProjectionBoardPool(workingNormalProps);
+    const workingActivePool = buildMlbProjectionBoardPool(workingActiveProps);
+    workingNormalProps = workingNormalPool.boardProps;
+    workingActiveProps = workingActivePool.boardProps;
     pipelinePropCountSnapshot = {
       normalizedProps: normalizedPropsSnapshot,
       afterSportFilter: sportFilteredProps.length,
-      afterMlbOnlyFilter: filterStageAudit.afterMlbOnlyFilter.length,
+      afterMlbOnlyFilter: boardPool.afterMlbOnlyFilter.length,
+      afterDuplicateRemoval: boardPool.afterDuplicateRemoval.length,
       afterMarketFilter: marketFilteredProps.length,
-      afterPlayerNormalization: filterStageAudit.afterPlayerNormalization.length,
+      afterPlayerNormalization: boardPool.afterPlayerNormalization.length,
+      afterLineValidation: boardPool.afterLineValidation.length,
       afterProjectionFilter: projectionCandidates.length,
       afterProjectionMerge: allDisplayProps.length,
       projectedProps: 0,
       afterHistoricalAttachment: 0,
-      rejections: { ...filterStageAudit.rejections },
+      rejections: { ...boardPool.rejections },
     };
     setPipelineStageCount(PIPELINE_STAGES.NORMALIZED_PROPS_COUNT, allDisplayProps.length);
 
@@ -2430,11 +2439,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     background.sportsDataSeasonStats = seasonStatsData;
 
     const statsFetchProps = pickUniquePropsForStatsFetch(
-      projectionCandidates.length
-        ? projectionCandidates
-        : allDisplayProps.length
-          ? allDisplayProps
-          : workingNormalProps
+      projectionCandidates.length ? projectionCandidates : allDisplayProps.length ? allDisplayProps : workingNormalProps
     );
     traceProjectionExecutionPath("fetchDFSProps:stats-fetch-start", {
       statsFetchPropCount: statsFetchProps.length,
@@ -3096,17 +3101,24 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       ? allDisplayProps
       : displayProps;
   debugInfo.pipelinePropCountAudit = buildPipelinePropCountAudit({
-    rawPrizePicks: Number(prizePicksProps?.length || debugInfo.providerFetchCounts?.prizepicks || 0),
-    rawUnderdog: Number(underdogProps?.length || debugInfo.providerFetchCounts?.underdog || 0),
-    combinedRaw: rawProps.length,
+    rawPrizePicks: Number(
+      debugInfo.pipelineProviderRaw?.rawPrizePicks ?? prizePicksProps?.length ?? debugInfo.providerFetchCounts?.prizepicks ?? 0
+    ),
+    rawUnderdog: Number(
+      debugInfo.pipelineProviderRaw?.rawUnderdog ?? underdogProps?.length ?? debugInfo.providerFetchCounts?.underdog ?? 0
+    ),
+    combinedRaw: Number(debugInfo.pipelineProviderRaw?.combinedRaw ?? mergedProviderProps?.length ?? rawProps.length),
+    afterCacheMerge: Number(debugInfo.pipelineProviderRaw?.afterCacheMerge ?? rawProps.length),
     normalizedProps: pipelinePropCountSnapshot.normalizedProps || parsedCount || allDisplayProps.length,
     afterSportFilter: pipelinePropCountSnapshot.afterSportFilter || allDisplayProps.length,
     afterMlbOnlyFilter: pipelinePropCountSnapshot.afterMlbOnlyFilter || pipelinePropCountSnapshot.afterSportFilter || 0,
-    afterMarketFilter: pipelinePropCountSnapshot.afterMarketFilter || allDisplayProps.length,
-    afterPlayerNormalization:
-      pipelinePropCountSnapshot.afterPlayerNormalization || pipelinePropCountSnapshot.afterMarketFilter || 0,
+    afterDuplicateRemoval:
+      pipelinePropCountSnapshot.afterDuplicateRemoval || pipelinePropCountSnapshot.normalizedProps || 0,
+    afterMarketFilter: pipelinePropCountSnapshot.afterMarketFilter || 0,
+    afterPlayerNormalization: pipelinePropCountSnapshot.afterPlayerNormalization || allDisplayProps.length,
+    afterLineValidation: pipelinePropCountSnapshot.afterLineValidation || allDisplayProps.length,
     projectionCandidates:
-      pipelinePropCountSnapshot.afterProjectionFilter || pipelinePropCountSnapshot.projectedProps || 0,
+      pipelinePropCountSnapshot.afterProjectionFilter || pipelinePropCountSnapshot.projectedProps || allDisplayProps.length,
     projectedProps:
       pipelinePropCountSnapshot.projectedProps ||
       countMergedProjections(allDisplayProps) ||
