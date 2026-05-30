@@ -27,6 +27,7 @@ function BestPlayHeroCard({ prop, onOpen }) {
         ? `${Math.round(Number(enriched.confidenceScore))}%`
         : "—";
   const sideLabel = side === "WATCH" ? "PASS" : formatPlatformSideLabel(enriched);
+  const outlierFlag = enriched.projectionOutlierFlag || enriched.projectionSanityAudit?.outlierFlags?.[0] || "";
   const reason =
     enriched.verifiedPlayExplanation?.reason ||
     enriched.qualifyReason ||
@@ -53,7 +54,9 @@ function BestPlayHeroCard({ prop, onOpen }) {
         }
       }}
     >
-      <p className="best-play-hero-card__eyebrow">#1 Overall Play</p>
+      <p className="best-play-hero-card__eyebrow">
+        #1 Overall Play{outlierFlag ? ` · ${outlierFlag}` : ""}
+      </p>
       <div className="best-play-hero-card__head">
         <PlayerImage prop={enriched} />
         <div>

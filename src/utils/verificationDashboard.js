@@ -34,10 +34,10 @@ import {
   computeStandardEdgePercent,
 } from "./standardPropMetrics.js";
 import { resolveProjectionValue, hasMajorResearchGaps, isLowMatchupProp } from "./conservativeProjection.js";
-import {
-  buildProbabilityDistributionAudit,
+import { buildProbabilityDistributionAudit,
   resolveProbabilityPipelineValues,
 } from "./probabilityDistributionAudit.js";
+import { buildProjectionSanityAudit } from "./projectionSanityAudit.js";
 
 export { PROBABILITY_HISTOGRAM_BUCKETS } from "./probabilityDistributionAudit.js";
 
@@ -268,6 +268,28 @@ function buildMatchupFailureAudit(projectedPool = []) {
   return { passedMatchupCount, failedMatchupCount, topFailedMatchupReasons };
 }
 
+function buildProjectionOutlierAudit(projectedPool = []) {
+  let projectionOutlierCount = 0;
+  const topProjectionOutliers = [];
+
+  for (const prop of projectedPool || []) {
+    const audit = buildProjectionSanityAudit(prop);
+    if (!audit.isOutlier) continue;
+    projectionOutlierCount += 1;
+    if (topProjectionOutliers.length < 8) {
+      topProjectionOutliers.push({
+        player: String(prop.playerName || prop.player || "Unknown").trim(),
+        market: audit.marketLabel,
+        projection: audit.projectionLabel,
+        season: audit.seasonLabel,
+        sanityScore: audit.sanityScore,
+      });
+    }
+  }
+
+  return { projectionOutlierCount, topProjectionOutliers };
+}
+
 function buildRuleRejectionCounts(projectedPool = []) {
   const counts = {};
   for (const prop of projectedPool) {
@@ -338,6 +360,7 @@ export function buildVerificationDashboard(props = [], options = {}) {
   const verifiedPicks = options.verifiedPicks || [];
   const gateMetrics = computeGateMetrics(projectedPool);
   const matchupAudit = buildMatchupFailureAudit(projectedPool);
+  const outlierAudit = buildProjectionOutlierAudit(projectedPool);
   const tierQualified = projectedPool.filter(passesVerifiedBestPlaysFilter);
   const tierCounts = countTierBreakdown(
     verifiedPicks.length ? verifiedPicks : tierQualified
@@ -386,6 +409,8 @@ export function buildVerificationDashboard(props = [], options = {}) {
     passedMatchupCount: matchupAudit.passedMatchupCount,
     failedMatchupCount: matchupAudit.failedMatchupCount,
     topFailedMatchupReasons: matchupAudit.topFailedMatchupReasons,
+    projectionOutlierCount: outlierAudit.projectionOutlierCount,
+    topProjectionOutliers: outlierAudit.topProjectionOutliers,
     tierA: tierCounts.tierA,
     tierB: tierCounts.tierB,
     tierC: tierCounts.tierC,

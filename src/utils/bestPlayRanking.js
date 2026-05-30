@@ -21,6 +21,11 @@ import {
 import { computeMlbPlayConfidence } from "./mlbPlayConfidence.js";
 import { attachBestPlayExplanation } from "./bestPlayExplanation.js";
 import { attachModelValidationFields } from "./modelValidation.js";
+import {
+  applySanityConfidencePenalty,
+  attachProjectionSanityAudit,
+  buildProjectionSanityAudit,
+} from "./projectionSanityAudit.js";
 import { computePlayabilityScore } from "./propCalibration.js";
 import {
   computeTopPickScore,
@@ -195,12 +200,18 @@ export function enrichBestPlayRankingFields(prop = {}) {
     metrics
   );
   const verifiedProbability = playability.probabilityScore ?? metrics.probabilityScore;
-  const displayConfidence =
+  const rawDisplayConfidence =
     playability.displayConfidenceScore ??
     metrics.adjustedConfidence ??
     prop.displayConfidenceScore ??
     prop.confidenceScore ??
     prop.confidence;
+  const sanityAudit = buildProjectionSanityAudit({
+    ...prop,
+    projection,
+    projectedValue: projection,
+  });
+  const displayConfidence = applySanityConfidencePenalty(rawDisplayConfidence, sanityAudit);
   const playabilityScore = Number.isFinite(Number(prop.playabilityScore))
     ? Number(prop.playabilityScore)
     : computePlayabilityScore(
@@ -221,6 +232,7 @@ export function enrichBestPlayRankingFields(prop = {}) {
     probabilityScore: verifiedProbability,
     displayConfidenceScore: displayConfidence,
     playabilityScore,
+    projectionSanityAudit: sanityAudit,
   });
   const edge = metrics.edge ?? (projection != null && line > 0 ? computeStandardEdge(projection, line) : null);
   const edgePercent =
@@ -316,12 +328,18 @@ export function enrichBestPlayRankingFields(prop = {}) {
   ranked.rankScore = computeTopPickScore(ranked);
   ranked.weightedBestPlayScore = ranked.topPickScore;
   ranked.verifiedRankingScore = ranked.topPickScore;
-  return attachModelValidationFields(ranked, {
-    edge,
-    edgePercent,
-    projection,
-    adjustedConfidence: playability.adjustedConfidence,
-  });
+  return attachModelValidationFields(
+    attachProjectionSanityAudit(ranked, {
+      audit: sanityAudit,
+      confidence: displayConfidence,
+    }),
+    {
+      edge,
+      edgePercent,
+      projection,
+      adjustedConfidence: playability.adjustedConfidence,
+    }
+  );
 }
 
 export function passesBestPlaysFilter(prop = {}) {

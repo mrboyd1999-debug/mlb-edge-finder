@@ -5,6 +5,7 @@ import { isReadyToBet, READY_MIN_CONFIDENCE, READY_MIN_DATA_QUALITY, PROJECTION_
 import { readManualStatsForProp } from "../services/pickStore.js";
 import DataQualityBadge from "./DataQualityBadge.jsx";
 import PlayerImage from "./PlayerImage.jsx";
+import ProjectionSanityAuditPanel from "./ProjectionSanityAuditPanel.jsx";
 import {
   formatHitRatePercent,
   resolveBreakdownTitle,
@@ -482,6 +483,12 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
                 />
               ) : null}
             </div>
+          </div>
+        ) : null}
+
+        {prop.projectionSanityAudit?.supported ? (
+          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
+            <ProjectionSanityAuditPanel audit={prop.projectionSanityAudit} />
           </div>
         ) : null}
 

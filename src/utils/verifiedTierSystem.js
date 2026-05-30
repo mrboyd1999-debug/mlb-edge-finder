@@ -18,6 +18,7 @@ import {
   selectHighestTierAPlays,
   NO_TIER_A_PLAYS_MESSAGE,
 } from "./bestPlayRankingScore.js";
+import { demoteTierForProjectionSanity } from "./projectionSanityAudit.js";
 
 export { NO_TIER_A_PLAYS_MESSAGE };
 
@@ -78,7 +79,7 @@ export function classifyVerifiedTier(prop = {}) {
   }
 
   if (probability >= VERIFIED_TIER_A.minProbability && confidence >= VERIFIED_TIER_A.minConfidence) {
-    return VERIFIED_TIER_A.id;
+    return demoteTierForProjectionSanity(VERIFIED_TIER_A.id, prop.projectionSanityAudit);
   }
   if (probability >= VERIFIED_TIER_B.minProbability && confidence >= VERIFIED_TIER_B.minConfidence) {
     return VERIFIED_TIER_B.id;

@@ -355,10 +355,11 @@ export function projectHitsAllowed(prop = {}, profile = {}, context = {}) {
   }
 
   const components = [
-    { label: "Last 5 avg", value: last5, weight: 0.35 },
+    { label: "Last 5 avg", value: last5, weight: 0.3 },
+    { label: "Last 10 avg", value: data.last10Average, weight: 0.15 },
     { label: "Season avg", value: season, weight: 0.3 },
-    { label: "Opponent adjustment", value: opponentAllowedRate(data, "hits"), weight: 0.2 },
-    { label: "Innings factor", value: inningsRate(data), weight: 0.15 },
+    { label: "Opponent adjustment", value: opponentAllowedRate(data, "hits"), weight: 0.15 },
+    { label: "Innings factor", value: inningsRate(data), weight: 0.1 },
   ];
 
   components.forEach((part) => {

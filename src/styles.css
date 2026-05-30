@@ -1242,6 +1242,73 @@ body,
   line-height: 1.45;
 }
 
+.projection-sanity-audit {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #0f172a;
+}
+
+.projection-sanity-audit--compact {
+  margin-top: 6px;
+  padding: 6px 8px;
+}
+
+.projection-sanity-audit__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #e2e8f0;
+}
+
+.projection-sanity-audit__flag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #7f1d1d;
+  color: #fecaca;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.projection-sanity-audit__score {
+  margin-left: auto;
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.projection-sanity-audit__grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 11px;
+  color: #cbd5e1;
+}
+
+.projection-sanity-audit__weights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 10px;
+  color: #64748b;
+}
+
+.projection-sanity-audit__summary,
+.projection-sanity-audit__penalty {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #94a3b8;
+}
+
+.projection-sanity-audit__penalty {
+  color: #fca5a5;
+}
+
 .best-play-row-card--grouped {
   border: none !important;
   border-radius: 0 !important;

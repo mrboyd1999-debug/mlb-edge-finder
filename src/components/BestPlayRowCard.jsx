@@ -17,6 +17,7 @@ import {
   formatHitRatePercent,
   validatePickDirectionBeforeRender,
 } from "../utils/pickDirectionAudit.js";
+import ProjectionSanityAuditPanel from "./ProjectionSanityAuditPanel.jsx";
 
 function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
   const enriched = withPlayerImageUrl(prop || {});
@@ -76,6 +77,7 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
     enriched.projectionSourceLabel ||
     formatBestPlayProjectionSource(enriched);
   const statsLine = explanation?.statsLine || "";
+  const projectionSanityAudit = enriched.projectionSanityAudit;
   const reason = explanation?.reason || enriched.qualifyReason || enriched.whyThisPick || "";
 
   function openDetails(event) {
@@ -154,7 +156,10 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
           <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 11 }}>
             Projection Source: <strong>{projectionSource}</strong>
           </p>
-          {isVerifiedPlay ? (
+          {projectionSanityAudit?.supported ? (
+            <ProjectionSanityAuditPanel audit={projectionSanityAudit} compact />
+          ) : null}
+          {isVerifiedPlay && !projectionSanityAudit?.supported ? (
             <div className="hit-rate-viz" aria-label="Hit rate snapshot">
               <span>
                 Last 5: <strong>{last5HitRate}</strong>
