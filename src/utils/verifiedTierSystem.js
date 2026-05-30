@@ -32,6 +32,7 @@ import {
   resolveMaximumTier,
 } from "./tierHistoricalValidation.js";
 import { isSupportedMlbMarket, isBlockedNonMlbPipelineProp } from "./mlbAllowedMarkets.js";
+import { hasVerifiedHistoricalAttachment, isFallbackProjectionProp } from "./projectionQuality.js";
 
 export { NO_TIER_A_PLAYS_MESSAGE, NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE };
 export {
@@ -218,6 +219,8 @@ export function hasIncompleteSupportingData(prop = {}) {
     hasMajorResearchGaps(prop) ||
     prop.projectionUnavailable ||
     prop.isFallbackProjection ||
+    isFallbackProjectionProp(prop) ||
+    !hasVerifiedHistoricalAttachment(prop) ||
     prop.unverifiedGradeBlocked
   );
 }
@@ -226,6 +229,8 @@ export function hasValidVerifiedProjection(prop = {}) {
   const projection = resolveBestPlayStatSpecificProjection(prop);
   if (projection == null || projection <= VERIFIED_MIN_PROJECTION) return false;
   if (prop.projectionUnavailable || prop.unverifiedGradeBlocked || prop.isFallbackProjection) return false;
+  if (isFallbackProjectionProp(prop)) return false;
+  if (!hasVerifiedHistoricalAttachment(prop)) return false;
   if (prop.projectionFormulaError || prop.projectionFormulaValid === false) return false;
   if (!passesMlbProjectionFormulaValidation(prop)) return false;
   return true;
@@ -236,6 +241,8 @@ export function passesVerifiedTierFilter(prop = {}) {
   if (resolvePropSport(prop) !== "MLB") return false;
   if (isBlockedNonMlbPipelineProp(prop)) return false;
   if (!isSupportedMlbMarket(prop)) return false;
+  if (isFallbackProjectionProp(prop)) return false;
+  if (!hasVerifiedHistoricalAttachment(prop)) return false;
   if (!hasValidVerifiedProjection(prop)) return false;
   return classifyVerifiedTier(prop) != null;
 }
@@ -244,8 +251,13 @@ export function passesResearchTierFilter(prop = {}) {
   if (passesVerifiedTierFilter(prop)) return false;
   if (!passesMinimalBestPlaysFilter(prop)) return false;
   if (resolvePropSport(prop) !== "MLB") return false;
-  if (!hasValidVerifiedProjection(prop)) return false;
-  if (!hasIncompleteSupportingData(prop)) return false;
+
+  const projection = sanitizeProjectionValue(prop.projection ?? prop.projectedValue);
+  if (projection == null || projection <= VERIFIED_MIN_PROJECTION) return false;
+
+  const fallback = isFallbackProjectionProp(prop);
+  const historicalMissing = !hasVerifiedHistoricalAttachment(prop);
+  if (!fallback && !historicalMissing && !hasIncompleteSupportingData(prop)) return false;
 
   const { probability, confidence } = resolveVerifiedMetrics(prop);
   if (!Number.isFinite(probability) || probability < VERIFIED_BASE_MIN_PROBABILITY) return false;
@@ -256,9 +268,21 @@ export function passesResearchTierFilter(prop = {}) {
 export function explainVerificationRejection(prop = {}) {
   if (!passesMinimalBestPlaysFilter(prop)) return "missing player, line, or stat type";
   if (resolvePropSport(prop) !== "MLB") return "non-MLB sport";
-  if (!hasValidVerifiedProjection(prop)) return "missing or invalid stat-specific projection";
+  if (!hasValidVerifiedProjection(prop)) {
+    if (isFallbackProjectionProp(prop)) return "fallback projection — research only";
+    if (!hasVerifiedHistoricalAttachment(prop)) {
+      const missing = resolveHistoricalDataPresent(prop).missingLabels?.join(", ") || "Last5/Last10/Season";
+      return `historical stats incomplete (${missing})`;
+    }
+    return "missing or invalid stat-specific projection";
+  }
   if (prop.projectionFormulaError || prop.projectionFormulaValid === false) {
     return prop.projectionFormulaErrorReason || "projection formula validation failed";
+  }
+  if (isFallbackProjectionProp(prop)) return "fallback projection — research only";
+  if (!hasVerifiedHistoricalAttachment(prop)) {
+    const missing = resolveHistoricalDataPresent(prop).missingLabels?.join(", ") || "Last5/Last10/Season";
+    return `historical stats incomplete (${missing})`;
   }
 
   const { probability, confidence, playability, dataQuality, sanity, historicalPresent, historicalMissing, hitRateValidated, hitRateMissing } =
@@ -507,25 +531,7 @@ export function countVerifiedTierDistribution(props = []) {
 
 export function selectVerifiedPlaysWithFallback(props = [], options = {}) {
   const picks = selectVerifiedPlaysByTier(props, options);
-  if (picks.length) return { picks, usedFallback: false };
-
-  const fallback = [...(props || [])]
-    .filter((prop) => {
-      const projection = resolveBestPlayStatSpecificProjection(prop);
-      if (projection == null || projection <= 0) return false;
-      const { probability, confidence } = resolveVerifiedMetrics(prop);
-      return (
-        Number.isFinite(probability) &&
-        Number.isFinite(confidence) &&
-        probability >= VERIFIED_BASE_MIN_PROBABILITY &&
-        confidence >= VERIFIED_BASE_MIN_CONFIDENCE
-      );
-    })
-    .map(annotateVerifiedTier)
-    .sort(compareVerifiedPlaysRank)
-    .slice(0, options.max ?? VERIFIED_MAX_PLAYS);
-
-  return { picks: fallback, usedFallback: fallback.length > 0 };
+  return { picks, usedFallback: false };
 }
 
 export function selectHeroOverallPlay(props = [], limit = 1) {

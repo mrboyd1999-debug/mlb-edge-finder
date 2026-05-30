@@ -54,20 +54,30 @@ export function mlbStatsApiPathLabel(url) {
 export function logMlbStatsApiCall({
   stage = "response",
   url = "",
+  endpoint = "",
   status = null,
   preview = "",
+  responseBody = "",
+  durationMs = null,
+  timeoutMs = null,
   playersReturned = null,
   matchedPlayer = null,
   playerId = null,
   projection = null,
   error = "",
 } = {}) {
-  const label = mlbStatsApiPathLabel(url);
+  const label = endpoint || mlbStatsApiPathLabel(url);
+  const body = responseBody || preview;
   console.info("[MLB Stats API]", {
     stage,
+    endpoint: label,
     url: label,
     status,
-    bodyPreview: preview ? String(preview).slice(0, 300) : "",
+    responseCode: status,
+    durationMs: durationMs ?? undefined,
+    timeoutMs: timeoutMs ?? undefined,
+    responseBody: body ? String(body).slice(0, 500) : "",
+    bodyPreview: body ? String(body).slice(0, 300) : "",
     playersReturned,
     matchedPlayer,
     playerId,

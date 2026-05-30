@@ -201,17 +201,20 @@ export async function searchMlbPlayers(query = "") {
   logMlbStatsApiCall({ stage: "request", url: searchUrl, status: null });
   console.info("[Manual Prop Matcher] API URL:", urlLabel);
 
+  const requestStartedAt = Date.now();
   let response;
   let preview = "";
   try {
     response = await cachedFetch(searchUrl, {}, { source: "MLB Stats", ttlMs: CACHE_TTL.STATS_MS });
-    preview = (await response.clone().text()).slice(0, 300);
+    preview = (await response.clone().text()).slice(0, 500);
   } catch (error) {
     logMlbStatsApiCall({
       stage: "error",
       url: searchUrl,
-      status: null,
+      status: /timed out/i.test(String(error?.message)) ? "timeout" : null,
       error: error?.message || String(error),
+      durationMs: Date.now() - requestStartedAt,
+      responseBody: preview,
     });
     console.warn("[Manual Prop Matcher] fetch error", {
       url: urlLabel,
@@ -225,6 +228,8 @@ export async function searchMlbPlayers(query = "") {
     url: searchUrl,
     status: response.status,
     preview,
+    responseBody: preview,
+    durationMs: Date.now() - requestStartedAt,
   });
   console.info("[Manual Prop Matcher] response status:", response.status);
   if (!response.ok) {

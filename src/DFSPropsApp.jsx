@@ -4657,6 +4657,7 @@ export default function DFSPropsApp() {
       mlbPipelineStatus={mlbPipelineStatus}
       pipelineRenderCounts={pipelineRenderCounts}
       prizePicksFeedProps={prizePicksFeedProps}
+      statsAttachmentAudit={debugInfo?.statsAttachmentAudit || null}
     />
 
       {selectedEvaluation && (

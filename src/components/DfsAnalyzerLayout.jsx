@@ -12,6 +12,7 @@ import SettingsPanel from "./SettingsPanel.jsx";
 import DeveloperDebugPanel from "./DeveloperDebugPanel.jsx";
 import ProjectionProviderWarning from "./ProjectionProviderWarning.jsx";
 import ApiSetupBanner from "./ApiSetupBanner.jsx";
+import HistoricalCoverageBanner from "./HistoricalCoverageBanner.jsx";
 import { readSettingsMeta } from "../services/runtimeSettings.js";
 import { isDebugModeEnabled } from "../utils/devMode.js";
 
@@ -50,6 +51,7 @@ function DfsAnalyzerLayout({
   underdogDebugSnapshot,
   debugInfo,
   mlbPipelineStatus,
+  statsAttachmentAudit = null,
 }) {
   const [connectionReport, setConnectionReport] = useState(() => {
     const meta = readSettingsMeta();
@@ -86,6 +88,8 @@ function DfsAnalyzerLayout({
         feedHealthContext={feedHealthContext}
         pipelineProjectionStats={pipelineRenderCounts?.projectionStats ?? null}
       />
+
+      <HistoricalCoverageBanner audit={statsAttachmentAudit} loading={loading} />
 
       {debugPanelsVisible ? (
         <VerificationFailureBreakdown

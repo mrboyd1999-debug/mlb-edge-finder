@@ -4,6 +4,7 @@ import { readSettingsMeta, getOddsApiKey, getSportsDataApiKey, writeSettingsMeta
 import { healthStateStyle, CONNECTION_TIERS } from "../services/sourceHealth.js";
 import { isPrizePicksFeedNotConfigured, PRIZEPICKS_NOT_CONFIGURED_DETAIL } from "../utils/providerProxy.js";
 import { testAllApiConnections } from "../services/apiConnectionTest.js";
+import { testMlbStatsApiConnection } from "../services/mlbStatsApiTest.js";
 import { resolveProjectionEngineStatus } from "../utils/projectionPipelineStatus.js";
 
 function findProviderRow(results = [], name) {
@@ -196,6 +197,28 @@ function SystemStatusCard({
   const sdRow = findProviderRow(reportRows, "SportsDataIO");
 
   const [retesting, setRetesting] = useState(false);
+  const [testingMlbStats, setTestingMlbStats] = useState(false);
+  const [mlbStatsTest, setMlbStatsTest] = useState(null);
+
+  const handleTestMlbStats = useCallback(async () => {
+    setTestingMlbStats(true);
+    try {
+      const result = await testMlbStatsApiConnection();
+      setMlbStatsTest(result);
+    } catch (error) {
+      console.error("[System Status] MLB Stats test failed", error);
+      setMlbStatsTest({
+        status: "Failed",
+        connected: false,
+        detail: error?.message || "MLB Stats API test failed",
+        responseTimeMs: 0,
+        playerCount: 0,
+        gameLogCount: 0,
+      });
+    } finally {
+      setTestingMlbStats(false);
+    }
+  }, []);
 
   const handleRetestAll = useCallback(async () => {
     setRetesting(true);
@@ -225,7 +248,15 @@ function SystemStatusCard({
 
   const stats = mlbPipelineStatus?.mlbStatsApi || {};
   const projection = mlbPipelineStatus?.projectionApi || {};
-  const statsResolved = resolveMlbStatsStatus(stats);
+  const statsResolved = mlbStatsTest
+    ? {
+        status: mlbStatsTest.status,
+        detail: mlbStatsTest.connected
+          ? `Connected · ${mlbStatsTest.responseTimeMs}ms · ${mlbStatsTest.playerCount} players · ${mlbStatsTest.gameLogCount} game logs`
+          : mlbStatsTest.detail,
+        checkedAt: mlbStatsTest.testedAt,
+      }
+    : resolveMlbStatsStatus(stats);
   const projectionResolved = resolveProjectionStatus(projection, pipelineProjectionStats || {});
 
   const rows = [
@@ -233,7 +264,7 @@ function SystemStatusCard({
     { provider: "PrizePicks", ...ppResolved, checkedAt: pp.lastFetchAt || testedAt },
     { provider: "Underdog", ...udResolved, checkedAt: ud.lastFetchAt || testedAt },
     { provider: "SportsDataIO", ...sdResolved, checkedAt: testedAt },
-    { provider: "MLB Stats API", ...statsResolved, checkedAt: stats.lastSuccessAt },
+    { provider: "MLB Stats API", ...statsResolved, checkedAt: mlbStatsTest?.testedAt || stats.lastSuccessAt },
     {
       provider: "Projection Engine",
       status: projectionResolved.status,
@@ -246,15 +277,32 @@ function SystemStatusCard({
     <section className="system-status-card" aria-label="System status">
       <div className="system-status-card__head">
         <strong>System Status</strong>
-        <button
-          type="button"
-          className="system-status-card__retest"
-          onClick={handleRetestAll}
-          disabled={retesting}
-        >
-          {retesting ? "Testing…" : "Retest All"}
-        </button>
+        <div className="system-status-card__actions">
+          <button
+            type="button"
+            className="system-status-card__retest"
+            onClick={handleTestMlbStats}
+            disabled={testingMlbStats}
+          >
+            {testingMlbStats ? "Testing Stats…" : "Test Stats API"}
+          </button>
+          <button
+            type="button"
+            className="system-status-card__retest"
+            onClick={handleRetestAll}
+            disabled={retesting}
+          >
+            {retesting ? "Testing…" : "Retest All"}
+          </button>
+        </div>
       </div>
+      {mlbStatsTest ? (
+        <p className="system-status-card__meta">
+          MLB Stats test: {mlbStatsTest.searchEndpoint || "search"} · HTTP {mlbStatsTest.searchStatus ?? "?"} ·{" "}
+          {mlbStatsTest.responseTimeMs}ms · {mlbStatsTest.playerCount} players · {mlbStatsTest.gameLogCount} game logs
+          {mlbStatsTest.searchResponseBody ? ` · ${mlbStatsTest.searchResponseBody.slice(0, 120)}` : ""}
+        </p>
+      ) : null}
       <div className="system-status-card__table-wrap">
         <table className="system-status-card__table">
           <thead>

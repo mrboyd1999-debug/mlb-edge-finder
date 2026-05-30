@@ -970,6 +970,46 @@ body,
   gap: 8px;
 }
 
+.system-status-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.historical-coverage-banner {
+  margin: 10px 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: #0f172a;
+}
+
+.historical-coverage-banner__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.historical-coverage-banner__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.historical-coverage-banner__total {
+  color: #64748b;
+}
+
+.historical-coverage-banner__note {
+  margin: 8px 0 0;
+  color: #fde047;
+  font-size: 12px;
+}
+
 .system-status-card__summary {
   font-size: 10px;
   color: #86efac;

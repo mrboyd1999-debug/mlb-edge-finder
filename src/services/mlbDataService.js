@@ -346,29 +346,50 @@ export async function fetchMlbGameLogs(playerId, { seasons = mlbSeasonYears(), g
       group,
       season,
     });
+    const requestStartedAt = Date.now();
     let response;
     try {
       response = await cachedFetch(statsUrl, {}, { source: "MLB Stats", ttlMs: CACHE_TTL.STATS_MS });
     } catch (error) {
-      logFetchError("game logs", { playerId, season, message: error.message });
+      const durationMs = Date.now() - requestStartedAt;
+      logFetchError("game logs", { playerId, season, message: error.message, durationMs });
       logMlbStatsApiCall({
         stage: "error",
         url: statsUrl,
-        status: null,
+        status: /timed out/i.test(String(error.message)) ? "timeout" : null,
         error: error.message,
+        durationMs,
+        playerId,
       });
       continue;
     }
-    const preview = (await response.clone().text()).slice(0, 300);
+    const responseBody = (await response.clone().text()).slice(0, 500);
+    const durationMs = Date.now() - requestStartedAt;
     logMlbStatsApiCall({
       stage: "response",
       url: statsUrl,
       status: response.status,
-      preview,
+      preview: responseBody.slice(0, 300),
+      responseBody,
+      durationMs,
+      playerId,
     });
     if (!response.ok) {
-      logFetchError("game logs", { playerId, season, status: response.status, url: String(statsUrl) });
-      logMlbData("logs.failed", { playerId, season, status: response.status, reason: "StatsAPI gameLog failed" });
+      logFetchError("game logs", {
+        playerId,
+        season,
+        status: response.status,
+        url: String(statsUrl),
+        responseBody,
+        durationMs,
+      });
+      logMlbData("logs.failed", {
+        playerId,
+        season,
+        status: response.status,
+        reason: "StatsAPI gameLog failed",
+        responseBody: responseBody.slice(0, 200),
+      });
       continue;
     }
     const payload = await response.json();

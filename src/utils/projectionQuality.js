@@ -13,6 +13,7 @@ import {
 import { validatePropSanityRejectReason, isPropSanityValid } from "./propSanity.js";
 import { resolvePropSportLabel } from "./underdogSportDetection.js";
 import { lockSportFromStatType, sportStatMismatchReason } from "./propStatSportLock.js";
+import { resolveHistoricalDataPresent } from "./tierHistoricalValidation.js";
 
 function isMalformedPlayerName(name = "") {
   const trimmed = String(name || "").trim();
@@ -85,6 +86,28 @@ export function normalizeProjectionSourceKey(source = "") {
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9_-]/g, "");
+}
+
+const FALLBACK_SOURCE_PATTERN =
+  /fallback|neutral|line-neutral|stat-fallback|manual-fallback|missing|unavailable|estimate|estimated|stat-type-mismatch/;
+
+/** True when projection is line/stat fallback rather than verified MLB historical model output. */
+export function isFallbackProjectionProp(prop = {}) {
+  if (prop.isFallbackProjection || prop.projectionFallback || prop.projectionUnavailable || prop.unverifiedGradeBlocked) {
+    return true;
+  }
+  const source = normalizeProjectionSourceKey(prop.projectionSource);
+  if (FALLBACK_SOURCE_PATTERN.test(source)) return true;
+  const label = String(prop.projectionSourceLabel || resolveProjectionDisplayLabel(prop, resolveProjectionQuality(prop)) || "")
+    .trim()
+    .toLowerCase();
+  if (/fallback projection|fallback model|no projection/.test(label)) return true;
+  return false;
+}
+
+/** Verified plays require full Last5/Last10/Season historical attachment. */
+export function hasVerifiedHistoricalAttachment(prop = {}) {
+  return resolveHistoricalDataPresent(prop).present;
 }
 
 export function resolveProjectionSourceLabel(prop = {}) {
