@@ -457,6 +457,7 @@ export function scoreDisplayProp(prop = {}) {
         pickTierRank: playability.pickTierRank,
         displayConfidenceScore: playability.displayConfidenceScore,
         researchReasons: playability.researchReasons,
+        probabilityCalibration: metrics.probabilityCalibration || prop.probabilityCalibration || null,
         rawEdgeLabel: playability.edgeDisplay?.rawEdgeLabel,
         displayEdgeLabel: playability.edgeDisplay?.displayEdgeLabel,
         cardStatus: invalidProp ? "rejected" : playability.cardStatus,

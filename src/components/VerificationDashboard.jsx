@@ -45,7 +45,16 @@ function DiagnosticTable({
               </>
             ) : null}
             <th>Probability</th>
-            {showPropDetails ? <th>Stat Prob</th> : null}
+            {showPropDetails ? <th>Cal Prob</th> : null}
+            {showPropDetails ? (
+              <>
+                <th>L5</th>
+                <th>L10</th>
+                <th>Season</th>
+                <th>Edge In</th>
+                <th>Matchup</th>
+              </>
+            ) : null}
             <th>Confidence</th>
             <th>Playability</th>
             <th>Score</th>
@@ -76,6 +85,15 @@ function DiagnosticTable({
               ) : null}
               <td>{formatCell(row?.probability, "%")}</td>
               {showPropDetails ? <td>{formatCell(row?.probabilityRaw, "%")}</td> : null}
+              {showPropDetails ? (
+                <>
+                  <td>{formatCell(row?.last5HitRate)}</td>
+                  <td>{formatCell(row?.last10HitRate)}</td>
+                  <td>{formatCell(row?.seasonHitRate)}</td>
+                  <td>{formatCell(row?.edgeInput)}</td>
+                  <td>{formatCell(row?.matchupInput)}</td>
+                </>
+              ) : null}
               <td>{formatCell(row?.confidence, "%")}</td>
               <td>{formatCell(row?.playability)}</td>
               <td>{formatCell(row?.score)}</td>
@@ -118,6 +136,24 @@ function DistributionSummary({ title, summary = {}, histogram = [] }) {
             <span className="verification-diagnostics__histogram-count">{bucket.count ?? 0}</span>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function CalibrationInputsSummary({ title, summary = {} }) {
+  if (!summary?.count) return null;
+  const format = (value) => (value == null || value === "—" ? "—" : `${value} pts`);
+
+  return (
+    <div className="verification-diagnostics__distribution-block">
+      <h5 className="verification-diagnostics__distribution-title">{title}</h5>
+      <div className="verification-diagnostics__grid verification-diagnostics__grid--compact">
+        <Metric label="Avg L5 contribution" value={format(summary.last5HitRate)} />
+        <Metric label="Avg L10 contribution" value={format(summary.last10HitRate)} />
+        <Metric label="Avg Season contribution" value={format(summary.seasonHitRate)} />
+        <Metric label="Avg Edge contribution" value={format(summary.edgeContribution)} />
+        <Metric label="Avg Matchup adj." value={format(summary.matchupAdjustment)} />
       </div>
     </div>
   );
@@ -246,18 +282,26 @@ function VerificationDashboard({ dashboard = null }) {
         </p>
       ) : null}
 
-      <h4 className="verification-diagnostics__subtitle">Model Distribution Audit</h4>
+      <h4 className="verification-diagnostics__subtitle">Probability Calibration</h4>
       {probabilityDistribution ? (
         <>
           <DistributionSummary
-            title="All projected props"
+            title="Probability Histogram — all projected props"
             summary={probabilityDistribution.projected}
             histogram={probabilityDistribution.projected?.histogram}
           />
+          <CalibrationInputsSummary
+            title="Average calibration inputs (projected pool)"
+            summary={probabilityDistribution.calibrationInputs}
+          />
           <DistributionSummary
-            title="Top 20 projected props"
+            title="Probability Histogram — top 20 projected props"
             summary={probabilityDistribution.top20}
             histogram={probabilityDistribution.top20?.histogram}
+          />
+          <CalibrationInputsSummary
+            title="Average calibration inputs (top 20)"
+            summary={probabilityDistribution.top20CalibrationInputs}
           />
           {compression ? (
             <div className="verification-diagnostics__compression">

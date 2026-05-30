@@ -6,12 +6,8 @@ import {
   computeStandardEdge,
   computeStandardEdgePercent,
 } from "./standardPropMetrics.js";
-import {
-  computeConservativeProbability,
-  hasMissingOpponentData,
-  resolveProjectionValue,
-} from "./conservativeProjection.js";
-import { computeStatSpecificProbability } from "./mlbStatProbability.js";
+import { resolveProjectionValue } from "./conservativeProjection.js";
+import { computeCalibratedProbability } from "./probabilityCalibration.js";
 import { computeFormConfidenceScore } from "./matchupEnrichment.js";
 import { formatHitRatePercent } from "./pickDirectionAudit.js";
 
@@ -98,12 +94,6 @@ function resolveParkAdjustment(prop = {}) {
   return { points: 0, label: note };
 }
 
-function resolveProjectionEdgeContribution(edgePercent) {
-  const edgePct = Math.abs(finite(edgePercent) ?? 0);
-  const strength = Math.min(edgePct / 35, 1);
-  return Math.round(strength * 38);
-}
-
 export function buildProbabilityAudit(prop = {}, metrics = {}) {
   const projection = finite(metrics.projection ?? resolveProjectionValue(prop));
   const line = finite(prop.line);
@@ -113,18 +103,10 @@ export function buildProbabilityAudit(prop = {}, metrics = {}) {
   const opponent = resolveOpponentAdjustment(prop);
   const park = resolveParkAdjustment(prop);
 
-  const projectionEdgePoints = resolveProjectionEdgeContribution(edgePercent);
-  const statSpecific = computeStatSpecificProbability(prop, projection, line);
+  const calibrated = computeCalibratedProbability(prop, { edge, edgePercent, projection }, { verified: true });
+  const breakdown = calibrated?.breakdown || {};
   const finalProbability =
-    finite(prop.probabilityScore ?? prop.verifiedProbability) ??
-    computeConservativeProbability(prop, { edge, edgePercent, projection }, { verified: false }) ??
-    statSpecific;
-
-  const base = 50;
-  const rollingBoost =
-    statSpecific != null && finalProbability != null
-      ? clamp(finalProbability - base - projectionEdgePoints - opponent.points - park.points, -8, 18)
-      : 0;
+    finite(prop.probabilityScore ?? prop.verifiedProbability) ?? calibrated?.probability ?? null;
 
   const inputs = {
     last10HitRate: hitRates.last10Label,
@@ -133,14 +115,19 @@ export function buildProbabilityAudit(prop = {}, metrics = {}) {
     projectionVsLine: edgePercent != null ? signedPct(edgePercent) : "—",
     opponentAdjustment: signedPct(opponent.points),
     parkAdjustment: signedPct(park.points),
+    matchupAdjustment: calibrated?.inputs?.matchupAdjustment ?? signedPct(breakdown.matchupAdjustment ?? 0),
+    edgeContribution: signedPct(breakdown.edgeContribution ?? 0),
+    last5Contribution: signedPct(breakdown.last5Contribution ?? 0),
+    last10Contribution: signedPct(breakdown.last10Contribution ?? 0),
+    seasonContribution: signedPct(breakdown.seasonContribution ?? 0),
   };
 
   const explanationLines = [
-    `Last 10: ${hitRates.last10Label}`,
-    `Season: ${hitRates.seasonLabel}`,
-    `Opponent Boost: ${signedPct(opponent.points)}`,
-    `Projection Edge: ${signedPct(projectionEdgePoints)}`,
-    `Park Adjustment: ${signedPct(park.points)}`,
+    `Last 5 hit rate: ${hitRates.last5Label} (${signedPct(breakdown.last5Contribution ?? 0)})`,
+    `Last 10 hit rate: ${hitRates.last10Label} (${signedPct(breakdown.last10Contribution ?? 0)})`,
+    `Season hit rate: ${hitRates.seasonLabel} (${signedPct(breakdown.seasonContribution ?? 0)})`,
+    `Projection edge: ${edgePercent != null ? signedPct(edgePercent) : "—"} (${signedPct(breakdown.edgeContribution ?? 0)})`,
+    `Matchup adjustment: ${calibrated?.inputs?.matchupAdjustment ?? signedPct(breakdown.matchupAdjustment ?? 0)}`,
     `Final Probability: ${pct(finalProbability)}`,
   ];
 
@@ -150,18 +137,23 @@ export function buildProbabilityAudit(prop = {}, metrics = {}) {
     line,
     edge,
     edgePercent,
-    base,
-    projectionEdgePoints,
+    base: breakdown.base ?? 43,
+    projectionEdgePoints: breakdown.edgeContribution ?? 0,
     opponentAdjustment: opponent.points,
     opponentLabel: opponent.label,
     parkAdjustment: park.points,
     parkLabel: park.label,
-    rollingBoost,
-    finalProbability: finalProbability != null ? Math.round(finalProbability) : null,
+    rollingBoost: breakdown.last5Contribution ?? 0,
+    finalProbability: finalProbability != null ? round1(finalProbability) : null,
     explanationLines,
     summary: explanationLines.join(" · "),
     hitRates,
+    calibration: calibrated,
   };
+}
+
+function round1(value) {
+  return Math.round(Number(value) * 10) / 10;
 }
 
 export function buildEdgeValidation(prop = {}, metrics = {}) {
@@ -241,6 +233,7 @@ export function attachModelValidationFields(prop = {}, metrics = {}) {
   return {
     ...prop,
     probabilityAudit,
+    probabilityCalibration: probabilityAudit.calibration || prop.probabilityCalibration || null,
     edgeValidation,
     matchupAudit,
     hitRateSnapshot: hitRates,

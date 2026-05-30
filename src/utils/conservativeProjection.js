@@ -1,10 +1,10 @@
 /** Realistic probability, playability tiers, and lean helpers for MLB props. */
 
 import { computeStandardEdge, computeStandardEdgePercent, computeStandardPropMetrics } from "./standardPropMetrics.js";
-import { computeStatSpecificProbability } from "./mlbStatProbability.js";
 import { computeMlbPlayConfidence } from "./mlbPlayConfidence.js";
 import { classifyVerifiedTier } from "./verifiedTierSystem.js";
 import { resolveProjectionLeanDisplay, resolveProjectionLean } from "./pickDirectionAudit.js";
+import { computeCalibratedProbability } from "./probabilityCalibration.js";
 
 export const PICK_TIER_VERIFIED = "Verified Play";
 export const PICK_TIER_RESEARCH = "Research Candidate";
@@ -15,8 +15,6 @@ const VERIFIED_MIN_DATA_QUALITY = 50;
 export const CONSERVATIVE_MIN_CONFIDENCE = 55;
 export const CONSERVATIVE_MIN_PROBABILITY = 58;
 const RESEARCH_MAX_RAW_CONFIDENCE = 50;
-const RESEARCH_MAX_PROBABILITY = 70;
-const ELITE_DATA_QUALITY = 85;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -182,55 +180,14 @@ export function resolveResearchReasons(prop = {}) {
   return reasons;
 }
 
-function canExceedConfidencePlusTen(prop = {}, { verified = false } = {}) {
-  return (
-    verified &&
-    finiteOr(prop.dataQualityScore, 0) >= ELITE_DATA_QUALITY &&
-    !hasMajorResearchGaps(prop) &&
-    !hasMissingMatchupData(prop) &&
-    !hasMissingOpponentData(prop) &&
-    !hasMissingSportsbookComparison(prop)
-  );
-}
-
-function applyProbabilityCaps(probability, prop = {}, { verified = false, confidence = null, edgePercent = null } = {}) {
-  const conf = finiteOr(confidence ?? prop.displayConfidenceScore ?? computeAdjustedConfidence(prop), NaN);
-  const edgePct = Math.abs(finiteOr(edgePercent ?? prop.edgePercent, 0));
-  let cap = verified ? 92 : RESEARCH_MAX_PROBABILITY;
-
-  if (edgePct >= 60) cap = Math.max(cap, 90);
-  else if (edgePct >= 40) cap = Math.max(cap, 85);
-  else if (edgePct >= 25) cap = Math.max(cap, 80);
-  else if (edgePct >= 15) cap = Math.max(cap, 76);
-
-  if (!canExceedConfidencePlusTen(prop, { verified }) && Number.isFinite(conf)) {
-    const confBonus = verified
-      ? edgePct >= 40
-        ? 28
-        : edgePct >= 20
-          ? 22
-          : edgePct >= 12
-            ? 18
-            : 15
-      : edgePct >= 40
-        ? 22
-        : edgePct >= 20
-          ? 15
-          : 10;
-    const confCap = conf + confBonus;
-    cap = Math.min(cap, confCap);
+function applyProbabilityCaps(probability, prop = {}, { verified = false } = {}) {
+  const ceiling = verified ? 92 : 88;
+  const floor = 40;
+  let value = round1(probability);
+  if (isResearchCandidate(prop) && !verified) {
+    return clamp(value, floor, Math.min(ceiling, 82));
   }
-
-  if (!verified) {
-    cap = Math.min(cap, RESEARCH_MAX_PROBABILITY);
-  }
-
-  if (!Number.isFinite(conf)) cap = Math.min(cap, 60);
-  if (isResearchCandidate(prop, { confidence: conf }) && edgePct < 25) {
-    cap = Math.min(cap, RESEARCH_MAX_PROBABILITY);
-  }
-
-  return clamp(round1(probability), 50, cap);
+  return clamp(value, floor, ceiling);
 }
 
 export function computeConservativeProbability(prop = {}, metrics = {}, options = {}) {
@@ -238,44 +195,13 @@ export function computeConservativeProbability(prop = {}, metrics = {}, options 
   const line = finiteOr(prop.line, NaN);
   if (projection == null || !Number.isFinite(line) || line <= 0) return null;
 
-  const adjustedConfidence = options.confidence ?? computeAdjustedConfidence(prop);
-  const edge = metrics.edge ?? computeStandardEdge(projection, line);
-  const edgePercent = metrics.edgePercent ?? computeStandardEdgePercent(edge, line) ?? 0;
-  const edgeStrength = Math.min(Math.abs(edgePercent) / 35, 1);
+  const calibrated = computeCalibratedProbability(prop, metrics, {
+    verified: options.verified ?? false,
+  });
+  if (calibrated?.probability == null) return null;
 
-  const statSpecific = computeStatSpecificProbability(prop, projection, line);
-  let probability =
-    statSpecific ??
-    50 + edgeStrength * 38;
-
-  const dq = finiteOr(prop.dataQualityScore, 50);
-  if (dq >= 80) probability += 3;
-
-  const lean = resolveLeanFromEdge(edge, prop);
-  const hit = finiteOr(prop.recentHitRate ?? prop.last5HitRate, NaN);
-  if (Number.isFinite(hit)) {
-    const supports =
-      (lean === "Higher" && hit >= 0.55) || (lean === "Lower" && hit <= 0.45) || Math.abs(hit - 0.5) >= 0.08;
-    if (supports) probability += 2;
-  }
-
-  if (hasMissingOpponentData(prop)) probability -= 5;
-  if (isLowMatchupProp(prop)) probability -= 2;
-  else if (hasMissingMatchupData(prop)) probability -= 5;
-  if (hasMissingSportsbookComparison(prop)) probability -= 3;
-
-  const vol = finiteOr(prop.volatility, NaN);
-  if (Number.isFinite(vol) && vol >= 3) probability -= 5;
-
-  if (prop.isFallbackProjection || prop.fallbackProfile || prop.sparseProfile || prop.lineOnlyData) {
-    probability -= 10;
-  }
-
-  const verified = options.verified ?? false;
-  return applyProbabilityCaps(probability, prop, {
-    verified,
-    confidence: adjustedConfidence,
-    edgePercent,
+  return applyProbabilityCaps(calibrated.probability, prop, {
+    verified: options.verified ?? false,
   });
 }
 
@@ -296,14 +222,17 @@ export function computeDisplayPropMetrics(prop = {}) {
   const base = computeStandardPropMetrics({ projection, line });
   const edgeDisplay = formatEdgeDisplay({ ...prop, ...base, line });
   const adjustedConfidence = computeAdjustedConfidence(prop);
-  const probabilityScore = computeConservativeProbability(prop, base, {
-    verified: false,
-    confidence: adjustedConfidence,
-  });
+  const researchGap = isResearchCandidate(prop, { confidence: adjustedConfidence });
+  const calibrated = computeCalibratedProbability(prop, base, { verified: !researchGap });
+  const probabilityScore =
+    calibrated?.probability != null
+      ? applyProbabilityCaps(calibrated.probability, prop, { verified: !researchGap })
+      : null;
   return {
     ...base,
     ...edgeDisplay,
     probabilityScore,
+    probabilityCalibration: calibrated,
     adjustedConfidence,
     lean: resolveLeanFromEdge(base.edge, prop),
     projectionStatus: "ok",
@@ -351,12 +280,8 @@ export function evaluateMlbPlayability(prop = {}, metrics = {}) {
   const playable = verified;
   const research = !playable && (lowMatchupResearch || researchGap);
 
-  if (probability != null) {
-    probability = applyProbabilityCaps(probability, prop, {
-      verified: playable,
-      confidence: adjustedConfidence,
-      edgePercent: metrics.edgePercent ?? prop.edgePercent,
-    });
+  if (probability != null && metrics.probabilityScore == null) {
+    probability = applyProbabilityCaps(probability, prop, { verified: playable });
   }
 
   const tier = playable ? PICK_TIER_VERIFIED : research ? PICK_TIER_RESEARCH : PICK_TIER_RESEARCH;

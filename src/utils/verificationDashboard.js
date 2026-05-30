@@ -100,7 +100,7 @@ function toVerificationDiagnosticRow(
   const pipeline = resolveProbabilityPipelineValues(prop);
   const probability = displayMetric(prop.probabilityScore ?? prop.verifiedProbability, { decimals: 1 });
   const probabilityRaw = displayMetric(
-    pipeline.statSpecific ?? pipeline.verifiedCapped ?? pipeline.researchCapped,
+    pipeline.calibrated ?? pipeline.statSpecific ?? pipeline.verifiedCapped ?? pipeline.researchCapped,
     { decimals: 1 }
   );
   const confidence = displayMetric(
@@ -115,6 +115,12 @@ function toVerificationDiagnosticRow(
   const edge = finite(prop.edge ?? computeStandardEdge(projection, line));
   const edgePercent = finite(prop.edgePercent ?? computeStandardEdgePercent(edge, line));
 
+  const calibrationInputs =
+    prop.probabilityCalibration?.inputs ||
+    prop.probabilityAudit?.calibration?.inputs ||
+    pipeline.calibrationInputs ||
+    null;
+
   const row = {
     player,
     probability,
@@ -122,6 +128,11 @@ function toVerificationDiagnosticRow(
     confidence,
     playability,
     score,
+    last5HitRate: calibrationInputs?.last5HitRate ?? "—",
+    last10HitRate: calibrationInputs?.last10HitRate ?? "—",
+    seasonHitRate: calibrationInputs?.seasonHitRate ?? "—",
+    edgeInput: calibrationInputs?.projectionVsLine ?? "—",
+    matchupInput: calibrationInputs?.matchupAdjustment ?? "—",
   };
 
   if (withPropDetails) {
@@ -135,7 +146,7 @@ function toVerificationDiagnosticRow(
         : edge != null
           ? `${edge > 0 ? "+" : ""}${edge}`
           : "N/A";
-    row.capFlag = pipeline.likelyResearchCap ? "research_cap_70" : "—";
+    row.capFlag = pipeline.likelyLegacyCap ? "legacy_cap_70" : "—";
   }
 
   if (withFailureReason) {
