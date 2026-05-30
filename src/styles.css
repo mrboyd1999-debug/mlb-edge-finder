@@ -1965,6 +1965,15 @@ body,
   color: #0f172a;
 }
 
+.verification-diagnostics__metric--bottleneck {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.verification-diagnostics__metric--bottleneck .verification-diagnostics__metric-value {
+  color: #b45309;
+}
+
 .verification-diagnostics__table-wrap {
   overflow-x: auto;
   overflow-y: visible;

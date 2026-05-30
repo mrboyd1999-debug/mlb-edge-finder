@@ -3,6 +3,7 @@ import { styles } from "../theme/styles.js";
 import { HIDDEN_SETTING_DEFS, getEffectiveSetting } from "../services/runtimeSettings.js";
 import PropPipelineCounters from "./PropPipelineCounters.jsx";
 import VerificationDashboard from "./VerificationDashboard.jsx";
+import VerificationFailureBreakdown from "./VerificationFailureBreakdown.jsx";
 import ApiHealthPanel from "./ApiHealthPanel.jsx";
 import MlbPipelineStatusPanel from "./MlbPipelineStatusPanel.jsx";
 import UnderdogDebugPanel from "./UnderdogDebugPanel.jsx";
@@ -32,6 +33,10 @@ function DeveloperDebugPanel({
       <PropPipelineCounters counts={bestPlaysFilter?.pipelineCounts || null} />
       <ProviderFeedDiagnosticsPanel />
       <PrizePicksDiagnosticsPanel diagnostics={prizePicksDiagnostics} feedRow={ppFeed} />
+      <VerificationFailureBreakdown
+        breakdown={bestPlaysFilter?.verificationDashboard?.verificationFailureBreakdown}
+        verifiedCount={bestPlaysFilter?.verifiedPicksCount}
+      />
       <VerificationDashboard dashboard={bestPlaysFilter?.verificationDashboard} />
       {debugModeEnabled ? (
         <label className="developer-debug-panel__toggle">
