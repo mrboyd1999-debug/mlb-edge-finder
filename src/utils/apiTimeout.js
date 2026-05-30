@@ -9,7 +9,9 @@ export const SPORTSDATA_TIMEOUT_MS = 30_000;
 /** MLB player stat profiles — must complete before projections merge. */
 export const MLB_STATS_FETCH_TIMEOUT_MS = 90_000;
 /** Per-provider caps — independent; do not use global mobile/desktop caps. */
-export const PRIZEPICKS_PROVIDER_TIMEOUT_MS = 15_000;
+export const PRIZEPICKS_RETRY_TIMEOUTS_MS = [5_000, 10_000, 15_000];
+/** Outer wrapper must exceed sum of recovery attempts (5s + 10s + 15s + retry gaps). */
+export const PRIZEPICKS_PROVIDER_TIMEOUT_MS = 35_000;
 export const UNDERDOG_PROVIDER_TIMEOUT_MS = 15_000;
 export const LINE_FEED_RETRY_DELAY_MS = 2_000;
 export const LINE_FEED_MAX_RETRIES = 2;

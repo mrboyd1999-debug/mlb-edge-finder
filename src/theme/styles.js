@@ -368,6 +368,17 @@ export const styles = {
     flexDirection: "column",
     gap: "5px",
   },
+  bestPlayHeroCard: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
+    padding: "14px 16px",
+    borderRadius: "12px",
+    border: "1px solid #2563eb",
+    background: "linear-gradient(180deg, #0f172a 0%, #111827 100%)",
+    cursor: "pointer",
+    minWidth: 0,
+  },
   bestPlayRowCard: {
     display: "flex",
     alignItems: "stretch",

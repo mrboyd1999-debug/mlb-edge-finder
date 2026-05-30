@@ -100,7 +100,7 @@ export function selectHighestTierAPlays(props = [], limit = 1) {
     );
 }
 
-export function selectTopVerifiedByScore(props = [], limit = 5) {
+export function selectTopVerifiedByScore(props = [], limit = 10) {
   return [...(props || [])]
     .sort(compareTopPickScore)
     .slice(0, limit)

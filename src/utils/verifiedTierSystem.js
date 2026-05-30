@@ -48,8 +48,9 @@ export const VERIFIED_MIN_DATA_QUALITY = 50;
 export const VERIFIED_TIERS = [VERIFIED_TIER_A, VERIFIED_TIER_B, VERIFIED_TIER_C];
 
 export const VERIFIED_MIN_PLAYS = 5;
-export const VERIFIED_MAX_PLAYS = 15;
+export const VERIFIED_MAX_PLAYS = 10;
 export const VERIFIED_FALLBACK_MAX = 10;
+export const VERIFIED_DISPLAY_MAX = 10;
 export const BEST_PLAYS_ENGINE_SIZE = 5;
 export const TOP_PICK_SCORE_AUDIT_SIZE = 20;
 

@@ -3,7 +3,6 @@ import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import CompactApiHeader from "./CompactApiHeader.jsx";
 import CompactAppTabs from "./CompactAppTabs.jsx";
 import SystemStatusCard from "./SystemStatusCard.jsx";
-import PropPipelineCounters from "./PropPipelineCounters.jsx";
 import ManualPropsPanel from "./ManualPropsPanel.jsx";
 import BestPlaysTab from "./BestPlaysTab.jsx";
 import PlatformFeedTab from "./PlatformFeedTab.jsx";
@@ -88,8 +87,6 @@ function DfsAnalyzerLayout({
       <ApiSetupBanner onOpenSettings={() => setAppView("settings")} />
 
       <ProjectionProviderWarning status={debugInfo?.projectionProvider} />
-
-      <PropPipelineCounters counts={pipelineRenderCounts} />
 
       {learningSaveNotice ? <p className="compact-form-notice">{learningSaveNotice}</p> : null}
 

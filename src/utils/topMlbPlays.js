@@ -414,53 +414,26 @@ export function resolveTopMlbPlaySections(
 
   logPipelineStage("rank.highestProbability", { pool: strictPool.length, ranked: highestPicks.length });
 
+  let sectionPicks = verifiedPicks.filter(Boolean).slice(0, 10);
+  let sectionTitle = "Top Verified Plays";
+  let sectionEyebrow = "Top 10 by probability, confidence, playability, and edge";
+
+  if (!sectionPicks.length && highestPicks.length) {
+    sectionPicks = highestPicks.filter(Boolean).slice(0, 10);
+    sectionTitle = selection.usedVerifiedFallback ? "Top Projected Props" : "Top Verified Plays";
+    sectionEyebrow = selection.usedVerifiedFallback
+      ? "Verified tier pool empty — showing top projected props by probability, edge, and confidence"
+      : "Weighted top plays";
+  }
+
   const sections = [
     {
-      id: "highest-probability",
-      title: "Highest Probability Pick",
-      eyebrow: noTierAPlays
-        ? NO_TIER_A_PLAYS_MESSAGE
-        : "Top Tier A play by composite score",
-      picks: highestProbabilityPicks.filter(Boolean),
-      emptyMessage: NO_TIER_A_PLAYS_MESSAGE,
-    },
-    {
-      id: "top-verified-plays",
-      title: "Top 5 Verified Plays",
-      eyebrow: "Sorted by top pick score descending",
-      picks: topVerifiedPicks.filter(Boolean),
-    },
-    {
       id: "verified-plays",
-      title: "Verified Plays",
-      eyebrow: "Tier A/B/C — sorted by top pick score descending",
-      picks: verifiedPicks.filter(Boolean),
-    },
-    {
-      id: "highest-edge",
-      title: "Top 5 Highest Edge",
-      eyebrow: "Largest projection vs line separation",
-      picks: topEdgePicks.filter(Boolean),
-    },
-    {
-      id: "research-plays",
-      title: "Research Plays",
-      eyebrow: "Missing matchup or incomplete supporting data — review before betting",
-      picks: researchPicks.filter(Boolean),
+      title: sectionTitle,
+      eyebrow: sectionEyebrow,
+      picks: sectionPicks,
     },
   ];
-
-  if (!verifiedPicks.length && !researchPicks.length && highestPicks.length) {
-    sections.length = 0;
-    sections.push({
-      id: "verified-plays",
-      title: selection.usedVerifiedFallback ? "Top Projected Props" : "Verified Plays",
-      eyebrow: selection.usedVerifiedFallback
-        ? "Verified tier pool empty — showing top projected props by probability, edge, and confidence"
-        : "Weighted top plays",
-      picks: highestPicks.filter(Boolean),
-    });
-  }
 
   const audit = auditTopMlbPlayRankableRejections(
     strictPool.map((prop) => enrichPropWithSideEvaluation(prop)),

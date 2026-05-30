@@ -33,7 +33,7 @@ import {
   computeStandardEdge,
   computeStandardEdgePercent,
 } from "./standardPropMetrics.js";
-import { resolveProjectionValue } from "./conservativeProjection.js";
+import { resolveProjectionValue, hasMajorResearchGaps, isLowMatchupProp } from "./conservativeProjection.js";
 import {
   buildProbabilityDistributionAudit,
   resolveProbabilityPipelineValues,
@@ -236,6 +236,38 @@ function countTierBreakdown(picks = []) {
   return counts;
 }
 
+function resolveMatchupFailureReason(prop = {}) {
+  if (isLowMatchupProp(prop)) return "Low matchup confidence";
+  if (prop.projectionUnavailable || prop.isFallbackProjection) return "Projection unavailable or fallback";
+  if (prop.unverifiedGradeBlocked) return "Unverified grade blocked";
+  if (hasMajorResearchGaps(prop)) return "Research gaps / missing supporting data";
+  if (!String(prop.opponent || "").trim() && !prop.matchupNote) return "Missing opponent or matchup context";
+  return "Incomplete supporting data";
+}
+
+function buildMatchupFailureAudit(projectedPool = []) {
+  const reasonCounts = {};
+  let passedMatchupCount = 0;
+  let failedMatchupCount = 0;
+
+  for (const prop of projectedPool || []) {
+    if (hasIncompleteSupportingData(prop)) {
+      failedMatchupCount += 1;
+      const reason = resolveMatchupFailureReason(prop);
+      reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
+    } else {
+      passedMatchupCount += 1;
+    }
+  }
+
+  const topFailedMatchupReasons = Object.entries(reasonCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([reason, count]) => ({ reason, count }));
+
+  return { passedMatchupCount, failedMatchupCount, topFailedMatchupReasons };
+}
+
 function buildRuleRejectionCounts(projectedPool = []) {
   const counts = {};
   for (const prop of projectedPool) {
@@ -305,6 +337,7 @@ export function buildVerificationDashboard(props = [], options = {}) {
     : resolveProjectedPool(props);
   const verifiedPicks = options.verifiedPicks || [];
   const gateMetrics = computeGateMetrics(projectedPool);
+  const matchupAudit = buildMatchupFailureAudit(projectedPool);
   const tierQualified = projectedPool.filter(passesVerifiedBestPlaysFilter);
   const tierCounts = countTierBreakdown(
     verifiedPicks.length ? verifiedPicks : tierQualified
@@ -350,6 +383,9 @@ export function buildVerificationDashboard(props = [], options = {}) {
     verifiedFailures: audit.totalFailures,
     usedVerifiedFallback: Boolean(options.usedVerifiedFallback),
     ...gateMetrics,
+    passedMatchupCount: matchupAudit.passedMatchupCount,
+    failedMatchupCount: matchupAudit.failedMatchupCount,
+    topFailedMatchupReasons: matchupAudit.topFailedMatchupReasons,
     tierA: tierCounts.tierA,
     tierB: tierCounts.tierB,
     tierC: tierCounts.tierC,

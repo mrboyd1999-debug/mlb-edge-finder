@@ -4,6 +4,7 @@ import {
   LINE_FEED_MAX_RETRIES,
   LINE_FEED_RETRY_DELAY_MS,
   PRIZEPICKS_PROVIDER_TIMEOUT_MS,
+  PRIZEPICKS_RETRY_TIMEOUTS_MS,
 } from "../utils/apiTimeout.js";
 import { safeParseJSON } from "../utils/safeParseJSON.js";
 import { normalizeGameStartTime, startTimeUncertainty } from "../utils/normalizeGameStartTime.js";
@@ -260,20 +261,64 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
 
   for (const endpoint of endpoints) {
     if (signal?.aborted) break;
-    const parsed = await fetchPrizePicksEndpoint(endpoint, fetchInit, { signal });
-    attempts.push(parsed.attempt);
 
-    applyPrizePicksAttemptDiagnostics(parsed.attempt, parsed, {
-      requestUrl: absoluteUrl(endpoint),
-      attempts: attempts.map((item) => ({
-        url: item.url,
-        status: item.status,
-        error: item.error,
-        durationMs: item.durationMs,
-        captchaDetected: item.captchaDetected,
-        blockedPayloadDetected: item.blockedPayloadDetected,
-      })),
-    });
+    let parsed = null;
+    for (let retryIndex = 0; retryIndex < PRIZEPICKS_RETRY_TIMEOUTS_MS.length; retryIndex += 1) {
+      if (signal?.aborted) break;
+      const timeoutMs = PRIZEPICKS_RETRY_TIMEOUTS_MS[retryIndex];
+      const timeoutLocation = `prizepicks.fetch.retry-${retryIndex + 1}-${timeoutMs}ms`;
+      parsed = await fetchPrizePicksEndpoint(endpoint, fetchInit, {
+        signal,
+        timeoutMs,
+        retryIndex,
+        timeoutLocation,
+      });
+      attempts.push(parsed.attempt);
+
+      applyPrizePicksAttemptDiagnostics(parsed.attempt, parsed, {
+        requestUrl: absoluteUrl(endpoint),
+        retryAttempt: retryIndex + 1,
+        retryTimeoutMs: timeoutMs,
+        lastTimeoutLocation: parsed.timeoutLocation || timeoutLocation,
+        attempts: attempts.map((item) => ({
+          url: item.url,
+          status: item.status,
+          error: item.error,
+          durationMs: item.durationMs,
+          captchaDetected: item.captchaDetected,
+          blockedPayloadDetected: item.blockedPayloadDetected,
+          timeoutLocation: item.timeoutLocation,
+          retryIndex: item.retryIndex,
+        })),
+      });
+
+      const timedOut = Boolean(parsed.timedOut || /timed out|abort/i.test(String(parsed.attempt?.error || "")));
+      const hasPayload = parsed.ok && parsed.payload;
+      const rawCount = hasPayload ? rawPrizePicksRecordCount(parsed.payload) : 0;
+
+      if (hasPayload && rawCount > 0) {
+        console.info("[PrizePicks] recovery success", { retryIndex: retryIndex + 1, timeoutMs, rawCount });
+        break;
+      }
+
+      if (timedOut) {
+        console.warn("[PrizePicks] timeout location", {
+          timeoutLocation: parsed.timeoutLocation || timeoutLocation,
+          timeoutMs,
+          retryIndex: retryIndex + 1,
+          durationMs: parsed.attempt?.durationMs,
+          willRetry: retryIndex < PRIZEPICKS_RETRY_TIMEOUTS_MS.length - 1,
+        });
+      }
+
+      if (retryIndex < PRIZEPICKS_RETRY_TIMEOUTS_MS.length - 1) {
+        const retryDelayMs = 250;
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+        continue;
+      }
+    }
+
+    if (!parsed) continue;
 
     if (parsed.ok && parsed.payload) {
       const isFallback = parsed.payload?.fallback === true;
@@ -538,8 +583,15 @@ function buildCachedPrizePicksResult({ sport, statType, attempts, endpoint, reas
   };
 }
 
-async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
-  const lineFeedTimeoutMs = Math.min(getLineFeedTimeoutMs(), PRIZEPICKS_PROVIDER_TIMEOUT_MS);
+async function fetchPrizePicksEndpoint(
+  endpoint,
+  init,
+  { signal, timeoutMs: timeoutOverride, retryIndex = 0, timeoutLocation = "prizepicks.fetch.single" } = {}
+) {
+  const lineFeedTimeoutMs =
+    Number.isFinite(Number(timeoutOverride)) && Number(timeoutOverride) > 0
+      ? Number(timeoutOverride)
+      : Math.min(getLineFeedTimeoutMs(), PRIZEPICKS_PROVIDER_TIMEOUT_MS);
   const attempt = {
     url: absoluteUrl(endpoint),
     status: null,
@@ -547,13 +599,20 @@ async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
     preview: "",
     error: "",
     htmlError: false,
-    retries: 0,
+    retries: retryIndex,
+    retryIndex,
     durationMs: 0,
+    timeoutLocation,
   };
   const startedAt = Date.now();
 
   console.info("[PrizePicks] request URL", attempt.url);
-  logProviderFetchPhase("PrizePicks", "PrizePicks Request Sent", { url: attempt.url, timeoutMs: lineFeedTimeoutMs });
+  logProviderFetchPhase("PrizePicks", "PrizePicks Request Sent", {
+    url: attempt.url,
+    timeoutMs: lineFeedTimeoutMs,
+    retryIndex: retryIndex + 1,
+    timeoutLocation,
+  });
 
   try {
     const response = await resilientFetch(
@@ -563,7 +622,7 @@ async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
       source: "PrizePicks",
       ttlMs: PRIZEPICKS_CLIENT_STALE_MS,
       timeoutMs: lineFeedTimeoutMs,
-      maxRetries: LINE_FEED_MAX_RETRIES,
+      maxRetries: 0,
       retryDelayMs: LINE_FEED_RETRY_DELAY_MS,
       skip429Retry: true,
       }
@@ -618,6 +677,8 @@ async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
         htmlError: attempt.preview.startsWith("<"),
         rateLimited: response.status === 429,
         httpStatus: response.status,
+        timeoutLocation,
+        timedOut: false,
       };
     }
 
@@ -717,12 +778,27 @@ async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
     return { ok: true, attempt, payload, htmlError: false, rateLimited: false };
   } catch (error) {
     const message = error?.message || String(error);
-    attempt.error = /timed out|abort/i.test(message)
-      ? `Request timed out after ${Math.round(lineFeedTimeoutMs / 1000)}s`
+    const timedOut = /timed out|abort/i.test(message);
+    attempt.error = timedOut
+      ? `Request timed out at ${timeoutLocation} after ${Math.round(lineFeedTimeoutMs / 1000)}s`
       : message || "Failed to fetch";
     attempt.durationMs = Date.now() - startedAt;
-    attempt.networkError = true;
-    return { ok: false, attempt, htmlError: false, rateLimited: false, networkError: true };
+    attempt.networkError = !timedOut;
+    console.warn("[PrizePicks] timeout location", {
+      timeoutLocation,
+      timeoutMs: lineFeedTimeoutMs,
+      timedOut,
+      error: attempt.error,
+    });
+    return {
+      ok: false,
+      attempt,
+      htmlError: false,
+      rateLimited: false,
+      networkError: !timedOut,
+      timedOut,
+      timeoutLocation,
+    };
   }
 }
 

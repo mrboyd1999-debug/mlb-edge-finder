@@ -190,6 +190,9 @@ function VerificationDashboard({ dashboard = null }) {
     failedDataQuality = 0,
     passedMatchup = 0,
     failedMatchup = 0,
+    passedMatchupCount = passedMatchup,
+    failedMatchupCount = failedMatchup,
+    topFailedMatchupReasons = [],
     tierA = 0,
     tierB = 0,
     tierC = 0,
@@ -214,6 +217,7 @@ function VerificationDashboard({ dashboard = null }) {
     : [];
 
   const compression = probabilityDistribution?.compressionAudit || null;
+  const matchupReasonRows = Array.isArray(topFailedMatchupReasons) ? topFailedMatchupReasons : [];
 
   return (
     <section className="verification-diagnostics" aria-label="Verification diagnostics">
@@ -227,11 +231,26 @@ function VerificationDashboard({ dashboard = null }) {
         <Metric label="Failed Confidence" value={failedConfidence} />
         <Metric label="Passed Data Quality" value={passedDataQuality} />
         <Metric label="Failed Data Quality" value={failedDataQuality} />
-        <Metric label="Passed Matchup" value={passedMatchup} />
-        <Metric label="Failed Matchup" value={failedMatchup} />
+        <Metric label="Passed Matchup Count" value={passedMatchupCount} />
+        <Metric label="Failed Matchup Count" value={failedMatchupCount} />
         <Metric label="Tier A Count" value={tierA} />
         <Metric label="Tier B Count" value={tierB} />
         <Metric label="Tier C Count" value={tierC} />
+      </div>
+
+      <div className="verification-diagnostics__rejections">
+        <h4 className="verification-diagnostics__subtitle">Matchup Audit</h4>
+        {matchupReasonRows.length ? (
+          <ul className="verification-diagnostics__rejection-list">
+            {matchupReasonRows.map(({ reason, count }) => (
+              <li key={reason}>
+                {reason}: {count}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="verification-diagnostics__empty">No failed matchup reasons recorded.</p>
+        )}
       </div>
 
       {showRejections ? (
@@ -277,75 +296,50 @@ function VerificationDashboard({ dashboard = null }) {
       ) : null}
 
       {usedVerifiedFallback ? (
-        <p className="verification-diagnostics__meta">
+        <p className="verification-diagnostics__meta" role="status">
           Verified tier pool was empty — top projected props promoted by score.
         </p>
       ) : null}
 
-      <h4 className="verification-diagnostics__subtitle">Probability Calibration</h4>
       {probabilityDistribution ? (
         <>
           <DistributionSummary
-            title="Probability Histogram — all projected props"
-            summary={probabilityDistribution.projected}
-            histogram={probabilityDistribution.projected?.histogram}
+            title="Probability Calibration"
+            summary={probabilityDistribution.summary}
+            histogram={probabilityDistribution.histogram}
           />
           <CalibrationInputsSummary
-            title="Average calibration inputs (projected pool)"
-            summary={probabilityDistribution.calibrationInputs}
-          />
-          <DistributionSummary
-            title="Probability Histogram — top 20 projected props"
-            summary={probabilityDistribution.top20}
-            histogram={probabilityDistribution.top20?.histogram}
-          />
-          <CalibrationInputsSummary
-            title="Average calibration inputs (top 20)"
-            summary={probabilityDistribution.top20CalibrationInputs}
+            title="Calibration Input Averages"
+            summary={probabilityDistribution.calibrationInputsSummary}
           />
           {compression ? (
-            <div className="verification-diagnostics__compression">
-              <p className="verification-diagnostics__meta">
-                Compression check: {compression.exact70Count ?? 0} at exactly 70% ·{" "}
-                {compression.band68to70Count ?? 0} in 68–70% band ·{" "}
-                {compression.uniqueDisplayedValues ?? 0} unique displayed values ·{" "}
-                {compression.researchCapHits ?? 0} research-cap hits
-              </p>
-              {compression.statSpecificHigherCount > 0 ? (
-                <p className="verification-diagnostics__meta">
-                  {compression.statSpecificHigherCount} props have stat-specific probability above
-                  displayed value (cap or confidence ceiling likely applied).
-                </p>
-              ) : null}
-              {Array.isArray(compression.notes) && compression.notes.length ? (
-                <ul className="verification-diagnostics__rejection-list">
-                  {compression.notes.map((note) => (
-                    <li key={note}>{note}</li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
+            <p className="verification-diagnostics__meta">
+              Compression audit: avg {compression.averageProbability ?? "—"}% · likely legacy cap{" "}
+              {compression.likelyLegacyCapCount ?? 0} props
+            </p>
           ) : null}
         </>
-      ) : (
-        <p className="verification-diagnostics__empty">Distribution audit unavailable.</p>
-      )}
+      ) : null}
 
-      <h4 className="verification-diagnostics__subtitle">Top 20 projected props</h4>
-      <p className="verification-diagnostics__meta">Rows Loaded: {topProjectedProps.length}</p>
-      <DiagnosticTable
-        rows={topProjectedProps}
-        emptyMessage="No projected props."
-        showFailureReason
-        showMatchup
-        showPropDetails
-      />
+      {topProjectedProps.length ? (
+        <>
+          <h4 className="verification-diagnostics__subtitle">Top Projected Props</h4>
+          <DiagnosticTable
+            rows={topProjectedProps}
+            emptyMessage="No projected props"
+            showFailureReason
+            showMatchup
+            showPropDetails
+          />
+        </>
+      ) : null}
 
-      <h4 className="verification-diagnostics__subtitle">Top 10 props after verification</h4>
-      <p className="verification-diagnostics__meta">
-        Rows Loaded: {Array.isArray(topAfterVerification) ? topAfterVerification.length : 0}
-      </p>
-      <DiagnosticTable rows={topAfterVerification} emptyMessage="No verified props on board." />
+      {topAfterVerification.length ? (
+        <>
+          <h4 className="verification-diagnostics__subtitle">Top After Verification</h4>
+          <DiagnosticTable rows={topAfterVerification} emptyMessage="No verified picks" showMatchup />
+        </>
+      ) : null}
     </section>
   );
 }
