@@ -1,7 +1,25 @@
 import SectionErrorBoundary from "./components/SectionErrorBoundary.jsx";
 import DFSPropsApp from "./DFSPropsApp";
+import DebugFeedPage from "./pages/DebugFeedPage.jsx";
 
 const IS_DEV = import.meta.env.DEV;
+
+function isDebugFeedRoute() {
+  if (typeof window === "undefined") return false;
+  return window.location.pathname === "/debug-feed" || window.location.pathname === "/debug-feed/";
+}
+
+export default function App() {
+  if (isDebugFeedRoute()) {
+    return <DebugFeedPage />;
+  }
+
+  return (
+    <SectionErrorBoundary name="Application" fallback={(error) => <AppCrashFallback error={error} />}>
+      <DFSPropsApp />
+    </SectionErrorBoundary>
+  );
+}
 
 function AppCrashFallback({ error }) {
   const message = error?.message || "Unknown error";
@@ -47,13 +65,5 @@ function AppCrashFallback({ error }) {
         </div>
       ) : null}
     </main>
-  );
-}
-
-export default function App() {
-  return (
-    <SectionErrorBoundary name="Application" fallback={(error) => <AppCrashFallback error={error} />}>
-      <DFSPropsApp />
-    </SectionErrorBoundary>
   );
 }

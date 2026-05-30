@@ -70,6 +70,13 @@ import {
   normalizePrizePicksResponse,
   parsePrizePicksProjections,
 } from "../utils/prizepicksParse.js";
+import {
+  logFeedFetchError,
+  logFeedFetchStart,
+  logFeedHttpResponse,
+  logFeedStageTrace,
+  publishFeedEvidence,
+} from "../utils/feedHardEvidence.js";
 
 export const PRIZEPICKS_HTML_BANNER = "API route is serving source/HTML instead of JSON. Check proxy/backend routing.";
 export const PRIZEPICKS_RATE_LIMIT_MESSAGE = "PrizePicks rate limited, using other sources.";
@@ -201,7 +208,32 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
     const message = proxyAssessment.invalid
       ? `PrizePicks proxy URL is invalid. Set ${config.canonicalKey} in Settings.`
       : "PrizePicks proxy URL missing";
+    console.log("PP START FETCH");
+    console.log("PP URL", "(not configured)");
     console.info("[PrizePicks]", message, "— fetch skipped (no HTTP)");
+    publishFeedEvidence("prizepicks", {
+      url: "",
+      httpStatus: null,
+      responseSize: 0,
+      fetchSuccess: false,
+      parseSuccess: false,
+      normalizeSuccess: false,
+      filterSuccess: false,
+      error: message,
+      errorStack: "",
+      counts: { raw: 0, parsed: 0, normalized: 0, filtered: 0 },
+    });
+    logFeedStageTrace("PP", "prizepicks", {
+      url: "",
+      httpStatus: null,
+      responseSize: 0,
+      fetchSuccess: false,
+      parseSuccess: false,
+      normalizeSuccess: false,
+      filterSuccess: false,
+      counts: { raw: 0, parsed: 0, normalized: 0, filtered: 0 },
+      error: message,
+    });
     updatePrizePicksDiagnostics({
       proxyConfigured: false,
       proxyMode: "none — blocked in fetchPrizePicksPropsInternal",
@@ -244,6 +276,11 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
 
   const endpoints = prizePicksEndpoints();
   const requestUrl = endpoints[0] ? absoluteUrl(endpoints[0]) : "";
+  console.log("PP START FETCH");
+  console.log("PP URL", requestUrl);
+  for (const endpoint of endpoints) {
+    console.log("PP URL", absoluteUrl(endpoint));
+  }
   updatePrizePicksDiagnostics({
     requestUrl,
     requestSent: true,
@@ -393,6 +430,22 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
       logPipelineAudit(isFallback ? "PrizePicks-cached" : "PrizePicks", audit);
       const apiSucceeded = !parsed.payload?.error;
       const rawCount = rawPrizePicksRecordCount(parsed.payload);
+      logFeedStageTrace("PP", "prizepicks", {
+        url: parsed.attempt?.url || absoluteUrl(endpoint),
+        httpStatus: parsed.attempt?.status ?? null,
+        responseSize: parsed.attempt?.responseSize ?? 0,
+        bodyPreview: String(parsed.attempt?.preview || "").slice(0, 500),
+        fetchSuccess: Boolean(parsed.ok && parsed.attempt?.responseReceived),
+        parseSuccess: rawCount > 0,
+        normalizeSuccess: normalizedProps.length > 0,
+        filterSuccess: usableMlbCount > 0,
+        counts: {
+          raw: rawCount,
+          parsed: normalizedProps.length,
+          normalized: normalizedProps.length,
+          filtered: usableMlbCount,
+        },
+      });
       console.info("[PrizePicks] response", {
         requestUrl: parsed.attempt?.url || absoluteUrl(endpoint),
         responseStatus: parsed.attempt?.status ?? null,
@@ -676,6 +729,7 @@ async function fetchPrizePicksEndpoint(
   };
   const startedAt = Date.now();
 
+  logFeedFetchStart("PP", attempt.url);
   console.info("[PrizePicks] request URL", attempt.url);
   logProviderFetchPhase("PrizePicks", "PrizePicks Request Sent", {
     url: attempt.url,
@@ -708,6 +762,15 @@ async function fetchPrizePicksEndpoint(
     attempt.responseReceived = true;
     attempt.responseReceivedAt = new Date().toISOString();
     attempt.preview = text.slice(0, 200).replace(/\s+/g, " ").trim();
+
+    logFeedHttpResponse("PP", { status: response.status, text, url: attempt.url });
+    publishFeedEvidence("prizepicks", {
+      url: attempt.url,
+      httpStatus: response.status,
+      responseSize: text.length,
+      bodyPreview: text.slice(0, 500),
+      fetchSuccess: response.ok,
+    });
 
     console.info("[PrizePicks] response headers", attempt.responseHeaders);
     console.info("[PrizePicks] response body length", attempt.responseSize);
@@ -795,8 +858,22 @@ async function fetchPrizePicksEndpoint(
         keys: payload && typeof payload === "object" ? Object.keys(payload).slice(0, 8) : [],
       });
     } catch (parseError) {
+      logFeedFetchError("PP", parseError);
       console.error("Non-JSON response:", trimmed.slice(0, 300));
       attempt.error = `PrizePicks returned non-JSON response: ${parseError.message || "invalid JSON"}`;
+      publishFeedEvidence("prizepicks", {
+        url: attempt.url,
+        httpStatus: attempt.status,
+        responseSize: text.length,
+        bodyPreview: trimmed.slice(0, 500),
+        fetchSuccess: true,
+        parseSuccess: false,
+        normalizeSuccess: false,
+        filterSuccess: false,
+        error: parseError.message,
+        errorStack: parseError.stack || "",
+        counts: { raw: 0, parsed: 0, normalized: 0, filtered: 0 },
+      });
       return { ok: false, attempt, htmlError: true, rateLimited: false, nonJson: true };
     }
 
@@ -866,6 +943,7 @@ async function fetchPrizePicksEndpoint(
 
     return { ok: true, attempt, payload, htmlError: false, rateLimited: false };
   } catch (error) {
+    logFeedFetchError("PP", error);
     const message = error?.message || String(error);
     const timedOut = /timed out|abort/i.test(message);
     attempt.error = timedOut
@@ -873,6 +951,30 @@ async function fetchPrizePicksEndpoint(
       : message || "Failed to fetch";
     attempt.durationMs = Date.now() - startedAt;
     attempt.networkError = !timedOut;
+    publishFeedEvidence("prizepicks", {
+      url: attempt.url,
+      httpStatus: attempt.status,
+      responseSize: attempt.responseSize || 0,
+      fetchSuccess: false,
+      parseSuccess: false,
+      normalizeSuccess: false,
+      filterSuccess: false,
+      error: message,
+      errorStack: error?.stack || "",
+      counts: { raw: 0, parsed: 0, normalized: 0, filtered: 0 },
+    });
+    logFeedStageTrace("PP", "prizepicks", {
+      url: attempt.url,
+      httpStatus: attempt.status,
+      responseSize: attempt.responseSize || 0,
+      fetchSuccess: false,
+      parseSuccess: false,
+      normalizeSuccess: false,
+      filterSuccess: false,
+      error: message,
+      errorStack: error?.stack || "",
+      counts: { raw: 0, parsed: 0, normalized: 0, filtered: 0 },
+    });
     console.warn("[PrizePicks Timeout] step:", timeoutLocation, {
       timeoutMs: lineFeedTimeoutMs,
       timedOut,

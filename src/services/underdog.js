@@ -67,6 +67,13 @@ import {
 import { unwrapUnderdogPayload } from "../utils/underdogEnvelope.js";
 import { filterResolvedSportProps } from "../utils/underdogSportDetection.js";
 import { recordProviderResponse } from "../utils/rawResponseDebug.js";
+import {
+  logFeedFetchError,
+  logFeedFetchStart,
+  logFeedHttpResponse,
+  logFeedStageTrace,
+  publishFeedEvidence,
+} from "../utils/feedHardEvidence.js";
 
 const UNDERDOG_ENDPOINTS = [
   "/api/underdog/beta/v5/over_under_lines",
@@ -129,6 +136,11 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all", sig
   }
 
   const attempts = [];
+
+  console.log("UD START FETCH");
+  for (const endpoint of underdogEndpoints()) {
+    console.log("UD URL", absoluteUrl(endpoint));
+  }
 
   console.log("[UD FETCH START]", { sport, statType });
 
@@ -235,6 +247,22 @@ async function fetchUnderdogPropsInternal({ sport = "all", statType = "all", sig
         ? filterResolvedSportProps(parsedProps, sport === "all" ? "MLB" : sport, { selectedSportTab: "MLB" })
         : parsedProps.filter((prop) => matchesFilter(prop, sport, statType));
       const usableCount = countUsableProps(props);
+      logFeedStageTrace("UD", "underdog", {
+        url: parsed.attempt?.url || apiUrl,
+        httpStatus: parsed.attempt?.status ?? null,
+        responseSize: parsed.attempt?.responseSize ?? 0,
+        bodyPreview: String(parsed.attempt?.preview || "").slice(0, 500),
+        fetchSuccess: Boolean(parsed.ok),
+        parseSuccess: rawCount > 0,
+        normalizeSuccess: parsedProps.length > 0,
+        filterSuccess: props.length > 0 && usableCount > 0,
+        counts: {
+          raw: rawCount,
+          parsed: parsedProps.length,
+          normalized: parsedProps.length,
+          filtered: props.length,
+        },
+      });
       console.log("[UD PROPS EXTRACTED]", {
         raw: rawCount,
         parsed: parsedProps.length,
@@ -433,6 +461,7 @@ async function attemptUnderdogEndpoint(endpoint, { signal, timeoutMs, retryIndex
   };
   const startedAt = Date.now();
 
+  logFeedFetchStart("UD", attempt.url);
   logProviderFetchPhase("Underdog", "fetch start", {
     url: attempt.url,
     timeoutMs: lineFeedTimeoutMs,
@@ -461,6 +490,15 @@ async function attemptUnderdogEndpoint(endpoint, { signal, timeoutMs, retryIndex
     const text = await response.text();
     attempt.preview = text.slice(0, 200).replace(/\s+/g, " ").trim();
     attempt.responseSize = text.length;
+
+    logFeedHttpResponse("UD", { status: response.status, text, url: attempt.url });
+    publishFeedEvidence("underdog", {
+      url: attempt.url,
+      httpStatus: response.status,
+      responseSize: text.length,
+      bodyPreview: text.slice(0, 500),
+      fetchSuccess: response.ok,
+    });
 
     logProviderFetchPhase("Underdog", "response received", {
       status: attempt.status,
@@ -518,8 +556,22 @@ async function attemptUnderdogEndpoint(endpoint, { signal, timeoutMs, retryIndex
         keys: payload && typeof payload === "object" ? Object.keys(payload).slice(0, 8) : [],
       });
     } catch (parseError) {
+      logFeedFetchError("UD", parseError);
       console.error("Non-JSON response:", trimmed.slice(0, 300));
       attempt.error = `Underdog returned non-JSON response: ${parseError.message || "invalid JSON"}`;
+      publishFeedEvidence("underdog", {
+        url: attempt.url,
+        httpStatus: attempt.status,
+        responseSize: text.length,
+        bodyPreview: trimmed.slice(0, 500),
+        fetchSuccess: true,
+        parseSuccess: false,
+        normalizeSuccess: false,
+        filterSuccess: false,
+        error: parseError.message,
+        errorStack: parseError.stack || "",
+        counts: { raw: 0, parsed: 0, normalized: 0, filtered: 0 },
+      });
       return { ok: false, attempt, nonJson: true };
     }
 
@@ -535,12 +587,37 @@ async function attemptUnderdogEndpoint(endpoint, { signal, timeoutMs, retryIndex
 
     return { ok: true, attempt, payload };
   } catch (error) {
+    logFeedFetchError("UD", error);
     const message = error?.message || String(error);
     attempt.error = /timed out|abort/i.test(message)
       ? `Request timed out after ${Math.round(lineFeedTimeoutMs / 1000)}s`
       : message || "Failed to fetch";
     attempt.durationMs = Date.now() - startedAt;
     attempt.networkError = true;
+    publishFeedEvidence("underdog", {
+      url: attempt.url,
+      httpStatus: attempt.status,
+      responseSize: attempt.responseSize || 0,
+      fetchSuccess: false,
+      parseSuccess: false,
+      normalizeSuccess: false,
+      filterSuccess: false,
+      error: message,
+      errorStack: error?.stack || "",
+      counts: { raw: 0, parsed: 0, normalized: 0, filtered: 0 },
+    });
+    logFeedStageTrace("UD", "underdog", {
+      url: attempt.url,
+      httpStatus: attempt.status,
+      responseSize: attempt.responseSize || 0,
+      fetchSuccess: false,
+      parseSuccess: false,
+      normalizeSuccess: false,
+      filterSuccess: false,
+      error: message,
+      errorStack: error?.stack || "",
+      counts: { raw: 0, parsed: 0, normalized: 0, filtered: 0 },
+    });
     if (/timed out|abort/i.test(message)) {
       console.warn("[UD TIMEOUT] step:", "underdog.fetch.response", {
         timeoutMs: lineFeedTimeoutMs,
