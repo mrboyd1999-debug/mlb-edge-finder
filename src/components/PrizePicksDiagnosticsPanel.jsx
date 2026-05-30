@@ -1,15 +1,27 @@
 import { memo } from "react";
 import { styles } from "../theme/styles.js";
-import { getPrizePicksDiagnostics } from "../utils/prizepicksDiagnostics.js";
+import { diagnosePrizePicksFailure, getPrizePicksDiagnostics } from "../utils/prizepicksDiagnostics.js";
 
 function row(label, value) {
   const text = value == null || value === "" ? "—" : String(value);
   return (
-    <div className="prizepicks-diagnostics__row" style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 8 }}>
+    <div className="prizepicks-diagnostics__row" style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: 8 }}>
       <span style={{ color: "#94a3b8", fontSize: 12 }}>{label}</span>
       <span style={{ fontSize: 12, wordBreak: "break-all" }}>{text}</span>
     </div>
   );
+}
+
+function boolLabel(value) {
+  if (value === true) return "true";
+  if (value === false) return "false";
+  return "—";
+}
+
+function formatHeaders(headers = {}) {
+  const entries = Object.entries(headers || {});
+  if (!entries.length) return "—";
+  return entries.map(([key, value]) => `${key}: ${value}`).join(" · ");
 }
 
 function PrizePicksDiagnosticsPanel({ diagnostics: diagnosticsProp = null, feedRow = null }) {
@@ -17,11 +29,11 @@ function PrizePicksDiagnosticsPanel({ diagnostics: diagnosticsProp = null, feedR
     typeof window !== "undefined" ? window.__PRIZEPICKS_DIAGNOSTICS__ : null;
   const d = diagnosticsProp || fromWindow || getPrizePicksDiagnostics();
   const feed = feedRow || {};
+  const diagnosis = diagnosePrizePicksFailure(d);
 
   const requestUrl = d.requestUrl || feed.apiUrl || feed.endpointsTried?.[0] || "";
   const statusCode = d.statusCode ?? d.lastAttemptStatus ?? feed.lastAttemptStatus ?? null;
-  const lastError =
-    d.lastError || feed.message || feed.lastError || feed.statusLabel || "";
+  const failureReason = d.failureReason || diagnosis.reason || d.lastError || feed.message || feed.statusLabel || "";
 
   return (
     <details className="prizepicks-diagnostics compact-settings-details" open>
@@ -34,27 +46,40 @@ function PrizePicksDiagnosticsPanel({ diagnostics: diagnosticsProp = null, feedR
         </span>
       </summary>
       <div style={{ display: "grid", gap: 6, marginTop: 8, padding: "8px 10px", borderRadius: 8, background: "rgba(15,23,42,0.5)" }}>
+        {failureReason ? (
+          <p className="prizepicks-diagnostics__failure" style={{ color: "#f87171", fontSize: 12, margin: "0 0 6px" }} role="status">
+            {diagnosis.category}: {failureReason}
+          </p>
+        ) : null}
+
+        <strong style={{ fontSize: 12, color: "#e2e8f0" }}>Pipeline</strong>
+        {row("PrizePicks Request Sent", boolLabel(d.requestSent))}
+        {row("PrizePicks Response Received", boolLabel(d.responseReceived))}
+        {row("PrizePicks Parsed Props", d.parsedPropsCount ?? feed.parsedCount ?? feed.propsAfterParsing ?? 0)}
+        {row("PrizePicks Final Props", d.finalPropsCount ?? d.validationCount ?? feed.usableCount ?? 0)}
+
+        <strong style={{ fontSize: 12, color: "#e2e8f0", marginTop: 4 }}>Request / Response</strong>
         {row("Request URL", requestUrl)}
+        {row("Response headers", formatHeaders(d.responseHeaders))}
+        {row("Response body length", d.responseBodyLength ?? d.responseSize ?? 0)}
+        {row("Captcha detected", boolLabel(d.captchaDetected))}
+        {row("Blocked payload detected", boolLabel(d.blockedPayloadDetected))}
+        {row("Failure category", diagnosis.category)}
+        {row("Used cache fallback", boolLabel(d.usedCacheFallback))}
+        {row("Live fetch failure", d.liveFetchFailureReason || (d.usedCacheFallback ? failureReason : "—"))}
+
+        <strong style={{ fontSize: 12, color: "#e2e8f0", marginTop: 4 }}>Counts</strong>
         {row("Proxy mode", d.proxyMode || (d.proxyConfigured ? "proxied (app route → external proxy)" : "none"))}
         {row("External proxy host", d.externalProxyHost)}
         {row("Proxy configured", d.proxyConfigured ? "yes" : "no")}
-        {row("Missing configuration", d.missingConfiguration || (d.proxyConfigured ? "—" : "VITE_PRIZEPICKS_PROXY_URL"))}
-        {row("Config keys checked", (d.configKeysChecked || []).join(", ") || "VITE_PRIZEPICKS_PROXY_URL, …")}
-        {row("Expected format", d.expectedFormat || "External https JSON proxy (see example below)")}
-        {row("Example proxy URL", d.exampleProxyUrl || "https://api.apify.com/v2/acts/.../run-sync-get-dataset-items?token=...")}
         {row("HTTP executed", d.httpExecuted ? "yes" : "no")}
         {row("Response time", d.responseTimeMs != null ? `${d.responseTimeMs}ms` : "—")}
         {row("Status code", statusCode)}
-        {row("Response size (chars)", d.responseSize ?? 0)}
         {row("Raw prop count", d.rawPropCount ?? feed.rawCount ?? feed.rawPropsLoaded ?? 0)}
         {row("MLB scoped count", d.mlbScopedCount ?? 0)}
-        {row("Normalized count", d.normalizedCount ?? feed.parsedCount ?? feed.propsAfterParsing ?? 0)}
-        {row("Validation count", d.validationCount ?? feed.usableCount ?? feed.usablePropsCount ?? 0)}
-        {row("MLB usable count", d.mlbUsableCount ?? 0)}
+        {row("Normalized count", d.normalizedCount ?? 0)}
         {row("Provider status", d.providerStatus || feed.status || "")}
-        {row("UI connection tier", d.uiConnectionTier || feed.connectionTier || "")}
         {row("Failure class", d.failureClass || "")}
-        {row("Last error", lastError)}
         {row("Updated at", d.updatedAt || "")}
         {d.filterReasons && Object.keys(d.filterReasons).length ? (
           <div style={{ marginTop: 4 }}>

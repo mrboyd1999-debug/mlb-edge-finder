@@ -51,6 +51,7 @@ import { recordProviderResponse } from "../utils/rawResponseDebug.js";
 import {
   classifyPrizePicksFailure,
   getPrizePicksDiagnostics,
+  headersToRecord,
   resetPrizePicksDiagnostics,
   updatePrizePicksDiagnostics,
 } from "../utils/prizepicksDiagnostics.js";
@@ -130,6 +131,55 @@ export async function fetchPrizePicksProps({ sport = "all", statType = "all", si
   );
 }
 
+function applyPrizePicksAttemptDiagnostics(attempt = {}, parsed = {}, extra = {}) {
+  const captchaDetected = Boolean(attempt.captchaDetected);
+  const blockedPayloadDetected = Boolean(attempt.blockedPayloadDetected || parsed.blockPayload);
+  const responseBodyLength = Number(attempt.responseSize ?? 0);
+  const rawPropCount =
+    extra.rawPropCount ??
+    (parsed.ok && parsed.payload ? rawPrizePicksRecordCount(parsed.payload) : Number(attempt.rawPropCount ?? 0));
+  const parsedPropsCount = Number(extra.parsedPropsCount ?? attempt.parsedPropsCount ?? 0);
+  const finalPropsCount = Number(extra.finalPropsCount ?? 0);
+
+  updatePrizePicksDiagnostics({
+    requestUrl: attempt.url || extra.requestUrl || "",
+    httpExecuted: true,
+    requestSent: true,
+    responseReceived: Boolean(attempt.responseReceived ?? (attempt.status != null || responseBodyLength > 0)),
+    responseReceivedAt: attempt.responseReceivedAt || (attempt.status != null ? new Date().toISOString() : ""),
+    statusCode: attempt.status ?? null,
+    responseSize: responseBodyLength,
+    responseBodyLength,
+    responseHeaders: attempt.responseHeaders || {},
+    responseTimeMs: attempt.durationMs ?? null,
+    timedOut: Boolean(extra.timedOut || /timed out|abort/i.test(String(attempt.error || ""))),
+    networkError: Boolean(attempt.networkError),
+    captchaDetected,
+    blockedPayloadDetected,
+    rawPropCount,
+    parsedPropsCount,
+    finalPropsCount,
+    normalizedCount: parsedPropsCount,
+    validationCount: finalPropsCount,
+    lastError: attempt.error || extra.lastError || "",
+    ...extra,
+    failureClass: classifyPrizePicksFailure({
+      httpExecuted: true,
+      timedOut: Boolean(extra.timedOut),
+      statusCode: attempt.status ?? null,
+      rawPropCount,
+      parsedPropsCount,
+      validationCount: finalPropsCount,
+      lastError: attempt.error || extra.lastError || "",
+      networkError: Boolean(attempt.networkError),
+      captchaDetected,
+      blockedPayloadDetected,
+      usedCacheFallback: Boolean(extra.usedCacheFallback),
+      providerStatus: extra.providerStatus || "",
+    }),
+  });
+}
+
 async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", signal } = {}) {
   resetPrizePicksDiagnostics();
   resetProviderFetchDiagnostics();
@@ -194,10 +244,13 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
   const requestUrl = endpoints[0] ? absoluteUrl(endpoints[0]) : "";
   updatePrizePicksDiagnostics({
     requestUrl,
+    requestSent: true,
+    requestSentAt: new Date().toISOString(),
     proxyConfigured: true,
     proxyMode: "browser → VITE_PRIZEPICKS_PROXY_URL",
     externalProxyHost,
     httpExecuted: false,
+    responseReceived: false,
     lastError: "",
   });
   console.info("[PrizePicks] proxy configured — starting fetch", {
@@ -210,29 +263,19 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
     const parsed = await fetchPrizePicksEndpoint(endpoint, fetchInit, { signal });
     attempts.push(parsed.attempt);
 
-    const responseSize = Number(parsed.attempt?.responseSize ?? 0);
-    const rawPropCount = parsed.ok && parsed.payload ? rawPrizePicksRecordCount(parsed.payload) : 0;
-    updatePrizePicksDiagnostics({
-      httpExecuted: true,
-      statusCode: parsed.attempt?.status ?? null,
-      responseSize,
-      rawPropCount,
-      lastError: parsed.attempt?.error || "",
+    applyPrizePicksAttemptDiagnostics(parsed.attempt, parsed, {
+      requestUrl: absoluteUrl(endpoint),
       attempts: attempts.map((item) => ({
         url: item.url,
         status: item.status,
         error: item.error,
         durationMs: item.durationMs,
+        captchaDetected: item.captchaDetected,
+        blockedPayloadDetected: item.blockedPayloadDetected,
       })),
     });
 
     if (parsed.ok && parsed.payload) {
-      console.info("[PrizePicks] response", {
-        requestUrl: parsed.attempt?.url || absoluteUrl(endpoint),
-        responseStatus: parsed.attempt?.status ?? null,
-        rawResponseCount: rawPropCount,
-        responseSize,
-      });
       const isFallback = parsed.payload?.fallback === true;
       const isRateLimited = Boolean(
         parsed.rateLimited || (parsed.payload?.rateLimited && !isFallback) || parsed.payload?.upstreamStatus === 429
@@ -273,6 +316,10 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
         usableMlbPropsCount: usableMlbCount,
         pipelineFetched: audit.fetched,
       });
+      logProviderFetchPhase("PrizePicks", "PrizePicks Final Props", {
+        parsedPropsCount: normalizedProps.length,
+        finalPropsCount: usableCount,
+      });
       const hasUsable = usableCount > 0;
       const lineSourceBadge = isFallback ? (hasUsable ? "CACHED" : "EMPTY") : hasUsable ? "LIVE" : "EMPTY";
 
@@ -288,6 +335,12 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
       logPipelineAudit(isFallback ? "PrizePicks-cached" : "PrizePicks", audit);
       const apiSucceeded = !parsed.payload?.error;
       const rawCount = rawPrizePicksRecordCount(parsed.payload);
+      console.info("[PrizePicks] response", {
+        requestUrl: parsed.attempt?.url || absoluteUrl(endpoint),
+        responseStatus: parsed.attempt?.status ?? null,
+        rawResponseCount: rawCount,
+        responseSize: parsed.attempt?.responseSize ?? 0,
+      });
       const warnings = [];
       if (isFallback) {
         warnings.push(parsed.payload.message || PRIZEPICKS_RATE_LIMIT_MESSAGE);
@@ -329,13 +382,23 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
         payloadSize: parsed.attempt?.responseSize,
         rawPropCount: rawCount,
         parsedPropsCount: normalizedProps.length,
+        finalPropsCount: usableCount,
         timedOut: Boolean(parsed.attempt?.error && /timed out|abort/i.test(parsed.attempt.error)),
-        lastError: parsed.attempt?.error || warnings[0] || "",
+        lastError: warnings[0] || parsed.attempt?.error || "",
+        failureReason: warnings[0] || "",
+        requestUrl: parsed.attempt?.url,
+        requestSent: true,
+        responseReceived: true,
+        responseHeaders: parsed.attempt?.responseHeaders,
+        captchaDetected: Boolean(parsed.attempt?.captchaDetected),
+        blockedPayloadDetected: Boolean(parsed.attempt?.blockedPayloadDetected),
       });
       updatePrizePicksDiagnostics({
         mlbScopedCount: audit.fetched,
         normalizedCount: audit.normalized ?? normalizedProps.length,
+        parsedPropsCount: normalizedProps.length,
         validationCount: usableCount,
+        finalPropsCount: usableCount,
         mlbUsableCount: usableMlbCount,
         responseTimeMs: parsed.attempt?.durationMs ?? null,
         filterReasons: audit.filterReasons || {},
@@ -345,6 +408,7 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
           httpExecuted: true,
           statusCode: parsed.attempt?.status ?? null,
           rawPropCount: rawCount,
+          parsedPropsCount: normalizedProps.length,
           validationCount: usableCount,
           providerStatus: pipelineStatus,
           lastError: warnings[0] || "",
@@ -391,25 +455,17 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
   recordSourceFailure(SOURCE_IDS.PRIZEPICKS, PRIZEPICKS_TEMPORARY_MESSAGE);
 
   const lastAttempt = attempts.at(-1) || {};
-  updatePrizePicksDiagnostics({
-    httpExecuted: attempts.length > 0,
-    statusCode: lastAttempt.status ?? null,
-    responseSize: lastAttempt.responseSize ?? 0,
-    lastError: lastAttempt.error || PRIZEPICKS_TEMPORARY_MESSAGE,
+  applyPrizePicksAttemptDiagnostics(lastAttempt, { ok: false }, {
     providerStatus: "Failed",
-    failureClass: classifyPrizePicksFailure({
-      httpExecuted: attempts.length > 0,
-      timedOut: /timed out|abort/i.test(String(lastAttempt.error || "")),
-      statusCode: lastAttempt.status ?? null,
-      networkError: Boolean(lastAttempt.networkError),
-      lastError: lastAttempt.error || "",
-      providerStatus: "Failed",
-    }),
+    lastError: lastAttempt.error || PRIZEPICKS_TEMPORARY_MESSAGE,
+    finalPropsCount: 0,
     attempts: attempts.map((item) => ({
       url: item.url,
       status: item.status,
       error: item.error,
       durationMs: item.durationMs,
+      captchaDetected: item.captchaDetected,
+      blockedPayloadDetected: item.blockedPayloadDetected,
     })),
   });
 
@@ -433,6 +489,28 @@ function buildCachedPrizePicksResult({ sport, statType, attempts, endpoint, reas
   const { props, audit } = normalizePrizePicksPayload(cachedPayload, sport, statType, "CACHED");
   logPipelineAudit("PrizePicks-cached", audit);
   markSourceCached(SOURCE_IDS.PRIZEPICKS, savedAt);
+  const lastAttempt = attempts.at(-1) || {};
+  const liveFailure =
+    lastAttempt.error ||
+    (reason === "rate-limit"
+      ? "PrizePicks rate limited"
+      : reason === "cooldown"
+        ? "PrizePicks cooldown active"
+        : "Live PrizePicks fetch failed");
+  const explicitReason = `Live fetch failed (${liveFailure}) — serving ${props.length} cached props from localStorage (not fresh endpoint data).`;
+  updatePrizePicksDiagnostics({
+    usedCacheFallback: true,
+    liveFetchFailureReason: liveFailure,
+    providerStatus: "Cached",
+    parsedPropsCount: props.length,
+    finalPropsCount: props.length,
+    validationCount: props.length,
+    normalizedCount: props.length,
+    failureReason: explicitReason,
+    lastError: liveFailure,
+    captchaDetected: Boolean(lastAttempt.captchaDetected),
+    blockedPayloadDetected: Boolean(lastAttempt.blockedPayloadDetected),
+  });
   const warning =
     reason === "rate-limit" || reason === "cooldown"
       ? PRIZEPICKS_RATE_LIMIT_MESSAGE
@@ -445,13 +523,16 @@ function buildCachedPrizePicksResult({ sport, statType, attempts, endpoint, reas
     lineSourceBadge: "CACHED",
     lastSuccessfulFetchAt: savedAt,
     rateLimited: reason === "rate-limit" || reason === "cooldown",
-    warnings: [warning],
+    liveFetchFailed: true,
+    usedCacheFallback: true,
+    warnings: [explicitReason, warning],
+    diagnostics: getPrizePicksDiagnostics(),
     debug: buildDebug(
       "localStorage:last-good-prizepicks",
       "Cached",
       rawPrizePicksRecordCount(cachedPayload),
       props.length,
-      warning,
+      explicitReason,
       attempts
     ),
   };
@@ -471,7 +552,8 @@ async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
   };
   const startedAt = Date.now();
 
-  logProviderFetchPhase("PrizePicks", "fetch start", { url: attempt.url, timeoutMs: lineFeedTimeoutMs });
+  console.info("[PrizePicks] request URL", attempt.url);
+  logProviderFetchPhase("PrizePicks", "PrizePicks Request Sent", { url: attempt.url, timeoutMs: lineFeedTimeoutMs });
 
   try {
     const response = await resilientFetch(
@@ -493,12 +575,19 @@ async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
 
     const text = await response.text();
     attempt.responseSize = text.length;
+    attempt.responseHeaders = headersToRecord(response.headers);
+    attempt.responseReceived = true;
+    attempt.responseReceivedAt = new Date().toISOString();
     attempt.preview = text.slice(0, 200).replace(/\s+/g, " ").trim();
 
-    logProviderFetchPhase("PrizePicks", "response received", {
+    console.info("[PrizePicks] response headers", attempt.responseHeaders);
+    console.info("[PrizePicks] response body length", attempt.responseSize);
+
+    logProviderFetchPhase("PrizePicks", "PrizePicks Response Received", {
       status: attempt.status,
       responseSize: attempt.responseSize,
       durationMs: attempt.durationMs,
+      headers: attempt.responseHeaders,
     });
     recordProviderFetchMetrics("PrizePicks", {
       responseTimeMs: attempt.durationMs,
@@ -522,6 +611,7 @@ async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
           : response.status === 429
             ? "PrizePicks rate limited (429)"
             : `HTTP ${response.status}`;
+      attempt.blockedPayloadDetected = response.status === 403;
       return {
         ok: false,
         attempt,
@@ -567,18 +657,38 @@ async function fetchPrizePicksEndpoint(endpoint, init, { signal } = {}) {
 
     logPrizePicksRawSample(payload);
     if (isPrizePicksBlockPayload(payload)) {
+      attempt.captchaDetected = true;
+      attempt.blockedPayloadDetected = true;
+      attempt.rawPropCount = 0;
+      attempt.parsedPropsCount = 0;
       attempt.error = "PrizePicks returned bot-protection payload instead of projections";
       console.warn("[PrizePicks] block payload detected — no projection rows", {
         keys: Object.keys(payload),
+      });
+      console.info("[PrizePicks] captcha detected", true);
+      console.info("[PrizePicks] blocked payload detected", true);
+      logProviderFetchPhase("PrizePicks", "PrizePicks Parsed Props", {
+        rawPropCount: 0,
+        parsedPropsCount: 0,
+        captchaDetected: true,
+        blockedPayloadDetected: true,
       });
       return { ok: false, attempt, htmlError: false, rateLimited: false, blockPayload: true };
     }
 
     const extractedRaw = countPrizePicksRawRecords(payload);
     const parsedPreview = parsePrizePicksProjections(unwrapProxyPayload(payload));
-    logProviderFetchPhase("PrizePicks", "props extracted", {
+    attempt.captchaDetected = false;
+    attempt.blockedPayloadDetected = false;
+    attempt.rawPropCount = extractedRaw;
+    attempt.parsedPropsCount = parsedPreview.length;
+    console.info("[PrizePicks] captcha detected", false);
+    console.info("[PrizePicks] blocked payload detected", false);
+    logProviderFetchPhase("PrizePicks", "PrizePicks Parsed Props", {
       rawPropCount: extractedRaw,
       parsedPropsCount: parsedPreview.length,
+      captchaDetected: false,
+      blockedPayloadDetected: false,
     });
     console.info("[PrizePicks] parse counts", {
       rawResponseCount: extractedRaw,
@@ -655,6 +765,15 @@ function formatAttemptWarnings(attempts = []) {
 }
 
 function failedPrizePicksResult({ endpoint, message, attempts = [], htmlError = false, sport = "all", statType = "all" }) {
+  const lastAttempt = attempts.at(-1) || {};
+  const failureReason = message || lastAttempt.error || PRIZEPICKS_TEMPORARY_MESSAGE;
+  applyPrizePicksAttemptDiagnostics(lastAttempt, { ok: false }, {
+    providerStatus: "Failed",
+    lastError: failureReason,
+    finalPropsCount: 0,
+    parsedPropsCount: Number(lastAttempt.parsedPropsCount ?? 0),
+  });
+
   const cachedResult = buildCachedPrizePicksResult({
     sport,
     statType,
@@ -663,23 +782,33 @@ function failedPrizePicksResult({ endpoint, message, attempts = [], htmlError = 
     reason: "fetch-failed",
   });
   if (cachedResult) {
-    const warnings = [PRIZEPICKS_TEMPORARY_MESSAGE, ...(cachedResult.warnings || [])].filter(
-      (item, index, list) => list.indexOf(item) === index
-    );
-    return { ...cachedResult, warnings };
+    return {
+      ...cachedResult,
+      error: true,
+      liveFetchFailed: true,
+      warnings: [failureReason, ...(cachedResult.warnings || [])].filter(
+        (item, index, list) => list.indexOf(item) === index
+      ),
+    };
   }
   const warnings = formatAttemptWarnings(attempts);
-  if (message && !warnings.includes(message)) warnings.unshift(message);
-  if (!warnings.includes(PRIZEPICKS_TEMPORARY_MESSAGE)) warnings.unshift(PRIZEPICKS_TEMPORARY_MESSAGE);
+  if (failureReason && !warnings.includes(failureReason)) warnings.unshift(failureReason);
+  updatePrizePicksDiagnostics({
+    failureReason: warnings.join(" | "),
+    finalPropsCount: 0,
+    providerStatus: "Failed",
+  });
   return {
     source: "PrizePicks",
     status: "Failed",
     props: [],
     lineSourceBadge: "",
     warnings,
+    error: true,
+    liveFetchFailed: true,
+    diagnostics: getPrizePicksDiagnostics(),
     debug: buildDebug(endpoint, "Failed", 0, 0, warnings.join(" | "), attempts),
     htmlError,
-    fallback: true,
   };
 }
 

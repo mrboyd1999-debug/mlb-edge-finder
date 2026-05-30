@@ -6,8 +6,11 @@ function ProviderStatusLine({ label, row = {} }) {
   const ms = row.responseTimeMs != null ? `${row.responseTimeMs}ms` : "pending";
   const status = row.httpStatus ?? "—";
   const parsed = row.parsedPropsCount ?? 0;
+  const finalCount = row.finalPropsCount ?? 0;
   const flag = row.timedOut ? " (timeout)" : row.slow ? " (slow)" : "";
-  return `${label}: ${parsed} props · ${ms} · HTTP ${status}${flag}`;
+  const reason = row.failureReason || row.lastError || "";
+  const reasonSuffix = reason ? ` · ${reason}` : "";
+  return `${label}: ${finalCount || parsed} props · ${ms} · HTTP ${status}${flag}${reasonSuffix}`;
 }
 
 function PropPipelineCounters({ counts = null, compact = false }) {

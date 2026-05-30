@@ -130,19 +130,34 @@ export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyRe
     if (timer != null) window.clearTimeout(timer);
     const durationMs = Date.now() - startedAt;
 
-    if (result?.__providerTimeout || controller.signal.aborted) {
+    if (result?.__providerTimeout || timedOut) {
       console.log(`${logKey} FAILED`);
       console.log(`${logKey} TIME MS`, durationMs);
+      const timeoutMessage = `Timed out after ${timeoutMs}ms`;
       recordProviderFetchMetrics(label, {
         responseTimeMs: durationMs,
         timedOut: true,
         slow: durationMs >= PROVIDER_SLOW_THRESHOLD_MS,
-        lastError: `Timed out after ${timeoutMs}ms`,
+        lastError: timeoutMessage,
+        failureReason: timeoutMessage,
+        failureCategory: "OUTER_TIMEOUT",
       });
+      if (label === "PrizePicks") {
+        updatePrizePicksDiagnostics({
+          outerTimeout: true,
+          timedOut: true,
+          responseTimeMs: durationMs,
+          finalPropsCount: 0,
+          parsedPropsCount: 0,
+          providerStatus: "Failed",
+          lastError: timeoutMessage,
+          failureReason: `Provider wrapper timed out after ${Math.round(timeoutMs / 1000)}s — request may not have completed.`,
+        });
+      }
       console.warn(`[Provider] ${label} timed out after ${durationMs}ms (limit ${timeoutMs}ms)`);
       return {
         label,
-        result: failResult({ timedOut: true, message: `Timed out after ${timeoutMs}ms` }),
+        result: failResult({ timedOut: true, message: timeoutMessage }),
         durationMs,
         timedOut: true,
         error: true,
@@ -177,16 +192,25 @@ export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyRe
   } catch (err) {
     if (timer != null) window.clearTimeout(timer);
     const durationMs = Date.now() - startedAt;
-    const wasTimeout = timedOut || controller.signal.aborted || isAbortOrTimeoutError(err);
+    const wasTimeout = timedOut;
+    const message = err?.message || String(err);
     console.log(wasTimeout ? `${logKey} TIMEOUT` : `${logKey} FAILED`);
     console.log(`${logKey} TIME MS`, durationMs);
+    if (label === "PrizePicks" && !wasTimeout) {
+      updatePrizePicksDiagnostics({
+        networkError: true,
+        responseTimeMs: durationMs,
+        lastError: message,
+        failureReason: `Network error before usable response (${message}).`,
+      });
+    }
     return {
       label,
-      result: failResult({ timedOut: wasTimeout, message: err?.message }),
+      result: failResult({ timedOut: wasTimeout, message }),
       durationMs,
       timedOut: wasTimeout,
       error: true,
-      statusReason: wasTimeout ? `Timed out after ${Math.round(timeoutMs / 1000)}s` : err?.message || "Fetch failed",
+      statusReason: wasTimeout ? `Timed out after ${Math.round(timeoutMs / 1000)}s` : message || "Fetch failed",
     };
   }
 }
@@ -240,6 +264,23 @@ export function logProviderFetchPerformance(entries = []) {
 }
 
 export function emptyPrizePicksProviderResult({ timedOut = false, message = "", notConfigured = false } = {}) {
+  if (timedOut || notConfigured || message) {
+    updatePrizePicksDiagnostics({
+      timedOut,
+      outerTimeout: timedOut,
+      providerStatus: notConfigured ? "Not configured" : "Failed",
+      finalPropsCount: 0,
+      parsedPropsCount: 0,
+      lastError: message,
+      failureReason:
+        message ||
+        (notConfigured
+          ? "PrizePicks proxy URL missing — request never sent."
+          : timedOut
+            ? "PrizePicks provider wrapper timed out."
+            : "PrizePicks fetch failed"),
+    });
+  }
   return {
     source: "PrizePicks",
     status: notConfigured ? "Not configured" : "Failed",
