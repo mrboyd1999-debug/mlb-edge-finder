@@ -91,6 +91,16 @@ const TOP_SCORE_COLUMNS = [
   },
 ];
 
+const TOP_VERIFIED_COLUMNS = [
+  { key: "player", label: "Player" },
+  { key: "market", label: "Market" },
+  { key: "probability", label: "Probability", suffix: "%" },
+  { key: "confidence", label: "Confidence", suffix: "%" },
+  { key: "finalPlayability", label: "Playability" },
+  { key: "verifiedTier", label: "Tier" },
+  { key: "tierLabel", label: "Tier Label" },
+];
+
 function VerificationFailureBreakdown({ filterDiagnostics = null }) {
   const dashboard = filterDiagnostics?.verificationDashboard || null;
   const breakdown = dashboard?.verificationFailureBreakdown;
@@ -98,29 +108,42 @@ function VerificationFailureBreakdown({ filterDiagnostics = null }) {
   const rejectedAudits = safeArray(dashboard?.rejectedPlayabilityAudits);
   const topConfidenceProps = safeArray(dashboard?.topConfidenceProps);
   const topPlayabilityProps = safeArray(dashboard?.topPlayabilityProps);
+  const topVerifiedPlays = safeArray(dashboard?.topVerifiedPlays);
 
-  const totalProps = breakdown?.totalProps ?? pipelineCounts?.rawProps ?? 0;
-  const propsWithProjections =
+  const projectedProps =
     breakdown?.propsWithProjections ?? pipelineCounts?.withProjections ?? breakdown?.projected ?? 0;
-  const verifiedPlays = breakdown?.verifiedPlays ?? filterDiagnostics?.verifiedPicksCount ?? 0;
-  const verifiedTierCount = breakdown?.verifiedTierCount ?? breakdown?.passedTierGate ?? 0;
+  const verifiedProps = breakdown?.verifiedPlays ?? filterDiagnostics?.verifiedPicksCount ?? 0;
+  const propsMissingHistoricalData = breakdown?.propsMissingHistoricalData ?? 0;
+  const propsUsingNeutralHistoricalFallback = breakdown?.propsUsingNeutralHistoricalFallback ?? 0;
   const failedProbability = breakdown?.failedProbability ?? 0;
   const failedConfidence = breakdown?.failedConfidence ?? 0;
   const failedPlayability = breakdown?.failedPlayability ?? 0;
   const failedSanity = breakdown?.failedSanity ?? 0;
-  const failedHistoricalData = breakdown?.failedHistoricalData ?? 0;
   const failedTierGate = breakdown?.failedTierGate ?? 0;
   const bottleneckLabel = breakdown?.primaryBottleneck;
   const rejected = breakdown?.highestScoringRejectedProp || rejectedAudits[0] || null;
 
   const summaryRows = [
-    { key: "totalProps", label: VERIFICATION_FAILURE_GATE_LABELS.totalProps, value: totalProps },
     {
-      key: "propsWithProjections",
+      key: "projectedProps",
       label: VERIFICATION_FAILURE_GATE_LABELS.propsWithProjections,
-      value: propsWithProjections,
+      value: projectedProps,
     },
-    { key: "verifiedPlays", label: VERIFICATION_FAILURE_GATE_LABELS.verifiedPlays, value: verifiedPlays },
+    {
+      key: "verifiedProps",
+      label: VERIFICATION_FAILURE_GATE_LABELS.verifiedPlays,
+      value: verifiedProps,
+    },
+    {
+      key: "propsMissingHistoricalData",
+      label: VERIFICATION_FAILURE_GATE_LABELS.propsMissingHistoricalData,
+      value: propsMissingHistoricalData,
+    },
+    {
+      key: "propsUsingNeutralHistoricalFallback",
+      label: VERIFICATION_FAILURE_GATE_LABELS.propsUsingNeutralHistoricalFallback,
+      value: propsUsingNeutralHistoricalFallback,
+    },
     {
       key: "failedProbability",
       label: VERIFICATION_FAILURE_GATE_LABELS.failedProbability,
@@ -146,12 +169,6 @@ function VerificationFailureBreakdown({ filterDiagnostics = null }) {
       highlight: bottleneckLabel === VERIFICATION_FAILURE_GATE_LABELS.failedSanity,
     },
     {
-      key: "failedHistoricalData",
-      label: VERIFICATION_FAILURE_GATE_LABELS.failedHistoricalData,
-      value: failedHistoricalData,
-      highlight: bottleneckLabel === VERIFICATION_FAILURE_GATE_LABELS.failedHistoricalData,
-    },
-    {
       key: "failedTierGate",
       label: VERIFICATION_FAILURE_GATE_LABELS.failedTierGate,
       value: failedTierGate,
@@ -159,15 +176,13 @@ function VerificationFailureBreakdown({ filterDiagnostics = null }) {
     },
   ];
 
-  const showTierHiddenNote =
-    verifiedTierCount > verifiedPlays && breakdown?.blockedByDisplayRankingGate > 0;
-
   return (
     <section className="verification-diagnostics verification-failure-breakdown" aria-label="Verification failure breakdown">
       <h3 className="verification-diagnostics__title">Verification Failure Breakdown</h3>
       <p className="verification-diagnostics__meta">
-        Sequential gate audit — each projected prop is counted at the first gate it fails. Full rejected-prop
-        playability audits are logged to the browser console as <code>[PlayabilityAudit]</code>.
+        Historical data is informational only — missing Last5/Last10 uses neutral scoring and a small
+        confidence adjustment, not auto-rejection. Full rejected-prop audits log as{" "}
+        <code>[PlayabilityAudit]</code> in the console.
       </p>
 
       <div className="verification-diagnostics__grid">
@@ -176,34 +191,23 @@ function VerificationFailureBreakdown({ filterDiagnostics = null }) {
         ))}
       </div>
 
-      {verifiedPlays === 0 && propsWithProjections > 0 && bottleneckLabel ? (
+      {verifiedProps === 0 && projectedProps > 0 && bottleneckLabel ? (
         <p className="verification-diagnostics__meta">
           Largest drop-off: <strong>{bottleneckLabel}</strong> ({breakdown?.primaryBottleneckCount ?? 0} props).
         </p>
       ) : null}
 
-      {showTierHiddenNote ? (
-        <p className="verification-diagnostics__meta">
-          {verifiedTierCount} props passed tier gates; {breakdown.blockedByDisplayRankingGate} hidden by display
-          ranking filters (not shown in Verified Plays list).
-        </p>
-      ) : null}
+      <AuditTable
+        title="Top 20 Verified Plays"
+        rows={topVerifiedPlays}
+        columns={TOP_VERIFIED_COLUMNS}
+        emptyMessage="No props passed verification and display gates yet."
+      />
 
       <AuditTable
         title="Highest Scoring Rejected Prop"
         rows={rejected ? [rejected] : []}
-        columns={[
-          { key: "player", label: "Player" },
-          { key: "market", label: "Market" },
-          { key: "probability", label: "Probability", suffix: "%" },
-          { key: "confidence", label: "Confidence", suffix: "%" },
-          { key: "historicalComponent", label: "Historical Component" },
-          { key: "trendComponent", label: "Trend Component" },
-          { key: "projectionComponent", label: "Projection Component" },
-          { key: "penaltyComponent", label: "Penalty Component" },
-          { key: "finalPlayability", label: "Final Playability" },
-          { key: "reasonRejected", label: "Reason Rejected" },
-        ]}
+        columns={PLAYABILITY_AUDIT_COLUMNS}
         emptyMessage="No rejected projected props to rank yet."
       />
 

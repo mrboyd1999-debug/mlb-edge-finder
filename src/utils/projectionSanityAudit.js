@@ -13,10 +13,10 @@ import { resolveCalibrationHitRates } from "./probabilityCalibration.js";
 import { formatNumber } from "./formatters.js";
 import {
   MAX_SANITY_WITHOUT_HISTORY,
-  RESEARCH_ONLY_TIER_LABEL,
   TIER_A_MIN_SANITY_SCORE,
   TIER_B_MIN_SANITY_SCORE,
   TIER_C_MIN_SANITY_SCORE,
+  applyMissingHistoricalConfidencePenalty,
   resolveHistoricalDataPresent,
   resolveHitRateValidationPresent,
 } from "./tierHistoricalValidation.js";
@@ -550,6 +550,12 @@ export function attachProjectionSanityAudit(prop = {}, options = {}) {
       ? rawPlayability
       : applySanityPlayabilityPenalty(rawPlayability, audit);
 
+    if (!historicalPresent) {
+      adjustedConfidence = applyMissingHistoricalConfidencePenalty(adjustedConfidence, prop);
+    }
+
+    const usesNeutralHistoricalFallback = !historicalPresent;
+
     const merged = {
       ...prop,
       projectionSanityAudit: audit,
@@ -560,20 +566,12 @@ export function attachProjectionSanityAudit(prop = {}, options = {}) {
       projectionOutlierFlag: audit?.outlierWarning || audit?.outlierFlags?.[0] || "",
       projectionSanityFail: audit?.sanityFail ?? false,
       historicalDataPresent: historicalPresent,
+      usesNeutralHistoricalFallback,
       displayConfidenceScore: adjustedConfidence,
       confidenceScore: adjustedConfidence,
       confidence: adjustedConfidence,
       playabilityScore: adjustedPlayability,
     };
-
-    if (!historicalPresent) {
-      merged.displayResearchOnly = true;
-      merged.pickTierLabel = RESEARCH_ONLY_TIER_LABEL;
-      merged.bettingLabel = RESEARCH_ONLY_TIER_LABEL;
-      merged.verifiedTier = null;
-      merged.verifiedTierLabel = null;
-      return merged;
-    }
 
     return enforceVerifiedTierFields(merged);
   } catch (error) {

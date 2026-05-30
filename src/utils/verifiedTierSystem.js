@@ -161,7 +161,7 @@ export function classifyVerifiedTier(prop = {}) {
   const hitRates = resolveHitRateValidationPresent(prop);
   const audit = prop.projectionSanityAudit || null;
 
-  if (!historical.present || audit?.sanityFail) return null;
+  if (audit?.sanityFail) return null;
   if (!Number.isFinite(probability) || !Number.isFinite(confidence)) return null;
   if (probability < VERIFIED_BASE_MIN_PROBABILITY || confidence < VERIFIED_BASE_MIN_CONFIDENCE) {
     return null;
@@ -195,7 +195,6 @@ export function classifyVerifiedTier(prop = {}) {
 
   const maximumTier = resolveMaximumTier({
     playability,
-    historicalPresent: historical.present,
     sanityFail: audit?.sanityFail,
   });
   return capTierToMaximum(tier, maximumTier);
@@ -255,12 +254,18 @@ export function explainVerificationRejection(prop = {}) {
     return `confidence ${Math.round(confidence)}% below Tier C minimum ${VERIFIED_BASE_MIN_CONFIDENCE}%`;
   }
   if (!Number.isFinite(playability)) return "playability score unavailable";
+  if (prop.projectionSanityAudit?.sanityFail || prop.projectionSanityFail) {
+    return "projection sanity blocked";
+  }
+  if (sanity != null && sanity < TIER_C_MIN_SANITY_SCORE) {
+    return `sanity ${sanity} below Tier C minimum ${TIER_C_MIN_SANITY_SCORE}`;
+  }
   if (playability < 40) return `playability ${Math.round(playability)}% caps tier at C (max)`;
   if (playability < VERIFIED_TIER_B.minPlayability) {
     return `playability ${Math.round(playability)}% below Tier B minimum ${VERIFIED_TIER_B.minPlayability}% (max tier B)`;
   }
   if (!historicalPresent) {
-    return `historical data missing (${(historicalMissing ?? []).join(", ") || "Last5/Last10/Season"}) — max tier B`;
+    return `historical data incomplete (${(historicalMissing ?? []).join(", ") || "Last5/Last10/Season"}) — Tier A blocked, informational only`;
   }
   if (!hitRateValidated) {
     return `hit-rate validation missing (${(hitRateMissing ?? []).join(", ") || "Last5/Last10/Season"}) — Tier A blocked`;
@@ -292,7 +297,7 @@ export function auditVerificationFailure(prop = {}) {
   if (resolvePropSport(prop) !== "MLB") return "failedProjection";
   if (!hasValidVerifiedProjection(prop)) return "failedProjection";
 
-  const { probability, confidence, playability, dataQuality, historicalPresent } = resolveVerifiedMetrics(prop);
+  const { probability, confidence, playability, dataQuality, sanity } = resolveVerifiedMetrics(prop);
 
   if (!Number.isFinite(probability) || probability < VERIFIED_BASE_MIN_PROBABILITY) {
     return "failedProbability";
@@ -300,11 +305,14 @@ export function auditVerificationFailure(prop = {}) {
   if (!Number.isFinite(confidence) || confidence < VERIFIED_BASE_MIN_CONFIDENCE) {
     return "failedConfidence";
   }
-  if (!Number.isFinite(playability) || playability < VERIFIED_TIER_B.minPlayability) {
+  if (
+    !Number.isFinite(playability) ||
+    playability < VERIFIED_TIER_B.minPlayability ||
+    prop.projectionSanityAudit?.sanityFail ||
+    prop.projectionSanityFail ||
+    (sanity != null && sanity < TIER_C_MIN_SANITY_SCORE)
+  ) {
     return "failedPlayability";
-  }
-  if (!historicalPresent && classifyVerifiedTier(prop) !== VERIFIED_TIER_A.id) {
-    return "failedHistoricalData";
   }
   if (Number.isFinite(dataQuality) && dataQuality < VERIFIED_MIN_DATA_QUALITY) {
     return "failedDataQuality";

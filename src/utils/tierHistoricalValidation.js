@@ -77,12 +77,26 @@ export function resolveHitRateValidationPresent(prop = {}) {
   };
 }
 
-export function resolveMaximumTier({ playability, historicalPresent = true, sanityFail = false } = {}) {
-  if (!historicalPresent || sanityFail) return "RESEARCH";
+export function resolveMaximumTier({ playability, sanityFail = false } = {}) {
+  if (sanityFail) return "RESEARCH";
   const play = finite(playability);
   if (play != null && play < 40) return "C";
   if (play != null && play < 50) return "B";
   return "A";
+}
+
+/** Small confidence haircut when history is incomplete — informational, not a rejection gate. */
+export function applyMissingHistoricalConfidencePenalty(confidence, prop = {}) {
+  const base = Number(confidence);
+  if (!Number.isFinite(base)) return confidence;
+  const historical = resolveHistoricalDataPresent(prop);
+  if (historical.present) return Math.round(base);
+
+  let penalty = 0;
+  if (!historical.last5Present) penalty += 3;
+  if (!historical.last10Present) penalty += 3;
+  if (!historical.seasonPresent) penalty += 2;
+  return Math.max(35, Math.round(base - penalty));
 }
 
 export function capTierToMaximum(tier, maximumTier) {

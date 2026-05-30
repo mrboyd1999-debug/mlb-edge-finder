@@ -3,7 +3,6 @@
  */
 
 import { computePlayabilityScore } from "./propCalibration.js";
-import { resolveHistoricalDataPresent } from "./tierHistoricalValidation.js";
 
 function finite(value, fallback = 0) {
   const num = Number(value);
@@ -72,14 +71,12 @@ export function resolveSanityScore(prop = {}) {
 }
 
 export function isResearchOnlyProp(prop = {}) {
-  if (prop.displayResearchOnly) return true;
   if (prop.verifiedTierFallback || prop.verifiedFallbackPick) return true;
   const label = String(prop.pickTierLabel || prop.bettingLabel || "").trim();
-  if (/research/i.test(label)) return true;
+  if (/research only/i.test(label)) return true;
   if (prop.bestPlayPool === "research") return true;
-  if (prop.historicalDataPresent === false) return true;
   if (prop.projectionSanityAudit?.sanityFail || prop.projectionSanityFail) return true;
-  return false;
+  return Boolean(prop.displayResearchOnly && !prop.verifiedTier);
 }
 
 export function passesTopVerifiedPlaysGate(prop = {}) {
@@ -104,11 +101,8 @@ export function passesHeroOverallPlayGate(prop = {}) {
   );
   const playability = resolvePlayabilityScore(prop);
   const sanity = resolveSanityScore(prop);
-  const historicalPresent =
-    prop.historicalDataPresent ?? resolveHistoricalDataPresent(prop).present;
   const audit = prop.projectionSanityAudit;
 
-  if (!historicalPresent) return false;
   if (audit?.sanityFail || prop.projectionSanityFail) return false;
   if (!Number.isFinite(probability) || probability < HERO_MIN_PROBABILITY) return false;
   if (!Number.isFinite(confidence) || confidence < HERO_MIN_CONFIDENCE) return false;
