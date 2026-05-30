@@ -206,6 +206,8 @@ export function buildFeedHealthContext({
     SportsDataIO: {
       usedOnBoard: (allDisplayProps || []).some(propUsesSportsData),
     },
+    statsAttachmentAudit: debugInfo?.statsAttachmentAudit || null,
+    pipelinePropCountAudit: debugInfo?.pipelinePropCountAudit || null,
   };
 }
 

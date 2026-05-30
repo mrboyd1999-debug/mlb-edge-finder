@@ -258,6 +258,7 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
     requestUrl,
     proxyHost: externalProxyHost,
   });
+  console.log("[PrizePicks] fetch start");
 
   for (const endpoint of endpoints) {
     if (signal?.aborted) break;
@@ -460,15 +461,18 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
         }),
       });
 
+      logPrizePicksFetchSummary({
+        liveCount: isFallback ? 0 : normalizedProps.length,
+        cacheCount: isFallback ? normalizedProps.length : 0,
+        finalCount: usableCount,
+        status: resolvePrizePicksFetchStatus({
+          liveLoaded: !isFallback && hasUsable,
+          usedCache: isFallback,
+          hasProps: hasUsable,
+        }),
+      });
+
       return {
-        source: "PrizePicks",
-        status: pipelineStatus,
-        props: normalizedProps,
-        pipelineAudit: audit,
-        warnings,
-        lineSourceBadge,
-        rateLimited: isRateLimited,
-        cached: isFallback,
         diagnostics: getPrizePicksDiagnostics(),
         lastSuccessfulFetchAt: isFallback
           ? parsed.payload.cachedAt || readCachedPayloadSavedAt()
@@ -560,6 +564,12 @@ function buildCachedPrizePicksResult({ sport, statType, attempts, endpoint, reas
     reason === "rate-limit" || reason === "cooldown"
       ? PRIZEPICKS_RATE_LIMIT_MESSAGE
       : PRIZEPICKS_TEMPORARY_MESSAGE;
+  logPrizePicksFetchSummary({
+    liveCount: 0,
+    cacheCount: props.length,
+    finalCount: props.length,
+    status: resolvePrizePicksFetchStatus({ usedCache: true, hasProps: props.length > 0 }),
+  });
   return {
     source: "PrizePicks",
     status: "Cached",
@@ -603,6 +613,32 @@ export function resolvePrizePicksCachedProviderResult({
     endpoint: "cache-fallback",
     reason: reason === "timeout" ? "fetch-failed" : reason,
   });
+}
+
+/** Connected = live load · Warning = cache fallback · Failed = no props */
+export function resolvePrizePicksFetchStatus({
+  liveLoaded = false,
+  usedCache = false,
+  hasProps = false,
+  notConfigured = false,
+} = {}) {
+  if (notConfigured) return "Not configured";
+  if (liveLoaded && hasProps && !usedCache) return "Connected";
+  if (hasProps && usedCache) return "Warning";
+  if (hasProps) return liveLoaded ? "Connected" : "Warning";
+  return "Failed";
+}
+
+export function logPrizePicksFetchSummary({
+  liveCount = 0,
+  cacheCount = 0,
+  finalCount = 0,
+  status = "Failed",
+} = {}) {
+  console.log("[PrizePicks] live count", liveCount);
+  console.log("[PrizePicks] cache count", cacheCount);
+  console.log("[PrizePicks] final count", finalCount);
+  console.log("[PrizePicks] status", status);
 }
 
 async function fetchPrizePicksEndpoint(

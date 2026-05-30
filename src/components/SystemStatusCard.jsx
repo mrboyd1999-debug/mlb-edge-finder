@@ -6,6 +6,7 @@ import { isPrizePicksFeedNotConfigured, PRIZEPICKS_NOT_CONFIGURED_DETAIL } from 
 import { testAllApiConnections } from "../services/apiConnectionTest.js";
 import { testMlbStatsApiConnection } from "../services/mlbStatsApiTest.js";
 import { resolveProjectionEngineStatus } from "../utils/projectionPipelineStatus.js";
+import { formatMlbStatsAttachmentDetail } from "../services/mlbPipelineStatus.js";
 
 function findProviderRow(results = [], name) {
   return results.find((row) => String(row.provider || "").toLowerCase().includes(name.toLowerCase())) || null;
@@ -134,25 +135,57 @@ function resolveLineFeedStatus(feed = {}) {
   return { status: "Failed", detail: statusLabel || feed.lastError || "No usable props" };
 }
 
-function resolveMlbStatsStatus(stats = {}) {
-  if (stats.attachmentConfirmed || (stats.historicalCoveragePercent ?? 0) > 0) {
-    if (stats.status === "Failed") {
-      return {
-        status: stats.historicalCoveragePercent >= 50 ? "Connected" : "Warning",
-        detail:
-          stats.lastError ||
-          `Historical stats attached (${stats.historicalCoveragePercent ?? 0}% coverage)`,
-      };
-    }
+function resolveMlbStatsStatus(stats = {}, attachmentAudit = null) {
+  const coverage = Math.max(
+    Number(stats.historicalCoveragePercent) || 0,
+    Number(attachmentAudit?.historicalCoveragePercent) || 0
+  );
+  const profilesMatched = Math.max(
+    Number(stats.profilesMatched ?? stats.playersReturned) || 0,
+    Number(attachmentAudit?.profilesFound) || 0
+  );
+  const gameLogsAttached = Math.max(
+    Number(stats.gameLogsAttached) || 0,
+    Number(attachmentAudit?.gameLogsAttached) || 0
+  );
+  const last5Last10Attached = Number(stats.last5Last10Attached) || 0;
+  const hasAttachment =
+    stats.attachmentConfirmed ||
+    coverage > 0 ||
+    profilesMatched > 0 ||
+    gameLogsAttached > 0 ||
+    last5Last10Attached > 0 ||
+    Number(attachmentAudit?.historicalAttached) > 0;
+
+  const detail = formatMlbStatsAttachmentDetail({
+    ...stats,
+    historicalCoveragePercent: coverage,
+    profilesMatched,
+    gameLogsAttached,
+    last5Last10Attached,
+  });
+
+  if (hasAttachment) {
+    const status =
+      coverage >= 50 ||
+      gameLogsAttached >= 10 ||
+      last5Last10Attached >= 10
+        ? "Connected"
+        : "Warning";
+    return {
+      status,
+      detail,
+    };
   }
+
   if (stats.status === "Connected") {
-    return { status: "Connected", detail: stats.lastError ? stats.lastError : "Game logs OK" };
+    return { status: "Connected", detail: stats.lastError ? `${detail} · ${stats.lastError}` : detail || "Game logs OK" };
   }
   if (stats.status === "Refreshing") {
     return { status: "Refreshing", detail: "Refreshing MLB player profiles" };
   }
   if (stats.status === "Warning") {
-    return { status: "Warning", detail: stats.lastError || "Using cached MLB player profiles" };
+    return { status: "Warning", detail: stats.lastError || detail || "Using cached MLB player profiles" };
   }
   return { status: "Failed", detail: stats.lastError || stats.failureReason || "Stats API unavailable" };
 }
@@ -258,15 +291,16 @@ function SystemStatusCard({
 
   const stats = mlbPipelineStatus?.mlbStatsApi || {};
   const projection = mlbPipelineStatus?.projectionApi || {};
-  const statsResolved = mlbStatsTest
-    ? {
-        status: mlbStatsTest.status,
-        detail: mlbStatsTest.connected
-          ? `Connected · ${mlbStatsTest.responseTimeMs}ms · ${mlbStatsTest.playerCount} players · ${mlbStatsTest.gameLogCount} game logs`
-          : mlbStatsTest.detail,
-        checkedAt: mlbStatsTest.testedAt,
-      }
-    : resolveMlbStatsStatus(stats);
+  const statsResolved =
+    mlbStatsTest && !stats.attachmentConfirmed && !(stats.historicalCoveragePercent > 0)
+      ? {
+          status: mlbStatsTest.status,
+          detail: mlbStatsTest.connected
+            ? `Connected · ${mlbStatsTest.responseTimeMs}ms · ${mlbStatsTest.playerCount} players · ${mlbStatsTest.gameLogCount} game logs`
+            : mlbStatsTest.detail,
+          checkedAt: mlbStatsTest.testedAt,
+        }
+      : resolveMlbStatsStatus(stats, feedHealthContext?.statsAttachmentAudit);
   const projectionResolved = resolveProjectionStatus(projection, pipelineProjectionStats || {});
 
   const rows = [

@@ -12,6 +12,10 @@ const DEFAULT_STATUS = {
     playerId: null,
     attachmentConfirmed: false,
     historicalCoveragePercent: 0,
+    profilesMatched: 0,
+    gameLogsAttached: 0,
+    last5Last10Attached: 0,
+    usingCache: false,
   },
   projectionApi: {
     label: "MLB Projection Engine",
@@ -154,7 +158,7 @@ function countPropsWithHistoricalFields(props = []) {
 }
 
 /** Reflect successful historical attachment on the board — never show Failed when stats landed. */
-export function syncMlbStatsStatusFromAttachment(audit = {}, props = []) {
+export function syncMlbStatsStatusFromAttachment(audit = {}, props = [], context = {}) {
   const profilesFound = Number(audit.profilesFound) || 0;
   const gameLogsAttached = Number(audit.gameLogsAttached) || 0;
   const historicalAttached = Number(audit.historicalAttached) || 0;
@@ -177,6 +181,19 @@ export function syncMlbStatsStatusFromAttachment(audit = {}, props = []) {
   pipelineStatus.mlbStatsApi.lastSuccessAt = pipelineStatus.mlbStatsApi.lastSuccessAt || now;
   pipelineStatus.mlbStatsApi.attachmentConfirmed = true;
   pipelineStatus.mlbStatsApi.historicalCoveragePercent = coveragePercent;
+  pipelineStatus.mlbStatsApi.profilesMatched = Math.max(
+    pipelineStatus.mlbStatsApi.profilesMatched ?? 0,
+    profilesFound
+  );
+  pipelineStatus.mlbStatsApi.gameLogsAttached = Math.max(
+    pipelineStatus.mlbStatsApi.gameLogsAttached ?? 0,
+    gameLogsAttached
+  );
+  pipelineStatus.mlbStatsApi.last5Last10Attached = Math.max(
+    pipelineStatus.mlbStatsApi.last5Last10Attached ?? 0,
+    propsWithHistorical
+  );
+  pipelineStatus.mlbStatsApi.usingCache = Boolean(context?.statsFromCache || context?.usedCache);
   pipelineStatus.mlbStatsApi.playersReturned = Math.max(
     pipelineStatus.mlbStatsApi.playersReturned ?? 0,
     profilesFound,
@@ -198,6 +215,21 @@ export function syncMlbStatsStatusFromAttachment(audit = {}, props = []) {
         : "Historical stats partially attached";
   }
   notifyPipelineStatusListeners();
+}
+
+export function formatMlbStatsAttachmentDetail(stats = {}) {
+  const coverage = Number(stats.historicalCoveragePercent) || 0;
+  const profiles = Number(stats.profilesMatched ?? stats.playersReturned) || 0;
+  const logs = Number(stats.gameLogsAttached) || 0;
+  const last5Last10 = Number(stats.last5Last10Attached) || 0;
+  const usingCache = Boolean(stats.usingCache);
+  return [
+    `Historical coverage: ${coverage}%`,
+    `Profiles matched: ${profiles}`,
+    `Game logs attached: ${logs}`,
+    `Last5/Last10 attached: ${last5Last10}`,
+    `Using cache: ${usingCache ? "true" : "false"}`,
+  ].join(" · ");
 }
 
 export function recordMlbProjectionResult({

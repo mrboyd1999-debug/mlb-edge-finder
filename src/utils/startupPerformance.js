@@ -11,6 +11,8 @@ export const STARTUP_PROJECTION_CANDIDATE_LIMIT = 50;
 export const STARTUP_BACKGROUND_BATCH_SIZE = 200;
 
 export const PERFORMANCE_TIMERS = {
+  loadCachedBoard: "loadCachedBoard",
+  refreshProviders: "refreshProviders",
   fetchFeeds: "fetchFeeds",
   normalizeProps: "normalizeProps",
   generateProjections: "generateProjections",

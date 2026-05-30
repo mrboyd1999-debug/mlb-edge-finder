@@ -13,6 +13,16 @@ function ProviderStatusLine({ label, row = {} }) {
   return `${label}: ${finalCount || parsed} props · ${ms} · HTTP ${status}${flag}${reasonSuffix}`;
 }
 
+function RejectionLines({ rejections = {} }) {
+  const rows = Object.entries(rejections || {}).filter(([, count]) => Number(count) > 0);
+  if (!rows.length) return null;
+  return (
+    <p className="prop-pipeline-counters prop-pipeline-counters--meta" aria-label="Pipeline filter rejections">
+      Rejections — {rows.map(([reason, count]) => `${reason}: ${count}`).join(" · ")}
+    </p>
+  );
+}
+
 function PropPipelineCounters({
   counts = null,
   projectionCoverageAudit = null,
@@ -22,7 +32,7 @@ function PropPipelineCounters({
 }) {
   if (!counts && !projectionCoverageAudit && !statsAttachmentAudit && !pipelinePropCountAudit) return null;
   const providerDiag =
-    counts.providerFetchDiagnostics ||
+    counts?.providerFetchDiagnostics ||
     (typeof window !== "undefined" ? window.__PROVIDER_FETCH_DIAGNOSTICS__ : null) ||
     getProviderFetchDiagnostics();
   const {
@@ -47,9 +57,6 @@ function PropPipelineCounters({
   const attachLine = attachAudit
     ? `Attach: ${attachAudit.profilesFound ?? 0} found · ${attachAudit.profilesMissing ?? 0} missing · ${attachAudit.gameLogsAttached ?? 0} logs · ${attachAudit.historicalCoveragePercent ?? 0}%`
     : "";
-  const stageLine = stageAudit
-    ? `Stages: raw ${stageAudit.rawPropsFetched ?? 0} · norm ${stageAudit.normalizedProps ?? 0} · sport ${stageAudit.afterSportFilter ?? 0} · market ${stageAudit.afterMarketFilter ?? 0} · proj filt ${stageAudit.afterProjectionFilter ?? 0} · merge ${stageAudit.afterProjectionMerge ?? 0} · verify ${stageAudit.afterVerificationFilter ?? 0} · shown ${stageAudit.displayedProps ?? 0}`
-    : "";
   const dropOffLine =
     stageAudit?.dropOffStage && stageAudit?.dropOffDetail
       ? `Drop-off at ${stageAudit.dropOffStage}: ${stageAudit.dropOffDetail}`
@@ -58,11 +65,10 @@ function PropPipelineCounters({
   if (compact) {
     return (
       <p className="prop-pipeline-counters" aria-label="Prop pipeline counts">
-        Raw: {raw} · Normalized: {normalized} · Projected: {projected} · Verified: {verified} · Rendered:{" "}
-        {rendered}
-        {coverageLine ? ` · ${coverageLine}` : ""}
-        {attachLine ? ` · ${attachLine}` : ""}
-        {stageLine ? ` · ${stageLine}` : ""}
+        PP: {stageAudit?.rawPrizePicks ?? prizepicksFetch} · UD: {stageAudit?.rawUnderdog ?? underdogFetch} · Combined:{" "}
+        {stageAudit?.combinedRaw ?? raw} · Projected: {stageAudit?.projectedProps ?? projected} · Verified:{" "}
+        {stageAudit?.verifiedProps ?? verified}
+        {dropOffLine ? ` · ${dropOffLine}` : ""}
       </p>
     );
   }
@@ -73,14 +79,27 @@ function PropPipelineCounters({
         Raw: {raw} · Normalized: {normalized} · Projected: {projected} · Verified: {verified} · Rendered: {rendered}
       </p>
       {stageAudit ? (
-        <p className="prop-pipeline-counters prop-pipeline-counters--meta" aria-label="Pipeline stage counts">
-          Raw fetched: {stageAudit.rawPropsFetched ?? 0} · Normalized: {stageAudit.normalizedProps ?? 0} · After sport
-          filter: {stageAudit.afterSportFilter ?? 0} · After market filter: {stageAudit.afterMarketFilter ?? 0} · After
-          projection filter: {stageAudit.afterProjectionFilter ?? 0} · After projection merge:{" "}
-          {stageAudit.afterProjectionMerge ?? 0} · After verification filter: {stageAudit.afterVerificationFilter ?? 0}{" "}
-          · Displayed: {stageAudit.displayedProps ?? 0}
-        </p>
+        <>
+          <p className="prop-pipeline-counters prop-pipeline-counters--meta" aria-label="Pipeline stage counts">
+            rawPrizePicks: {stageAudit.rawPrizePicks ?? 0} · rawUnderdog: {stageAudit.rawUnderdog ?? 0} · combinedRaw:{" "}
+            {stageAudit.combinedRaw ?? stageAudit.rawPropsFetched ?? 0} · normalizedProps:{" "}
+            {stageAudit.normalizedProps ?? 0}
+          </p>
+          <p className="prop-pipeline-counters prop-pipeline-counters--meta">
+            afterSportFilter: {stageAudit.afterSportFilter ?? 0} · afterMlbOnlyFilter:{" "}
+            {stageAudit.afterMlbOnlyFilter ?? 0} · afterMarketFilter: {stageAudit.afterMarketFilter ?? 0} ·
+            afterPlayerNormalization: {stageAudit.afterPlayerNormalization ?? 0}
+          </p>
+          <p className="prop-pipeline-counters prop-pipeline-counters--meta">
+            projectionCandidates: {stageAudit.projectionCandidates ?? stageAudit.afterProjectionFilter ?? 0} ·
+            projectedProps: {stageAudit.projectedProps ?? stageAudit.afterProjectionMerge ?? 0} ·
+            afterHistoricalAttachment: {stageAudit.afterHistoricalAttachment ?? 0} · verifiedProps:{" "}
+            {stageAudit.verifiedProps ?? stageAudit.afterVerificationFilter ?? 0} · displayedProps:{" "}
+            {stageAudit.displayedProps ?? 0}
+          </p>
+        </>
       ) : null}
+      <RejectionLines rejections={stageAudit?.rejections} />
       {dropOffLine ? (
         <p className="compact-form-notice prop-pipeline-counters__failure" role="status">
           {dropOffLine}

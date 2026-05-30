@@ -5,11 +5,11 @@ export const ENRICHMENT_MAX_RETRIES = 1;
 export const MOBILE_TIMEOUT_MS = 5_000;
 export const DESKTOP_TIMEOUT_MS = 8_000;
 export const LINE_FEED_TIMEOUT_MS = 30_000;
-export const SPORTSDATA_TIMEOUT_MS = 30_000;
+export const SPORTSDATA_TIMEOUT_MS = 8_000;
 /** MLB player stat profiles — fail fast and fall back to season merge + cache. */
-export const MLB_STATS_FETCH_TIMEOUT_MS = 10_000;
+export const MLB_STATS_FETCH_TIMEOUT_MS = 8_000;
 /** Per-provider caps — independent; do not use global mobile/desktop caps. */
-export const PRIZEPICKS_RETRY_TIMEOUTS_MS = [5_000, 10_000, 15_000];
+export const PRIZEPICKS_RETRY_TIMEOUTS_MS = [5_000];
 /** Startup feed cap — fail fast and fall back to cache. */
 export const PRIZEPICKS_PROVIDER_TIMEOUT_MS = 5_000;
 export const UNDERDOG_PROVIDER_TIMEOUT_MS = 5_000;
