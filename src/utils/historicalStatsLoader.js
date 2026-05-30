@@ -16,31 +16,71 @@ function round4(value) {
   return Math.round(num * 10000) / 10000;
 }
 
-function resolveGameLogCount(profile = {}, prop = {}) {
-  const fromProfile =
-    finite(profile.sampleSize) ??
-    (Array.isArray(profile.gradingRows) ? profile.gradingRows.length : null) ??
-    (Array.isArray(profile.splits) ? profile.splits.length : null);
-  return fromProfile ?? finite(prop.sampleSize) ?? finite(prop.games) ?? null;
+function asObject(value) {
+  return value && typeof value === "object" ? value : null;
 }
 
-function resolveHistoricalSource(profile = {}, prop = {}) {
-  if (prop.historicalSource) return prop.historicalSource;
-  if (profile.statSources?.length) return profile.statSources.join(", ");
-  if (profile.source) return profile.source;
-  if (profile.hasGameLogs) return "MLB StatsAPI game logs";
+function resolveGameLogCount(profile = null, prop = null) {
+  const safeProfile = asObject(profile);
+  const safeProp = asObject(prop);
+  const gameLogs = safeProfile?.gameLogs;
+
+  if (Array.isArray(gameLogs)) {
+    return gameLogs.length;
+  }
+  if (gameLogs && typeof gameLogs === "object") {
+    const fromLogs = finite(gameLogs.sampleSize);
+    if (fromLogs != null) return fromLogs;
+  }
+
+  const fromProfile =
+    finite(safeProfile?.sampleSize) ??
+    (Array.isArray(safeProfile?.gradingRows) ? safeProfile.gradingRows.length : null) ??
+    (Array.isArray(safeProfile?.splits) ? safeProfile.splits.length : null);
+
+  return fromProfile ?? finite(safeProp?.sampleSize) ?? finite(safeProp?.games) ?? 0;
+}
+
+function resolveHistoricalSource(profile = null, prop = null) {
+  const safeProp = asObject(prop) || {};
+  if (safeProp.historicalSource) return safeProp.historicalSource;
+
+  const safeProfile = asObject(profile);
+  if (!safeProfile) return "—";
+  if (safeProfile.statSources?.length) return safeProfile.statSources.join(", ");
+  if (safeProfile.source) return safeProfile.source;
+  if (safeProfile.hasGameLogs) return "MLB StatsAPI game logs";
   return "—";
 }
 
-function profileHasUsableGameLogs(profile = {}) {
-  if (!profile || profile.sparse || profile.fallback) return false;
-  const gameLogCount = resolveGameLogCount(profile);
+function profileHasUsableGameLogs(profile = null) {
+  const safeProfile = asObject(profile);
+  if (!safeProfile || safeProfile.sparse || safeProfile.fallback) return false;
+  const gameLogCount = resolveGameLogCount(safeProfile);
   return Boolean(
-    profile.hasGameLogs ||
+    safeProfile.hasGameLogs ||
       (gameLogCount != null && gameLogCount >= 3) ||
-      finite(profile.last5Average) != null ||
-      finite(profile.seasonAverage) != null
+      finite(safeProfile.last5Average) != null ||
+      finite(safeProfile.seasonAverage) != null
   );
+}
+
+function emptyHistoricalAuditRow(prop = {}, reason = "Historical data unavailable") {
+  return {
+    player: String(prop?.playerName || prop?.player || "Unknown").trim(),
+    market: String(prop?.statType || prop?.market || prop?.propType || "—").trim(),
+    last5: null,
+    last10: null,
+    seasonAverage: null,
+    gameLogCount: 0,
+    sampleSize: 0,
+    historicalSource: "—",
+    profileHasLogs: false,
+    historicalPresent: false,
+    historicalCoverage: false,
+    missingHistorical: reason,
+    dropTrace: reason,
+  };
 }
 
 /** Merge statsMap profile historical fields onto a prop (never overwrites existing prop values). */
@@ -51,42 +91,76 @@ export function attachHistoricalStatsFromProfile(prop = {}, context = {}) {
   const profile = findStatProfile(statsMap, prop);
   if (!profileHasUsableGameLogs(profile)) return prop;
 
-  const gameLogCount = resolveGameLogCount(profile, prop);
-  const historicalSource = resolveHistoricalSource(profile, prop);
+  const safeProfile = asObject(profile);
+  if (!safeProfile) return prop;
+
+  const gameLogCount = resolveGameLogCount(safeProfile, prop);
+  const historicalSource = resolveHistoricalSource(safeProfile, prop);
 
   return {
     ...prop,
-    last5Average: finite(prop.last5Average) ?? finite(profile.last5Average) ?? finite(profile.recentForm),
-    last10Average: finite(prop.last10Average) ?? finite(profile.last10Average),
-    seasonAverage: finite(prop.seasonAverage) ?? finite(profile.seasonAverage),
-    recentForm: finite(prop.recentForm) ?? finite(profile.last5Average) ?? finite(profile.recentForm),
-    last5HitRate: finite(prop.last5HitRate) ?? finite(profile.last5HitRate),
+    last5Average:
+      finite(prop.last5Average) ?? finite(safeProfile.last5Average) ?? finite(safeProfile.recentForm),
+    last10Average: finite(prop.last10Average) ?? finite(safeProfile.last10Average),
+    seasonAverage: finite(prop.seasonAverage) ?? finite(safeProfile.seasonAverage),
+    recentForm:
+      finite(prop.recentForm) ?? finite(safeProfile.last5Average) ?? finite(safeProfile.recentForm),
+    last5HitRate: finite(prop.last5HitRate) ?? finite(safeProfile.last5HitRate),
     last10HitRate:
-      finite(prop.last10HitRate) ?? finite(profile.last10HitRate) ?? finite(profile.recentHitRate),
+      finite(prop.last10HitRate) ?? finite(safeProfile.last10HitRate) ?? finite(safeProfile.recentHitRate),
     seasonHitRate:
-      finite(prop.seasonHitRate) ?? finite(profile.seasonHitRate) ?? finite(profile.historicalHitRate),
-    recentHitRate: finite(prop.recentHitRate) ?? finite(profile.recentHitRate) ?? finite(profile.last10HitRate),
+      finite(prop.seasonHitRate) ??
+      finite(safeProfile.seasonHitRate) ??
+      finite(safeProfile.historicalHitRate),
+    recentHitRate:
+      finite(prop.recentHitRate) ?? finite(safeProfile.recentHitRate) ?? finite(safeProfile.last10HitRate),
     historicalHitRate:
-      finite(prop.historicalHitRate) ?? finite(profile.historicalHitRate) ?? finite(profile.seasonHitRate),
-    sampleSize: finite(prop.sampleSize) ?? finite(profile.sampleSize) ?? gameLogCount,
-    games: finite(prop.games) ?? finite(profile.sampleSize) ?? gameLogCount,
-    hasGameLogs: prop.hasGameLogs ?? profile.hasGameLogs ?? (gameLogCount != null && gameLogCount >= 3),
-    gradingRows: prop.gradingRows ?? profile.gradingRows ?? profile.splits ?? null,
-    splits: prop.splits ?? profile.splits ?? null,
+      finite(prop.historicalHitRate) ??
+      finite(safeProfile.historicalHitRate) ??
+      finite(safeProfile.seasonHitRate),
+    sampleSize: finite(prop.sampleSize) ?? finite(safeProfile.sampleSize) ?? gameLogCount ?? 0,
+    games: finite(prop.games) ?? finite(safeProfile.sampleSize) ?? gameLogCount ?? 0,
+    hasGameLogs:
+      prop.hasGameLogs ?? safeProfile.hasGameLogs ?? (gameLogCount != null && gameLogCount >= 3),
+    gradingRows: prop.gradingRows ?? safeProfile.gradingRows ?? safeProfile.splits ?? null,
+    splits: prop.splits ?? safeProfile.splits ?? null,
     historicalSource,
     historicalStatsAttached: true,
-    historicalProfileKey: profile.playerName ? `${profile.playerName}|${profile.statType || ""}` : null,
+    historicalProfileKey: safeProfile.playerName
+      ? `${safeProfile.playerName}|${safeProfile.statType || ""}`
+      : null,
+    historicalCoverage: resolveHistoricalDataPresent({
+      ...prop,
+      last5Average: finite(prop.last5Average) ?? finite(safeProfile.last5Average),
+      last10Average: finite(prop.last10Average) ?? finite(safeProfile.last10Average),
+      seasonAverage: finite(prop.seasonAverage) ?? finite(safeProfile.seasonAverage),
+    }).present,
   };
 }
 
 export function attachHistoricalStatsToProps(props = [], context = {}) {
-  return (props || []).map((prop) => attachHistoricalStatsFromProfile(prop, context));
+  return (props || []).map((prop) => {
+    try {
+      return attachHistoricalStatsFromProfile(prop, context);
+    } catch (error) {
+      console.warn("[Historical audit] attach failed", {
+        player: prop?.playerName || prop?.player,
+        error: error?.message || error,
+      });
+      return {
+        ...prop,
+        sampleSize: finite(prop?.sampleSize) ?? 0,
+        historicalCoverage: false,
+      };
+    }
+  });
 }
 
 function diagnoseHistoricalDrop(prop = {}, profile = null, enriched = {}) {
-  if (!profile) return "No statsMap profile match for player/market";
-  if (profile.sparse || profile.fallback) return "Matched profile is sparse/fallback only";
-  if (!profileHasUsableGameLogs(profile)) return "Profile has no usable game logs";
+  const safeProfile = asObject(profile);
+  if (!safeProfile) return "No statsMap profile match for player/market";
+  if (safeProfile.sparse || safeProfile.fallback) return "Matched profile is sparse/fallback only";
+  if (!profileHasUsableGameLogs(safeProfile)) return "Profile has no usable game logs";
 
   const before = resolveHistoricalDataPresent(prop);
   const after = resolveHistoricalDataPresent(enriched);
@@ -94,7 +168,7 @@ function diagnoseHistoricalDrop(prop = {}, profile = null, enriched = {}) {
   if (after.present) return "";
 
   const missing = after.missingLabels?.length ? after.missingLabels.join(", ") : "unknown";
-  if (profileHasUsableGameLogs(profile) && !after.present) {
+  if (profileHasUsableGameLogs(safeProfile) && !after.present) {
     return `Profile has logs but prop missing after attach: ${missing}`;
   }
   return `Historical incomplete: ${missing}`;
@@ -117,24 +191,35 @@ function pickSampleProps(pool = [], limit = 10) {
 }
 
 export function buildHistoricalPipelineAuditRow(prop = {}, context = {}) {
-  const statsMap = context.statsMap;
-  const profile = statsMap instanceof Map ? findStatProfile(statsMap, prop) : null;
-  const enriched = attachHistoricalStatsFromProfile(prop, context);
-  const historical = resolveHistoricalDataPresent(enriched);
+  try {
+    const statsMap = context.statsMap;
+    const profile = statsMap instanceof Map ? findStatProfile(statsMap, prop) : null;
+    const enriched = attachHistoricalStatsFromProfile(prop, context);
+    const historical = resolveHistoricalDataPresent(enriched);
+    const sampleSize = resolveGameLogCount(profile, enriched);
 
-  return {
-    player: String(prop.playerName || prop.player || "Unknown").trim(),
-    market: String(prop.statType || prop.market || prop.propType || "—").trim(),
-    last5: round4(enriched.last5Average),
-    last10: round4(enriched.last10Average),
-    seasonAverage: round4(enriched.seasonAverage),
-    gameLogCount: resolveGameLogCount(profile, enriched),
-    historicalSource: resolveHistoricalSource(profile, enriched),
-    profileHasLogs: profileHasUsableGameLogs(profile),
-    historicalPresent: historical.present,
-    missingHistorical: historical.missingLabels?.join(", ") || "",
-    dropTrace: diagnoseHistoricalDrop(prop, profile, enriched),
-  };
+    return {
+      player: String(prop?.playerName || prop?.player || "Unknown").trim(),
+      market: String(prop?.statType || prop?.market || prop?.propType || "—").trim(),
+      last5: round4(enriched?.last5Average),
+      last10: round4(enriched?.last10Average),
+      seasonAverage: round4(enriched?.seasonAverage),
+      gameLogCount: sampleSize,
+      sampleSize,
+      historicalSource: resolveHistoricalSource(profile, enriched),
+      profileHasLogs: profileHasUsableGameLogs(profile),
+      historicalPresent: Boolean(historical?.present),
+      historicalCoverage: Boolean(historical?.present),
+      missingHistorical: historical?.missingLabels?.join(", ") || "",
+      dropTrace: diagnoseHistoricalDrop(prop, profile, enriched),
+    };
+  } catch (error) {
+    console.warn("[Historical audit] row build failed", {
+      player: prop?.playerName || prop?.player,
+      error: error?.message || error,
+    });
+    return emptyHistoricalAuditRow(prop);
+  }
 }
 
 export function buildHistoricalCoverageAudit(projectedPool = [], context = {}) {
@@ -156,21 +241,26 @@ export function buildHistoricalCoverageAudit(projectedPool = [], context = {}) {
   let attachedFromProfileCount = 0;
 
   for (const prop of pool) {
-    const profile = statsMap instanceof Map ? findStatProfile(statsMap, prop) : null;
-    if (profile) profileMatchCount += 1;
-    if (profileHasUsableGameLogs(profile)) profileWithLogsCount += 1;
+    try {
+      const profile = statsMap instanceof Map ? findStatProfile(statsMap, prop) : null;
+      if (profile) profileMatchCount += 1;
+      if (profileHasUsableGameLogs(profile)) profileWithLogsCount += 1;
 
-    const before = resolveHistoricalDataPresent(prop);
-    const enriched = attachHistoricalStatsFromProfile(prop, context);
-    if (!before.present && resolveHistoricalDataPresent(enriched).present) {
-      attachedFromProfileCount += 1;
+      const before = resolveHistoricalDataPresent(prop);
+      const enriched = attachHistoricalStatsFromProfile(prop, context);
+      if (!before.present && resolveHistoricalDataPresent(enriched).present) {
+        attachedFromProfileCount += 1;
+      }
+      if (resolveHistoricalDataPresent(enriched).present) withHistorical += 1;
+    } catch (error) {
+      console.warn("[Historical audit] coverage pass failed", {
+        player: prop?.playerName || prop?.player,
+        error: error?.message || error,
+      });
     }
-    if (resolveHistoricalDataPresent(enriched).present) withHistorical += 1;
   }
 
-  const sampleRows = pickSampleProps(pool, 10).map((prop) =>
-    buildHistoricalPipelineAuditRow(prop, context)
-  );
+  const sampleRows = pickSampleProps(pool, 10).map((prop) => buildHistoricalPipelineAuditRow(prop, context));
 
   return {
     coveragePercent: Math.round((withHistorical / pool.length) * 1000) / 10,
