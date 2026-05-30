@@ -12,8 +12,8 @@ function finite(value, fallback = 0) {
 export const NO_TIER_A_PLAYS_MESSAGE = "No Tier A Plays Today";
 export const NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE = "No high-quality verified plays yet";
 
-export const TOP_VERIFIED_MIN_PLAYABILITY = 50;
-export const TOP_VERIFIED_MIN_CONFIDENCE = 55;
+export const TOP_VERIFIED_MIN_PLAYABILITY = 45;
+export const TOP_VERIFIED_MIN_CONFIDENCE = 50;
 export const HERO_MIN_PROBABILITY = 60;
 export const HERO_MIN_CONFIDENCE = 60;
 export const HERO_MIN_PLAYABILITY = 60;
@@ -176,10 +176,30 @@ export function annotateTopPickRankingFields(prop = {}, rank = null) {
   };
 }
 
+function passesRelaxedVerifiedDisplayGate(prop = {}) {
+  if (isResearchOnlyProp(prop)) return false;
+  if (prop.projectionFormulaError || prop.projectionFormulaValid === false) return false;
+  const probability = finite(prop.probabilityScore ?? prop.verifiedProbability, NaN);
+  const confidence = finite(
+    prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence,
+    NaN
+  );
+  const playability = resolvePlayabilityScore(prop);
+  return (
+    Number.isFinite(probability) &&
+    Number.isFinite(confidence) &&
+    probability >= 45 &&
+    confidence >= TOP_VERIFIED_MIN_CONFIDENCE &&
+    Number.isFinite(playability)
+  );
+}
+
 export function selectTopVerifiedByScore(props = [], limit = 10) {
-  return [...(props || [])]
-    .filter(passesTopVerifiedPlaysGate)
-    .sort(compareVerifiedPlaysRank)
+  const strict = [...(props || [])].filter(passesTopVerifiedPlaysGate).sort(compareVerifiedPlaysRank);
+  const pool = strict.length
+    ? strict
+    : [...(props || [])].filter(passesRelaxedVerifiedDisplayGate).sort(compareVerifiedPlaysRank);
+  return pool
     .slice(0, limit)
     .map((prop, index) =>
       annotateTopPickRankingFields(

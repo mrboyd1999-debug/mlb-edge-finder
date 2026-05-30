@@ -51,7 +51,7 @@ export const VERIFIED_TIER_A = {
 export const VERIFIED_TIER_B = {
   id: "B",
   minProbability: 58,
-  minPlayability: 50,
+  minPlayability: 45,
   minSanity: TIER_B_MIN_SANITY_SCORE,
   rank: 1,
 };
@@ -60,12 +60,18 @@ export const VERIFIED_TIER_C = {
   minSanity: TIER_C_MIN_SANITY_SCORE,
   rank: 2,
 };
+export const VERIFIED_TIER_D = {
+  id: "D",
+  minSanity: TIER_C_MIN_SANITY_SCORE,
+  rank: 3,
+  label: "Research",
+};
 
 export const VERIFIED_BASE_MIN_PROBABILITY = 45;
 export const VERIFIED_BASE_MIN_CONFIDENCE = 50;
 export const VERIFIED_MIN_DATA_QUALITY = 50;
 
-export const VERIFIED_TIERS = [VERIFIED_TIER_A, VERIFIED_TIER_B, VERIFIED_TIER_C];
+export const VERIFIED_TIERS = [VERIFIED_TIER_A, VERIFIED_TIER_B, VERIFIED_TIER_C, VERIFIED_TIER_D];
 
 export const VERIFIED_MIN_PLAYS = 5;
 export const VERIFIED_MAX_PLAYS = 10;
@@ -198,7 +204,11 @@ export function classifyVerifiedTier(prop = {}) {
     playability,
     sanityFail: audit?.sanityFail,
   });
-  return capTierToMaximum(tier, maximumTier);
+  tier = capTierToMaximum(tier, maximumTier);
+  if (!tier && qualifiesTierC({ sanity, audit })) {
+    tier = VERIFIED_TIER_D.id;
+  }
+  return tier;
 }
 
 export function hasIncompleteSupportingData(prop = {}) {
@@ -471,16 +481,48 @@ export function selectVerifiedPlaysByTier(props = [], options = {}) {
   const max = options.max ?? VERIFIED_MAX_PLAYS;
   const eligible = (props || [])
     .filter(passesVerifiedTierFilter)
-    .filter(passesTopVerifiedPlaysGate)
     .map(annotateVerifiedTier)
     .sort(compareVerifiedPlaysRank);
 
-  return eligible.slice(0, max);
+  const preferred = eligible.filter((prop) => ["A", "B", "C", "D"].includes(prop.verifiedTier));
+  const pool = preferred.length ? preferred : eligible;
+  return pool.slice(0, max);
+}
+
+export function countVerifiedTierDistribution(props = []) {
+  const counts = { tierA: 0, tierB: 0, tierC: 0, tierD: 0, unclassified: 0 };
+  for (const prop of props || []) {
+    const tier = prop.verifiedTier || classifyVerifiedTier(prop);
+    if (tier === "A") counts.tierA += 1;
+    else if (tier === "B") counts.tierB += 1;
+    else if (tier === "C") counts.tierC += 1;
+    else if (tier === "D") counts.tierD += 1;
+    else counts.unclassified += 1;
+  }
+  return counts;
 }
 
 export function selectVerifiedPlaysWithFallback(props = [], options = {}) {
   const picks = selectVerifiedPlaysByTier(props, options);
-  return { picks, usedFallback: false };
+  if (picks.length) return { picks, usedFallback: false };
+
+  const fallback = [...(props || [])]
+    .filter((prop) => {
+      const projection = resolveBestPlayStatSpecificProjection(prop);
+      if (projection == null || projection <= 0) return false;
+      const { probability, confidence } = resolveVerifiedMetrics(prop);
+      return (
+        Number.isFinite(probability) &&
+        Number.isFinite(confidence) &&
+        probability >= VERIFIED_BASE_MIN_PROBABILITY &&
+        confidence >= VERIFIED_BASE_MIN_CONFIDENCE
+      );
+    })
+    .map(annotateVerifiedTier)
+    .sort(compareVerifiedPlaysRank)
+    .slice(0, options.max ?? VERIFIED_MAX_PLAYS);
+
+  return { picks: fallback, usedFallback: fallback.length > 0 };
 }
 
 export function selectHeroOverallPlay(props = [], limit = 1) {

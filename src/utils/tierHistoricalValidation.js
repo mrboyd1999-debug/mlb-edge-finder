@@ -16,7 +16,7 @@ export const MAX_CONFIDENCE_WITHOUT_HISTORY = 50;
 export const MAX_PLAYABILITY_WITHOUT_HISTORY = 25;
 export const RESEARCH_ONLY_TIER_LABEL = "Research Only";
 
-const TIER_RANK = { A: 0, B: 1, C: 2 };
+const TIER_RANK = { A: 0, B: 1, C: 2, D: 3 };
 
 function hasStoredLast5(prop = {}) {
   if (finite(prop.last5HitRate) != null) return true;
@@ -100,8 +100,9 @@ export function applyMissingHistoricalConfidencePenalty(confidence, prop = {}) {
 }
 
 export function capTierToMaximum(tier, maximumTier) {
-  if (!tier || !maximumTier) return tier;
-  if (maximumTier === "RESEARCH") return null;
+  if (!tier) return tier;
+  if (!maximumTier) return tier;
+  if (maximumTier === "RESEARCH") return tier === "A" || tier === "B" ? "C" : "D";
   const current = TIER_RANK[tier];
   const max = TIER_RANK[maximumTier];
   if (current == null || max == null) return tier;

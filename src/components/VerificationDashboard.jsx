@@ -200,6 +200,7 @@ function VerificationDashboard({ dashboard = null }) {
     tierA = 0,
     tierB = 0,
     tierC = 0,
+    tierD = 0,
     topAfterVerification = [],
     ruleRejectionCounts = {},
     failureBreakdown = {},
@@ -242,6 +243,7 @@ function VerificationDashboard({ dashboard = null }) {
         <Metric label="Tier A Count" value={tierA} />
         <Metric label="Tier B Count" value={tierB} />
         <Metric label="Tier C Count" value={tierC} />
+        <Metric label="Tier D Count" value={tierD} />
       </div>
 
       <div className="verification-diagnostics__rejections">

@@ -16,7 +16,13 @@ import {
   filterMlbSplitsForStatType,
 } from "./mlbDataService.js";
 import { buildMlbStatsApiUrl } from "./mlbStatsApiUrl.js";
-import { statProfileKey, findStatProfile, normalizePlayerName } from "../utils/playerNames.js";
+import {
+  statProfileKey,
+  findStatProfile,
+  normalizePlayerName,
+  buildPlayerMatchKeys,
+  resolvePropPlayerName,
+} from "../utils/playerNames.js";
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
 import { emitVisibleProjectionDebug, emitSportRoutingDebug } from "../utils/projectionRuntimeDebug.js";
 import { recordProjectionFetchAttempt } from "../utils/projectionFetchDebug.js";
@@ -35,24 +41,42 @@ const SOCCER_PLAYER_FETCH_LIMIT = 40;
 const API_FOOTBALL_KEY = import.meta.env?.VITE_API_FOOTBALL_KEY || "";
 const API_FOOTBALL_BASE = "/api/api-football";
 const API_FOOTBALL_LEAGUE_IDS = [253, 39, 2, 140, 78, 61, 135];
-const MLB_STATS_FETCH_CAP = 80;
+const MLB_STATS_FETCH_CAP = 300;
 
-/** Pick one prop per player/stat pair so stats fetch covers the full board without duplicate API work. */
+/** Pick props for stats fetch — unique players first, then unique player/market pairs. */
 export function pickUniquePropsForStatsFetch(props = [], max = MLB_STATS_FETCH_CAP) {
-  const seen = new Set();
   const out = [];
-  for (const prop of props || []) {
-    if (!prop?.playerName) continue;
-    const key = [
+  const seenPlayers = new Set();
+  const seenPlayerStat = new Set();
+
+  const playerStatKey = (prop) => {
+    const playerName = resolvePropPlayerName(prop);
+    return [
       String(resolvePropSport(prop) || prop.sport || "").toLowerCase(),
-      normalizePlayerName(prop.playerName),
-      canonicalMarketKey(prop.statType || prop.market || ""),
+      normalizePlayerName(playerName),
+      canonicalMarketKey(prop.statType || prop.market || prop.propType || ""),
     ].join("|");
-    if (seen.has(key)) continue;
-    seen.add(key);
+  };
+
+  for (const prop of props || []) {
+    const playerName = resolvePropPlayerName(prop);
+    if (!playerName) continue;
+    const playerKey = normalizePlayerName(playerName);
+    if (!playerKey || seenPlayers.has(playerKey)) continue;
+    seenPlayers.add(playerKey);
+    seenPlayerStat.add(playerStatKey(prop));
+    out.push(prop);
+    if (out.length >= max) return out;
+  }
+
+  for (const prop of props || []) {
+    const key = playerStatKey(prop);
+    if (seenPlayerStat.has(key)) continue;
+    seenPlayerStat.add(key);
     out.push(prop);
     if (out.length >= max) break;
   }
+
   return out;
 }
 
@@ -1053,9 +1077,36 @@ function uniqueSources(items = []) {
 }
 
 function storeStatProfile(stats, prop, profile) {
-  const key = statProfileKey(prop);
-  stats.set(key, { ...profile, sport: profile.sport || prop.sport, statType: profile.statType || prop.statType });
-  stats.set(statLookupKey(prop), stats.get(key));
+  const playerName = resolvePropPlayerName(prop);
+  const statKey = canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
+  const sport = String(profile.sport || prop.sport || resolvePropSport(prop) || "MLB").toLowerCase();
+  const enriched = {
+    ...profile,
+    sport: profile.sport || prop.sport || resolvePropSport(prop) || "MLB",
+    statType: profile.statType || prop.statType || prop.market,
+    playerName: profile.playerName || playerName,
+    playerId:
+      profile.playerId ??
+      profile.sportsDataPlayerId ??
+      profile.mlbPlayerId ??
+      prop.playerId ??
+      prop.sportsDataPlayerId ??
+      prop.mlbPlayerId ??
+      null,
+  };
+
+  const keys = new Set([statProfileKey(prop), statLookupKey(prop)]);
+  for (const playerKey of buildPlayerMatchKeys(playerName)) {
+    keys.add([sport, playerKey, statKey].filter(Boolean).join("|"));
+  }
+  const playerId = enriched.playerId;
+  if (playerId != null && playerId !== "") {
+    keys.add([sport, `id:${String(playerId)}`, statKey].filter(Boolean).join("|"));
+  }
+
+  for (const key of keys) {
+    stats.set(key, enriched);
+  }
 }
 
 function valuesFromMlbSplits(splits, statType) {

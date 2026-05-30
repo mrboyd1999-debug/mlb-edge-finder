@@ -20,6 +20,7 @@ import {
   classifyVerifiedTier,
   explainVerificationRejection,
   passesVerifiedTierFilter,
+  countVerifiedTierDistribution,
   VERIFICATION_AUDIT_KEYS,
 } from "./verifiedTierSystem.js";
 import {
@@ -300,6 +301,10 @@ export function buildVerificationFailureBreakdown(projectedPool = [], options = 
     failedSanity: 0,
     passedTierGate: 0,
     failedTierGate: 0,
+    tierA: 0,
+    tierB: 0,
+    tierC: 0,
+    tierD: 0,
     propsMissingHistoricalData: 0,
     propsUsingNeutralHistoricalFallback: 0,
     verifiedDisplayCount: Number(options.verifiedDisplayCount ?? 0),
@@ -368,6 +373,13 @@ export function buildVerificationFailureBreakdown(projectedPool = [], options = 
   }
 
   breakdown.verifiedTierCount = breakdown.passedTierGate;
+  const tierDistribution = countVerifiedTierDistribution(
+    (projectedPool || []).filter(passesVerifiedTierFilter)
+  );
+  breakdown.tierA = tierDistribution.tierA;
+  breakdown.tierB = tierDistribution.tierB;
+  breakdown.tierC = tierDistribution.tierC;
+  breakdown.tierD = tierDistribution.tierD;
   breakdown.highestScoringRejectedProp = buildHighestScoringRejectedProp(projectedPool);
 
   return breakdown;
@@ -537,14 +549,7 @@ function computeGateMetrics(projectedPool = []) {
 }
 
 function countTierBreakdown(picks = []) {
-  const counts = { tierA: 0, tierB: 0, tierC: 0 };
-  for (const prop of picks) {
-    const tier = prop.verifiedTier || classifyVerifiedTier(prop);
-    if (tier === "A") counts.tierA += 1;
-    else if (tier === "B") counts.tierB += 1;
-    else if (tier === "C") counts.tierC += 1;
-  }
-  return counts;
+  return countVerifiedTierDistribution(picks);
 }
 
 function resolveMatchupFailureReason(prop = {}) {
@@ -732,9 +737,7 @@ export function buildVerificationDashboard(props = [], options = {}) {
   const matchupAudit = buildMatchupFailureAudit(projectedPool);
   const outlierAudit = buildProjectionOutlierAudit(projectedPool);
   const tierQualified = projectedPool.filter(passesVerifiedBestPlaysFilter);
-  const tierCounts = countTierBreakdown(
-    verifiedPicks.length ? verifiedPicks : tierQualified
-  );
+  const tierCounts = countTierBreakdown(tierQualified);
   const verifiedCount = verifiedPicks.length;
   const verifiedPasses = tierQualified.length;
   console.log("AFTER VERIFICATION", verifiedPasses);
@@ -803,6 +806,7 @@ export function buildVerificationDashboard(props = [], options = {}) {
     tierA: tierCounts.tierA,
     tierB: tierCounts.tierB,
     tierC: tierCounts.tierC,
+    tierD: tierCounts.tierD,
     topBeforeVerification: buildTopDiagnosticRows(projectedPool),
     topAfterVerification: buildTopDiagnosticRows(verifiedPicks),
     topProjectedProps,
@@ -848,6 +852,7 @@ export function logVerificationDashboardAudit(props = [], options = {}) {
       tierA: dashboard.tierA,
       tierB: dashboard.tierB,
       tierC: dashboard.tierC,
+      tierD: dashboard.tierD,
     },
     ruleRejectionCounts: dashboard.ruleRejectionCounts,
     verificationFailureBreakdown: dashboard.verificationFailureBreakdown,

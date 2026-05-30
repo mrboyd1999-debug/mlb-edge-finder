@@ -2,7 +2,7 @@
  * Historical stats loader — merge MLB StatsAPI profile averages onto live props.
  */
 
-import { findStatProfile } from "./playerNames.js";
+import { findPlayerHistoricalProfile, findStatProfile } from "./playerNames.js";
 import { resolveHistoricalDataPresent } from "./tierHistoricalValidation.js";
 
 function finite(value) {
@@ -88,7 +88,7 @@ export function attachHistoricalStatsFromProfile(prop = {}, context = {}) {
   const statsMap = context.statsMap;
   if (!(statsMap instanceof Map)) return prop;
 
-  const profile = findStatProfile(statsMap, prop);
+  const profile = findPlayerHistoricalProfile(statsMap, prop);
   if (!profileHasUsableGameLogs(profile)) return prop;
 
   const safeProfile = asObject(profile);
@@ -193,7 +193,7 @@ function pickSampleProps(pool = [], limit = 10) {
 export function buildHistoricalPipelineAuditRow(prop = {}, context = {}) {
   try {
     const statsMap = context.statsMap;
-    const profile = statsMap instanceof Map ? findStatProfile(statsMap, prop) : null;
+    const profile = statsMap instanceof Map ? findPlayerHistoricalProfile(statsMap, prop) : null;
     const enriched = attachHistoricalStatsFromProfile(prop, context);
     const historical = resolveHistoricalDataPresent(enriched);
     const sampleSize = resolveGameLogCount(profile, enriched);
@@ -242,7 +242,7 @@ export function buildHistoricalCoverageAudit(projectedPool = [], context = {}) {
 
   for (const prop of pool) {
     try {
-      const profile = statsMap instanceof Map ? findStatProfile(statsMap, prop) : null;
+      const profile = statsMap instanceof Map ? findPlayerHistoricalProfile(statsMap, prop) : null;
       if (profile) profileMatchCount += 1;
       if (profileHasUsableGameLogs(profile)) profileWithLogsCount += 1;
 

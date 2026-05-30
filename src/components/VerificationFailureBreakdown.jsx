@@ -201,6 +201,10 @@ function VerificationFailureBreakdown({ filterDiagnostics = null, heavyAuditEnab
   const failedPlayability = breakdown?.failedPlayability ?? 0;
   const failedSanity = breakdown?.failedSanity ?? 0;
   const failedTierGate = breakdown?.failedTierGate ?? 0;
+  const tierA = breakdown?.tierA ?? dashboard?.tierA ?? 0;
+  const tierB = breakdown?.tierB ?? dashboard?.tierB ?? 0;
+  const tierC = breakdown?.tierC ?? dashboard?.tierC ?? 0;
+  const tierD = breakdown?.tierD ?? dashboard?.tierD ?? 0;
   const bottleneckLabel = breakdown?.primaryBottleneck;
   const rejected = breakdown?.highestScoringRejectedProp || rejectedAudits[0] || null;
 
@@ -261,6 +265,10 @@ function VerificationFailureBreakdown({ filterDiagnostics = null, heavyAuditEnab
       value: failedTierGate,
       highlight: bottleneckLabel === VERIFICATION_FAILURE_GATE_LABELS.failedTierGate,
     },
+    { key: "tierA", label: "Tier A", value: tierA },
+    { key: "tierB", label: "Tier B", value: tierB },
+    { key: "tierC", label: "Tier C", value: tierC },
+    { key: "tierD", label: "Tier D (Research)", value: tierD },
   ];
 
   return (
