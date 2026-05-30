@@ -1,5 +1,6 @@
 import { memo, useEffect } from "react";
 import { AUDIT_LABELS } from "../utils/verificationDashboard.js";
+import { safeArray } from "../utils/safeStats.js";
 
 function Metric({ label, value }) {
   return (
@@ -130,7 +131,7 @@ function DistributionSummary({ title, summary = {}, histogram = [] }) {
         <Metric label="Spread (Max − Min)" value={formatPct(summary.spread)} />
       </div>
       <div className="verification-diagnostics__histogram">
-        {histogram.map((bucket) => (
+        {safeArray(histogram).map((bucket) => (
           <div key={bucket.id} className="verification-diagnostics__histogram-row">
             <span className="verification-diagnostics__histogram-label">{bucket.label}</span>
             <span className="verification-diagnostics__histogram-count">{bucket.count ?? 0}</span>

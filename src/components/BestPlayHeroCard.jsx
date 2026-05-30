@@ -18,7 +18,7 @@ function BestPlayHeroCard({ prop, onOpen }) {
   const line = formatNumber(enriched.line);
   const projection = resolveProjectionValue(enriched);
   const projectionLabel = projection != null && projection > 0 ? formatNumber(projection) : "—";
-  const probability = enriched.probabilityScore ?? enriched.verifiedProbability;
+  const probability = enriched.probabilityScore ?? enriched.verifiedProbability ?? 0;
   const probLabel = Number.isFinite(Number(probability)) ? `${Math.round(Number(probability))}%` : "—";
   const confLabel =
     enriched.displayConfidenceScore != null

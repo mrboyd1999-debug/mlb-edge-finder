@@ -6,6 +6,7 @@ import { readManualStatsForProp } from "../services/pickStore.js";
 import DataQualityBadge from "./DataQualityBadge.jsx";
 import PlayerImage from "./PlayerImage.jsx";
 import ProjectionSanityAuditPanel from "./ProjectionSanityAuditPanel.jsx";
+import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import {
   formatHitRatePercent,
   resolveBreakdownTitle,
@@ -33,6 +34,7 @@ import {
   warningFlags,
 } from "../utils/pickAnalysis.js";
 import { buildHistoricalPerformance } from "../utils/historicalPropAnalytics.js";
+import { safeArray } from "../utils/safeStats.js";
 import { isManualAnalyzerProp } from "../utils/manualPropBuilder.js";
 import {
   AWAITING_PROJECTION_STATUS,
@@ -114,9 +116,9 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
   const breakdownTitle = breakdownMode ? resolveBreakdownTitle(prop) : null;
   const projectionSourceLabel = formatBestPlayProjectionSource(prop);
   const last10HitRate = formatHitRatePercent(
-    prop.last10HitRate ?? prop.recentHitRate ?? prop.last5HitRate
+    prop.last10HitRate ?? prop.recentHitRate ?? prop.last5HitRate ?? 0
   );
-  const seasonHitRate = formatHitRatePercent(prop.seasonHitRate);
+  const seasonHitRate = formatHitRatePercent(prop.seasonHitRate ?? prop.historicalHitRate ?? 0);
   const badge = manualProp
     ? prop.dataQualityBadge || { label: prop.scoringModeLabel || "Offline scoring mode", tone: "info" }
     : prop.dataQualityBadge || dataQualityBadge(prop);
@@ -466,16 +468,16 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
               </p>
             ) : null}
             <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "3px", marginTop: "4px" }}>
-              {prop.projectionBreakdown
-                .filter((row) => row.label !== "Projected Output" && row.label !== "Projected Ks" && row.label !== "Data status")
+            {safeArray(prop.projectionBreakdown)
+                .filter((row) => row?.label !== "Projected Output" && row?.label !== "Projected Ks" && row?.label !== "Data status")
                 .slice(0, 10)
                 .map((row) => (
                   <MetricIf key={row.label} label={row.label} value={row.display ?? row.value} strong={/projected/i.test(row.label)} />
                 ))}
-              {prop.projectionBreakdown.find((row) => /projected|final projection/i.test(row.label)) ? (
+              {safeArray(prop.projectionBreakdown).find((row) => /projected|final projection/i.test(String(row?.label || ""))) ? (
                 <MetricIf
                   label="Projected"
-                  value={prop.projectionBreakdown.find((row) => /projected|final projection/i.test(row.label))?.display}
+                  value={safeArray(prop.projectionBreakdown).find((row) => /projected|final projection/i.test(String(row?.label || "")))?.display}
                   strong
                 />
               ) : null}
@@ -492,7 +494,9 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
 
         {prop.projectionSanityAudit?.supported ? (
           <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
-            <ProjectionSanityAuditPanel audit={prop.projectionSanityAudit} />
+            <SectionErrorBoundary name="Projection Sanity">
+              <ProjectionSanityAuditPanel audit={prop.projectionSanityAudit} />
+            </SectionErrorBoundary>
           </div>
         ) : null}
 
@@ -608,7 +612,7 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
               <div style={{ ...styles.explanationBlock, marginTop: "8px" }}>
                 <strong>Research gaps</strong>
                 <ul style={styles.explanationList}>
-                  {prop.researchGaps.map((gap) => (
+                  {safeArray(prop.researchGaps).map((gap) => (
                     <li key={gap}>{gap}</li>
                   ))}
                 </ul>
@@ -638,11 +642,11 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
             )}
 
             <div style={{ ...styles.explanationSections, marginTop: manualProp ? "4px" : "8px" }}>
-              {!manualProp && explanation.slice(1).map((section) => (
+              {!manualProp && safeArray(explanation).slice(1).map((section) => (
                 <div key={section.title} style={styles.explanationBlock}>
                   <strong>{section.title}</strong>
                   <ul style={styles.explanationList}>
-                    {section.lines.map((line) => (
+                    {safeArray(section?.lines).map((line) => (
                       <li key={line}>{line}</li>
                     ))}
                   </ul>

@@ -1,8 +1,10 @@
 import { memo, useMemo } from "react";
+import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import BestPlayHeroCard from "./BestPlayHeroCard.jsx";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
 import { compareTopPickScore } from "../utils/bestPlayRankingScore.js";
 import { VERIFIED_DISPLAY_MAX } from "../utils/verifiedTierSystem.js";
+import { safeArray } from "../utils/safeStats.js";
 
 function findSection(sections, id) {
   return (sections || []).find((row) => row.id === id) || null;
@@ -19,7 +21,7 @@ function BestPlaysTab({
   const verifiedSection = useMemo(() => findSection(sections, "verified-plays"), [sections]);
 
   const verifiedPicks = useMemo(() => {
-    return [...(verifiedSection?.picks || [])]
+    return safeArray(verifiedSection?.picks)
       .sort(compareTopPickScore)
       .slice(0, VERIFIED_DISPLAY_MAX);
   }, [verifiedSection]);
@@ -43,7 +45,11 @@ function BestPlaysTab({
         <p className="compact-form-notice">{failureReason}</p>
       ) : null}
 
-      {heroPlay ? <BestPlayHeroCard prop={heroPlay} onOpen={onOpen} /> : null}
+      {heroPlay ? (
+        <SectionErrorBoundary name="Hero Card">
+          <BestPlayHeroCard prop={heroPlay} onOpen={onOpen} />
+        </SectionErrorBoundary>
+      ) : null}
 
       <section className="compact-section">
         <div className="compact-section__head">
@@ -56,12 +62,16 @@ function BestPlaysTab({
         {verifiedPicks.length ? (
           <div className="compact-card-list">
             {verifiedPicks.map((prop, index) => (
-              <BestPlayRowCard
-                key={prop.id || `${prop.playerName}-${prop.statType}-${prop.line}-${index}`}
-                prop={prop}
-                rank={index + 1}
-                onOpen={onOpen}
-              />
+              <SectionErrorBoundary
+                key={prop?.id || `${prop?.playerName}-${prop?.statType}-${prop?.line}-${index}`}
+                name={`Verified Play #${index + 1}`}
+              >
+                <BestPlayRowCard
+                  prop={prop}
+                  rank={index + 1}
+                  onOpen={onOpen}
+                />
+              </SectionErrorBoundary>
             ))}
           </div>
         ) : (

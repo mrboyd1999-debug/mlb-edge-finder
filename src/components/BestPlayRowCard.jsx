@@ -1,4 +1,5 @@
 import { memo, useEffect } from "react";
+import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import PlayerImage from "./PlayerImage.jsx";
 import { styles } from "../theme/styles.js";
 import { formatNumber } from "../utils/formatters.js";
@@ -18,6 +19,7 @@ import {
   validatePickDirectionBeforeRender,
 } from "../utils/pickDirectionAudit.js";
 import ProjectionSanityAuditPanel from "./ProjectionSanityAuditPanel.jsx";
+import { safeArray, safeFixed } from "../utils/safeStats.js";
 
 function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
   const enriched = withPlayerImageUrl(prop || {});
@@ -33,7 +35,7 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
   const propType = enriched.propType || enriched.statType || enriched.market || displayFullMarketLabel(enriched);
   const line = formatNumber(enriched.line);
   const sideLabel = side === "WATCH" ? "PASS" : formatPlatformSideLabel(enriched);
-  const probability = enriched.probabilityScore ?? enriched.verifiedProbability;
+  const probability = enriched.probabilityScore ?? enriched.verifiedProbability ?? 0;
   const probLabel = Number.isFinite(Number(probability)) ? `${Math.round(Number(probability))}%` : "—";
   const confLabel =
     enriched.displayConfidenceScore != null
@@ -47,7 +49,7 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
   const statusLabel = enriched.pickTierLabel || enriched.bettingLabel || "Research Candidate";
   const tierLabel = enriched.verifiedTier ? `Tier ${enriched.verifiedTier}` : statusLabel;
   const rankingScore = enriched.topPickScore ?? enriched.verifiedRankingScore ?? enriched.weightedBestPlayScore;
-  const rankingLabel = Number.isFinite(Number(rankingScore)) ? Number(rankingScore).toFixed(1) : "—";
+  const rankingLabel = Number.isFinite(Number(rankingScore)) ? safeFixed(rankingScore, 1) : "—";
   const playabilityLabel = Number.isFinite(Number(enriched.playabilityScore))
     ? `${Math.round(Number(enriched.playabilityScore))}`
     : "—";
@@ -58,13 +60,15 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
   const explanation = enriched.verifiedPlayExplanation;
   const hitRates = enriched.hitRateSnapshot || explanation?.hitRates;
   const last5HitRate = formatHitRatePercent(
-    hitRates?.last5 != null ? hitRates.last5 / 100 : enriched.last5HitRate
+    hitRates?.last5 != null ? hitRates.last5 / 100 : enriched.last5HitRate ?? 0
   );
   const last10HitRate = formatHitRatePercent(
-    hitRates?.last10 != null ? hitRates.last10 / 100 : enriched.last10HitRate ?? enriched.recentHitRate
+    hitRates?.last10 != null
+      ? hitRates.last10 / 100
+      : enriched.last10HitRate ?? enriched.recentHitRate ?? 0
   );
   const seasonHitRate = formatHitRatePercent(
-    hitRates?.season != null ? hitRates.season / 100 : enriched.seasonHitRate
+    hitRates?.season != null ? hitRates.season / 100 : enriched.seasonHitRate ?? 0
   );
   const isVerifiedPlay = Boolean(
     enriched.verified || enriched.verifiedTier || enriched.pickTierLabel === "Verified Play"
@@ -141,7 +145,7 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
               Conf <strong>{confLabel}</strong>
             </span>
             <span>
-              Edge <strong>{edgeLabels.displayEdgeLabel}</strong>
+              Edge <strong>{edgeLabels?.displayEdgeLabel ?? "—"}</strong>
             </span>
             <span>
               Play <strong>{playabilityLabel}</strong>
@@ -157,7 +161,9 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
             Projection Source: <strong>{projectionSource}</strong>
           </p>
           {projectionSanityAudit?.supported ? (
-            <ProjectionSanityAuditPanel audit={projectionSanityAudit} compact />
+            <SectionErrorBoundary name="Projection Sanity">
+              <ProjectionSanityAuditPanel audit={projectionSanityAudit} compact />
+            </SectionErrorBoundary>
           ) : null}
           {isVerifiedPlay && !projectionSanityAudit?.supported ? (
             <div className="hit-rate-viz" aria-label="Hit rate snapshot">
@@ -181,9 +187,9 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
               <p style={{ ...styles.bestPlayRowSubline, color: "#cbd5e1", marginTop: 2, fontSize: 11 }}>
                 Last 5: <strong>{probabilityAudit.last5HitRate ?? hitRates?.last5Label ?? last5HitRate}</strong>
                 {" · "}
-                Last 10: <strong>{probabilityAudit.last10HitRate}</strong>
+                Last 10: <strong>{probabilityAudit.last10HitRate ?? hitRates?.last10Label ?? last10HitRate}</strong>
                 {" · "}
-                Season: <strong>{probabilityAudit.seasonHitRate}</strong>
+                Season: <strong>{probabilityAudit.seasonHitRate ?? hitRates?.seasonLabel ?? seasonHitRate}</strong>
                 {" · "}
                 Proj vs Line: <strong>{probabilityAudit.projectionVsLine}</strong>
                 {" · "}
@@ -193,7 +199,7 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false }) {
               </p>
               {probabilityAudit.finalProbability != null ? (
                 <p style={{ ...styles.bestPlayRowSubline, color: "#e2e8f0", marginTop: 2, fontSize: 11 }}>
-                  {probabilityAudit.explanationLines?.map((line, index) => (
+                  {safeArray(probabilityAudit.explanationLines).map((line, index) => (
                     <span key={line}>
                       {index ? " · " : ""}
                       {line}

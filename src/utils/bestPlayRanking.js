@@ -174,6 +174,22 @@ export function buildMarketContextNote(prop = {}) {
 }
 
 export function enrichBestPlayRankingFields(prop = {}) {
+  try {
+    return enrichBestPlayRankingFieldsUnsafe(prop);
+  } catch (error) {
+    console.error("[BestPlays] enrich failed", prop?.playerName || prop?.player, error);
+    return {
+      ...prop,
+      playabilityScore: prop?.playabilityScore ?? 0,
+      probabilityScore: prop?.probabilityScore ?? 0,
+      verifiedTier: prop?.verifiedTier ?? "C",
+      historicalDataPresent: false,
+      enrichmentError: error?.message || "Enrichment failed",
+    };
+  }
+}
+
+function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
   const projection = resolveBestPlayStatSpecificProjection(prop);
   const line = finiteOr(prop.line, NaN);
   const games = resolveGamesPlayed(prop);

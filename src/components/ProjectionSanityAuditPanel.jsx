@@ -1,9 +1,11 @@
 import { memo } from "react";
+import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import {
   PROJECTION_MISMATCH_FLAG,
   PROJECTION_OUTLIER_WARNING,
   TIER_A_MIN_SANITY_SCORE,
 } from "../utils/projectionSanityAudit.js";
+import { safeFixed } from "../utils/safeStats.js";
 
 function SideBySideCell({ label, value, highlight = false }) {
   return (
@@ -17,8 +19,13 @@ function SideBySideCell({ label, value, highlight = false }) {
 function ProjectionSanityAuditPanel({ audit = null, compact = false }) {
   if (!audit?.supported) return null;
 
+  const sanityScore = audit.sanityScore ?? 0;
+  const confidencePenalty = audit.confidencePenalty ?? 0;
+  const playabilityPenalty = audit.playabilityPenalty ?? 0;
+
   return (
-    <div className={`projection-sanity-audit${compact ? " projection-sanity-audit--compact" : ""}`}>
+    <SectionErrorBoundary name="Projection Sanity">
+      <div className={`projection-sanity-audit${compact ? " projection-sanity-audit--compact" : ""}`}>
       <div className="projection-sanity-audit__head">
         <strong>Projection sanity audit</strong>
         {audit.outlierWarning ? (
@@ -29,8 +36,8 @@ function ProjectionSanityAuditPanel({ audit = null, compact = false }) {
             {PROJECTION_MISMATCH_FLAG}
           </span>
         ) : null}
-        {audit.sanityScore != null ? (
-          <span className="projection-sanity-audit__score">Sanity {audit.sanityScore}/100</span>
+        {sanityScore != null ? (
+          <span className="projection-sanity-audit__score">Sanity {sanityScore}/100</span>
         ) : null}
       </div>
 
@@ -58,18 +65,19 @@ function ProjectionSanityAuditPanel({ audit = null, compact = false }) {
       ) : null}
 
       {audit.summary ? <p className="projection-sanity-audit__summary">{audit.summary}</p> : null}
-      {audit.sanityScore != null && audit.sanityScore < TIER_A_MIN_SANITY_SCORE ? (
+      {sanityScore < TIER_A_MIN_SANITY_SCORE ? (
         <p className="projection-sanity-audit__penalty">
           Tier A blocked — sanity score must be ≥{TIER_A_MIN_SANITY_SCORE}.
         </p>
       ) : null}
-      {audit.confidencePenalty > 0 || audit.playabilityPenalty > 0 ? (
+      {confidencePenalty > 0 || playabilityPenalty > 0 ? (
         <p className="projection-sanity-audit__penalty">
-          Confidence −{audit.confidencePenalty || 0} · Playability −{audit.playabilityPenalty || 0}
-          {audit.recentOverRateGap != null ? ` · Recent gap ${audit.recentOverRateGap} pts` : ""}
+          Confidence −{confidencePenalty} · Playability −{playabilityPenalty}
+          {audit.recentOverRateGap != null ? ` · Recent gap ${safeFixed(audit.recentOverRateGap, 1)} pts` : ""}
         </p>
       ) : null}
-    </div>
+      </div>
+    </SectionErrorBoundary>
   );
 }
 

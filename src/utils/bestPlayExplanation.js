@@ -21,8 +21,8 @@ function resolveLean(prop = {}) {
 
 function formatStat(value) {
   if (value == null) return "—";
-  const num = Number(value);
-  if (!Number.isFinite(num)) return String(value);
+  const num = Number(value ?? 0);
+  if (!Number.isFinite(num)) return "—";
   return Number.isInteger(num) ? String(num) : num.toFixed(1);
 }
 

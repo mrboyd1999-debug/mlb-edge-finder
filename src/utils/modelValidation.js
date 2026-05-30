@@ -100,6 +100,51 @@ function resolveParkAdjustment(prop = {}) {
 }
 
 export function buildProbabilityAudit(prop = {}, metrics = {}) {
+  try {
+    return buildProbabilityAuditUnsafe(prop, metrics);
+  } catch (error) {
+    console.error("[ProbabilityAudit] build failed", prop?.playerName || prop?.player, error);
+    return buildProbabilityAuditFallback(prop);
+  }
+}
+
+function buildProbabilityAuditFallback(prop = {}) {
+  const hitRateSnapshot = buildHitRateSnapshot(prop || {});
+  return {
+    last10HitRate: hitRateSnapshot.last10Label,
+    seasonHitRate: hitRateSnapshot.seasonLabel,
+    last5HitRate: hitRateSnapshot.last5Label,
+    projectionVsLine: "—",
+    opponentAdjustment: "—",
+    parkAdjustment: "—",
+    matchupAdjustment: "—",
+    edgeContribution: "—",
+    last5Contribution: "—",
+    last10Contribution: "—",
+    seasonContribution: "—",
+    projection: null,
+    line: null,
+    edge: null,
+    edgePercent: null,
+    base: 43,
+    projectionEdgePoints: 0,
+    opponentLabel: "—",
+    parkLabel: "—",
+    rollingBoost: 0,
+    finalProbability: null,
+    explanationLines: [],
+    summary: "",
+    hitRates: hitRateSnapshot,
+    calibration: null,
+    historicalDataPresent: false,
+    historicalMissing: ["Last5", "Last10", "Season"],
+    hitRateValidated: false,
+    hitRateMissing: ["Last5", "Last10", "Season"],
+    historicalDataWarning: HISTORICAL_DATA_UNAVAILABLE_WARNING,
+  };
+}
+
+function buildProbabilityAuditUnsafe(prop = {}, metrics = {}) {
   const projection = finite(metrics.projection ?? resolveProjectionValue(prop));
   const line = finite(prop.line);
   const edge = finite(metrics.edge ?? computeStandardEdge(projection, line));
@@ -240,21 +285,30 @@ export function buildMatchupAudit(prop = {}) {
 }
 
 export function attachModelValidationFields(prop = {}, metrics = {}) {
-  const probabilityAudit = buildProbabilityAudit(prop, metrics);
-  const edgeValidation = buildEdgeValidation(prop, metrics);
-  const matchupAudit = buildMatchupAudit(prop);
-  const hitRates = probabilityAudit.hitRates;
+  try {
+    const probabilityAudit = buildProbabilityAudit(prop, metrics);
+    const edgeValidation = buildEdgeValidation(prop, metrics);
+    const matchupAudit = buildMatchupAudit(prop);
+    const hitRates = probabilityAudit?.hitRates || buildHitRateSnapshot(prop);
 
-  return {
-    ...prop,
-    probabilityAudit,
-    probabilityCalibration: probabilityAudit.calibration || prop.probabilityCalibration || null,
-    edgeValidation,
-    matchupAudit,
-    hitRateSnapshot: hitRates,
-    probabilityExplanation: probabilityAudit.summary,
-    hitRateLine: `L5 ${hitRates.last5Label} · L10 ${hitRates.last10Label} · Season ${hitRates.seasonLabel}`,
-  };
+    return {
+      ...prop,
+      probabilityAudit,
+      probabilityCalibration: probabilityAudit?.calibration || prop.probabilityCalibration || null,
+      edgeValidation,
+      matchupAudit,
+      hitRateSnapshot: hitRates,
+      probabilityExplanation: probabilityAudit?.summary || "",
+      hitRateLine: `L5 ${hitRates?.last5Label ?? "—"} · L10 ${hitRates?.last10Label ?? "—"} · Season ${hitRates?.seasonLabel ?? "—"}`,
+    };
+  } catch (error) {
+    console.error("[ModelValidation] attach failed", prop?.playerName || prop?.player, error);
+    return {
+      ...prop,
+      probabilityAudit: buildProbabilityAuditFallback(prop),
+      hitRateSnapshot: buildHitRateSnapshot(prop),
+    };
+  }
 }
 
 export function formatProbabilityExplanation(audit = {}) {

@@ -101,8 +101,8 @@ function breakdownWeight(prop = {}, labelPattern) {
 }
 
 function resolveHistoricalAverages(prop = {}) {
-  const inputs = prop.pitcherInputs || {};
-  const breakdown = prop.projectionBreakdown || [];
+  const inputs = prop?.pitcherInputs || {};
+  const breakdown = Array.isArray(prop?.projectionBreakdown) ? prop.projectionBreakdown : [];
   const last5Row = breakdown.find((r) => /last\s*5/i.test(String(r.label || "")));
   const seasonRow = breakdown.find((r) => /season/i.test(String(r.label || "")));
   const last10Row = breakdown.find((r) => /last\s*10/i.test(String(r.label || "")));
@@ -283,6 +283,22 @@ function formatPctLabel(value) {
 }
 
 export function buildProjectionSanityAudit(prop = {}) {
+  try {
+    return buildProjectionSanityAuditUnsafe(prop);
+  } catch (error) {
+    console.error("[ProjectionSanity] audit failed", prop?.playerName || prop?.player, error);
+    return {
+      supported: false,
+      historicalDataPresent: false,
+      hitRateValidated: false,
+      sanityScore: 0,
+      blocksTierA: true,
+      summary: "Projection sanity audit unavailable",
+    };
+  }
+}
+
+function buildProjectionSanityAuditUnsafe(prop = {}) {
   const marketKey = resolveMarketKey(prop);
   const rule = MARKET_SANITY_RULES[marketKey] || null;
   const projection = resolveProjectionValue(prop);
@@ -483,29 +499,38 @@ export function passesTierASanityGate(audit = {}) {
 }
 
 export function attachProjectionSanityAudit(prop = {}, options = {}) {
-  const audit = options.audit || buildProjectionSanityAudit(prop);
-  const rawConfidence =
-    options.confidence ??
-    prop.displayConfidenceScore ??
-    prop.confidenceScore ??
-    prop.confidence;
-  const rawPlayability = options.playability ?? prop.playabilityScore;
-  const adjustedConfidence = applySanityConfidencePenalty(rawConfidence, audit);
-  const adjustedPlayability = applySanityPlayabilityPenalty(rawPlayability, audit);
+  try {
+    const audit = options.audit || buildProjectionSanityAudit(prop);
+    const rawConfidence =
+      options.confidence ??
+      prop.displayConfidenceScore ??
+      prop.confidenceScore ??
+      prop.confidence;
+    const rawPlayability = options.playability ?? prop.playabilityScore;
+    const adjustedConfidence = applySanityConfidencePenalty(rawConfidence, audit);
+    const adjustedPlayability = applySanityPlayabilityPenalty(rawPlayability, audit);
 
-  const merged = {
-    ...prop,
-    projectionSanityAudit: audit,
-    projectionSanityScore: audit.sanityScore,
-    projectionMismatch: audit.projectionMismatch,
-    projectionMismatchFlag: audit.projectionMismatch ? PROJECTION_MISMATCH_FLAG : "",
-    projectionOutlier: audit.isOutlier,
-    projectionOutlierFlag: audit.outlierWarning || audit.outlierFlags?.[0] || "",
-    historicalDataPresent: audit.historicalDataPresent ?? false,
-    displayConfidenceScore: adjustedConfidence,
-    confidenceScore: adjustedConfidence,
-    confidence: adjustedConfidence,
-    playabilityScore: adjustedPlayability,
-  };
-  return enforceVerifiedTierFields(merged);
+    const merged = {
+      ...prop,
+      projectionSanityAudit: audit,
+      projectionSanityScore: audit?.sanityScore ?? 0,
+      projectionMismatch: audit?.projectionMismatch ?? false,
+      projectionMismatchFlag: audit?.projectionMismatch ? PROJECTION_MISMATCH_FLAG : "",
+      projectionOutlier: audit?.isOutlier ?? false,
+      projectionOutlierFlag: audit?.outlierWarning || audit?.outlierFlags?.[0] || "",
+      historicalDataPresent: audit?.historicalDataPresent ?? false,
+      displayConfidenceScore: adjustedConfidence,
+      confidenceScore: adjustedConfidence,
+      confidence: adjustedConfidence,
+      playabilityScore: adjustedPlayability,
+    };
+    return enforceVerifiedTierFields(merged);
+  } catch (error) {
+    console.error("[ProjectionSanity] attach failed", prop?.playerName || prop?.player, error);
+    return {
+      ...prop,
+      projectionSanityAudit: { supported: false, blocksTierA: true },
+      historicalDataPresent: false,
+    };
+  }
 }

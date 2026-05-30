@@ -349,7 +349,10 @@ export function buildHighestProbabilityQualifyReason(prop = {}) {
   const edgeMag = resolveEdgeMagnitude(prop);
   const probability = prop.verifiedProbability;
   const verifiedNote = Number.isFinite(probability) ? `${probability}%` : "";
-  const leanNote = lean && lean !== "PASS" ? `${lean} · ${edgeMag.toFixed(1)} pt edge` : "";
+  const leanNote =
+    lean && lean !== "PASS" && Number.isFinite(Number(edgeMag))
+      ? `${lean} · ${Number(edgeMag ?? 0).toFixed(1)} pt edge`
+      : "";
   return [verifiedNote, leanNote, market, base].filter(Boolean).join(" · ");
 }
 

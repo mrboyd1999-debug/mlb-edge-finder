@@ -4395,13 +4395,15 @@ export default function DFSPropsApp() {
     />
 
       {selectedEvaluation && (
-        <PickDetailModal
-          prop={selectedEvaluation}
-          onClose={() => setSelectedEvaluation(null)}
-          onSaveManualStats={handleManualStatsSave}
-          onSavePick={saveThisPick}
-          variant={isManualAnalyzerProp(selectedEvaluation) ? "manual" : "breakdown"}
-        />
+        <SectionErrorBoundary name="Pick Detail">
+          <PickDetailModal
+            prop={selectedEvaluation}
+            onClose={() => setSelectedEvaluation(null)}
+            onSaveManualStats={handleManualStatsSave}
+            onSavePick={saveThisPick}
+            variant={isManualAnalyzerProp(selectedEvaluation) ? "manual" : "breakdown"}
+          />
+        </SectionErrorBoundary>
       )}
     </>
   );

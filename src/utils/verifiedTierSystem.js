@@ -231,10 +231,10 @@ export function explainVerificationRejection(prop = {}) {
     return `playability ${Math.round(playability)}% below Tier B minimum ${VERIFIED_TIER_B.minPlayability}% (max tier B)`;
   }
   if (!historicalPresent) {
-    return `historical data missing (${historicalMissing.join(", ") || "Last5/Last10/Season"}) — max tier B`;
+    return `historical data missing (${(historicalMissing ?? []).join(", ") || "Last5/Last10/Season"}) — max tier B`;
   }
   if (!hitRateValidated) {
-    return `hit-rate validation missing (${hitRateMissing.join(", ") || "Last5/Last10/Season"}) — Tier A blocked`;
+    return `hit-rate validation missing (${(hitRateMissing ?? []).join(", ") || "Last5/Last10/Season"}) — Tier A blocked`;
   }
   if (Number.isFinite(dataQuality) && dataQuality < VERIFIED_MIN_DATA_QUALITY) {
     return `data quality ${Math.round(dataQuality)}% below ${VERIFIED_MIN_DATA_QUALITY}%`;
