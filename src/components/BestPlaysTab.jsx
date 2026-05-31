@@ -2,7 +2,7 @@ import { memo, useMemo } from "react";
 import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import BestPlayHeroCard from "./BestPlayHeroCard.jsx";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
-import { compareVerifiedPlaysRank, passesHeroOverallPlayGate } from "../utils/bestPlayRankingScore.js";
+import { compareVerifiedPlaysRank, compareBestPlaysRank, passesHeroOverallPlayGate } from "../utils/bestPlayRankingScore.js";
 import {
   VERIFIED_DISPLAY_MAX,
   NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
@@ -25,7 +25,12 @@ function BestPlaysTab({
   renderSourceAudit = null,
   cacheStatus = "",
 }) {
+  const topBestPlaysSection = useMemo(() => findSection(sections, "top-10-best-plays"), [sections]);
   const verifiedSection = useMemo(() => findSection(sections, "verified-plays"), [sections]);
+
+  const topBestPlays = useMemo(() => {
+    return safeArray(topBestPlaysSection?.picks).sort(compareBestPlaysRank).slice(0, 10);
+  }, [topBestPlaysSection]);
 
   const verifiedPicks = useMemo(() => {
     return safeArray(verifiedSection?.picks)
@@ -34,8 +39,8 @@ function BestPlaysTab({
   }, [verifiedSection]);
 
   const heroPlay = useMemo(() => {
-    return verifiedPicks.find(passesHeroOverallPlayGate) || null;
-  }, [verifiedPicks]);
+    return topBestPlays.find(passesHeroOverallPlayGate) || verifiedPicks.find(passesHeroOverallPlayGate) || null;
+  }, [topBestPlays, verifiedPicks]);
   const failureReason = loadError || filterDiagnostics?.error || "";
   const blockStaleRender = shouldBlockVerifiedPlayRender(renderSourceAudit);
 
@@ -62,7 +67,7 @@ function BestPlaysTab({
         <p className="compact-empty">{NO_LIVE_VERIFIED_PROPS_MESSAGE}</p>
       ) : (
         <>
-      {failureReason && !verifiedPicks.length ? (
+      {failureReason && !verifiedPicks.length && !topBestPlays.length ? (
         <p className="compact-form-notice">{failureReason}</p>
       ) : null}
 
@@ -71,6 +76,37 @@ function BestPlaysTab({
           <BestPlayHeroCard prop={heroPlay} onOpen={onOpen} cacheStatus={cacheStatus} />
         </SectionErrorBoundary>
       ) : null}
+
+      <section className="compact-section">
+        <div className="compact-section__head">
+          <h2>{topBestPlaysSection?.title || "Top 10 Best Plays"}</h2>
+          <p>
+            {topBestPlaysSection?.eyebrow ||
+              "Top 10 sorted by probability, confidence, then projection edge"}
+          </p>
+        </div>
+        {topBestPlays.length ? (
+          <div className="compact-card-list">
+            {topBestPlays.map((prop, index) => (
+              <SectionErrorBoundary
+                key={prop?.id || `${prop?.playerName}-${prop?.statType}-${prop?.line}-${index}`}
+                name={`Best Play #${index + 1}`}
+              >
+                <BestPlayRowCard
+                  prop={prop}
+                  rank={index + 1}
+                  onOpen={onOpen}
+                  cacheStatus={cacheStatus}
+                />
+              </SectionErrorBoundary>
+            ))}
+          </div>
+        ) : (
+          <p className="compact-empty">
+            {topBestPlaysSection?.emptyMessage || NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE}
+          </p>
+        )}
+      </section>
 
       <section className="compact-section">
         <div className="compact-section__head">

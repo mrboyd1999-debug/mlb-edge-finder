@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { formatDataSourceLabel } from "../utils/renderDataSourceAudit.js";
 
 function Metric({ label, value }) {
   return (
@@ -8,10 +9,19 @@ function Metric({ label, value }) {
   );
 }
 
-function LiveBoardPipelineBanner({ trace = null, loading = false }) {
-  if (!trace && !loading) return null;
+function LiveBoardPipelineBanner({ trace = null, renderSourceAudit = null, loading = false }) {
+  const liveProviderCount =
+    renderSourceAudit?.liveProviderCount ?? renderSourceAudit?.providerPlays ?? trace?.provider ?? 0;
+  const localStorageCount =
+    renderSourceAudit?.localStorageCount ?? renderSourceAudit?.localStoragePlays ?? 0;
+  const cacheCount = renderSourceAudit?.cacheCount ?? renderSourceAudit?.cachePlays ?? 0;
+  const renderingSource = renderSourceAudit?.renderingSource
+    ? formatDataSourceLabel(renderSourceAudit.renderingSource)
+    : null;
 
-  const isLive = Number(trace?.rendered ?? 0) > 0 && Number(trace?.provider ?? 0) > 0;
+  if (!trace && !renderSourceAudit && !loading) return null;
+
+  const isLive = Number(liveProviderCount) > 0;
 
   return (
     <section
@@ -20,16 +30,28 @@ function LiveBoardPipelineBanner({ trace = null, loading = false }) {
     >
       <div className="provider-feed-mode-banner__head">
         <strong className="provider-feed-mode-banner__title">
-          {loading ? "Loading live board…" : "Live Board Pipeline"}
+          {loading ? "Loading live board…" : "Board Source Diagnostics"}
         </strong>
+        {!loading && renderingSource ? (
+          <span className="live-board-pipeline-banner__source">{renderingSource}</span>
+        ) : null}
       </div>
       {!loading ? (
-        <p className="provider-feed-mode-banner__detail live-board-pipeline-banner__metrics">
-          <Metric label="LIVE NORMALIZED" value={trace?.normalized} />
-          <Metric label="LIVE PROJECTED" value={trace?.projected} />
-          <Metric label="LIVE VERIFIED" value={trace?.verified} />
-          <Metric label="LIVE RENDERED" value={trace?.rendered} />
-        </p>
+        <>
+          <p className="provider-feed-mode-banner__detail live-board-pipeline-banner__metrics">
+            <Metric label="LIVE_PROVIDER_COUNT" value={liveProviderCount} />
+            <Metric label="LOCAL_STORAGE_COUNT" value={localStorageCount} />
+            <Metric label="CACHE_COUNT" value={cacheCount} />
+          </p>
+          {trace ? (
+            <p className="provider-feed-mode-banner__detail live-board-pipeline-banner__metrics">
+              <Metric label="LIVE NORMALIZED" value={trace?.normalized} />
+              <Metric label="LIVE PROJECTED" value={trace?.projected} />
+              <Metric label="LIVE VERIFIED" value={trace?.verified} />
+              <Metric label="LIVE RENDERED" value={trace?.rendered} />
+            </p>
+          ) : null}
+        </>
       ) : null}
     </section>
   );

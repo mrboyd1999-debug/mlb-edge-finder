@@ -148,6 +148,23 @@ export function compareVerifiedPlaysRank(a = {}, b = {}) {
   return String(a.playerName || a.player || "").localeCompare(String(b.playerName || b.player || ""));
 }
 
+/** Top 10 Best Plays: probability → confidence → projection edge */
+export function compareBestPlaysRank(a = {}, b = {}) {
+  const probA = finite(a.probabilityScore ?? a.verifiedProbability, 0);
+  const probB = finite(b.probabilityScore ?? b.verifiedProbability, 0);
+  if (probB !== probA) return probB - probA;
+
+  const confA = finite(a.displayConfidenceScore ?? a.confidenceScore ?? a.confidence, 0);
+  const confB = finite(b.displayConfidenceScore ?? b.confidenceScore ?? b.confidence, 0);
+  if (confB !== confA) return confB - confA;
+
+  const edgeA = resolveRankingEdgePercent(a);
+  const edgeB = resolveRankingEdgePercent(b);
+  if (edgeB !== edgeA) return edgeB - edgeA;
+
+  return compareTopPickScore(a, b);
+}
+
 export const compareVerifiedRankingPlays = compareVerifiedPlaysRank;
 export const compareWeightedBestPlays = compareTopPickScore;
 

@@ -47,7 +47,9 @@ import {
   mergeProjectionsOntoProps,
   logPipelineMergeDiagnostics,
 } from "../services/mlb/projectionMergePipeline.js";
-import { resolveBestPlayProjection, PROJECTION_JOIN_DEBUG } from "./bestPlaysPipelineDebug.js";
+import { enrichBestPlayRankingFields } from "./bestPlayRanking.js";
+import { resolveBestPlayProjection, PROJECTION_JOIN_DEBUG, passesVerifiedBestPlaysFilter } from "./bestPlaysPipelineDebug.js";
+import { compareBestPlaysRank, computeTopPickScore } from "./bestPlayRankingScore.js";
 import {
   selectStartupProjectionCandidates,
   STARTUP_PROJECTION_CANDIDATE_LIMIT,
@@ -55,6 +57,7 @@ import {
 
 export const TOP_MLB_PLAYS_LIMIT = HIGHEST_PROBABILITY_MAX_PLAYS;
 export const SECTION_BEST_PLAYS = HIGHEST_PROBABILITY_MAX_PLAYS;
+export const TOP_BEST_PLAYS_LIMIT = 10;
 export const MAX_PLAYER_APPEARANCES = 2;
 export const WAITING_FOR_PROJECTIONS_MESSAGE = "Waiting for verified projections…";
 export const FALLBACK_PROJECTIONS_LABEL = "Relaxed ranking applied";
@@ -237,6 +240,25 @@ function statKey(prop = {}) {
     .toLowerCase();
 }
 
+function buildPlayerMarketKey(prop = {}) {
+  return `${playerKey(prop)}|${statKey(prop)}`;
+}
+
+/** Keep highest-scoring prop per player+market (removes duplicate Juan Soto lines). */
+export function dedupeByPlayerMarketBestScore(props = [], scoreFn = computeTopPickScore) {
+  const best = new Map();
+  for (const prop of props || []) {
+    const key = buildPlayerMarketKey(prop);
+    if (!key || key === "|") continue;
+    const score = Number(scoreFn(prop)) || 0;
+    const prev = best.get(key);
+    if (!prev || score > (Number(scoreFn(prev)) || 0)) {
+      best.set(key, prop);
+    }
+  }
+  return [...best.values()];
+}
+
 export function buildRankableParlayPicks(ranked = [], limit = SECTION_PARLAY) {
   const selected = [];
   const usedPlayers = new Set();
@@ -414,6 +436,16 @@ export function resolveTopMlbPlaySections(
   filterDiagnostics.highestProbabilityCount = highestProbabilityPicks.length;
   filterDiagnostics.noTierAPlays = noTierAPlays;
 
+  verifiedPicks = dedupeByPlayerMarketBestScore(verifiedPicks);
+  highestPicks = dedupeByPlayerMarketBestScore(highestPicks);
+
+  const topBestPlayPicks = dedupeByPlayerMarketBestScore(
+    historicalPool.filter(passesVerifiedBestPlaysFilter).map((prop) => enrichBestPlayRankingFields(prop))
+  )
+    .sort(compareBestPlaysRank)
+    .slice(0, TOP_BEST_PLAYS_LIMIT)
+    .map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
+
   filterDiagnostics.selected = highestPicks.length;
   filterDiagnostics.eligible = strictEligible;
   filterDiagnostics.debugMode = Boolean(selection.debugMode);
@@ -437,6 +469,13 @@ export function resolveTopMlbPlaySections(
     : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE;
 
   const sections = [
+    {
+      id: "top-10-best-plays",
+      title: "Top 10 Best Plays",
+      eyebrow: "Sorted by probability, confidence, then projection edge",
+      emptyMessage: topBestPlayPicks.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
+      picks: topBestPlayPicks,
+    },
     {
       id: "verified-plays",
       title: sectionTitle,

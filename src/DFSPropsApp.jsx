@@ -271,7 +271,7 @@ import {
   logLiveProviderPipelineTrace,
   mergeLiveFeedDiagnosticsIntoAudit,
 } from "./utils/liveProviderPipelineAudit.js";
-import { buildRenderSourceAudit } from "./utils/renderDataSourceAudit.js";
+import { buildRenderSourceAudit, preferLiveProviderBoardProps } from "./utils/renderDataSourceAudit.js";
 import {
   beginRefreshDiagnostics,
   endRefreshDiagnostics,
@@ -4079,9 +4079,14 @@ export default function DFSPropsApp() {
     [allDisplayProps, pipelineFallback, debugInfo?.ingestionFallback]
   );
   const boardDisplayProps = useMemo(() => {
-    if (acceptedPropsForRender.length) return acceptedPropsForRender;
-    return liveRenderBoard.props;
-  }, [acceptedPropsForRender, liveRenderBoard]);
+    const base = acceptedPropsForRender.length ? acceptedPropsForRender : liveRenderBoard.props;
+    return preferLiveProviderBoardProps(base, {
+      cacheStatus,
+      debugInfo,
+      lastUpdated,
+      ingestionFallback: debugInfo?.ingestionFallback || "",
+    });
+  }, [acceptedPropsForRender, liveRenderBoard, cacheStatus, debugInfo, lastUpdated]);
 
   const prizePicksFeedProps = useMemo(() => {
     const research = (boardDisplayProps || []).filter((prop) => {
@@ -4647,7 +4652,7 @@ export default function DFSPropsApp() {
   const lastUpdatedLabel = lastUpdated ? `${formatDateTime(lastUpdated)}${cacheStatus === "cached" ? " (cached)" : ""}` : "Never";
   const providerCoverageAuditDisplay = useMemo(() => {
     const fetchAudit = debugInfo?.providerCoverageAudit;
-    const renderAudit = buildRenderSourceAudit({
+    return buildRenderSourceAudit({
       allDisplayProps,
       boardDisplayProps,
       topMlbPlayBoard,
@@ -4656,33 +4661,6 @@ export default function DFSPropsApp() {
       debugInfo,
       lastUpdated,
     });
-    if (!renderAudit) return null;
-    const boardCached = /cached|stale|expired/i.test(String(cacheStatus || ""));
-    const timestamp = lastUpdated || renderAudit.boardCacheTimestamp || "";
-    const liveRendered =
-      Number(renderAudit.providerPlays ?? 0) > 0 || Number(renderAudit.combinedProps ?? 0) > 0;
-    const fetchLive =
-      fetchAudit?.feedMode === "LIVE" || Number(fetchAudit?.combinedUsable ?? fetchAudit?.combinedProps ?? 0) > 0;
-    if (!boardCached && (renderAudit.feedMode === "LIVE" || (liveRendered && fetchLive))) {
-      return {
-        ...renderAudit,
-        feedMode: "LIVE",
-        boardCacheActive: false,
-        cacheBoardMessage: "Provider feeds loaded live on last refresh.",
-      };
-    }
-    if (boardCached || !liveRendered) {
-      return {
-        ...renderAudit,
-        feedMode: "CACHE",
-        boardCacheActive: boardCached || renderAudit.boardCacheActive,
-        boardCacheTimestamp: timestamp,
-        cacheBoardMessage: timestamp
-          ? `Running on cached board from ${formatDateTime(timestamp)}`
-          : renderAudit.cacheBoardMessage || "Running on cached provider/board data",
-      };
-    }
-    return renderAudit;
   }, [
     allDisplayProps,
     boardDisplayProps,
@@ -5093,6 +5071,7 @@ export default function DFSPropsApp() {
       cacheStatus={cacheStatus}
       boardCacheTimestamp={lastUpdated}
       liveBoardPipelineTrace={debugInfo?.liveBoardPipelineTrace || null}
+      renderSourceAudit={providerCoverageAuditDisplay}
     />
 
       {selectedEvaluation && (

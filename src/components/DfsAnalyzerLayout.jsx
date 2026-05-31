@@ -97,7 +97,11 @@ function DfsAnalyzerLayout({
         boardCacheTimestamp={boardCacheTimestamp}
       />
 
-      <LiveBoardPipelineBanner trace={liveBoardPipelineTrace} loading={loading} />
+      <LiveBoardPipelineBanner
+        trace={liveBoardPipelineTrace}
+        renderSourceAudit={renderSourceAudit}
+        loading={loading}
+      />
 
       <CompactAppTabs activeTab={appView} onChange={setAppView} />
 

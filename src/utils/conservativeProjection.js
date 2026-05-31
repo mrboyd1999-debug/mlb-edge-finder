@@ -193,11 +193,11 @@ export function resolveResearchReasons(prop = {}) {
 }
 
 function applyProbabilityCaps(probability, prop = {}, { verified = false } = {}) {
-  const ceiling = verified ? 92 : 88;
-  const floor = 40;
+  const ceiling = verified ? 90 : 90;
+  const floor = 50;
   let value = round1(probability);
   if (isResearchCandidate(prop) && !verified) {
-    return clamp(value, floor, Math.min(ceiling, 82));
+    return clamp(value, floor, Math.min(ceiling, 85));
   }
   return clamp(value, floor, ceiling);
 }
