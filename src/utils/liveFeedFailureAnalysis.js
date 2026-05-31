@@ -3,7 +3,7 @@
  */
 
 import { getProxyUrl, getRawProxyUrl } from "../config/apiConfig.js";
-import { assessProxyUrl } from "../utils/providerProxy.js";
+import { assessProxyUrl, resolvePrizePicksFetchEndpoints } from "../utils/providerProxy.js";
 
 export const LIVE_STAGE_LABELS = {
   FETCHED: "FETCHED",
@@ -36,11 +36,17 @@ export const UNDERDOG_ENDPOINT_INVENTORY = [
 export function getPrizePicksEndpointInventory() {
   const proxyUrl = getProxyUrl("prizepicks");
   const rawProxy = getRawProxyUrl("prizepicks");
-  const assessment = assessProxyUrl(rawProxy);
+  const routes = resolvePrizePicksFetchEndpoints();
+  const endpoints = routes.map((path, index) => ({
+    path,
+    label: path.startsWith("/api/prizepicks") ? "PrizePicks built-in route" : "PrizePicks external proxy",
+    primary: index === 0,
+  }));
   return {
-    configured: Boolean(proxyUrl),
+    configured: endpoints.length > 0,
+    externalProxyConfigured: Boolean(proxyUrl),
     invalid: Boolean(rawProxy) && !proxyUrl,
-    endpoints: proxyUrl ? [{ path: proxyUrl, label: "PrizePicks proxy URL", primary: true }] : [],
+    endpoints,
     rawProxy: rawProxy || "",
   };
 }
@@ -138,8 +144,8 @@ export function auditProviderEndpoints() {
     prizepicks: pp,
     underdog: ud,
     warnings: [
-      !pp.configured ? "PrizePicks proxy URL not configured" : "",
-      pp.invalid ? "PrizePicks proxy URL is invalid" : "",
+      !pp.configured ? "PrizePicks fetch route unavailable" : "",
+      pp.invalid ? "PrizePicks external proxy URL is invalid (using built-in /api/prizepicks)" : "",
       ud.invalid ? "Underdog proxy URL is invalid" : "",
     ].filter(Boolean),
   };

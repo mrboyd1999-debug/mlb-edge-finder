@@ -1,5 +1,5 @@
 import { getOddsApiKey, getProxyUrl, getRawProxyUrl, getSportsDataApiKey, getStatmuseApiKey } from "../config/apiConfig.js";
-import { normalizeProxyUrl } from "../utils/providerProxy.js";
+import { resolvePrizePicksFetchEndpoints } from "../utils/providerProxy.js";
 import {
   buildOddsApiProxyUrl,
   logOddsApiExchange,
@@ -204,12 +204,8 @@ function classifyLineSourceProbe(result, { requiresKey = false, keyConfigured = 
 
 async function testPrizePicks() {
   const proxyUrl = getProxyUrl("prizepicks");
-  const rawProxy = getRawProxyUrl("prizepicks");
-  if (!proxyUrl) {
-    const invalid = Boolean(rawProxy) && !normalizeProxyUrl(rawProxy);
-    const message = invalid
-      ? "PrizePicks proxy URL is invalid. Set VITE_PRIZEPICKS_PROXY_URL in Settings."
-      : "PrizePicks proxy URL missing";
+  const routes = resolvePrizePicksFetchEndpoints();
+  if (!routes.length) {
     return {
       provider: "PrizePicks",
       route: "/api/prizepicks",
@@ -217,24 +213,29 @@ async function testPrizePicks() {
       ok: false,
       timedOut: false,
       status: CONNECTION_STATUS.NOT_CONFIGURED,
-      message,
+      message: "No PrizePicks fetch route available",
       settingsLine: CONNECTION_MESSAGES.NOT_CONFIGURED,
       displayStatus: CONNECTION_MESSAGES.NOT_CONFIGURED,
-      preview: message,
-      lastError: message,
+      preview: "No PrizePicks fetch route available",
+      lastError: "No PrizePicks fetch route available",
     };
   }
 
-  const route = proxyUrl;
-  console.info("[API Health] PrizePicks probe", { requestUrl: route });
   let lastResult = null;
-  for (let attempt = 0; attempt <= PRIZEPICKS_MAX_RETRIES; attempt += 1) {
-    if (attempt > 0) {
-      await new Promise((resolve) => window.setTimeout(resolve, PRIZEPICKS_RETRY_DELAY_MS));
+  let route = routes[0];
+  for (const candidate of routes) {
+    route = candidate;
+    console.info("[API Health] PrizePicks probe", { requestUrl: route });
+    for (let attempt = 0; attempt <= PRIZEPICKS_MAX_RETRIES; attempt += 1) {
+      if (attempt > 0) {
+        await new Promise((resolve) => window.setTimeout(resolve, PRIZEPICKS_RETRY_DELAY_MS));
+      }
+      lastResult = await probeFetch(route, { timeoutMs: PRIZEPICKS_FETCH_TIMEOUT_MS });
+      const parsedCount = Array.isArray(lastResult.payload?.props) ? lastResult.payload.props.length : 0;
+      if (lastResult.ok && Number(lastResult.status) === 200 && parsedCount > 0) break;
     }
-    lastResult = await probeFetch(route, { timeoutMs: PRIZEPICKS_FETCH_TIMEOUT_MS });
-    const parsedCount = Array.isArray(lastResult.payload?.props) ? lastResult.payload.props.length : 0;
-    if (lastResult.ok && Number(lastResult.status) === 200 && parsedCount > 0) break;
+    const parsedCount = Array.isArray(lastResult?.payload?.props) ? lastResult.payload.props.length : 0;
+    if (lastResult?.ok && Number(lastResult.status) === 200 && parsedCount > 0) break;
   }
   const classified = classifyLineSourceProbe(lastResult, { sourceId: SOURCE_IDS.PRIZEPICKS });
   const rawCount = Array.isArray(lastResult.payload?.data) ? lastResult.payload.data.length : 0;
@@ -249,7 +250,7 @@ async function testPrizePicks() {
   return {
     provider: "PrizePicks",
     route,
-    proxyConfigured: true,
+    proxyConfigured: Boolean(proxyUrl),
     rawResponseCount: rawCount,
     parsedCount,
     ...classified,

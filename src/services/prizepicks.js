@@ -49,7 +49,7 @@ import {
   withSourceRequestLock,
 } from "./sourceRateLimit.js";
 import { getProxyUrl, getRawProxyUrl } from "../config/apiConfig.js";
-import { assessProxyUrl, inspectPrizePicksProxyConfig } from "../utils/providerProxy.js";
+import { assessProxyUrl, inspectPrizePicksProxyConfig, resolvePrizePicksFetchEndpoints } from "../utils/providerProxy.js";
 import { recordProviderResponse } from "../utils/rawResponseDebug.js";
 import {
   classifyPrizePicksFailure,
@@ -204,11 +204,11 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
     }
   })();
 
-  if (!proxyUrl) {
+  const endpoints = prizePicksEndpoints();
+
+  if (!endpoints.length) {
     const config = inspectPrizePicksProxyConfig();
-    const message = proxyAssessment.invalid
-      ? `PrizePicks proxy URL is invalid. Set ${config.canonicalKey} in Settings.`
-      : "PrizePicks proxy URL missing";
+    const message = "No PrizePicks fetch route available";
     console.log("PP START FETCH");
     console.log("PP URL", "(not configured)");
     console.info("[PrizePicks]", message, "— fetch skipped (no HTTP)");
@@ -237,7 +237,7 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
     });
     updatePrizePicksDiagnostics({
       proxyConfigured: false,
-      proxyMode: "none — blocked in fetchPrizePicksPropsInternal",
+      proxyMode: "none — no fetch route",
       httpExecuted: false,
       lastError: message,
       providerStatus: "Not configured",
@@ -275,7 +275,6 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
     headers: lineFeedJsonHeaders(),
   };
 
-  const endpoints = prizePicksEndpoints();
   const requestUrl = endpoints[0] ? absoluteUrl(endpoints[0]) : "";
   console.log("PP START FETCH");
   console.log("PP URL", requestUrl);
@@ -286,19 +285,24 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
     requestUrl,
     requestSent: true,
     requestSentAt: new Date().toISOString(),
-    proxyConfigured: true,
-    proxyMode: "browser → VITE_PRIZEPICKS_PROXY_URL",
+    proxyConfigured: Boolean(proxyUrl),
+    proxyMode: proxyUrl
+      ? "browser → VITE_PRIZEPICKS_PROXY_URL (with /api/prizepicks fallback)"
+      : "browser → built-in /api/prizepicks",
     externalProxyHost,
     httpExecuted: false,
     responseReceived: false,
-    lastError: "",
+    lastError: proxyAssessment.invalid
+      ? `Invalid ${inspectPrizePicksProxyConfig().canonicalKey} ignored — using built-in /api/prizepicks`
+      : "",
   });
-  console.info("[PrizePicks] proxy configured — starting fetch", {
+  console.info("[PrizePicks] starting fetch", {
     requestUrl,
-    proxyHost: externalProxyHost,
+    proxyHost: externalProxyHost || "(built-in /api/prizepicks)",
+    endpointCount: endpoints.length,
   });
-  console.log("[PrizePicks Fetch Start]", { requestUrl, proxyHost: externalProxyHost });
-  console.log("[PP FETCH START]", { requestUrl, proxyHost: externalProxyHost });
+  console.log("[PrizePicks Fetch Start]", { requestUrl, proxyHost: externalProxyHost || "(built-in)" });
+  console.log("[PP FETCH START]", { requestUrl, proxyHost: externalProxyHost || "(built-in)" });
 
   for (const endpoint of endpoints) {
     if (signal?.aborted) break;
@@ -995,9 +999,7 @@ async function fetchPrizePicksEndpoint(
 }
 
 function prizePicksEndpoints() {
-  const proxyUrl = getProxyUrl("prizepicks");
-  if (!proxyUrl) return [];
-  return [proxyUrl];
+  return resolvePrizePicksFetchEndpoints();
 }
 
 function notConfiguredPrizePicksProviderResult(message = "PrizePicks proxy URL missing") {
