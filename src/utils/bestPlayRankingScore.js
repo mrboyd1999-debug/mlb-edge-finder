@@ -189,19 +189,39 @@ export const HERO_MIN_CONFIDENCE = 60;
 export const HERO_MIN_PLAYABILITY = 60;
 export const HERO_MIN_SANITY = 65;
 
-import {
-  computeValidatedEdgePercent,
-  clampValidatedEdgePercent,
-  isFullDataProp,
-  classifyPropTier,
-  hasIntegrityReviewFlags,
-} from "./boardQuality.js";
+import { classifyPropTier } from "./tierClassification.js";
+import { DATA_STATUS, resolveMlbDataStatus } from "./mlbBoardPipeline.js";
+
+const MAX_RANKING_EDGE_PERCENT = 40;
+
+function computeValidatedEdgePercent(prop = {}) {
+  const line = finite(prop.line, NaN);
+  const projection = finite(prop.projection ?? prop.projectedValue, NaN);
+  if (!Number.isFinite(projection) || projection <= 0 || !Number.isFinite(line)) return null;
+  return ((projection - line) / projection) * 100;
+}
+
+function clampValidatedEdgePercent(edgePercent) {
+  const pct = finite(edgePercent, NaN);
+  if (!Number.isFinite(pct)) return null;
+  return Math.max(0, Math.min(MAX_RANKING_EDGE_PERCENT, pct));
+}
+
+function isFullDataProp(prop = {}) {
+  return resolveMlbDataStatus(prop) === DATA_STATUS.FULL_MLB_DATA;
+}
+
+function hasIntegrityReviewFlags(prop = {}) {
+  const integrity = prop.integrityAudit;
+  if (!integrity) return false;
+  return Boolean(integrity.hitRateInvalid || integrity.probabilityMismatch || integrity.edgeMismatch);
+}
 
 const TIER_SORT_ORDER = { A: 0, B: 1, "Review Needed": 2, C: 3, D: 4 };
 
 function compareBestPlaysTierRank(a = {}, b = {}) {
-  const tierA = TIER_SORT_ORDER[classifyPropTier(a)] ?? 4;
-  const tierB = TIER_SORT_ORDER[classifyPropTier(b)] ?? 4;
+  const tierA = TIER_SORT_ORDER[classifyPropTier(a) ?? "D"] ?? 5;
+  const tierB = TIER_SORT_ORDER[classifyPropTier(b) ?? "D"] ?? 5;
   return tierA - tierB;
 }
 
@@ -215,7 +235,7 @@ export function resolveRankingEdgePercent(prop = {}) {
 }
 
 export function resolveNormalizedEdgeScore(prop = {}) {
-  return Math.min(resolveRankingEdgePercent(prop), 100);
+  return Math.min(resolveRankingEdgePercent(prop), 90);
 }
 
 export function resolveRecentFormScore(prop = {}) {
@@ -245,7 +265,7 @@ export function computeTopPlayFinalScore(prop = {}) {
   const edgeScore = resolveNormalizedEdgeScore(prop);
   const recentForm = resolveRecentFormScore(prop);
   const score =
-    probability * 0.5 + confidence * 0.25 + edgeScore * 0.15 + recentForm * 0.1;
+    probability * 0.45 + confidence * 0.25 + edgeScore * 0.2 + recentForm * 0.1;
   return Math.round(score * 100) / 100;
 }
 
@@ -285,9 +305,17 @@ export function buildTopPlayRankExplanation(prop = {}) {
 }
 
 export function compareTopPlayFinalScore(a = {}, b = {}) {
+  const tierDelta = compareBestPlaysTierRank(a, b);
+  if (tierDelta !== 0) return tierDelta;
   const scoreDelta = computeTopPlayFinalScore(b) - computeTopPlayFinalScore(a);
   if (scoreDelta !== 0) return scoreDelta;
-  return compareBestPlaysTierRank(a, b);
+  const probDelta =
+    finite(b.probabilityScore ?? b.verifiedProbability, 0) - finite(a.probabilityScore ?? a.verifiedProbability, 0);
+  if (probDelta !== 0) return probDelta;
+  return (
+    finite(b.displayConfidenceScore ?? b.confidenceScore ?? b.confidence, 0) -
+    finite(a.displayConfidenceScore ?? a.confidenceScore ?? a.confidence, 0)
+  );
 }
 
 export function resolvePlayabilityScore(prop = {}) {

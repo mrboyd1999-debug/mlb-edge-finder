@@ -21,14 +21,14 @@ export const BEST_PLAYS_MIN = {
 };
 
 export const TIER_A_RULES = {
-  confidence: 75,
+  confidence: 70,
   probability: 70,
   playability: 0,
 };
 
 export const TIER_B_RULES = {
   confidence: 65,
-  probability: 60,
+  probability: 65,
   playability: 0,
 };
 

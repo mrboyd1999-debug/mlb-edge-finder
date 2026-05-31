@@ -7,7 +7,7 @@ import { isSportsDataPitcherConnected } from "./sportsDataPitcherLookup.js";
 
 export const STARTER_PENDING_LABEL = "Pitcher Pending";
 export const OPPONENT_PITCHER_UNAVAILABLE_LABEL = "Opponent pitcher unavailable";
-export const PROBABLE_STARTER_PENDING_LABEL = "Probable starter pending";
+export const PROBABLE_STARTER_PENDING_LABEL = "Pitcher: Pending";
 export const PITCHER_STATUS_UNKNOWN = "UNKNOWN";
 
 function isUnavailablePitcherLabel(value = "") {

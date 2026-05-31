@@ -9,10 +9,11 @@ import {
   VERIFICATION_STATUS,
 } from "./verificationStatus.js";
 
-export const TIER_A_METRICS = { confidence: 75, probability: 70 };
-export const ELITE_TIER_METRICS = { confidence: 75, probability: 70 };
-/** Playable tier — probability >= 60, confidence >= 65 */
-export const TIER_B_METRICS = { confidence: 65, probability: 60 };
+export const TIER_A_METRICS = { confidence: 70, probability: 70 };
+export const ELITE_TIER_METRICS = { confidence: 70, probability: 70 };
+/** Playable tier — probability >= 65, confidence >= 65 */
+export const TIER_B_METRICS = { confidence: 65, probability: 65 };
+export const TIER_C_METRICS = { confidence: 60, probability: 55 };
 export const RESEARCH_TIER_METRICS = { confidence: 65 };
 /** Best Plays board — same thresholds as Tier B; tier priority handles A vs B vs C */
 export const BEST_PLAYS_BOARD_MIN = { ...TIER_B_METRICS };
@@ -128,19 +129,8 @@ export function isMissingSeasonSource(prop = {}) {
 }
 
 export function applyTierCaps(prop = {}, tier = "C") {
-  let capped = tier;
-  const pitcherVerification =
-    prop.pitcherVerification || resolvePitcherVerification(prop).pitcherVerification;
-
-  if (isMissingSeasonSource(prop) && capped === "A") {
-    capped = "B";
-  }
-
-  if (pitcherVerification === PITCHER_VERIFICATION.FAIL && capped === "A") {
-    capped = "B";
-  }
-
-  return capped;
+  void prop;
+  return tier;
 }
 
 export function passesResearchPlayThresholds(prop = {}) {
@@ -177,6 +167,10 @@ export function resolvePlayCategory(prop = {}) {
 }
 
 export function resolvePlayCategoryLabel(prop = {}) {
+  const tier = classifyPropTier(prop);
+  if (tier === "A") return "Elite";
+  if (tier === "B") return "Best Play";
+  if (tier === "C") return "Research";
   const category = resolvePlayCategory(prop);
   if (category === "ELITE") return "Elite";
   if (category === "BEST") return "Best Play";
@@ -185,23 +179,28 @@ export function resolvePlayCategoryLabel(prop = {}) {
 }
 
 export function classifyPropTier(prop = {}) {
-  if (isInflatedProbabilityProp(prop)) return "C";
-  if (!hasTierBasics(prop)) return "C";
-  if (!hasAllowedVerification(prop)) return "C";
-  if (!hasPositiveEdge(prop)) return "C";
+  if (isInflatedProbabilityProp(prop)) return null;
+  if (!hasTierBasics(prop)) return null;
+  if (!hasPositiveEdge(prop)) return null;
 
   const confidence = resolvePropConfidence(prop);
   const probability = resolvePropProbability(prop);
+  const status = prop.verificationStatus || resolveVerificationStatus(prop);
 
-  let tier = "C";
   if (confidence >= TIER_A_METRICS.confidence && probability >= TIER_A_METRICS.probability) {
-    tier = "A";
-  } else if (confidence >= TIER_B_METRICS.confidence && probability >= TIER_B_METRICS.probability) {
-    tier = "B";
+    if (status === VERIFICATION_STATUS.FULL || status === VERIFICATION_STATUS.PARTIAL) {
+      return applyTierCaps(prop, "A");
+    }
   }
-
-  if (tier === "C") return "C";
-  return applyTierCaps(prop, tier);
+  if (confidence >= TIER_B_METRICS.confidence && probability >= TIER_B_METRICS.probability) {
+    if (status === VERIFICATION_STATUS.FULL || status === VERIFICATION_STATUS.PARTIAL) {
+      return applyTierCaps(prop, "B");
+    }
+  }
+  if (confidence >= TIER_C_METRICS.confidence && probability >= TIER_C_METRICS.probability) {
+    return "C";
+  }
+  return null;
 }
 
 export function getTierAFailures(prop = {}) {
@@ -220,15 +219,7 @@ export function getTierAFailures(prop = {}) {
     failures.push(`probability ${formatMetric(probability)} < ${TIER_A_METRICS.probability}`);
   }
   const capped = applyTierCaps(prop, "A");
-  if (capped === "B") {
-    if (isMissingSeasonSource(prop)) failures.push("capped at B: missing season source");
-    const pitcherVerification =
-      prop.pitcherVerification || resolvePitcherVerification(prop).pitcherVerification;
-    if (pitcherVerification === PITCHER_VERIFICATION.FAIL) failures.push("capped at B: pitcherVerification FAIL");
-  }
-  if (capped === "C") {
-    failures.push("capped at C after applying pitcher/season caps");
-  }
+  if (capped !== "A") failures.push("capped below Tier A after review");
   return failures;
 }
 

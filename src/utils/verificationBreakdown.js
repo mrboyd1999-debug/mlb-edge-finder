@@ -5,7 +5,6 @@
 import { normalizeSource } from "./normalizeSource.js";
 import { PITCHER_VERIFICATION, PROBABLE_STARTER_PENDING_LABEL, resolvePitcherVerification } from "./opponentStarter.js";
 import { computeWeightedIntegrityScore } from "./integrityAudit.js";
-import { resolvePropConfidence, resolvePropProbability } from "./tierClassification.js";
 import { resolveProjectionValue } from "./projectionQuality.js";
 
 export const FORM_FULL_MIN_PROBABILITY = 70;
@@ -17,6 +16,14 @@ export const STRONG_BEST_PLAY_MIN_CONFIDENCE = 65;
 function finite(value) {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
+}
+
+function resolvePropConfidence(prop = {}) {
+  return finite(prop.finalConfidence ?? prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence) ?? NaN;
+}
+
+function resolvePropProbability(prop = {}) {
+  return finite(prop.finalProbability ?? prop.probabilityScore ?? prop.verifiedProbability) ?? NaN;
 }
 
 function resolvePlayProjection(prop = {}) {

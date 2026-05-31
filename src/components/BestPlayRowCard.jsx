@@ -13,7 +13,6 @@ import { formatEdgeDisplay } from "../utils/conservativeProjection.js";
 import { validatePickDirectionBeforeRender } from "../utils/pickDirectionAudit.js";
 import { resolveRecommendedSide, resolveTierDisplayLabel } from "../utils/boardQuality.js";
 import { resolveNormalizedConfidence, resolveNormalizedProbability } from "../utils/propDisplayFields.js";
-import { buildTopPlayRankExplanation } from "../utils/bestPlayRankingScore.js";
 import ProviderLabel from "./ProviderLabel.jsx";
 
 function resolveLeanSideLabel(prop = {}, recommendedSide = "PASS") {
@@ -32,6 +31,14 @@ function formatMatchup(prop = {}) {
   const opponent = prop.opponent || prop.opponentTeam || "";
   if (team && opponent) return `${team} @ ${opponent}`;
   return team || opponent || "";
+}
+
+function resolveTierLabel(prop = {}) {
+  const tier = String(prop.finalTier || prop.tier || "").toUpperCase();
+  if (tier === "A") return "Elite";
+  if (tier === "B") return "Best Play";
+  if (tier === "C") return "Research";
+  return prop.playCategoryLabel || resolveTierDisplayLabel(prop) || "Play";
 }
 
 function BestPlayRowCard({ prop, onOpen, rank }) {
@@ -57,23 +64,20 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
   const playerName = enriched.playerName || enriched.player || "Unknown";
   const market = enriched.propType || enriched.statType || enriched.market || displayFullMarketLabel(enriched);
   const matchup = formatMatchup(enriched);
-  const line = formatNumber(enriched.line);
   const confidenceValue = resolveNormalizedConfidence(enriched);
   const confidenceLabel = confidenceValue != null ? `${confidenceValue}%` : "—";
   const probabilityValue = resolveNormalizedProbability(enriched);
   const probLabel = probabilityValue != null ? `${probabilityValue}%` : "—";
-  const tierLabel = enriched.isDebugPlay
-    ? "DEBUG PLAY"
-    : enriched.verificationStatus === "FULL"
-      ? "Verified Play"
-      : enriched.playCategoryLabel || resolveTierDisplayLabel(enriched);
-  const riskLevel = String(enriched.riskLevel || "HIGH").toUpperCase();
+  const tierLabel = resolveTierLabel(enriched);
   const edgeLabels = enriched.rawEdgeLabel
     ? { displayEdgeLabel: enriched.displayEdgeLabel }
     : formatEdgeDisplay(enriched);
   const projection = resolveProjectionValue(enriched);
   const projectionLabel = projection != null && projection > 0 ? formatNumber(projection) : "—";
-  const rankExplanation = enriched.topPlayRankExplanation || buildTopPlayRankExplanation(enriched);
+  const rankScore = enriched.topPlayFinalScore ?? enriched.sortScore ?? "—";
+  const ppLine = enriched.prizePicksLineLabel;
+  const udLine = enriched.underdogLineLabel;
+  const activeLine = enriched.activeLineLabel ?? (enriched.line != null ? formatNumber(enriched.line) : "—");
 
   function openDetails(event) {
     event?.stopPropagation?.();
@@ -100,45 +104,23 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
           <div className="best-play-row-top-line">
             {rank != null ? <span style={styles.bestPlayRowRank}>#{rank}</span> : null}
             <h3 style={styles.bestPlayRowPlayer}>{playerName}</h3>
-            <span className={`best-play-row-tier best-play-row-tier--${enriched.isDebugPlay ? "debug" : String(enriched.tier || enriched.finalTier || "c").toLowerCase()}`}>
+            <span className={`best-play-row-tier best-play-row-tier--${String(enriched.tier || enriched.finalTier || "c").toLowerCase()}`}>
               {tierLabel}
             </span>
           </div>
           <p style={styles.bestPlayRowSubline}>
-            {matchup} · {market} · Line {line}
+            {matchup} · {market}
+          </p>
+          <p className="best-play-row-subline" style={{ marginTop: 2 }}>
+            Recommended: <strong>{leanSideLabel !== "Pass" ? leanSideLabel : sideLabel}</strong>
+            {ppLine ? <> · PrizePicks: <strong>{ppLine}</strong></> : null}
+            {udLine ? <> · Underdog: <strong>{udLine}</strong></> : null}
+            <> · Line: <strong>{activeLine}</strong></>
           </p>
           <ProviderLabel prop={enriched} compact />
-          {enriched.cardDescription ? (
-            <p className="best-play-row-description">{enriched.cardDescription}</p>
-          ) : null}
-          {rankExplanation?.lines?.length ? (
-            <div className="best-play-row-rank-explanation" style={{ marginTop: 6, fontSize: "11px", lineHeight: 1.45, color: "#cbd5e1" }}>
-              {rankExplanation.lines.map((line) => (
-                <div key={line}>{line}</div>
-              ))}
-            </div>
-          ) : null}
-          {enriched.verificationBreakdownLines?.length ? (
-            <div className="best-play-row-verification-breakdown" style={{ marginTop: 4, fontSize: "10px", lineHeight: 1.4, color: "#94a3b8" }}>
-              {enriched.verificationBreakdownLines.map((line) => (
-                <div key={line}>{line}</div>
-              ))}
-            </div>
-          ) : null}
-          {enriched.verificationReason ? (
-            <p className="best-play-row-verification-reason" style={{ marginTop: 4, fontSize: "10px", color: "#94a3b8" }}>
-              {enriched.verificationStatus === "PARTIAL" ? `PARTIAL: ${enriched.partialVerificationReason || enriched.verificationReason}` : enriched.verificationReason}
-            </p>
-          ) : null}
-          <div className="prop-card-core-metrics prop-card-core-metrics--mobile" style={{ marginTop: 4 }}>
-            <span>
-              Side <strong>{leanSideLabel !== "Pass" ? leanSideLabel : sideLabel}</strong>
-            </span>
+          <div className="prop-card-core-metrics prop-card-core-metrics--mobile" style={{ marginTop: 6 }}>
             <span>
               Projection <strong>{projectionLabel}</strong>
-            </span>
-            <span>
-              Edge <strong>{edgeLabels?.displayEdgeLabel ?? "—"}</strong>
             </span>
             <span>
               Probability <strong>{probLabel}</strong>
@@ -147,7 +129,10 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
               Confidence <strong>{confidenceLabel}</strong>
             </span>
             <span>
-              Risk <strong>{riskLevel}</strong>
+              Edge <strong>{edgeLabels?.displayEdgeLabel ?? "—"}</strong>
+            </span>
+            <span>
+              Rank <strong>{rankScore}</strong>
             </span>
           </div>
         </div>

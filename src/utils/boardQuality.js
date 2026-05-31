@@ -48,9 +48,10 @@ import {
 } from "./mlbBoardPipeline.js";
 import { attachPropDisplayFields, resolveNormalizedConfidence, resolveNormalizedProbability } from "./propDisplayFields.js";
 import { passesVerifiedBestPlaysFilter } from "./bestPlaysPipelineDebug.js";
+import { applyProjectionOutlierControl } from "./projectionOutlierControl.js";
 import { passesStrongMetricBestPlayGate } from "./verificationBreakdown.js";
 
-export { classifyPropTier, getTierAFailures, getTierBFailures, buildTierDebugSummary, hasPositiveEdge, hasAllowedVerification, passesResearchPlayThresholds, passesBestPlayDisplayGate, BEST_PLAYS_BOARD_MIN, ELITE_TIER_METRICS, resolvePlayCategory, resolvePlayCategoryLabel } from "./tierClassification.js";
+export { classifyPropTier, getTierAFailures, getTierBFailures, buildTierDebugSummary, hasPositiveEdge, hasAllowedVerification, passesResearchPlayThresholds, passesBestPlayDisplayGate, isMissingSeasonSource, BEST_PLAYS_BOARD_MIN, ELITE_TIER_METRICS, resolvePlayCategory, resolvePlayCategoryLabel } from "./tierClassification.js";
 import {
   TIER_A_METRICS,
   TIER_B_METRICS,
@@ -63,6 +64,7 @@ import {
   hasPositiveEdge,
   hasAllowedVerification,
   hasTierBasics,
+  isMissingSeasonSource,
   passesResearchPlayThresholds,
   passesBestPlayDisplayGate,
   resolvePlayCategory,
@@ -116,12 +118,12 @@ export const FALLBACK_RANK_WEIGHTS = {
   sanity: 0.1,
 };
 /** Production tier thresholds — probability + confidence + full MLB data. */
-export const TIER_A_MIN_CONFIDENCE = TIER_A_METRICS.confidence;
+export const TIER_A_MIN_CONFIDENCE = 70;
 export const TIER_A_MIN_PLAYABILITY = TIER_A_RULES.playability;
-export const TIER_A_MIN_PROBABILITY = TIER_A_METRICS.probability;
-export const TIER_B_MIN_CONFIDENCE = TIER_B_METRICS.confidence;
+export const TIER_A_MIN_PROBABILITY = 70;
+export const TIER_B_MIN_CONFIDENCE = 65;
 export const TIER_B_MIN_PLAYABILITY = TIER_B_RULES.playability;
-export const TIER_B_MIN_PROBABILITY = TIER_B_METRICS.probability;
+export const TIER_B_MIN_PROBABILITY = 65;
 /** Legacy edge gates — not used for A/B/C tier classification. */
 export const TIER_A_MIN_EDGE = 0.5;
 export const TIER_B_MIN_EDGE = 0.3;
@@ -139,7 +141,7 @@ export const BEST_PLAY_MIN_PLAYABILITY = BEST_PLAYS_MIN.playability;
 export const BEST_PLAY_MIN_SANITY = 0;
 export const MIN_UNIQUE_PLAYERS_TOP_10 = 5;
 export const MIN_PROJECTED_PROPS_FOR_BEST_PLAYS = 20;
-export const BEST_PLAYS_DISPLAY_LIMIT = 5;
+export const BEST_PLAYS_DISPLAY_LIMIT = 3;
 export const DEBUG_BEST_PLAYS_LIMIT = 10;
 export const TOP_BEST_PLAYS_TARGET = BEST_PLAYS_DISPLAY_LIMIT;
 export const CONFIDENCE_CALIBRATION_MIN = 50;
@@ -522,12 +524,11 @@ export function resolveVerifiedPlaysEmptyMessage({
   return NO_BEST_PLAYS_STANDARDS_MESSAGE;
 }
 
-/** Best Plays board gate — any classified tier with verified edge, or strong metric override. */
+/** Best Plays board gate — Tier A/B/C with positive edge and basics. */
 export function passesBestPlayBoardThresholds(prop = {}) {
   if (passesStrongMetricBestPlayGate(prop) && hasPositiveEdge(prop) && hasTierBasics(prop)) {
     return true;
   }
-  if (!hasAllowedVerification(prop)) return false;
   if (!hasPositiveEdge(prop)) return false;
   if (!hasTierBasics(prop)) return false;
   const tier = classifyPropTier(prop);
@@ -793,8 +794,7 @@ function buildBestPlaysTierPools(pool = []) {
     (prop) =>
       playerKey(prop) &&
       marketKey(prop) &&
-      hasAllowedVerification(prop) &&
-      hasPositiveEdge(prop)
+      passesBestPlayBoardThresholds(prop)
   );
   const tierA = eligible.filter((prop) => classifyPropTier(prop) === "A");
   const tierB = eligible.filter((prop) => classifyPropTier(prop) === "B");
@@ -1330,6 +1330,15 @@ export function resolveProjectionConfidenceLevel(prop = {}) {
 }
 
 export function attachBoardQualityFields(prop = {}) {
+  prop = applyProjectionOutlierControl(prop);
+  if (isMissingSeasonSource(prop) && (prop.last10HitRate != null || prop.recentHitRate != null)) {
+    prop = {
+      ...prop,
+      seasonMissingPenalty: 0,
+      seasonMissingStatus: "neutral",
+      historicalStatus: prop.historicalStatus || "neutral",
+    };
+  }
   const withSportsDataPitcher = prop.sportsDataGame
     ? attachSportsDataPitcherFields(prop, { game: prop.sportsDataGame, seasonRows: prop.sportsDataSeasonRows || [] })
     : prop;

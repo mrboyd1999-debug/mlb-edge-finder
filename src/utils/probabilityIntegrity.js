@@ -63,7 +63,18 @@ export function isInflatedProbabilityProp(prop = {}, probability = null) {
   const prob = finite(probability ?? prop.probabilityScore ?? prop.verifiedProbability ?? prop.probabilityNormalized);
   if (prob == null) return false;
   const hitRates = prop.probabilityCalibration?.hitRates || resolveCalibrationHitRates(prop);
-  const historical = resolveHistoricalProbability(hitRates);
+  const mergedRates = {
+    ...hitRates,
+    last10HitRate: hitRates.last10HitRate ?? prop.last10HitRate ?? prop.recentHitRate,
+    last5HitRate: hitRates.last5HitRate ?? prop.last5HitRate,
+  };
+  const hasRealHistory = Boolean(
+    mergedRates.last10HitRate != null ||
+      mergedRates.last5HitRate != null ||
+      (mergedRates.seasonRateValid && mergedRates.seasonHitRate != null)
+  );
+  if (!hasRealHistory) return false;
+  const historical = resolveHistoricalProbability(mergedRates);
   if (historical == null) return false;
   return prob > historical + 20;
 }

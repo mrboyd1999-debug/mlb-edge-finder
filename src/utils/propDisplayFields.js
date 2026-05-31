@@ -143,11 +143,38 @@ export function buildCardDescription(prop = {}) {
   return parts.length ? parts.join(" · ") : "";
 }
 
+export function resolveProviderLineFields(prop = {}) {
+  const comparison = prop.lineComparison || {};
+  const prizePicksLine = finite(comparison.prizePicksLine ?? prop.prizePicksLine ?? prop.ppLine);
+  const underdogLine = finite(comparison.underdogLine ?? prop.underdogLine ?? prop.udLine);
+  const activeLine = finite(prop.line);
+  return {
+    prizePicksLine,
+    underdogLine,
+    activeLine,
+    prizePicksLineLabel: prizePicksLine != null ? formatNumber(prizePicksLine) : null,
+    underdogLineLabel: underdogLine != null ? formatNumber(underdogLine) : null,
+    activeLineLabel: activeLine != null ? formatNumber(activeLine) : null,
+  };
+}
+
+export function resolvePitcherCardLabel(prop = {}) {
+  const raw = String(
+    prop.opposingPitcher || prop.opponentStarterNote || prop.pitcherName || prop.matchupAudit?.pitcher || ""
+  ).trim();
+  if (!raw || raw === "—") return "Pitcher: Pending";
+  if (/probable starter pending|pitcher pending|starter pending|opponent pitcher unavailable/i.test(raw)) {
+    return "Pitcher: Pending";
+  }
+  return `Pitcher: ${raw}`;
+}
+
 export function attachPropDisplayFields(prop = {}, context = {}) {
   const confidenceNormalized = resolveNormalizedConfidence(prop);
   const probabilityNormalized = resolveNormalizedProbability(prop);
   const riskLevel = computePropRiskLevel(prop);
   const providerLabel = resolveProviderDisplayLabel(prop, context);
+  const lineFields = resolveProviderLineFields(prop);
   const cardDescription = buildCardDescription({
     ...prop,
     displayConfidenceScore: confidenceNormalized,
@@ -156,6 +183,7 @@ export function attachPropDisplayFields(prop = {}, context = {}) {
 
   return {
     ...prop,
+    ...lineFields,
     confidenceNormalized,
     confidence: confidenceNormalized,
     displayConfidenceScore: confidenceNormalized,
@@ -163,6 +191,7 @@ export function attachPropDisplayFields(prop = {}, context = {}) {
     riskLevel,
     riskExplanation: resolveRiskExplanation(riskLevel),
     providerLabel,
+    pitcherCardLabel: resolvePitcherCardLabel(prop),
     cardDescription,
     qualificationReason: cardDescription || prop.qualificationReason || "",
   };

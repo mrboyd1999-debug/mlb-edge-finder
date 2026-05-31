@@ -44,6 +44,7 @@ import { attachBoardQualityFields,
 import { resolveNormalizedConfidence, resolveNormalizedProbability } from "../utils/propDisplayFields.js";
 import { resolveRiskExplanation } from "../utils/risk.js";
 import { resolveOpposingPitcherDisplayLabel } from "../utils/opponentStarter.js";
+import { resolvePitcherCardLabel } from "../utils/propDisplayFields.js";
 import ProviderLabel from "./ProviderLabel.jsx";
 import { resolveVerificationStatus } from "../utils/verificationStatus.js";
 import { buildHitRateSnapshot } from "../utils/modelValidation.js";
@@ -338,7 +339,7 @@ export default function PickDetailModal({
   const probabilityAuditRows = buildSimpleProbabilityAuditRows(prop, hitRateSnapshot);
   const confidenceExplanationRows = buildConfidenceExplanationRows(prop);
   const advancedProbabilityAuditRows = buildAdvancedProbabilityAuditRows(prop);
-  const opposingPitcherLabel = resolveOpposingPitcherDisplayLabel(prop);
+  const opposingPitcherLabel = resolvePitcherCardLabel(prop);
   const probabilityLabel = (() => {
     const normalized = resolveNormalizedProbability(prop);
     if (normalized != null) return `${normalized}%`;
@@ -487,7 +488,7 @@ export default function PickDetailModal({
             )}
           </div>
 
-          {breakdownMode && prop.probabilityAudit ? (
+          {breakdownMode && showDebugPanels && prop.probabilityAudit ? (
             <>
               <button
                 type="button"
@@ -538,16 +539,18 @@ export default function PickDetailModal({
             </>
           ) : null}
 
-          <button
-            type="button"
-            className="pick-detail-toggle-btn"
-            onClick={() => setShowAdvancedDetails((open) => !open)}
-            aria-expanded={showAdvancedDetails}
-          >
-            {showAdvancedDetails ? "Hide Advanced Details" : "Show Advanced Details"}
-          </button>
+          {showDebugPanels ? (
+            <button
+              type="button"
+              className="pick-detail-toggle-btn"
+              onClick={() => setShowAdvancedDetails((open) => !open)}
+              aria-expanded={showAdvancedDetails}
+            >
+              {showAdvancedDetails ? "Hide Advanced Details" : "Show Advanced Details"}
+            </button>
+          ) : null}
 
-          {showAdvancedDetails ? (
+          {showDebugPanels && showAdvancedDetails ? (
             <div className="pick-detail-modal-audit">
               {!manualProp ? (
                 <>

@@ -213,9 +213,18 @@ function resolveSportsDataHealth({ row, keyConfigured, testedAt, mlbPipelineStat
   };
 }
 
+function hasSuccessfulPropParse(feed = {}) {
+  const raw = finite(feed.rawCount);
+  const parsed = finite(feed.parsedCount ?? feed.normalizedCount);
+  if (parsed != null && parsed > 0) return true;
+  if (raw != null && raw > 0 && hasUsableProps(feed)) return true;
+  return hasUsableProps(feed);
+}
+
 function resolveUnderdogHealth(feed = {}) {
   const usable = hasUsableProps(feed);
   const live = Boolean(feed.liveHttpOk && !feed.cached && !feed.fallback && usable);
+  const sessionParsed = hasSuccessfulPropParse(feed);
   const cacheAgeMs = resolveCacheAgeMs(feed);
   const cacheFresh =
     cacheAgeMs == null ? Boolean(feed.cached && usable) : cacheAgeMs <= USABLE_PROP_CACHE_MAX_AGE_MS;
@@ -224,16 +233,16 @@ function resolveUnderdogHealth(feed = {}) {
     responseCode: feed.httpStatus ?? null,
     lastChecked: feed.lastFetchAt || null,
     cacheAge: formatCacheAgeLabel(feed),
-    propsReturned: finite(feed.activeUsableCount ?? feed.usableCount),
+    propsReturned: finite(feed.parsedCount ?? feed.activeUsableCount ?? feed.usableCount),
     keyPresent: true,
     failureReason: feed.lastError || "",
   };
 
-  if (live) {
+  if (sessionParsed) {
     return {
       status: "Connected",
       color: API_STATUS_COLOR.GREEN,
-      detail: `${debug.propsReturned} live props`,
+      detail: `${debug.propsReturned ?? finite(feed.parsedCount) ?? finite(feed.rawCount) ?? 0} props`,
       debug: { ...debug, failureReason: "" },
     };
   }
@@ -275,16 +284,26 @@ function resolveUnderdogHealth(feed = {}) {
 
 function resolvePrizePicksHealth(feed = {}, { alternatePropSourcesAvailable = false } = {}) {
   const usable = hasUsableProps(feed);
+  const sessionParsed = hasSuccessfulPropParse(feed);
   const live = Boolean(feed.liveHttpOk && !feed.cached && !feed.fallback && usable);
   const debug = {
     endpointTested: feed.endpoint || "/prizepicks/props",
     responseCode: feed.httpStatus ?? null,
     lastChecked: feed.lastFetchAt || null,
     cacheAge: formatCacheAgeLabel(feed),
-    propsReturned: finite(feed.activeUsableCount ?? feed.usableCount),
+    propsReturned: finite(feed.parsedCount ?? feed.activeUsableCount ?? feed.usableCount),
     keyPresent: Boolean(feed.httpExecuted ?? feed.diagnostics?.httpExecuted ?? true),
     failureReason: feed.lastError || feed.statusLabel || "",
   };
+
+  if (sessionParsed) {
+    return {
+      status: "Connected",
+      color: API_STATUS_COLOR.GREEN,
+      detail: `${debug.propsReturned ?? finite(feed.rawCount) ?? 0} props`,
+      debug: { ...debug, failureReason: "" },
+    };
+  }
 
   if (live) {
     return {

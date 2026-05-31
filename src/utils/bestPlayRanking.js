@@ -51,6 +51,7 @@ import {
   evaluateMlbPlayability,
   isVerifiedPlay,
 } from "./conservativeProjection.js";
+import { applyProjectionOutlierControl } from "./projectionOutlierControl.js";
 
 export const BEST_PLAYS_MIN_EDGE = 0.015;
 export const BEST_PLAYS_MIN_GAMES = 5;
@@ -211,7 +212,12 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     { ...prop, projection: rawProjection, projectedValue: rawProjection },
     rawProjection
   );
-  const projection = validatedProp.projection;
+  const outlierControlled = applyProjectionOutlierControl({
+    ...validatedProp,
+    projection: validatedProp.projection,
+    projectedValue: validatedProp.projection,
+  });
+  const projection = outlierControlled.projection ?? validatedProp.projection;
   const marketValidation = validatedProp.projectionValidation;
   const line = finiteOr(prop.line, NaN);
   const games = resolveGamesPlayed(prop);
@@ -224,10 +230,10 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
           probabilityScore: prop.probabilityScore,
           lean: prop.lean,
         }
-      : computeDisplayPropMetrics({ ...validatedProp, projection, line });
+      : computeDisplayPropMetrics({ ...outlierControlled, projection, line });
   const playability = evaluateMlbPlayability(
     {
-      ...prop,
+      ...outlierControlled,
       projection,
       projectedValue: projection,
       confidenceScore:
