@@ -107,7 +107,7 @@ export function resolveVerifiedHitRateSnapshot(prop = {}) {
     last20Label: toLabel(last20),
     source: "verified-mlb-hit-rates",
     seasonHitRateSource: seasonBundle.seasonHitRateSource,
-    gamesCount: seasonBundle.seasonGames,
+    gamesCount: seasonBundle.gamesCount ?? seasonBundle.sampleGames ?? seasonBundle.seasonGames,
     gamesLabel: seasonBundle.gamesLabel,
     gamesLabelKey: seasonBundle.gamesLabelKey,
     verified: Boolean(

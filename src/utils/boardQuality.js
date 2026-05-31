@@ -4,8 +4,18 @@
 
 import { attachSeasonHitRateFields, resolveSeasonHitRateBundle } from "./seasonHitRate.js";
 import { attachDataIntegrityFields } from "./dataIntegrity.js";
+import { canonicalMarketKey } from "./marketNormalization.js";
 
 export const MAX_PLAYER_PROPS_IN_TOP_LIST = 2;
+export const MAX_MARKET_PROPS_IN_TOP_LIST = 3;
+export const BEST_PLAYS_DIVERSITY_MARKETS = [
+  "hrr",
+  "totalBases",
+  "hits",
+  "strikeouts",
+  "fantasyScore",
+  "runs",
+];
 export const TOP_SECTION_LIMIT = 5;
 export const MAX_DISPLAY_EDGE_PERCENT = 40;
 export const PARTIAL_DATA_CONFIDENCE_PENALTY = 10;
@@ -51,9 +61,11 @@ export function playerKey(prop = {}) {
 }
 
 export function marketKey(prop = {}) {
-  return String(prop.statType || prop.market || prop.propType || "")
-    .trim()
-    .toLowerCase();
+  return canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
+}
+
+function diversityMarketKey(prop = {}) {
+  return marketKey(prop) || String(prop.statType || prop.market || prop.propType || "").trim().toLowerCase();
 }
 
 export function buildPlayerMarketKey(prop = {}) {
@@ -98,35 +110,60 @@ export function applyPlayerDiversityFilter(
   return out;
 }
 
-/** Prefer unique players first, then allow second prop up to maxPerPlayer. */
+/** Prefer unique players and mixed markets; cap props per player and per market. */
 export function applyBestPlaysDiversityFilter(
   props = [],
-  { limit = 10, maxPerPlayer = MAX_PLAYER_PROPS_IN_TOP_LIST, minUniquePlayers = MIN_UNIQUE_PLAYERS_TOP_10 } = {}
+  {
+    limit = 10,
+    maxPerPlayer = MAX_PLAYER_PROPS_IN_TOP_LIST,
+    maxPerMarket = MAX_MARKET_PROPS_IN_TOP_LIST,
+    minUniquePlayers = MIN_UNIQUE_PLAYERS_TOP_10,
+    priorityMarkets = BEST_PLAYS_DIVERSITY_MARKETS,
+  } = {}
 ) {
   const sorted = [...props];
-  const counts = new Map();
+  const playerCounts = new Map();
+  const marketCounts = new Map();
   const out = [];
   const seen = new Set();
 
-  for (const prop of sorted) {
-    if (out.length >= limit) break;
-    const key = playerKey(prop);
-    if (!key || counts.has(key)) continue;
-    counts.set(key, 1);
+  const canAdd = (prop) => {
+    const player = playerKey(prop);
+    const market = diversityMarketKey(prop);
+    if (!player || !market) return false;
+    if (seen.has(prop)) return false;
+    if ((playerCounts.get(player) || 0) >= maxPerPlayer) return false;
+    if ((marketCounts.get(market) || 0) >= maxPerMarket) return false;
+    return true;
+  };
+
+  const addProp = (prop) => {
+    const player = playerKey(prop);
+    const market = diversityMarketKey(prop);
     out.push(prop);
     seen.add(prop);
+    playerCounts.set(player, (playerCounts.get(player) || 0) + 1);
+    marketCounts.set(market, (marketCounts.get(market) || 0) + 1);
+  };
+
+  for (const targetMarket of priorityMarkets) {
+    if (out.length >= limit) break;
+    const candidate = sorted.find((prop) => diversityMarketKey(prop) === targetMarket && canAdd(prop));
+    if (candidate) addProp(candidate);
   }
 
   for (const prop of sorted) {
     if (out.length >= limit) break;
-    if (seen.has(prop)) continue;
-    const key = playerKey(prop);
-    if (!key) continue;
-    const used = counts.get(key) || 0;
-    if (used >= maxPerPlayer) continue;
-    counts.set(key, used + 1);
-    out.push(prop);
-    seen.add(prop);
+    const player = playerKey(prop);
+    if (!player || seen.has(prop) || playerCounts.has(player)) continue;
+    if (!canAdd(prop)) continue;
+    addProp(prop);
+  }
+
+  for (const prop of sorted) {
+    if (out.length >= limit) break;
+    if (seen.has(prop) || !canAdd(prop)) continue;
+    addProp(prop);
   }
 
   void minUniquePlayers;
@@ -411,7 +448,12 @@ function compareBestPlaysTierRank(a = {}, b = {}) {
 
 export function buildTopBestPlaysPicks(
   pool = [],
-  { limit = TOP_BEST_PLAYS_TARGET, projectedCount = 0, maxPerPlayer = MAX_PLAYER_PROPS_IN_TOP_LIST } = {}
+  {
+    limit = TOP_BEST_PLAYS_TARGET,
+    projectedCount = 0,
+    maxPerPlayer = MAX_PLAYER_PROPS_IN_TOP_LIST,
+    maxPerMarket = MAX_MARKET_PROPS_IN_TOP_LIST,
+  } = {}
 ) {
   const diagnostics = buildBestPlayFilterDiagnostics(pool);
   const rejectionSamples = buildBestPlayRejectionSamples(pool);
@@ -420,6 +462,7 @@ export function buildTopBestPlaysPicks(
   let picks = applyBestPlaysDiversityFilter(strictSorted, {
     limit,
     maxPerPlayer,
+    maxPerMarket,
     minUniquePlayers: MIN_UNIQUE_PLAYERS_TOP_10,
   });
 
@@ -432,9 +475,12 @@ export function buildTopBestPlaysPicks(
     const fallbackPool = [...(pool || [])].filter(passesTierABFullData).sort(compareBestPlaysRecoveryRank);
     const pickedKeys = new Set(picks.map((prop) => buildPlayerMarketKey(prop)));
     const playerCounts = new Map();
+    const marketCounts = new Map();
     for (const prop of picks) {
-      const key = playerKey(prop);
-      if (key) playerCounts.set(key, (playerCounts.get(key) || 0) + 1);
+      const playerKeyValue = playerKey(prop);
+      const marketKeyValue = diversityMarketKey(prop);
+      if (playerKeyValue) playerCounts.set(playerKeyValue, (playerCounts.get(playerKeyValue) || 0) + 1);
+      if (marketKeyValue) marketCounts.set(marketKeyValue, (marketCounts.get(marketKeyValue) || 0) + 1);
     }
 
     for (const prop of fallbackPool) {
@@ -442,11 +488,15 @@ export function buildTopBestPlaysPicks(
       const marketKeyValue = buildPlayerMarketKey(prop);
       if (pickedKeys.has(marketKeyValue)) continue;
       const playerKeyValue = playerKey(prop);
-      const used = playerCounts.get(playerKeyValue) || 0;
-      if (used >= maxPerPlayer) continue;
+      const marketBucket = diversityMarketKey(prop);
+      const usedPlayer = playerCounts.get(playerKeyValue) || 0;
+      const usedMarket = marketCounts.get(marketBucket) || 0;
+      if (usedPlayer >= maxPerPlayer) continue;
+      if (usedMarket >= maxPerMarket) continue;
       picks.push(prop);
       pickedKeys.add(marketKeyValue);
-      if (playerKeyValue) playerCounts.set(playerKeyValue, used + 1);
+      if (playerKeyValue) playerCounts.set(playerKeyValue, usedPlayer + 1);
+      if (marketBucket) marketCounts.set(marketBucket, usedMarket + 1);
       usedFallback = true;
     }
   }
@@ -456,6 +506,7 @@ export function buildTopBestPlaysPicks(
     picks = applyBestPlaysDiversityFilter(rescuePool, {
       limit,
       maxPerPlayer,
+      maxPerMarket,
       minUniquePlayers: MIN_UNIQUE_PLAYERS_TOP_10,
     });
     usedFallback = rescuePool.length > 0;

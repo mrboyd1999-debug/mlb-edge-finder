@@ -65,7 +65,6 @@ import {
 } from "./boardQuality.js";
 import {
   selectStartupProjectionCandidates,
-  STARTUP_PROJECTION_CANDIDATE_LIMIT,
 } from "./startupPerformance.js";
 
 export const TOP_MLB_PLAYS_LIMIT = HIGHEST_PROBABILITY_MAX_PLAYS;
@@ -372,9 +371,7 @@ export function resolveTopMlbPlaySections(
     fetchSport: "MLB",
   });
   const historicalPool = attachHistoricalStatsToProps(preparedPool, mergeContext);
-  const projectionCandidateLimit = options.lightweight
-    ? STARTUP_PROJECTION_CANDIDATE_LIMIT
-    : Number.POSITIVE_INFINITY;
+  const projectionCandidateLimit = Number.POSITIVE_INFINITY;
   const engineProjectedPool = selectStartupProjectionCandidates(
     enrichedPool,
     Number.isFinite(projectionCandidateLimit) ? projectionCandidateLimit : enrichedPool.length
@@ -519,7 +516,7 @@ export function resolveTopMlbPlaySections(
     {
       id: "top-10-best-plays",
       title: "Best Plays",
-      eyebrow: "Top 10 · Tier A/B · Full data · Confidence 65+ · Max 2 props per player",
+      eyebrow: "Top 10 · Tier A/B · Full data · Max 2/player · Max 3/market · Mixed markets",
       emptyMessage:
         topBestPlayPicks.length || (bestPlaysResult.diagnostics?.fullData ?? 0) > 0
           ? ""

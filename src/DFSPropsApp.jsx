@@ -262,6 +262,7 @@ import {
   attachHistoricalStatsToProps,
   buildStatsAttachmentMetrics,
 } from "./utils/historicalStatsLoader.js";
+import { enrichMlbPropsBatch } from "./services/mlb/mlbEnrichmentPipeline.js";
 import {
   buildPipelinePropCountAudit,
   countVerifiedFilterProps,
@@ -2564,6 +2565,34 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       pipelinePropCountSnapshot.afterProjectionMerge = allDisplayProps.length;
       pipelinePropCountSnapshot.projectedProps = countMergedProjections(allDisplayProps);
       console.log("PROJECTED", pipelinePropCountSnapshot.projectedProps);
+
+      const needsEngineProjections =
+        pipelinePropCountSnapshot.projectedProps < Math.min(allDisplayProps.length, 100);
+      if (needsEngineProjections) {
+        const enrichmentResult = enrichMlbPropsBatch(allDisplayProps, {
+          seasonStats: seasonStatsData,
+          statsMap: stableStats.statsMap,
+          skipInitialMerge: true,
+          initialMergeDebug: merged.debug,
+        });
+        allDisplayProps = enrichmentResult.props;
+        workingNormalProps = enrichMlbPropsBatch(workingNormalProps, {
+          seasonStats: seasonStatsData,
+          statsMap: stableStats.statsMap,
+          skipInitialMerge: true,
+          initialMergeDebug: merged.debug,
+        }).props;
+        workingActiveProps = enrichMlbPropsBatch(workingActiveProps, {
+          seasonStats: seasonStatsData,
+          statsMap: stableStats.statsMap,
+          skipInitialMerge: true,
+          initialMergeDebug: merged.debug,
+        }).props;
+        pipelinePropCountSnapshot.projectedProps = countPropsWithProjections(allDisplayProps);
+        debugInfo.mlbEnrichmentDebug = enrichmentResult.debug;
+        console.log("PROJECTED AFTER ENGINE", pipelinePropCountSnapshot.projectedProps);
+      }
+
       pipelinePropCountSnapshot.rejections = {
         ...pipelinePropCountSnapshot.rejections,
         noProjectionFormula: Math.max(
@@ -2978,7 +3007,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     pipelineTraceNormalizedPool.length,
     allDisplayProps.length
   )
-    ? prepareLiveBoardDirectRenderProps(pipelineTraceNormalizedPool, 50)
+    ? prepareLiveBoardDirectRenderProps(pipelineTraceNormalizedPool, 120)
     : [];
   let liveRenderResult;
   if (bypassRenderProps.length) {

@@ -184,6 +184,11 @@ function applyHistoricalFields(prop = {}, profile = null, fields = {}) {
       finite(fields.seasonHitRate),
     sampleSize: finite(prop.sampleSize) ?? finite(fields.sampleSize) ?? gameLogCount ?? 0,
     games: finite(prop.games) ?? finite(fields.games) ?? gameLogCount ?? 0,
+    seasonGamesPlayed:
+      finite(prop.seasonGamesPlayed) ??
+      finite(fields.seasonGamesPlayed) ??
+      gameLogCount ??
+      null,
     hasGameLogs: prop.hasGameLogs ?? fields.hasGameLogs ?? (gameLogCount != null && gameLogCount >= 3),
     gradingRows: prop.gradingRows ?? fields.splits ?? profile?.gradingRows ?? profile?.splits ?? null,
     splits: prop.splits ?? fields.splits ?? profile?.splits ?? null,

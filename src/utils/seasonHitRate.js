@@ -22,22 +22,74 @@ function toDisplayLabel(rate) {
   return `${Math.round(rate)}%`;
 }
 
-function resolveGamesLabel(source = "", games = null) {
-  if (/season game logs|prop\.seasonHitRate/i.test(String(source || ""))) {
+const SEASON_SOURCE_PATTERN = /season game logs|season-hit-rate/i;
+const SAMPLE_SOURCE_PATTERN = /last\d+|proxy|sample/i;
+
+function resolveGamesLabel(source = "", sampleGames = null) {
+  if (SEASON_SOURCE_PATTERN.test(String(source || ""))) {
     return { gamesLabel: "Season Games", gamesLabelKey: "season" };
   }
-  if (games != null && games > 0) {
+  if (sampleGames != null && sampleGames > 0) {
     return { gamesLabel: "Sample Games", gamesLabelKey: "sample" };
   }
   return { gamesLabel: "Games", gamesLabelKey: "unknown" };
 }
 
-function bundleFromRate(rate, { seasonGames = null, seasonHits = null, seasonHitRateSource = "" } = {}) {
+/** Actual MLB season games played — never use rolling-window sample sizes here. */
+export function resolveActualSeasonGamesPlayed(prop = {}, computed = {}) {
+  return (
+    finite(computed.gameLogCount) ??
+    finite(prop.seasonGamesPlayed) ??
+    finite(prop.seasonGames) ??
+    finite(prop.games) ??
+    null
+  );
+}
+
+const SEASON_HIT_RATE_SOURCE_LABELS = {
+  "season game logs": "Season game logs",
+  "season-hit-rate": "Season hit rate",
+  "last30 game logs": "Last 30 games",
+  "last20 game logs": "Last 20 games",
+  "last10 game logs": "Last 10 games",
+  "last10-proxy": "Recent sample (last 10 games)",
+  "no mlb games": "No MLB games logged",
+  unavailable: "Unavailable",
+};
+
+export function formatSeasonHitRateSource(source = "") {
+  const key = String(source || "").trim().toLowerCase();
+  if (!key) return "";
+  if (SEASON_HIT_RATE_SOURCE_LABELS[key]) return SEASON_HIT_RATE_SOURCE_LABELS[key];
+  if (/^prop\./i.test(key)) {
+    return key
+      .replace(/^prop\./i, "")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/[_-]+/g, " ")
+      .trim()
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+  return key
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function bundleFromRate(
+  rate,
+  { seasonGames = null, sampleGames = null, seasonHits = null, seasonHitRateSource = "" } = {}
+) {
   const normalized = normalizeHitRatePercent(rate);
-  const labels = resolveGamesLabel(seasonHitRateSource, seasonGames);
+  const labels = resolveGamesLabel(seasonHitRateSource, sampleGames);
+  const displayGamesCount =
+    labels.gamesLabelKey === "sample" ? sampleGames ?? null : seasonGames ?? sampleGames ?? null;
+
   return {
     seasonHitRate: normalized,
     seasonGames,
+    sampleGames,
+    gamesCount: displayGamesCount,
     seasonHits,
     seasonHitRateSource,
     gamesLabel: labels.gamesLabel,
@@ -47,37 +99,40 @@ function bundleFromRate(rate, { seasonGames = null, seasonHits = null, seasonHit
   };
 }
 
-function pickWindowRate(computed = {}, line, prop = {}) {
+function pickWindowRate(computed = {}, prop = {}) {
+  const actualSeasonGames = resolveActualSeasonGamesPlayed(prop, computed);
   const windows = [
-    { rate: computed.last30HitRate ?? prop.last30HitRate, games: 30, source: "last30 game logs" },
-    { rate: computed.last20HitRate ?? prop.last20HitRate, games: 20, source: "last20 game logs" },
-    { rate: computed.last10HitRate ?? prop.last10HitRate ?? prop.recentHitRate, games: 10, source: "last10 game logs" },
+    { rate: computed.seasonHitRate ?? prop.seasonHitRate ?? prop.historicalHitRate, games: actualSeasonGames, source: "season game logs", isSeason: true },
+    { rate: computed.last30HitRate ?? prop.last30HitRate, games: 30, source: "last30 game logs", isSeason: false },
+    { rate: computed.last20HitRate ?? prop.last20HitRate, games: 20, source: "last20 game logs", isSeason: false },
     {
-      rate: computed.seasonHitRate ?? prop.seasonHitRate ?? prop.historicalHitRate,
-      games: computed.gameLogCount ?? prop.gameLogCount ?? prop.seasonGames ?? prop.sampleSize,
-      source: "season game logs",
+      rate: computed.last10HitRate ?? prop.last10HitRate ?? prop.recentHitRate,
+      games: 10,
+      source: "last10 game logs",
+      isSeason: false,
     },
   ];
 
   for (const window of windows) {
     const rate = normalizeHitRatePercent(window.rate);
-    const games = finite(window.games);
+    const sampleGames = window.isSeason ? null : finite(window.games);
+    const games = window.isSeason ? actualSeasonGames : sampleGames;
     if (rate != null && rate > 0 && games != null && games > 0) {
       const hits = Math.round((rate / 100) * games);
       return bundleFromRate(rate, {
-        seasonGames: games,
+        seasonGames: actualSeasonGames,
+        sampleGames: window.isSeason ? null : sampleGames,
         seasonHits: hits,
         seasonHitRateSource: window.source,
       });
     }
   }
 
-  const seasonGames = finite(computed.gameLogCount) ?? 0;
   const seasonRate = normalizeHitRatePercent(computed.seasonHitRate);
-  if (seasonGames > 0 && seasonRate != null && seasonRate > 0) {
+  if (actualSeasonGames != null && actualSeasonGames > 0 && seasonRate != null && seasonRate > 0) {
     return bundleFromRate(seasonRate, {
-      seasonGames,
-      seasonHits: Math.round((seasonRate / 100) * seasonGames),
+      seasonGames: actualSeasonGames,
+      seasonHits: Math.round((seasonRate / 100) * actualSeasonGames),
       seasonHitRateSource: "season game logs",
     });
   }
@@ -88,42 +143,44 @@ function pickWindowRate(computed = {}, line, prop = {}) {
 export function resolveSeasonHitRateBundle(prop = {}) {
   const line = finite(prop.line);
   const statType = prop.statType || prop.market || prop.propType || "";
-  const seasonGames =
-    finite(prop.seasonGames) ??
-    finite(prop.games) ??
-    finite(prop.sampleSize) ??
-    finite(prop.gameLogCount);
+  const actualSeasonGames = resolveActualSeasonGamesPlayed(prop);
 
   const explicitSeason = normalizeHitRatePercent(prop.seasonHitRate ?? prop.historicalHitRate);
   const last10 = normalizeHitRatePercent(prop.last10HitRate ?? prop.recentHitRate);
 
   if (explicitSeason != null && explicitSeason > 0) {
     return bundleFromRate(explicitSeason, {
-      seasonGames,
-      seasonHitRateSource: "prop.seasonHitRate",
+      seasonGames: actualSeasonGames,
+      seasonHits:
+        actualSeasonGames != null && actualSeasonGames > 0
+          ? Math.round((explicitSeason / 100) * actualSeasonGames)
+          : null,
+      seasonHitRateSource: "season-hit-rate",
     });
   }
 
   const splits = prop.splits || prop.gradingRows || [];
   if (Array.isArray(splits) && splits.length && line != null) {
     const computed = computeMlbHistoricalAveragesFromSplits(splits, statType, line);
-    const fromLogs = pickWindowRate(computed, line, prop);
+    const fromLogs = pickWindowRate(computed, prop);
     if (fromLogs) return fromLogs;
   }
 
   if (last10 != null && last10 > 0) {
-    const proxyGames = finite(prop.gameLogCount) ?? 10;
     return bundleFromRate(last10, {
-      seasonGames: proxyGames,
-      seasonHits: Math.round((last10 / 100) * proxyGames),
-      seasonHitRateSource: "last10HitRate proxy",
+      seasonGames: actualSeasonGames,
+      sampleGames: 10,
+      seasonHits: Math.round((last10 / 100) * 10),
+      seasonHitRateSource: "last10-proxy",
     });
   }
 
-  if (seasonGames === 0) {
+  if (actualSeasonGames === 0) {
     return {
       seasonHitRate: 0,
       seasonGames: 0,
+      sampleGames: null,
+      gamesCount: 0,
       seasonHits: 0,
       seasonHitRateSource: "no mlb games",
       gamesLabel: "Season Games",
@@ -135,7 +192,9 @@ export function resolveSeasonHitRateBundle(prop = {}) {
 
   return {
     seasonHitRate: null,
-    seasonGames: seasonGames ?? null,
+    seasonGames: actualSeasonGames,
+    sampleGames: null,
+    gamesCount: actualSeasonGames,
     seasonHits: null,
     seasonHitRateSource: "unavailable",
     gamesLabel: "Games",
@@ -151,6 +210,8 @@ export function attachSeasonHitRateFields(prop = {}) {
     ...prop,
     seasonHitRate: bundle.seasonHitRate ?? prop.seasonHitRate,
     seasonGames: bundle.seasonGames ?? prop.seasonGames,
+    seasonGamesPlayed: bundle.seasonGames ?? prop.seasonGamesPlayed,
+    sampleGames: bundle.sampleGames ?? prop.sampleGames,
     seasonHits: bundle.seasonHits ?? prop.seasonHits,
     seasonHitRateSource: bundle.seasonHitRateSource,
     seasonHitRateDisplay: bundle.displayLabel,

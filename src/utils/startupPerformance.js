@@ -7,7 +7,7 @@ import { isBlockedNonMlbPipelineProp } from "./mlbAllowedMarkets.js";
 import { resolveEngineProjectedPool } from "./projectionPipelineStatus.js";
 
 export const STARTUP_NORMALIZED_PROP_LIMIT = 300;
-export const STARTUP_PROJECTION_CANDIDATE_LIMIT = 50;
+export const STARTUP_PROJECTION_CANDIDATE_LIMIT = 120;
 export const STARTUP_BACKGROUND_BATCH_SIZE = 200;
 
 export const PERFORMANCE_TIMERS = {

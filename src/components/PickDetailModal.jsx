@@ -41,7 +41,7 @@ import {
   classifyPropTier,
 } from "../utils/boardQuality.js";
 import { buildHitRateSnapshot } from "../utils/modelValidation.js";
-import { resolveSeasonHitRateBundle } from "../utils/seasonHitRate.js";
+import { resolveSeasonHitRateBundle, formatSeasonHitRateSource } from "../utils/seasonHitRate.js";
 import DataIntegrityPanel from "./DataIntegrityPanel.jsx";
 import { isManualAnalyzerProp } from "../utils/manualPropBuilder.js";
 import {
@@ -134,6 +134,10 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
   const hitRateSnapshot = useMemo(() => buildHitRateSnapshot(prop), [prop]);
   const seasonHitRate = seasonBundle.displayLabel;
   const gamesCountLabel = seasonBundle.gamesLabel || prop.seasonGamesLabel || "Season Games";
+  const gamesCountValue =
+    seasonBundle.gamesCount ??
+    (seasonBundle.gamesLabelKey === "sample" ? seasonBundle.sampleGames : seasonBundle.seasonGames);
+  const seasonRateSourceLabel = formatSeasonHitRateSource(seasonBundle.seasonHitRateSource);
   const tierBadgeLabel = prop.confidenceTierLabel || `Tier ${classifyPropTier(prop)}`;
   const boardDataLabel = resolveBoardDataQualityLabel(prop);
   const badge = manualProp
@@ -344,11 +348,11 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
           {breakdownMode ? <MetricIf label="Projection Source" value={projectionSourceLabel} /> : null}
           {breakdownMode ? <MetricIf label="Last 10 Hit Rate" value={last10HitRate !== "—" ? last10HitRate : null} /> : null}
           {breakdownMode ? <MetricIf label="Season Hit Rate" value={seasonHitRate !== "—" && seasonHitRate !== "0%" ? seasonHitRate : null} /> : null}
-          {breakdownMode && seasonBundle.seasonHitRateSource ? (
-            <MetricIf label="Season rate source" value={seasonBundle.seasonHitRateSource} />
+          {breakdownMode && seasonRateSourceLabel ? (
+            <MetricIf label="Season rate source" value={seasonRateSourceLabel} />
           ) : null}
-          {breakdownMode && seasonBundle.seasonGames != null ? (
-            <MetricIf label={gamesCountLabel} value={seasonBundle.seasonGames} />
+          {breakdownMode && gamesCountValue != null ? (
+            <MetricIf label={gamesCountLabel} value={gamesCountValue} />
           ) : null}
           {breakdownMode && seasonBundle.seasonHits != null ? (
             <MetricIf label="Season hits" value={seasonBundle.seasonHits} />
@@ -432,11 +436,11 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
               <MetricIf label="Last 5 hit rate" value={prop.probabilityAudit.last5HitRate} />
               <MetricIf label="Last 10 hit rate" value={prop.probabilityAudit.last10HitRate} />
               <MetricIf label="Season hit rate" value={hitRateSnapshot.seasonLabel !== "0%" ? hitRateSnapshot.seasonLabel : seasonHitRate} />
-              {seasonBundle.seasonHitRateSource ? (
-                <MetricIf label="Season rate source" value={seasonBundle.seasonHitRateSource} />
+              {seasonRateSourceLabel ? (
+                <MetricIf label="Season rate source" value={seasonRateSourceLabel} />
               ) : null}
-              {seasonBundle.seasonGames != null ? (
-                <MetricIf label={gamesCountLabel} value={seasonBundle.seasonGames} />
+              {gamesCountValue != null ? (
+                <MetricIf label={gamesCountLabel} value={gamesCountValue} />
               ) : null}
               {seasonBundle.seasonHits != null ? (
                 <MetricIf label="Season hits" value={seasonBundle.seasonHits} />

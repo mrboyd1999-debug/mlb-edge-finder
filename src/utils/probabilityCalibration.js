@@ -2,7 +2,7 @@
  * Probability calibration — edge-driven blend capped at realistic MLB hit rates.
  */
 
-import { resolveSeasonHitRateBundle } from "./seasonHitRate.js";
+import { resolveSeasonHitRateBundle, formatSeasonHitRateSource } from "./seasonHitRate.js";
 import { resolveVerifiedHitRateSnapshot } from "./verifiedHitRates.js";
 
 export const CALIBRATION_MIN_PROBABILITY = 50;
@@ -238,7 +238,7 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
     recentHitRate: `${round1(recentHitRate)}%`,
     seasonHitRate: seasonValid ? `${round1(seasonHitRate)}%` : "—",
     seasonRateValid: seasonValid,
-    seasonHitRateSource: hitRates.seasonHitRateSource || "—",
+    seasonHitRateSource: formatSeasonHitRateSource(hitRates.seasonHitRateSource) || "—",
     confidence: `${round1(confidence)}%`,
     playability: `${round1(playability)}%`,
     projectionEdge: `${round1(edgeScore)}%`,

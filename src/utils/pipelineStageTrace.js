@@ -59,7 +59,7 @@ export function pickUnderdogBypassRenderProps(normalizedPool = [], limit = 20) {
     .map((prop) => ({ ...prop, isLiveRenderProp: true }));
 }
 
-export function prepareLiveBoardDirectRenderProps(normalizedPool = [], limit = 50) {
+export function prepareLiveBoardDirectRenderProps(normalizedPool = [], limit = 120) {
   const live = (normalizedPool || []).filter((prop) => {
     const player = String(prop?.playerName || prop?.player || "").trim();
     const line = Number(prop?.line);
