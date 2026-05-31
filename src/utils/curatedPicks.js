@@ -1,0 +1,327 @@
+import { filterAllDisplayPropsBySport } from "./allDisplayProps.js";
+import { filterResolvedSportProps } from "./underdogSportDetection.js";
+import {
+  buildPropSoftDedupeKey,
+  isValidDisplayProp,
+  markDisplayFallbackProps,
+  sortPropsForDisplay,
+} from "./displayPropScoring.js";
+import { annotateProjectionFields, isProjectionRankedProp, isStreakRankEligible } from "./projectionQuality.js";
+import { MLB_ONLY_MODE } from "./mlbOnlyMode.js";
+import { isSafeModeEnabled } from "./safeMode.js";
+import {
+  buildSafeMlbPropPool,
+  resolveSafeMlbStreakPicks,
+  sortLoosePropsByConfidence,
+} from "./safeModePipeline.js";
+import { resolveCuratedGoblinDemonBoards } from "./goblinDemonPairs.js";
+import { isGoblinProp, isDemonProp } from "./propLabels.js";
+import {
+  filterUnderdogStreakPool,
+  isPrizePicksProp,
+  UNDERDOG_STREAK_EMPTY_MESSAGE,
+} from "./underdogStreakPool.js";
+import {
+  extractParsedUnderdogProps,
+  filterMlbUnderdogStreakEligible,
+  filterUnderdogPropsForSport,
+  isStreakEligibleUdProp,
+} from "./underdogPickPool.js";
+import { resolvePropSportLabel } from "./underdogSportDetection.js";
+
+export { UNDERDOG_STREAK_EMPTY_MESSAGE } from "./underdogStreakPool.js";
+export { UNDERDOG_PARSER_EMPTY_MESSAGE } from "./underdogStreakPool.js";
+
+export {
+  GOBLIN_EMPTY_MESSAGE,
+  DEMON_EMPTY_MESSAGE,
+  resolveCuratedGoblinDemonBoards,
+} from "./goblinDemonPairs.js";
+
+export const CURATED_SPORT_ORDER = MLB_ONLY_MODE ? ["MLB"] : ["MLB", "WNBA", "NBA", "Tennis"];
+
+export const DISPLAY_LIMITS = {
+  streakPerSport: 2,
+  parlayLegs: 4,
+  parlayCards: 1,
+  goblins: 6,
+  demons: 6,
+};
+
+export const MLB_EMPTY_MESSAGE = "No MLB props loaded. Check provider feed, API key, or proxy.";
+
+export const CURATED_SPORT_LABELS = {
+  MLB: "MLB",
+  WNBA: "WNBA",
+  NBA: "NBA",
+  Tennis: "Tennis",
+};
+
+function annotateMlbPick(prop = {}, isFallback = false) {
+  return {
+    ...prop,
+    isFallbackMlbPick: isFallback,
+    fallbackLabel: isFallback ? "Fallback MLB pick" : prop.fallbackLabel || "",
+    bettingLabel: isFallback ? "Fallback MLB pick" : prop.bettingLabel,
+    displayFallback: isFallback || prop.displayFallback,
+  };
+}
+
+function mergeUniquePicks(primary = [], fallback = [], limit = 2) {
+  const seen = new Set();
+  const merged = [];
+  for (const prop of [...primary, ...fallback]) {
+    if (!prop || merged.length >= limit) break;
+    const key = buildPropSoftDedupeKey(prop);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(prop);
+  }
+  return merged.slice(0, limit);
+}
+
+function resolveUnderdogPickPool(displayProps = [], rawProps = [], parsedUnderdogProps = [], sport = "MLB") {
+  const parsed = extractParsedUnderdogProps({
+    parsedUnderdogProps,
+    rawProps,
+    displayProps,
+  });
+  return filterUnderdogPropsForSport(parsed, sport);
+}
+
+function buildUnderdogConfidencePool(displayProps = [], rawProps = [], parsedUnderdogProps = [], sport = "MLB") {
+  return sortLoosePropsByConfidence(resolveUnderdogPickPool(displayProps, rawProps, parsedUnderdogProps, sport));
+}
+
+function pickLowCorrelationUdProps(pool = [], limit = 4, excludeKeys = new Set()) {
+  const selected = [];
+  const playerKeys = new Set();
+  const marketKeys = new Set();
+
+  for (const prop of pool) {
+    if (selected.length >= limit) break;
+    const key = buildPropSoftDedupeKey(prop);
+    if (excludeKeys.has(key)) continue;
+
+    const player = String(prop.player || prop.playerName || "").trim().toLowerCase();
+    const market = String(prop.statType || prop.market || prop.propType || "").trim().toLowerCase();
+    const playerMarketKey = `${player}|${market}`;
+    if (!player || playerKeys.has(player) || marketKeys.has(playerMarketKey)) continue;
+
+    playerKeys.add(player);
+    marketKeys.add(playerMarketKey);
+    selected.push(annotateMlbPick(prop, true));
+  }
+
+  return selected;
+}
+
+function annotateUdPayoutProp(prop = {}, role) {
+  const isGoblin = role === "goblin";
+  return annotateMlbPick({
+    ...prop,
+    payoutRole: role,
+    payoutLabel: isGoblin ? "Goblin" : "Demon",
+    payoutBadge: isGoblin ? "GOBLIN / SAFER LINE" : "DEMON / HIGHER PAYOUT",
+    isGoblinPick: isGoblin,
+    isDemonPick: !isGoblin,
+    goblinDemonVerified: Boolean(prop.verifiedAdjustedOdds),
+  }, true);
+}
+
+/**
+ * When Underdog pool has props, fill empty curated sections from UD props sorted by confidence.
+ */
+export function resolveUnderdogSectionFallbacks(
+  displayProps = [],
+  rawProps = [],
+  {
+    streakPicks = [],
+    parlayPicks = [],
+    goblins = [],
+    demons = [],
+    parsedUnderdogProps = [],
+    selectedSport = "MLB",
+    streakLimit = DISPLAY_LIMITS.streakPerSport,
+    parlayLimit = DISPLAY_LIMITS.parlayLegs,
+    goblinLimit = DISPLAY_LIMITS.goblins,
+    demonLimit = DISPLAY_LIMITS.demons,
+  } = {}
+) {
+  const udPool = buildUnderdogConfidencePool(displayProps, rawProps, parsedUnderdogProps, selectedSport);
+  if (!udPool.length) {
+    return { streakPicks, parlayPicks, goblins, demons, udPoolCount: 0 };
+  }
+
+  const streakUdPool = selectedSport === "MLB" ? udPool : filterUnderdogPropsForSport(udPool, selectedSport);
+
+  const usedKeys = new Set([
+    ...streakPicks,
+    ...parlayPicks,
+    ...goblins,
+    ...demons,
+  ].map((prop) => buildPropSoftDedupeKey(prop)));
+
+  let nextStreakPicks = [...streakPicks];
+  if (nextStreakPicks.length < streakLimit) {
+    const extras = streakUdPool
+      .filter((prop) => !usedKeys.has(buildPropSoftDedupeKey(prop)))
+      .slice(0, streakLimit - nextStreakPicks.length)
+      .map((prop) => annotateMlbPick(prop, true));
+    extras.forEach((prop) => usedKeys.add(buildPropSoftDedupeKey(prop)));
+    nextStreakPicks = mergeUniquePicks(nextStreakPicks, extras, streakLimit);
+  }
+
+  let nextParlayPicks = [...parlayPicks];
+  if (nextParlayPicks.length < parlayLimit) {
+    const parlayExclude = new Set([
+      ...usedKeys,
+      ...nextParlayPicks.map((prop) => buildPropSoftDedupeKey(prop)),
+    ]);
+    const extras = pickLowCorrelationUdProps(
+      udPool.filter((prop) => !parlayExclude.has(buildPropSoftDedupeKey(prop))),
+      parlayLimit - nextParlayPicks.length,
+      parlayExclude
+    );
+    extras.forEach((prop) => usedKeys.add(buildPropSoftDedupeKey(prop)));
+    nextParlayPicks = mergeUniquePicks(nextParlayPicks, extras, parlayLimit);
+  }
+
+  let nextGoblins = [...goblins];
+  if (nextGoblins.length < goblinLimit) {
+    const extras = udPool
+      .filter((prop) => isGoblinProp(prop) && !usedKeys.has(buildPropSoftDedupeKey(prop)))
+      .slice(0, goblinLimit - nextGoblins.length)
+      .map((prop) => annotateUdPayoutProp(prop, "goblin"));
+    extras.forEach((prop) => usedKeys.add(buildPropSoftDedupeKey(prop)));
+    nextGoblins = mergeUniquePicks(nextGoblins, extras, goblinLimit);
+  }
+
+  let nextDemons = [...demons];
+  if (nextDemons.length < demonLimit) {
+    const extras = udPool
+      .filter((prop) => isDemonProp(prop) && !usedKeys.has(buildPropSoftDedupeKey(prop)))
+      .slice(0, demonLimit - nextDemons.length)
+      .map((prop) => annotateUdPayoutProp(prop, "demon"));
+    nextDemons = mergeUniquePicks(nextDemons, extras, demonLimit);
+  }
+
+  return {
+    streakPicks: markDisplayFallbackProps(
+      nextStreakPicks.map(annotateProjectionFields).filter(isStreakRankEligible)
+    ),
+    parlayPicks: markDisplayFallbackProps(
+      nextParlayPicks.map(annotateProjectionFields).filter(isProjectionRankedProp)
+    ),
+    goblins: nextGoblins.slice(0, goblinLimit),
+    demons: nextDemons.slice(0, demonLimit),
+    udPoolCount: udPool.length,
+  };
+}
+
+export function shouldApplyUnderdogSectionFallbacks(primaryCount = 0, udCount = 0, limit = 1) {
+  if (!udCount) return false;
+  if (isSafeModeEnabled()) return primaryCount < limit;
+  return primaryCount < limit;
+}
+
+export function countMlbDisplayProps(displayProps = [], rawProps = []) {
+  if (isSafeModeEnabled()) {
+    return buildSafeMlbPropPool(displayProps, rawProps).length;
+  }
+  const fromDisplay = filterResolvedSportProps(displayProps, "MLB", { selectedSportTab: "MLB" }).filter(isValidDisplayProp);
+  const fromRaw = filterResolvedSportProps(rawProps || [], "MLB", { selectedSportTab: "MLB" }).filter(isValidDisplayProp);
+  return new Set([...fromDisplay, ...fromRaw].map((p) => buildPropSoftDedupeKey(p))).size;
+}
+
+export function countUnderdogStreakProps(displayProps = [], rawProps = [], parsedUnderdogProps = [], sport = "MLB") {
+  const pool = resolveUnderdogPickPool(displayProps, rawProps, parsedUnderdogProps, sport);
+  if (sport === "MLB") {
+    return filterMlbUnderdogStreakEligible(pool).length;
+  }
+  return filterUnderdogPropsForSport(pool, sport).filter(isStreakEligibleUdProp).length;
+}
+
+/** Return up to 2 MLB streak picks from validated Underdog props only — never PrizePicks or fallback pool. */
+export function resolveMlbStreakPicks(
+  streakBoards = {},
+  displayProps = [],
+  limit = DISPLAY_LIMITS.streakPerSport,
+  rawProps = [],
+  parsedUnderdogProps = []
+) {
+  const udParsedPool = resolveUnderdogPickPool(displayProps, rawProps, parsedUnderdogProps, "MLB");
+  const streakEligible = filterMlbUnderdogStreakEligible(udParsedPool)
+    .map(annotateProjectionFields)
+    .filter(isStreakRankEligible);
+
+  const boardPicks = filterUnderdogStreakPool(streakBoards.MLB?.picks || [])
+    .filter((prop) => !isPrizePicksProp(prop) && resolvePropSportLabel(prop) === "MLB")
+    .map(annotateProjectionFields)
+    .filter(isStreakRankEligible)
+    .slice(0, limit)
+    .map((prop) => annotateMlbPick(prop, false));
+
+  const validated = sortPropsForDisplay(streakEligible)
+    .slice(0, limit)
+    .map((prop) => annotateMlbPick(prop, false));
+
+  const merged = mergeUniquePicks(boardPicks, validated, limit).filter((prop) => !isPrizePicksProp(prop));
+  return merged;
+}
+
+export function resolveCuratedSportPicks(sport, streakBoards = {}, displayProps = [], limit = DISPLAY_LIMITS.streakPerSport, rawProps = []) {
+  if (sport === "MLB") return resolveMlbStreakPicks(streakBoards, displayProps, limit, rawProps);
+
+  const boardPicks = (streakBoards[sport]?.picks || []).slice(0, limit);
+  const sportProps = filterAllDisplayPropsBySport(displayProps, sport, "all");
+  const fallback = sortPropsForDisplay(sportProps.filter(isValidDisplayProp)).slice(0, limit);
+  return markDisplayFallbackProps(mergeUniquePicks(boardPicks, fallback, limit));
+}
+
+export function resolveCuratedGoblinBoardPicks(boardPicks = [], displayProps = [], limit = DISPLAY_LIMITS.goblins, rawProps = []) {
+  return resolveCuratedGoblinDemonBoards(displayProps, rawProps, {
+    goblinBoardPicks: boardPicks,
+    goblinLimit: limit,
+    demonLimit: 0,
+  }).goblins;
+}
+
+export function resolveCuratedDemonBoardPicks(boardPicks = [], displayProps = [], limit = DISPLAY_LIMITS.demons, rawProps = []) {
+  return resolveCuratedGoblinDemonBoards(displayProps, rawProps, {
+    demonBoardPicks: boardPicks,
+    goblinLimit: 0,
+    demonLimit: limit,
+  }).demons;
+}
+
+/** @deprecated Use resolveCuratedGoblinBoardPicks / resolveCuratedDemonBoardPicks */
+export function resolveCuratedBoardPicks(boardPicks = [], selector, displayProps = [], limit = DISPLAY_LIMITS.goblins, rawProps = []) {
+  const isGoblinSelector = selector?.name === "selectGoblinProps";
+  if (isGoblinSelector) {
+    return resolveCuratedGoblinBoardPicks(boardPicks, displayProps, limit, rawProps);
+  }
+  return resolveCuratedDemonBoardPicks(boardPicks, displayProps, limit, rawProps);
+}
+
+export function isManuallySavedPick(pick = {}) {
+  return /manually saved|manual analyzer/i.test(String(pick.recommendationType || ""));
+}
+
+export function historyPickToDisplayProp(pick = {}) {
+  return {
+    ...pick,
+    id: pick.id || pick.uniqueKey,
+    playerName: pick.playerName || pick.player || "",
+    player: pick.playerName || pick.player || "",
+    statType: pick.statType || pick.market || pick.propType || "",
+    market: pick.statType || pick.market || "",
+    confidence: pick.confidenceScore ?? pick.confidence,
+    confidenceScore: pick.confidenceScore ?? pick.confidence,
+    bestPick: pick.pickDirection || pick.side || pick.pick || "",
+    side: pick.pickDirection || pick.side || pick.pick || "",
+    platform: pick.platform || pick.source || "",
+    source: pick.platform || pick.source || "",
+    savedPick: true,
+  };
+}

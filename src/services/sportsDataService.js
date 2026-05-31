@@ -1,0 +1,540 @@
+/**
+ * SportsDataIO MLB stats client — proxy-only (no direct browser calls to api.sportsdata.io).
+ *
+ * All requests go through `/api/sportsdataio/*` with the saved key sent as
+ * `X-SportsData-Api-Key` to the local backend proxy. The server attaches
+ * `Ocp-Apim-Subscription-Key` when calling SportsDataIO upstream.
+ *
+ * Health probe: `GET /api/sportsdataio/mlb-status`
+ *
+ * Enrichment failures never block PrizePicks / Underdog props.
+ */
+
+import { getSportsDataApiKey } from "../config/apiConfig.js";
+import { cleanApiKey } from "../utils/cleanApiKey.js";
+import { ENRICHMENT_MAX_RETRIES, getSportsDataTimeoutMs } from "../utils/apiTimeout.js";
+import { fetchJsonSafe, getCacheTtlMs } from "./fetchUtil.js";
+import { emitProjectionDebug, emitVisibleProjectionDebug } from "../utils/projectionRuntimeDebug.js";
+import { recordProjectionFetchAttempt } from "../utils/projectionFetchDebug.js";
+import {
+  assertProjectionDatasetNotEmpty,
+  logProjectionFetchResult,
+  logProjectionFetchStart,
+  traceProjectionExecutionPath,
+} from "../utils/projectionSourceTrace.js";
+import {
+  SOURCE_IDS,
+  cachedLinesMessage,
+  isSourceInCooldown,
+  markSourceCached,
+  recordSource429,
+  recordSourceFailure,
+  recordSourceSuccess,
+  withSourceRequestLock,
+  withSourceRetryQueue,
+} from "./sourceRateLimit.js";
+
+export const SPORTSDATA_PROXY_HEADER = "X-SportsData-Api-Key";
+export const SPORTSDATA_MLB_STATUS_ROUTE = "/api/sportsdataio/mlb-status";
+export const SPORTSDATA_MLB_PLAYERS_ROUTE = "/api/sportsdataio/scores/json/Players";
+const SPORTSDATA_BASE = "/api/sportsdataio";
+const SPORTSDATA_CACHE_PREFIX = "dfs-sportsdata-cache-v1";
+const SPORTSDATA_CACHE_MAX_MS = 60 * 60 * 1000;
+
+export const SPORTSDATA_UNAVAILABLE_MESSAGE =
+  "SportsDataIO unavailable — using MLB Stats API for player matching and projections.";
+
+export const SPORTSDATA_CONNECTED_VIA_PROXY = "Connected via Proxy";
+
+function sportsDataProxyHeaders() {
+  const apiKey = cleanApiKey(getSportsDataApiKey());
+  return {
+    accept: "application/json",
+    ...(apiKey ? { [SPORTSDATA_PROXY_HEADER]: apiKey } : {}),
+  };
+}
+
+function isoDate(date = new Date()) {
+  return new Date(date).toISOString().slice(0, 10).replace(/-/g, "-");
+}
+
+function currentSeason(date = new Date()) {
+  return new Date(date).getFullYear();
+}
+
+function buildUrl(path) {
+  const url = new URL(`${SPORTSDATA_BASE}${path.startsWith("/") ? "" : "/"}${path}`, window.location.origin);
+  return url;
+}
+
+function readCache(key) {
+  try {
+    const raw = window.localStorage.getItem(`${SPORTSDATA_CACHE_PREFIX}:${key}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.savedAt) return null;
+    if (Date.now() - new Date(parsed.savedAt).getTime() > SPORTSDATA_CACHE_MAX_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(key, data) {
+  try {
+    window.localStorage.setItem(
+      `${SPORTSDATA_CACHE_PREFIX}:${key}`,
+      JSON.stringify({ savedAt: new Date().toISOString(), data })
+    );
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+function emptyResult({ source = "SportsDataIO", reason = "" } = {}) {
+  return {
+    source,
+    data: [],
+    cached: false,
+    warnings: reason ? [reason] : [],
+    lastSuccessfulFetchAt: "",
+    rateLimited: false,
+  };
+}
+
+function cachedResult(cached, { source = "SportsDataIO", reason = "" } = {}) {
+  return {
+    source,
+    data: cached?.data ?? [],
+    cached: true,
+    warnings: [cachedLinesMessage(cached?.savedAt) || reason || SPORTSDATA_UNAVAILABLE_MESSAGE].filter(Boolean),
+    lastSuccessfulFetchAt: cached?.savedAt || "",
+    rateLimited: false,
+  };
+}
+
+async function fetchSportsDataEndpoint(cacheKey, url) {
+  const endpoint = url.toString();
+  logProjectionFetchStart(`SportsDataIO:${cacheKey}`, { endpoint, cacheKey });
+
+  const apiKey = cleanApiKey(getSportsDataApiKey());
+  if (!apiKey) {
+    const cached = readCache(cacheKey);
+    if (cached) {
+      logProjectionFetchResult(`SportsDataIO:${cacheKey}`, {
+        endpoint,
+        status: 200,
+        data: cached.data,
+        count: cached.data?.length ?? 0,
+        error: "SportsDataIO key not configured — serving cache",
+      });
+      return cachedResult(cached, { reason: "SportsDataIO key not configured — serving cache." });
+    }
+    recordProjectionFetchAttempt({
+      provider: `SportsDataIO-${cacheKey}`,
+      endpoint,
+      sport: "MLB",
+      ok: false,
+      statusCode: 401,
+      responseCount: 0,
+      error: "SportsDataIO key not configured",
+      rawSample: { ok: false, status: "not_configured" },
+    });
+    logProjectionFetchResult(`SportsDataIO:${cacheKey}`, {
+      endpoint,
+      status: 401,
+      data: [],
+      count: 0,
+      error: "SportsDataIO key not configured",
+    });
+    assertProjectionDatasetNotEmpty([], {
+      label: `SportsDataIO:${cacheKey}`,
+      endpoint,
+      status: 401,
+    });
+    return emptyResult({ reason: "SportsDataIO key not configured." });
+  }
+
+  if (isSourceInCooldown(SOURCE_IDS.SPORTSDATA)) {
+    const cached = readCache(cacheKey);
+    if (cached) {
+      logProjectionFetchResult(`SportsDataIO:${cacheKey}`, {
+        endpoint,
+        status: 429,
+        data: cached.data,
+        count: cached.data?.length ?? 0,
+        error: "SportsDataIO in cooldown — serving cache",
+      });
+      return cachedResult(cached, { reason: "SportsDataIO in cooldown — serving cache." });
+    }
+    logProjectionFetchResult(`SportsDataIO:${cacheKey}`, {
+      endpoint,
+      status: 429,
+      data: [],
+      count: 0,
+      error: "SportsDataIO in cooldown",
+    });
+    assertProjectionDatasetNotEmpty([], {
+      label: `SportsDataIO:${cacheKey}`,
+      endpoint,
+      status: 429,
+    });
+    return emptyResult({ reason: "SportsDataIO in cooldown." });
+  }
+
+  return withSourceRequestLock(SOURCE_IDS.SPORTSDATA, async () => {
+    return withSourceRetryQueue(
+      SOURCE_IDS.SPORTSDATA,
+      async () => {
+        const result = await fetchJsonSafe(
+          url.toString(),
+          { headers: sportsDataProxyHeaders() },
+          {
+            source: "SportsDataIO",
+            ttlMs: getCacheTtlMs(),
+            timeoutMs: getSportsDataTimeoutMs(),
+            maxRetries: ENRICHMENT_MAX_RETRIES,
+            skip429Retry: true,
+            enrichment: true,
+          }
+        );
+        if (result.rateLimited) {
+          recordSource429(SOURCE_IDS.SPORTSDATA);
+          const cached = readCache(cacheKey);
+          if (cached) return cachedResult(cached, { reason: "SportsDataIO rate limited — serving cache." });
+          return { ...emptyResult({ reason: "SportsDataIO rate limited." }), rateLimited: true };
+        }
+        if (!result.ok) {
+          recordSourceFailure(SOURCE_IDS.SPORTSDATA, result.error || "request failed");
+          const cached = readCache(cacheKey);
+          if (cached) {
+            markSourceCached(SOURCE_IDS.SPORTSDATA, cached.savedAt);
+            return cachedResult(cached, { reason: result.error || SPORTSDATA_UNAVAILABLE_MESSAGE });
+          }
+          recordProjectionFetchAttempt({
+            provider: `SportsDataIO-${cacheKey}`,
+            endpoint: url.toString(),
+            sport: "MLB",
+            ok: false,
+            statusCode: result.status ?? 502,
+            responseCount: 0,
+            error: result.error || SPORTSDATA_UNAVAILABLE_MESSAGE,
+            rawSample: {
+              ok: result.ok,
+              error: result.error,
+              status: result.response?.status,
+              preview: result.preview,
+            },
+          });
+          emitProjectionDebug(`fetchSportsDataEndpoint:${cacheKey}`, [], {
+            origin: `src/services/sportsDataService.js :: fetchSportsDataEndpoint (request failed, cacheKey=${cacheKey})`,
+            rawResponse: {
+              ok: result.ok,
+              error: result.error,
+              status: result.response?.status,
+              preview: result.preview,
+              text: result.text,
+              data: result.data,
+            },
+            meta: { url: endpoint, cacheKey },
+          });
+          logProjectionFetchResult(`SportsDataIO:${cacheKey}`, {
+            endpoint,
+            status: result.status ?? 502,
+            data: result.data ?? null,
+            count: 0,
+            error: result.error || SPORTSDATA_UNAVAILABLE_MESSAGE,
+          });
+          assertProjectionDatasetNotEmpty([], {
+            label: `SportsDataIO:${cacheKey}`,
+            endpoint,
+            status: result.status ?? 502,
+          });
+          return emptyResult({ reason: result.error || SPORTSDATA_UNAVAILABLE_MESSAGE });
+        }
+        const data = Array.isArray(result.data) ? result.data : result.data ? [result.data] : [];
+        recordProjectionFetchAttempt({
+          provider: `SportsDataIO-${cacheKey}`,
+          endpoint,
+          sport: "MLB",
+          ok: result.ok && data.length > 0,
+          statusCode: result.status ?? (result.ok ? 200 : 502),
+          responseCount: data.length,
+          error: result.ok ? (data.length ? "" : "Empty projection response array") : result.error || "request failed",
+          warnings: result.ok ? [] : [result.error].filter(Boolean),
+          rawSample: data.slice(0, 2),
+        });
+        logProjectionFetchResult(`SportsDataIO:${cacheKey}`, {
+          endpoint,
+          status: result.status ?? 200,
+          data: data.slice(0, 2),
+          count: data.length,
+          error: data.length ? null : "Empty projection response array",
+        });
+        if (!data.length) {
+          emitProjectionDebug(`fetchSportsDataEndpoint:${cacheKey}`, data, {
+            origin: `src/services/sportsDataService.js :: fetchSportsDataEndpoint (empty parsed data, cacheKey=${cacheKey})`,
+            rawResponse: result.data ?? result,
+            meta: { url: endpoint, cacheKey, responseOk: result.ok },
+          });
+          assertProjectionDatasetNotEmpty(data, {
+            label: `SportsDataIO:${cacheKey}`,
+            endpoint,
+            status: result.status ?? 200,
+          });
+        }
+        writeCache(cacheKey, data);
+        recordSourceSuccess(SOURCE_IDS.SPORTSDATA);
+        return {
+          source: "SportsDataIO",
+          data,
+          cached: false,
+          warnings: [],
+          lastSuccessfulFetchAt: new Date().toISOString(),
+          rateLimited: false,
+          proxied: true,
+        };
+      },
+      {
+        maxAttempts: 2,
+        isRetryable: (res, err) => {
+          if (err) return true;
+          if (!res || res.cached) return false;
+          if (res.rateLimited) return false;
+          if (res.warnings?.length) return false;
+          return false;
+        },
+      }
+    );
+  });
+}
+
+/** Proxy health probe — never calls SportsDataIO directly from the browser. */
+export async function probeSportsDataMlbStatusProxy() {
+  const apiKey = getSportsDataApiKey();
+  if (!apiKey) {
+    return {
+      ok: false,
+      success: false,
+      proxied: true,
+      responseCode: 401,
+      status: "not_configured",
+      message: "SportsDataIO key not configured",
+      data: null,
+      keyConfigured: false,
+    };
+  }
+
+  const result = await fetchJsonSafe(
+    SPORTSDATA_MLB_STATUS_ROUTE,
+    { headers: sportsDataProxyHeaders(), cache: "no-store" },
+    {
+      source: "SportsDataIO status",
+      ttlMs: 0,
+      timeoutMs: getSportsDataTimeoutMs(),
+      maxRetries: ENRICHMENT_MAX_RETRIES,
+      skip429Retry: true,
+      enrichment: true,
+    }
+  );
+
+  const envelope = result.data && typeof result.data === "object" && !Array.isArray(result.data) ? result.data : null;
+  const payload = envelope?.data ?? null;
+  const responseCode = Number(envelope?.responseCode ?? result.status ?? 0);
+  const success = Boolean(envelope?.success ?? envelope?.ok);
+  const healthOk = success && responseCode === 200 && (payload === true || payload === false || payload != null);
+
+  return {
+    ok: healthOk,
+    success: healthOk,
+    proxied: true,
+    responseCode,
+    status: envelope?.status || (healthOk ? "connected" : "failed"),
+    message: envelope?.message || (healthOk ? SPORTSDATA_CONNECTED_VIA_PROXY : result.error || SPORTSDATA_UNAVAILABLE_MESSAGE),
+    data: payload,
+    payload,
+    timedOut: Boolean(envelope?.timedOut),
+    unauthorized: Boolean(envelope?.unauthorized),
+    rateLimited: Boolean(envelope?.rateLimited),
+    durationMs: envelope?.durationMs || 0,
+    keyConfigured: true,
+    preview: envelope?.message || result.error || "",
+  };
+}
+
+/** MLB Players probe — validates subscription access for stat enrichment. */
+export async function probeSportsDataMlbPlayersProxy() {
+  const apiKey = getSportsDataApiKey();
+  if (!apiKey) {
+    return {
+      ok: false,
+      success: false,
+      proxied: true,
+      responseCode: 401,
+      status: "not_configured",
+      message: "SportsDataIO key not configured",
+      data: null,
+      keyConfigured: false,
+      route: SPORTSDATA_MLB_PLAYERS_ROUTE,
+      upstreamPath: "/scores/json/Players",
+    };
+  }
+
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), getSportsDataTimeoutMs());
+  let response;
+  let text = "";
+  try {
+    response = await fetch(SPORTSDATA_MLB_PLAYERS_ROUTE, {
+      headers: sportsDataProxyHeaders(),
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    text = await response.text();
+  } catch (error) {
+    const timedOut = error?.name === "AbortError";
+    return {
+      ok: false,
+      success: false,
+      proxied: true,
+      responseCode: timedOut ? 408 : 502,
+      status: timedOut ? "timeout" : "failed",
+      message: timedOut ? "Timed out — using base feed." : error?.message || "Proxy fetch failed",
+      data: null,
+      text: "",
+      preview: error?.message || "",
+      timedOut,
+      unauthorized: false,
+      durationMs: Date.now() - startedAt,
+      keyConfigured: true,
+      route: SPORTSDATA_MLB_PLAYERS_ROUTE,
+      upstreamPath: "/scores/json/Players",
+    };
+  } finally {
+    window.clearTimeout(timer);
+  }
+
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = null;
+  }
+
+  const responseCode = Number(payload?.responseCode ?? response.status ?? 0);
+  const unauthorized = responseCode === 401 || responseCode === 403 || Boolean(payload?.unauthorized);
+  const playersOk = response.ok && Array.isArray(payload);
+  const preview = String(payload?.preview || payload?.message || text || "").slice(0, 400).replace(/\s+/g, " ").trim();
+
+  return {
+    ok: playersOk,
+    success: playersOk,
+    proxied: true,
+    responseCode: playersOk ? 200 : responseCode || response.status,
+    status: playersOk ? "connected" : unauthorized ? "unauthorized" : "failed",
+    message: playersOk
+      ? `Connected — ${payload.length} MLB players`
+      : payload?.message || preview || `HTTP ${responseCode || response.status}`,
+    data: playersOk ? payload : null,
+    payload: playersOk ? payload : null,
+    playerCount: playersOk ? payload.length : 0,
+    text,
+    preview,
+    timedOut: false,
+    unauthorized,
+    durationMs: Date.now() - startedAt,
+    keyConfigured: true,
+    route: SPORTSDATA_MLB_PLAYERS_ROUTE,
+    upstreamPath: "/scores/json/Players",
+  };
+}
+
+// --- Public endpoint helpers ---------------------------------------------
+
+export function fetchTeams() {
+  return fetchSportsDataEndpoint("teams", buildUrl("/scores/json/Teams"));
+}
+
+export function fetchGamesByDate(date = new Date()) {
+  const day = isoDate(date);
+  return fetchSportsDataEndpoint(`games-${day}`, buildUrl(`/scores/json/GamesByDate/${day}`));
+}
+
+export function fetchTeamMatchupStats(date = new Date()) {
+  return fetchGamesByDate(date);
+}
+
+export async function fetchPlayerGameProjections(date = new Date()) {
+  const day = isoDate(date);
+  return fetchSportsDataEndpoint(
+    `projections-${day}`,
+    buildUrl(`/projections/json/PlayerGameProjectionStatsByDate/${day}`)
+  );
+}
+
+export async function fetchFantasyProjections(date = new Date()) {
+  return fetchPlayerGameProjections(date);
+}
+
+export async function fetchPlayerGameStats(date = new Date()) {
+  const day = isoDate(date);
+  return fetchSportsDataEndpoint(`game-stats-${day}`, buildUrl(`/stats/json/PlayerGameStatsByDate/${day}`));
+}
+
+export async function fetchPlayerSeasonStats(season = currentSeason()) {
+  const result = await fetchSportsDataEndpoint(
+    `season-stats-${season}`,
+    buildUrl(`/stats/json/PlayerSeasonStats/${season}`)
+  );
+  if (Array.isArray(result?.data) && result.data.length > 0) {
+    emitVisibleProjectionDebug(
+      result.data,
+      "fetchPlayerSeasonStats @ src/services/sportsDataService.js"
+    );
+  }
+  return result;
+}
+
+export async function fetchBattingAverages(season = currentSeason()) {
+  const result = await fetchPlayerSeasonStats(season);
+  const filtered = (result.data || [])
+    .filter((row) => row && typeof row === "object" && Number.isFinite(Number(row.BattingAverage)))
+    .map((row) => ({
+      playerId: row.PlayerID,
+      name: row.Name,
+      team: row.Team,
+      battingAverage: Number(row.BattingAverage),
+      atBats: Number(row.AtBats),
+      hits: Number(row.Hits),
+      onBasePercentage: Number(row.OnBasePercentage),
+      sluggingPercentage: Number(row.SluggingPercentage),
+    }));
+  return { ...result, data: filtered };
+}
+
+export async function fetchPitcherSeasonSplits(playerId, season = currentSeason()) {
+  if (!playerId) return emptyResult({ reason: "playerId required for pitcher splits." });
+  return fetchSportsDataEndpoint(
+    `pitcher-splits-${season}-${playerId}`,
+    buildUrl(`/stats/json/PlayerSeasonSplitStatsByPlayerID/${season}/${playerId}`)
+  );
+}
+
+/** Aggregate snapshot for a slate: games + projections + season stats. */
+export async function fetchSlateSnapshot({ date = new Date(), season = currentSeason() } = {}) {
+  const [games, projections, seasonStats] = await Promise.all([
+    fetchGamesByDate(date),
+    fetchPlayerGameProjections(date),
+    fetchPlayerSeasonStats(season),
+  ]);
+  return {
+    source: "SportsDataIO",
+    games,
+    projections,
+    seasonStats,
+    cached: games.cached || projections.cached || seasonStats.cached,
+    warnings: [...(games.warnings || []), ...(projections.warnings || []), ...(seasonStats.warnings || [])],
+    proxied: true,
+  };
+}

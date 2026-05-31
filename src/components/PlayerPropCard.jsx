@@ -1,0 +1,589 @@
+import { memo } from "react";
+import PlayerImage from "./PlayerImage.jsx";
+import DataQualityBadge from "./DataQualityBadge.jsx";
+import DataSourceTag from "./DataSourceTag.jsx";
+import { formatLeanSide, formatNumber, shortReason } from "../utils/formatters.js";
+import { confidenceTier, displayMarketLabel, displaySport } from "../utils/propLabels.js";
+import { lineMovementArrow, lineSourceBadgeStyle, resultStatusBadge, sportsbookCardTag } from "../utils/cardSignals.js";
+import { dataBadgeStyle, styles, tierStyle } from "../theme/styles.js";
+import { isReadyToBet } from "../services/pickScoring.js";
+import { dynamicAcceptanceTier, getVolatilityLabel } from "../services/propQualityGates.js";
+import { riskAccentStyle } from "../utils/displayPropScoring.js";
+import MlbPipelineFailureBlock from "./MlbPipelineFailureBlock.jsx";
+import { isManualAnalyzerProp } from "../utils/manualPropBuilder.js";
+import { shouldShowMlbPipelineFailure } from "../utils/mlbPipelineFailureDisplay.js";
+import { resolveProjectionLeanDisplay } from "../utils/pickDirectionAudit.js";
+import {
+  AWAITING_PROJECTION_STATUS,
+  hasValidProjection,
+  leanBadgeStyle,
+  manualMetricFadeStyle,
+  manualRiskBadgeStyle,
+  manualWeakPickStyle,
+  NO_VERIFIED_PLAY_STATUS,
+  normalizeManualPick,
+  PASS_STATUS,
+  NO_VERIFIED_GRADE_STATUS,
+  payoutBadgeStyle,
+  payoutDisplayLabel,
+  projectionVsLineLabel,
+  riskShortLabel,
+  strongPlayBadgeStyle,
+} from "../utils/manualPropScoring.js";
+
+const DYNAMIC_TIER_STYLE = {
+  SAFE: { border: "#22c55e", background: "#052e16", color: "#bbf7d0" },
+  PLAYABLE: { border: "#0ea5e9", background: "#082f49", color: "#bae6fd" },
+  VALUE: { border: "#a855f7", background: "#3b0764", color: "#e9d5ff" },
+  RESEARCH: { border: "#475569", background: "#1e293b", color: "#cbd5e1" },
+};
+
+function dynamicTierBadgeStyle(tierKey) {
+  const colors = DYNAMIC_TIER_STYLE[tierKey] || DYNAMIC_TIER_STYLE.RESEARCH;
+  return {
+    fontSize: "10px",
+    fontWeight: 800,
+    padding: "2px 6px",
+    borderRadius: "6px",
+    border: `1px solid ${colors.border}`,
+    background: colors.background,
+    color: colors.color,
+    letterSpacing: "0.04em",
+  };
+}
+
+function bettingLabelStyle(label) {
+  const key = String(label || "").toLowerCase();
+  if (key.includes("near")) {
+    return {
+      fontSize: "10px",
+      fontWeight: 800,
+      padding: "2px 6px",
+      borderRadius: "6px",
+      border: "1px solid #ca8a04",
+      background: "#422006",
+      color: "#fef08a",
+    };
+  }
+  if (key.includes("ready")) {
+    return {
+      fontSize: "10px",
+      fontWeight: 800,
+      padding: "2px 6px",
+      borderRadius: "6px",
+      border: "1px solid #16a34a",
+      background: "#14532d",
+      color: "#dcfce7",
+    };
+  }
+  return {
+    fontSize: "10px",
+    fontWeight: 800,
+    padding: "2px 6px",
+    borderRadius: "6px",
+    border: "1px solid #475569",
+    background: "#1e293b",
+    color: "#cbd5e1",
+  };
+}
+
+function noVerifiedPlayBadgeStyle() {
+  return { border: "1px solid #475569", background: "#1e293b", color: "#94a3b8" };
+}
+
+function cardStatusBadgeClass(cardStatus = "") {
+  const key = String(cardStatus || "").toLowerCase();
+  if (key === "playable") return "prop-card-status-badge--playable";
+  if (key === "research") return "prop-card-status-badge--research";
+  if (key === "rejected") return "prop-card-status-badge--rejected";
+  return "prop-card-status-badge--unavailable";
+}
+
+function resolveCardStatusLabel(prop = {}) {
+  if (prop.displayRejected) return "Rejected";
+  if (prop.projectionStatus === "missing" || prop.projection == null) return "Unavailable";
+  if (prop.isDisplayPlayable) return "Playable";
+  return "Research Only";
+}
+
+function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, cardStyle, savedResult, cacheStatus = "" }) {
+  const isManual = isManualAnalyzerProp(prop);
+  const hasProjection = hasValidProjection(prop);
+  const passPlay = isManual && (prop.passPlay || prop.displayStatus === PASS_STATUS || prop.bettingLabel === PASS_STATUS);
+  const noVerifiedPlay = isManual && (!hasProjection || prop.projectionUnavailable || prop.unverifiedGradeBlocked);
+  const showEngineSide = isManual && hasProjection && !noVerifiedPlay && !passPlay;
+  const tier = confidenceTier(prop);
+  const pickSide = showEngineSide ? normalizeManualPick(prop.bestPick || prop.side || prop.pick) : "";
+  const lean = showEngineSide
+    ? pickSide === "over"
+      ? "Over"
+      : pickSide === "under"
+        ? "Under"
+        : formatLeanSide(prop.bestPick || prop.side || "Watch")
+    : null;
+  const weakPick = isManual && (noVerifiedPlay || passPlay || prop.noEdge || prop.isWeakManualPick);
+  const metricFade = noVerifiedPlay ? {} : manualMetricFadeStyle(prop.edge);
+  const payoutLabel = payoutDisplayLabel(prop);
+  const projVsLine = projectionVsLineLabel(prop);
+  const researchOnly = Boolean(prop.displayResearchOnly) || /research only/i.test(String(prop.bettingLabel || ""));
+  const playable = Boolean(prop.isDisplayPlayable) && !researchOnly;
+  const cardStatus = prop.cardStatus || (prop.displayRejected ? "rejected" : playable ? "playable" : "research");
+  const cardStatusLabel = prop.pickTierLabel || prop.bettingLabel || resolveCardStatusLabel(prop);
+  const probabilityPct =
+    prop.probabilityScore ??
+    (Number.isFinite(Number(prop.modelProbability)) ? Math.round(Number(prop.modelProbability) * 100) : null);
+  const leanDisplay =
+    prop.lean ||
+    resolveProjectionLeanDisplay(prop) ||
+    (pickSide === "over" ? "Higher" : pickSide === "under" ? "Lower" : formatLeanSide(prop.bestPick || prop.side || "Watch"));
+  const ready = playable && (Boolean(prop.isQualificationAccepted) || isReadyToBet(prop));
+  const bettingLabel =
+    researchOnly
+      ? "Research only"
+      : prop.bettingLabel ||
+        (ready ? "Ready to Bet" : prop.displayTier === "near" || prop.recommendationStatus === "near" ? "Near Miss" : "Watchlist");
+  const isWatch = !ready && !researchOnly && (prop.recommendationStatus === "watchlist" || prop.recommendationStatus === "research" || prop.recommendationStatus === "near");
+  const movementLabel = lineMovementArrow(prop);
+  const bookTag = sportsbookCardTag(prop);
+  const resultBadge = savedResult ? resultStatusBadge(savedResult) : null;
+  const sourceBadge = prop.lineSourceBadge || prop.modelSignal?.lineSourceBadge || "";
+  const verifiedBadge = prop.verifiedBadge || (prop.sportsbookVerified ? "VERIFIED" : "");
+  const statusLabel = researchOnly
+    ? "Research only"
+    : prop.playTag === "Strong Play"
+      ? "Strong Play"
+      : prop.bettingLabel ||
+        (ready ? "Ready to Bet" : prop.displayTier === "near" || prop.recommendationStatus === "near" ? "Near Miss" : "Watchlist");
+  const statSourceBadges = (prop.statEnrichmentSources || prop.dataSources || prop.modelSignal?.statEnrichmentSources || [])
+    .filter(Boolean)
+    .slice(0, 3);
+  const lowReasons = prop.lowConfidenceReasons || [];
+  const volatilityLabel = getVolatilityLabel(prop);
+  const dynamicTier = prop.dynamicAcceptanceTier || dynamicAcceptanceTier(prop);
+  const movementTag = prop.lineMovementTag || prop.lineMovement?.tag || "";
+  const bookLine = prop.sportsbookLine ?? prop.sportsbookComparison?.marketAverageLine;
+  const lastUpdated = prop.updatedAt || prop.lastFetchAt || prop.cacheMetadata?.verifiedAt || "";
+  const cacheLabel = prop.cacheVerified || prop.lineSourceBadge === "CACHED" ? "cached verified" : "";
+  const sportsbookEdgeNum = Number(prop.sportsbookEdge ?? 0);
+  const sportsbookEdgeLabel = prop.sportsbookEdgeLabel || "";
+  const sportsbookBooksCount = Number(prop.sportsbookBooksCount || prop.sportsbookComparison?.books || 0);
+
+  // Player stat expansion fields — already populated by enrichment pipeline.
+  const last5Avg = prop.last5Average ?? prop.profile?.last5Average ?? null;
+  const last10Avg = prop.last10Average ?? prop.profile?.last10Average ?? null;
+  const hitRatePct = (() => {
+    const rate = prop.recentHitRate ?? prop.last5HitRate ?? prop.last10HitRate ?? prop.profile?.recentHitRate;
+    if (!Number.isFinite(Number(rate))) return null;
+    const num = Number(rate);
+    return Math.min(100, Math.round(num <= 1 ? num * 100 : num));
+  })();
+  const opponentRank = prop.opponentRank ?? prop.profile?.opponentRank ?? null;
+  const opponentAllowed = prop.opponentAllowed ?? prop.profile?.opponentAllowed ?? null;
+  const homeAwaySplit = prop.homeAwaySplit || prop.profile?.homeAwaySplit || (prop.isHome === true ? "Home" : prop.isHome === false ? "Away" : "");
+  const recentTrend = prop.formNote || prop.profile?.formNote || prop.recentTrend || prop.strikeoutTrend || "";
+  const openingLine = prop.lineMovement?.openingLine ?? null;
+  const currentLineSnap = prop.lineMovement?.currentLine ?? prop.line ?? null;
+  const confRaw =
+    noVerifiedPlay || passPlay
+      ? null
+      : prop.displayConfidenceScore ??
+        (prop.calibratedConfidence != null && prop.calibratedConfidence !== prop.confidenceScore
+          ? prop.calibratedConfidence
+          : prop.confidenceScore ?? prop.confidence ?? null);
+  const confDisplay =
+    confRaw != null && Number(confRaw) > 0 ? Math.round(Number(confRaw)) : null;
+  const confDisplayLabel = confDisplay != null ? `${confDisplay}%` : "Unavailable";
+  const edgeLabels = prop.rawEdgeLabel
+    ? { raw: prop.rawEdgeLabel, display: prop.displayEdgeLabel }
+    : null;
+  const edgePct = Number(prop.edgePercent);
+  const edgeDisplay = edgeLabels
+    ? edgeLabels.display
+    : Number.isFinite(edgePct)
+      ? `${edgePct > 0 ? "+" : ""}${Math.round(edgePct)}%`
+      : noVerifiedPlay || !Number.isFinite(Number(prop.edge))
+        ? null
+        : formatNumber(prop.edge);
+  const rawEdgeDisplay = edgeLabels?.raw ?? (Number.isFinite(Number(prop.edge)) ? formatNumber(prop.edge) : null);
+  const dqLabel = Number.isFinite(Number(prop.dataQualityScore))
+    ? `${Math.round(Number(prop.dataQualityScore))}%`
+    : "—";
+  const hitChanceDisplay = noVerifiedPlay
+    ? null
+    : Number.isFinite(Number(prop.impliedHitChance))
+      ? `${Math.round(Number(prop.impliedHitChance))}%`
+      : null;
+  const projectionDisplay = noVerifiedPlay
+    ? null
+    : prop.projectedValue != null
+      ? formatNumber(prop.projectedValue)
+      : prop.projection != null
+        ? formatNumber(prop.projection)
+        : null;
+  const volatilityDisplay = noVerifiedPlay ? null : prop.volatilityLabel || null;
+  const riskShort = noVerifiedPlay ? null : riskShortLabel(prop.riskLevel);
+  const showDynamicTier = dynamicTier && String(dynamicTier).toUpperCase() !== "RESEARCH";
+  const riskAccent = riskAccentStyle(prop.riskLevel);
+  const fallbackBadge = prop.displayFallback || prop.fallbackLabel;
+
+  function openDetails(event) {
+    event?.stopPropagation?.();
+    onOpen?.(prop);
+  }
+
+  return (
+    <article
+      className={
+        topPick
+          ? "prop-card-top-pick"
+          : isManual
+            ? `prop-card-compact prop-card-manual${weakPick ? " prop-card-manual-weak" : ""}`
+            : "prop-card-compact"
+      }
+      style={{
+        ...styles.card,
+        ...(compact ? styles.cardMobileTight : null),
+        ...(isManual ? manualWeakPickStyle(prop.edge) : riskAccent),
+        ...cardStyle,
+      }}
+      role="button"
+      tabIndex={0}
+      onClick={openDetails}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openDetails(e);
+        }
+      }}
+    >
+      <div style={styles.compactCardTop}>
+        {rank != null && <span style={styles.rankBadge}>#{rank}</span>}
+        {resultBadge && (
+          <span
+            style={{
+              fontSize: "10px",
+              fontWeight: 800,
+              padding: "2px 6px",
+              borderRadius: "6px",
+              border: `1px solid ${resultBadge.border}`,
+              background: resultBadge.color,
+              color: resultBadge.text,
+              alignSelf: "flex-start",
+            }}
+            title={`Saved result: ${savedResult}`}
+          >
+            {resultBadge.label}
+          </span>
+        )}
+        <PlayerImage prop={prop} />
+        <div style={styles.cardInfo}>
+          <div style={styles.cardTitleRow}>
+            <div style={{ minWidth: 0 }}>
+              <p className="prop-card-platform" style={styles.platform}>
+                {prop.platform} · {displaySport(prop)}
+              </p>
+              <h3 className="prop-card-player-name" style={styles.playerName}>{prop.playerName}</h3>
+              <DataSourceTag prop={prop} cacheStatus={cacheStatus} compact />
+              {!compact && (
+                <p style={styles.gameLine}>
+                  {prop.team || "—"} vs {prop.opponent || "—"}
+                </p>
+              )}
+            </div>
+            <div style={styles.cardBadgeColumn}>
+              {verifiedBadge && !isManual ? <span style={lineSourceBadgeStyle("VERIFIED")}>VERIFIED</span> : null}
+              {fallbackBadge ? <span style={bettingLabelStyle("Near Miss")}>Fallback</span> : null}
+              {!isManual ? <span style={bettingLabelStyle(statusLabel)}>{compact ? statusLabel : bettingLabel}</span> : null}
+              {isManual && prop.playTag === "Strong Play" ? (
+                <span style={{ ...styles.scoreBadge, ...strongPlayBadgeStyle(), fontSize: "9px" }}>Strong Play</span>
+              ) : null}
+              {prop.needsReview ? <span style={bettingLabelStyle("Near Miss")}>Needs review</span> : null}
+              {showDynamicTier ? <span style={dynamicTierBadgeStyle(dynamicTier)}>{dynamicTier}</span> : null}
+              {!compact && sourceBadge ? <span style={lineSourceBadgeStyle(sourceBadge)}>{String(sourceBadge).toUpperCase()}</span> : null}
+              {!compact && prop.timeBadge?.label ? (
+                <span style={dataBadgeStyle(prop.timeBadge.tone || "partial")}>{prop.timeBadge.label}</span>
+              ) : null}
+              {!compact && prop.statsMissingBadge?.label ? (
+                <span style={dataBadgeStyle(prop.statsMissingBadge.tone || "weak")}>{prop.statsMissingBadge.label}</span>
+              ) : null}
+              {!compact && prop.researchMissingBadge?.label && prop.researchMissingBadge.label !== prop.statsMissingBadge?.label ? (
+                <span style={dataBadgeStyle(prop.researchMissingBadge.tone || "weak")}>{prop.researchMissingBadge.label}</span>
+              ) : null}
+              {!compact ? <DataQualityBadge prop={prop} /> : null}
+              {!compact ? <span style={tierStyle(isWatch ? "Risky" : tier)}>{isWatch ? "Watch" : tier}</span> : null}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="prop-card-meta-row prop-card-meta-primary" style={styles.compactMetaRow}>
+        {compact ? (
+          isManual ? (
+            noVerifiedPlay ? (
+              <>
+                <span className="prop-card-stat-highlight prop-card-prop-line-row" style={{ ...styles.compactMetaItem, flex: "1 1 100%" }}>
+                  <strong>
+                    {displayMarketLabel(prop)} · Line {formatNumber(prop.line)}
+                    {prop.source || prop.platform ? ` · ${prop.source || prop.platform}` : ""}
+                  </strong>
+                </span>
+                <div className="prop-card-primary-metrics" style={styles.manualPrimaryMetricsRow}>
+                  <span style={{ ...styles.scoreBadge, ...noVerifiedPlayBadgeStyle() }}>
+                    {prop.displayStatus || NO_VERIFIED_PLAY_STATUS}
+                  </span>
+                </div>
+                {shouldShowMlbPipelineFailure(prop) ? (
+                  <MlbPipelineFailureBlock prop={prop} />
+                ) : (
+                  <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, marginTop: "2px", color: "#94a3b8" }}>
+                    {prop.statusMessage || prop.whyThisPick || NO_VERIFIED_GRADE_STATUS || AWAITING_PROJECTION_STATUS}
+                  </p>
+                )}
+                {projVsLine ? (
+                  <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, color: "#64748b" }}>
+                    {projVsLine}
+                  </p>
+                ) : null}
+              </>
+            ) : passPlay ? (
+              <>
+                <span className="prop-card-stat-highlight prop-card-prop-line-row" style={{ ...styles.compactMetaItem, flex: "1 1 100%" }}>
+                  <strong>
+                    {displayMarketLabel(prop)} · Line {formatNumber(prop.line)}
+                    {prop.source || prop.platform ? ` · ${prop.source || prop.platform}` : ""}
+                  </strong>
+                </span>
+                <div className="prop-card-primary-metrics" style={styles.manualPrimaryMetricsRow}>
+                  <span style={{ ...styles.scoreBadge, ...noVerifiedPlayBadgeStyle() }}>{PASS_STATUS}</span>
+                  {projectionDisplay ? (
+                    <span style={{ ...styles.scoreBadge, borderColor: "#475569", color: "#cbd5e1", background: "#111827" }}>
+                      PROJ {projectionDisplay}
+                    </span>
+                  ) : null}
+                </div>
+                <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, marginTop: "2px", color: "#94a3b8" }}>
+                  {prop.statusMessage || prop.whyThisPick || "Edge too weak — engine recommends PASS."}
+                </p>
+                {projVsLine ? (
+                  <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, color: "#64748b" }}>
+                    {projVsLine}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+            <>
+              <span className="prop-card-stat-highlight prop-card-prop-line-row" style={{ ...styles.compactMetaItem, flex: "1 1 100%" }}>
+                <strong>
+                  {displayMarketLabel(prop)} · Line {formatNumber(prop.line)}
+                  {prop.source || prop.platform ? ` · ${prop.source || prop.platform}` : ""}
+                </strong>
+              </span>
+              <div className="prop-card-primary-metrics" style={styles.manualPrimaryMetricsRow}>
+                {projectionDisplay ? (
+                  <span style={{ ...styles.scoreBadge, ...metricFade, borderColor: "#475569", color: "#cbd5e1", background: "#111827" }}>
+                    PROJ {projectionDisplay}
+                  </span>
+                ) : null}
+                {edgeDisplay != null ? (
+                  <span
+                    style={{
+                      ...styles.scoreBadge,
+                      ...metricFade,
+                      borderColor: "#1d4ed8",
+                      color: "#93c5fd",
+                      background: "#1e3a8a",
+                    }}
+                  >
+                    EDGE +{edgeDisplay}
+                  </span>
+                ) : null}
+                {confDisplay != null ? (
+                  <span style={{ ...styles.scoreBadge, ...metricFade, borderColor: "#166534", color: "#86efac", background: "#052e16" }}>
+                    CONF {confDisplay}%
+                  </span>
+                ) : null}
+                {hitChanceDisplay ? (
+                  <span style={{ ...styles.scoreBadge, ...metricFade, borderColor: "#155e75", color: "#a5f3fc", background: "#083344" }}>
+                    HIT {hitChanceDisplay}
+                  </span>
+                ) : null}
+              </div>
+              <div className="prop-card-badge-row" style={styles.badgeRow}>
+                {lean === "Over" || lean === "Under" ? (
+                  <span style={{ ...styles.scoreBadge, ...leanBadgeStyle(lean) }}>
+                    {isManual ? `Model Pick ${lean.toUpperCase()}` : lean.toUpperCase()}
+                  </span>
+                ) : null}
+                <span style={{ ...styles.scoreBadge, ...payoutBadgeStyle(prop) }}>{payoutLabel}</span>
+              </div>
+              {prop.whyThisPick || prop.qualificationReason ? (
+                <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, marginTop: "2px" }}>
+                  {prop.whyThisPick || prop.qualificationReason}
+                </p>
+              ) : projVsLine ? (
+                <p className="prop-card-volatility-secondary" style={styles.manualVolatilityLine}>
+                  {projVsLine}
+                </p>
+              ) : null}
+            </>
+            )
+          ) : (
+          <>
+            <span className="prop-card-stat-highlight prop-card-prop-line-row" style={{ ...styles.compactMetaItem, flex: "1 1 100%" }}>
+              <strong>
+                {prop.team || "—"} vs {prop.opponent || "—"} · {displayMarketLabel(prop)} · Line {formatNumber(prop.line)}
+              </strong>
+            </span>
+            <div className="prop-card-badge-row" style={styles.badgeRow}>
+              <span className={`prop-card-status-badge ${cardStatusBadgeClass(cardStatus)}`} style={bettingLabelStyle(cardStatusLabel)}>
+                {cardStatusLabel}
+              </span>
+            </div>
+            <div className="prop-card-core-metrics">
+              <span>
+                Proj <strong>{projectionDisplay ?? "—"}</strong>
+              </span>
+              <span>
+                Lean <strong>{leanDisplay}</strong>
+              </span>
+              <span>
+                Prob <strong>{probabilityPct != null ? `${probabilityPct}%` : "—"}</strong>
+              </span>
+              <span>
+                Conf <strong>{confDisplayLabel}</strong>
+              </span>
+              <span>
+                DQ <strong>{dqLabel}</strong>
+              </span>
+              <span>
+                Raw <strong>{rawEdgeDisplay != null ? (Number(prop.edge) > 0 ? `+${rawEdgeDisplay}` : rawEdgeDisplay) : "—"}</strong>
+              </span>
+              <span>
+                Edge <strong>{edgeDisplay ?? "—"}</strong>
+              </span>
+              <span>
+                Status <strong>{cardStatusLabel}</strong>
+              </span>
+            </div>
+          </>
+          )
+        ) : (
+          <>
+            <span className="prop-card-stat-highlight" style={styles.compactMetaItem}>
+              <span style={styles.metaLabel}>Prop</span>
+              <strong>{displayMarketLabel(prop)}</strong>
+            </span>
+            <span style={styles.compactMetaItem}>
+              <span style={styles.metaLabel}>Line</span>
+              <strong>
+                {formatNumber(prop.line)}
+                {movementLabel ? <span style={{ marginLeft: "4px", color: "#7dd3fc", fontSize: "11px" }}>{movementLabel}</span> : null}
+              </strong>
+            </span>
+            <span className="prop-card-conf-highlight" style={styles.compactMetaItem}>
+              <span style={styles.metaLabel}>Conf</span>
+              <strong style={styles.metaValueStrong}>
+                {confDisplay != null ? `${confDisplay}%` : "—"}
+              </strong>
+            </span>
+            <span style={styles.compactMetaItem}>
+              <span style={styles.metaLabel}>Side</span>
+              <strong style={styles.metaValueStrong}>{lean}</strong>
+            </span>
+          </>
+        )}
+        {topPick && !compact && confDisplay != null ? (
+          <p className="prop-meta-top-pick-inline">
+            CONF {confDisplay}% {edgeDisplay != null ? `• EDGE ${edgeDisplay}` : ""} {riskShort ? `• RISK ${riskShort}` : ""}
+          </p>
+        ) : null}
+        {!compact ? (
+          <>
+            <span className="prop-meta-secondary" style={styles.compactMetaItem}>
+              <span style={styles.metaLabel}>Proj</span>
+              <strong style={styles.metaValueStrong}>
+                {prop.projectedValue != null
+                  ? formatNumber(prop.projectedValue)
+                  : prop.projection != null
+                    ? formatNumber(prop.projection)
+                    : "—"}
+              </strong>
+            </span>
+            <span className={`prop-meta-conf-edge-risk${topPick ? " prop-meta-top-pick-hide" : ""}`} style={styles.compactMetaItem}>
+              <span style={styles.metaLabel}>Edge</span>
+              <strong style={styles.metaValueStrong}>{edgeDisplay}</strong>
+            </span>
+            <span className={`prop-meta-conf-edge-risk${topPick ? " prop-meta-top-pick-hide" : ""}`} style={styles.compactMetaItem}>
+              <span style={styles.metaLabel}>Risk</span>
+              <strong>{riskShort}</strong>
+            </span>
+          </>
+        ) : null}
+        {!compact ? (
+          <>
+        <span className="prop-meta-secondary" style={styles.compactMetaItem}>
+          <span style={styles.metaLabel}>EV</span>
+          <strong>{Number.isFinite(Number(prop.expectedValueScore)) ? Math.round(Number(prop.expectedValueScore)) : "—"}</strong>
+        </span>
+        <span className="prop-meta-secondary" style={styles.compactMetaItem}>
+          <span style={styles.metaLabel}>Vol</span>
+          <strong>
+            {volatilityLabel}
+            {Number.isFinite(Number(prop.volatility)) ? ` (${formatNumber(prop.volatility)})` : ""}
+          </strong>
+        </span>
+        <span className="prop-meta-secondary" style={styles.compactMetaItem}>
+          <span style={styles.metaLabel}>DQ</span>
+          <strong>{Number.isFinite(Number(prop.dataQualityScore)) ? Math.max(22, Math.round(Number(prop.dataQualityScore))) : "—"}</strong>
+        </span>
+        {bookLine != null && Number.isFinite(sportsbookEdgeNum) && sportsbookEdgeNum !== 0 ? (
+          <span
+            className="prop-meta-secondary"
+            style={styles.compactMetaItem}
+            title={sportsbookEdgeLabel || `Sportsbook consensus ${formatNumber(bookLine)}`}
+          >
+            <span style={styles.metaLabel}>SB Edge</span>
+            <strong
+              style={{
+                ...styles.metaValueStrong,
+                color: sportsbookEdgeNum > 0 ? "#86efac" : "#fca5a5",
+              }}
+            >
+              {sportsbookEdgeNum > 0 ? "+" : ""}
+              {formatNumber(sportsbookEdgeNum)}
+            </strong>
+          </span>
+        ) : null}
+          </>
+        ) : null}
+        {!compact && prop.edgeScore != null && (
+          <span style={styles.compactMetaItem}>
+            <span style={styles.metaLabel}>Edge</span>
+            <strong>{prop.edgeScore}</strong>
+          </span>
+        )}
+      </div>
+      {!compact ? (
+        <>
+          {statSourceBadges.length > 0 ? (
+            <p style={{ ...styles.compactFlags, margin: "4px 0 0", color: "#bae6fd", display: "none" }} aria-hidden="true">
+              Stats: {statSourceBadges.join(" · ")}
+            </p>
+          ) : null}
+          {bookTag ? (
+            <p style={{ ...styles.compactFlags, margin: "4px 0 0", color: "#86efac", display: "none" }} aria-hidden="true">
+              {bookTag}
+            </p>
+          ) : null}
+        </>
+      ) : null}
+      {shouldShowMlbPipelineFailure(prop) && !(isManual && noVerifiedPlay) ? (
+        <MlbPipelineFailureBlock prop={prop} />
+      ) : null}
+      <button type="button" className="prop-card-why-link" style={styles.whyLink} onClick={openDetails}>
+        View Details
+      </button>
+    </article>
+  );
+}
+
+export default memo(PlayerPropCard);
