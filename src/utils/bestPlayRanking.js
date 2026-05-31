@@ -434,6 +434,8 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
   ranked.projectionConfidenceLevel = resolveProjectionConfidenceLevel(ranked);
   ranked.confidenceTier = classifyPropTier(ranked);
   ranked.confidenceTierLabel = ranked.confidenceTier ? `Tier ${ranked.confidenceTier}` : null;
+  ranked.verifiedTier = ranked.confidenceTier;
+  ranked.verifiedTierLabel = ranked.confidenceTierLabel;
   return attachBoardQualityFields(
     attachModelValidationFields(
       attachProjectionSanityAudit(ranked, {

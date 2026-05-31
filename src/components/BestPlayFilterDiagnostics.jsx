@@ -20,20 +20,18 @@ function BestPlayFilterDiagnostics({ filterDiagnostics = null }) {
     <section className="verification-diagnostics best-play-filter-diagnostics" aria-label="Best Plays filter diagnostics">
       <h3 className="verification-diagnostics__title">Best Plays Filter Diagnostics</h3>
       <p className="verification-diagnostics__meta">
-        Strict qualified: {filterDiagnostics?.bestPlayQualifiedStrict ?? 0}
+        Active board tier: {audit.activeTier || "A"}
         {filterDiagnostics?.bestPlayUsedFallback ? " · Fallback fill active" : ""}
       </p>
       <div className="verification-diagnostics__grid">
         <Metric label="Total Projected" value={audit.totalProjected} />
-        <Metric label="Full Data" value={audit.fullData} />
-        <Metric label="Partial Data" value={audit.partialData} />
-        <Metric label="Tier A" value={audit.tierA ?? audit.tierAFullData} />
-        <Metric label="Tier B" value={audit.tierB ?? audit.tierBFullData} />
-        <Metric label="Tier C" value={audit.tierC ?? audit.tierCFullData} />
-        <Metric label="Rejected By Confidence" value={audit.rejectedByConfidence} />
-        <Metric label="Rejected By Probability" value={audit.rejectedByProbability} />
-        <Metric label="Rejected By Playability" value={audit.rejectedByPlayability} />
-        <Metric label="Rejected By Tier C" value={audit.rejectedByTierC} />
+        <Metric label="Tier A (pool)" value={audit.tierA ?? audit.tierAFullData} />
+        <Metric label="Tier B (pool)" value={audit.tierB ?? audit.tierBFullData} />
+        <Metric label="Tier C (pool)" value={audit.tierC ?? audit.tierCFullData} />
+        <Metric label="Tier A (shown)" value={audit.tierADisplayed} />
+        <Metric label="Tier B (shown)" value={audit.tierBDisplayed} />
+        <Metric label="Tier C (shown)" value={audit.tierCDisplayed} />
+        <Metric label="Qualified A/B" value={filterDiagnostics?.bestPlayQualifiedStrict ?? audit.qualifiedStrict} />
       </div>
       {samples.length ? (
         <div className="verification-diagnostics__table-wrap">
@@ -42,9 +40,10 @@ function BestPlayFilterDiagnostics({ filterDiagnostics = null }) {
               <tr>
                 <th>Player</th>
                 <th>Market</th>
-                <th>Confidence</th>
-                <th>Probability</th>
-                <th>Data</th>
+                <th>Conf</th>
+                <th>Play</th>
+                <th>Edge</th>
+                <th>L10</th>
                 <th>Reason</th>
               </tr>
             </thead>
@@ -53,9 +52,10 @@ function BestPlayFilterDiagnostics({ filterDiagnostics = null }) {
                 <tr key={`${row.player}-${row.market}-${index}`}>
                   <td>{row.player}</td>
                   <td>{row.market}</td>
-                  <td>{row.confidence}%</td>
-                  <td>{row.probability}%</td>
-                  <td>{row.fullDataReason || "—"}</td>
+                  <td>{row.confidence ?? "—"}%</td>
+                  <td>{row.playability ?? "—"}</td>
+                  <td>{row.edge ?? "—"}</td>
+                  <td>{row.last10HitRate ?? "—"}%</td>
                   <td>{row.reason}</td>
                 </tr>
               ))}

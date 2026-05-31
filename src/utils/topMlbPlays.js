@@ -522,7 +522,7 @@ export function resolveTopMlbPlaySections(
     {
       id: "top-10-best-plays",
       title: "Best Plays",
-      eyebrow: "Top 10 · Tier A → B → Review Needed · Full data · Sort score ranked",
+      eyebrow: "Top 10 · Tier A → B → C · Sort score ranked",
       emptyMessage:
         topBestPlayPicks.length || (bestPlaysResult.diagnostics?.fullData ?? 0) > 0
           ? ""

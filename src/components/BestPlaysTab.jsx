@@ -128,6 +128,18 @@ function BestPlaysTab({
             </SectionErrorBoundary>
           ) : null}
 
+          {filterDiagnostics?.bestPlayFilterAudit ? (
+            <p className="compact-form-notice">
+              Tier pool A {filterDiagnostics.bestPlayFilterAudit.tierA ?? 0} · B{" "}
+              {filterDiagnostics.bestPlayFilterAudit.tierB ?? 0} · C{" "}
+              {filterDiagnostics.bestPlayFilterAudit.tierC ?? 0}
+              {" · "}
+              Shown A {filterDiagnostics.bestPlayFilterAudit.tierADisplayed ?? 0} · B{" "}
+              {filterDiagnostics.bestPlayFilterAudit.tierBDisplayed ?? 0} · C{" "}
+              {filterDiagnostics.bestPlayFilterAudit.tierCDisplayed ?? 0}
+            </p>
+          ) : null}
+
           <BestPlayFilterDiagnostics filterDiagnostics={filterDiagnostics} />
 
           <BestPlaysSection
