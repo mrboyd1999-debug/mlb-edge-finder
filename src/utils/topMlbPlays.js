@@ -57,6 +57,7 @@ import { resolveBestPlayProjection, PROJECTION_JOIN_DEBUG, passesPlayboardPoolFi
 import { compareBestPlaysRank, annotateBestPlayRankingAudit } from "./bestPlayRankingScore.js";
 import {
   dedupeByPlayerMarketBestScore,
+  dedupeByPlayerBestScore,
   buildTopSectionPicks,
   compareHighestEdgePlaysRank,
   TOP_SECTION_LIMIT,
@@ -89,7 +90,7 @@ import {
 export const TOP_MLB_PLAYS_LIMIT = HIGHEST_PROBABILITY_MAX_PLAYS;
 export const SECTION_BEST_PLAYS = HIGHEST_PROBABILITY_MAX_PLAYS;
 export const TOP_BEST_PLAYS_LIMIT = 3;
-export const MAX_PLAYER_APPEARANCES = 2;
+export const MAX_PLAYER_APPEARANCES = 1;
 export const WAITING_FOR_PROJECTIONS_MESSAGE = "Waiting for verified projections…";
 export const FALLBACK_PROJECTIONS_LABEL = "Relaxed ranking applied";
 
@@ -448,18 +449,18 @@ export function resolveTopMlbPlaySections(
   filterDiagnostics.highestProbabilityCount = highestProbabilityPicks.length;
   filterDiagnostics.noTierAPlays = noTierAPlays;
 
-  verifiedPicks = dedupeByPlayerMarketBestScore(verifiedPicks);
-  highestPicks = dedupeByPlayerMarketBestScore(highestPicks);
+  verifiedPicks = dedupeByPlayerBestScore(verifiedPicks);
+  highestPicks = dedupeByPlayerBestScore(highestPicks);
 
   const enrichedForBoard = historicalPool.map((prop) => enrichBestPlayRankingFields(prop));
   const probabilityAuditRows = logProjectedPropProbabilityAudit(enrichedForBoard);
   filterDiagnostics.probabilityAuditRows = probabilityAuditRows;
   filterDiagnostics.topProjectedDebugPlays = probabilityAuditRows.slice(0, DEBUG_BEST_PLAYS_LIMIT);
-  let boardQualityPool = dedupeByPlayerMarketBestScore(
+  let boardQualityPool = dedupeByPlayerBestScore(
     enrichedForBoard.filter(passesPlayboardPoolFilter)
   );
   if (!boardQualityPool.length) {
-    boardQualityPool = dedupeByPlayerMarketBestScore(
+    boardQualityPool = dedupeByPlayerBestScore(
       enrichedForBoard.filter(
         (prop) =>
           hasAllowedVerification(prop) &&
@@ -488,6 +489,9 @@ export function resolveTopMlbPlaySections(
   });
   const topBestPlayPicks = bestPlaysResult.picks.map((prop, idx) =>
     annotateHighestProbabilityPlay(annotateBestPlayRankingAudit(prop, idx + 1), idx + 1)
+  );
+  const morePlayPicks = (bestPlaysResult.morePlays || bestPlaysResult.topRankedUnique?.slice(TOP_BEST_PLAYS_LIMIT) || []).map(
+    (prop, idx) => annotateHighestProbabilityPlay(annotateBestPlayRankingAudit(prop, idx + TOP_BEST_PLAYS_LIMIT + 1), idx + TOP_BEST_PLAYS_LIMIT + 1)
   );
   filterDiagnostics.bestPlayDebugPlays = bestPlaysResult.debugPlays || [];
   filterDiagnostics.bestPlayFilterAudit = bestPlaysResult.diagnostics;
@@ -581,7 +585,7 @@ export function resolveTopMlbPlaySections(
     {
       id: "top-10-best-plays",
       title: "Best Plays",
-      eyebrow: "Top 3 · Ranked by probability, confidence, edge, and recent form",
+      eyebrow: "Top 3 elite MLB picks · One prop per player",
       emptyMessage: topBestPlayPicks.length
         ? ""
         : resolveVerifiedPlaysEmptyMessage({
@@ -590,6 +594,13 @@ export function resolveTopMlbPlaySections(
           }),
       fallbackNotice: bestPlaysResult.fallbackNotice || "",
       picks: topBestPlayPicks,
+    },
+    {
+      id: "more-plays",
+      title: "More Plays",
+      eyebrow: "Ranks 4–10 · Unique players · Sorted by composite score",
+      emptyMessage: morePlayPicks.length ? "" : "No additional ranked plays meet display standards.",
+      picks: morePlayPicks,
     },
     {
       id: "top-5-safest",

@@ -71,8 +71,11 @@ import {
   resolvePlayCategoryLabel,
 } from "./tierClassification.js";
 
-export const MAX_PLAYER_PROPS_IN_TOP_LIST = 2;
+export const MAX_PLAYER_PROPS_IN_TOP_LIST = 1;
 export const MAX_MARKET_PROPS_IN_TOP_LIST = 2;
+export const TOP_RANKED_UNIQUE_PLAYERS_LIMIT = 10;
+export const BOARD_DISPLAY_MIN_PROBABILITY = 65;
+export const BOARD_DISPLAY_MIN_CONFIDENCE = 70;
 export const MAX_HRR_RATIO_IN_TOP_LIST = 0.25;
 export const HRR_MARKET_KEY = "hrr";
 export const BEST_PLAYS_DIVERSITY_MARKETS = [
@@ -184,6 +187,21 @@ function defaultPickScore(prop = {}) {
   );
 }
 
+/** Keep highest-scoring prop per player (one board slot per player). */
+export function dedupeByPlayerBestScore(props = [], scoreFn = computeTopPlayFinalScore) {
+  const best = new Map();
+  for (const prop of props || []) {
+    const key = playerKey(prop);
+    if (!key) continue;
+    const score = Number(scoreFn(prop)) || 0;
+    const prev = best.get(key);
+    if (!prev || score > (Number(scoreFn(prev)) || 0)) {
+      best.set(key, prop);
+    }
+  }
+  return [...best.values()];
+}
+
 /** Keep highest-scoring prop per player + market type. */
 export function dedupeByPlayerMarketBestScore(props = [], scoreFn = defaultPickScore) {
   const best = new Map();
@@ -250,6 +268,64 @@ export function applyBestPlaysDiversityFilter(
 
   void minUniquePlayers;
   return out.slice(0, limit);
+}
+
+/** Board display gate — probability, confidence, projection edge, and positive lean. */
+export function passesBoardDisplayQualityGate(prop = {}) {
+  const probability = resolvePropProbability(prop);
+  const confidence = resolvePropConfidence(prop);
+  const line = finite(prop.line, NaN);
+  const projection = finite(prop.projection ?? prop.projectedValue, NaN);
+  if (!Number.isFinite(probability) || probability < BOARD_DISPLAY_MIN_PROBABILITY) return false;
+  if (!Number.isFinite(confidence) || confidence < BOARD_DISPLAY_MIN_CONFIDENCE) return false;
+  if (!Number.isFinite(line) || !Number.isFinite(projection) || projection <= line) return false;
+  if (!hasPositiveEdge(prop)) return false;
+  return true;
+}
+
+/** Fill ranked list with unique players and markets for display slots. */
+export function applyBoardDisplaySlotFilter(
+  props = [],
+  { limit = TOP_RANKED_UNIQUE_PLAYERS_LIMIT, existingPlayers = new Set(), existingMarkets = new Set() } = {}
+) {
+  const players = new Set(existingPlayers);
+  const markets = new Set(existingMarkets);
+  const out = [];
+  for (const prop of props || []) {
+    if (out.length >= limit) break;
+    const player = playerKey(prop);
+    const market = diversityMarketKey(prop);
+    if (!player || !market) continue;
+    if (players.has(player) || markets.has(market)) continue;
+    if (!passesBoardDisplayQualityGate(prop)) continue;
+    players.add(player);
+    markets.add(market);
+    out.push(prop);
+  }
+  return out;
+}
+
+/** Top N unique players in score order (assumes one prop per player). */
+export function selectUniquePlayerRankedPicks(props = [], limit = TOP_RANKED_UNIQUE_PLAYERS_LIMIT) {
+  const seen = new Set();
+  const out = [];
+  for (const prop of props || []) {
+    if (out.length >= limit) break;
+    const key = playerKey(prop);
+    if (!key || seen.has(key)) continue;
+    if (!passesBoardDisplayQualityGate(prop)) continue;
+    seen.add(key);
+    out.push(prop);
+  }
+  return out;
+}
+
+export function resolveBestPlayRankLabel(prop = {}, rank = 1) {
+  const tier = String(prop.finalTier || prop.tier || "").toUpperCase();
+  if (rank === 1) return tier === "A" ? "#1 Elite Play" : "#1 Best Play";
+  if (rank === 2) return tier === "A" ? "#2 Elite Play" : "#2 Best Play";
+  if (rank === 3) return tier === "A" || tier === "B" ? "#3 Best Play" : "#3 Research";
+  return `#${rank}`;
 }
 
 export function computeValidatedEdgePercent(prop = {}) {
@@ -930,31 +1006,32 @@ export function buildTopBestPlaysPicks(
   pool = [],
   {
     limit = TOP_BEST_PLAYS_TARGET,
+    rankedLimit = TOP_RANKED_UNIQUE_PLAYERS_LIMIT,
     projectedCount = 0,
-    maxPerPlayer = MAX_PLAYER_PROPS_IN_TOP_LIST,
+    maxPerPlayer = 1,
     maxPerMarket = MAX_MARKET_PROPS_IN_TOP_LIST,
   } = {}
 ) {
-  const diagnostics = buildBestPlayFilterDiagnostics(pool);
-  const rejectionSamples = buildBestPlayRejectionSamples(pool);
-  const tierPools = buildBestPlaysTierPools(pool);
+  const playerPool = dedupeByPlayerBestScore(pool);
+  const diagnostics = buildBestPlayFilterDiagnostics(playerPool);
+  const rejectionSamples = buildBestPlayRejectionSamples(playerPool);
+  const tierPools = buildBestPlaysTierPools(playerPool);
   const { eligible, tierA, tierB } = tierPools;
   const { sourcePool, activeTier, usedFallback, fallbackNotice } = resolveBestPlaysSourcePool(tierPools);
   const strictEligible = [...tierA, ...tierB];
-  const rankedSource = [...sourcePool].sort(compareTopPlayFinalScore);
-  let picks = applyBestPlaysDiversityFilter(rankedSource, {
-    limit,
-    maxPerPlayer,
-    maxPerMarket,
-    minUniquePlayers: Math.min(MIN_UNIQUE_PLAYERS_TOP_10, limit),
-  });
+  const dedupedByPlayer = dedupeByPlayerBestScore(sourcePool);
+  const qualityPool = dedupedByPlayer.filter(passesBoardDisplayQualityGate);
+  const rankedSource = [...qualityPool].sort(compareTopPlayFinalScore);
+  const topRankedUnique = selectUniquePlayerRankedPicks(rankedSource, rankedLimit);
+
+  let picks = applyBoardDisplaySlotFilter(rankedSource, { limit });
 
   if (picks.length < limit && rankedSource.length) {
     picks = fillBestPlaysToLimit(picks, rankedSource, {
       limit,
-      maxPerPlayer,
+      maxPerPlayer: 1,
       maxPerMarket,
-    });
+    }).filter(passesBoardDisplayQualityGate);
   }
 
   picks = picks.sort(compareTopPlayFinalScore).slice(0, limit);
@@ -978,17 +1055,32 @@ export function buildTopBestPlaysPicks(
         bestPlayActiveTier: activeTier,
         bestPlayFilterReason: tierAudit.reason,
         bestPlayUsedFallback: usedFallback,
+        bestPlayRankLabel: resolveBestPlayRankLabel(prop, index + 1),
       }),
       index + 1
     );
   });
 
-  diagnostics.boardDiagnostics = buildBestPlayBoardDiagnostics(pool, annotatedPicks, { limit });
+  const annotatedRanked = topRankedUnique.map((prop, index) =>
+    annotateBestPlayRankingAudit(
+      attachFinalTierFields({
+        ...prop,
+        topPlayFinalScore: computeTopPlayFinalScore(prop),
+        sortScore: computeTopPlayFinalScore(prop),
+        bestPlayRankLabel: resolveBestPlayRankLabel(prop, index + 1),
+      }),
+      index + 1
+    )
+  );
 
-  const debugPlays = buildTopProjectedDebugPlays(pool, { limit: DEBUG_BEST_PLAYS_LIMIT });
+  diagnostics.boardDiagnostics = buildBestPlayBoardDiagnostics(playerPool, annotatedPicks, { limit });
+
+  const debugPlays = buildTopProjectedDebugPlays(playerPool, { limit: DEBUG_BEST_PLAYS_LIMIT });
 
   return {
     picks: annotatedPicks,
+    topRankedUnique: annotatedRanked,
+    morePlays: annotatedRanked.slice(limit),
     debugPlays,
     usedFallback,
     fallbackNotice,

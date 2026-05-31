@@ -43,6 +43,8 @@ function BestPlayBoardDiagnosticsSummary({ boardDiagnostics = null }) {
 }
 
 function BestPlayFilterDiagnostics({ filterDiagnostics = null, showExtended = false }) {
+  if (!showExtended) return null;
+
   const audit = filterDiagnostics?.bestPlayFilterAudit;
   const boardDiagnostics = filterDiagnostics?.boardDiagnostics ?? audit?.boardDiagnostics;
   const samples = safeArray(filterDiagnostics?.bestPlayRejectionSamples);
@@ -53,7 +55,7 @@ function BestPlayFilterDiagnostics({ filterDiagnostics = null, showExtended = fa
   return (
     <>
       <BestPlayBoardDiagnosticsSummary boardDiagnostics={boardDiagnostics} />
-      {showExtended && audit ? (
+      {audit ? (
         <section className="verification-diagnostics best-play-filter-diagnostics" aria-label="Best Plays filter diagnostics">
           <h3 className="verification-diagnostics__title">Best Plays Filter Diagnostics</h3>
           <p className="verification-diagnostics__meta">
@@ -120,7 +122,7 @@ function BestPlayFilterDiagnostics({ filterDiagnostics = null, showExtended = fa
                       <td>{row.market}</td>
                       <td>{row.confidence ?? "—"}%</td>
                       <td>{row.probability ?? "—"}%</td>
-                      <td>{row.playability ?? "—"}</td>
+                      <td>{row.playability ?? "—"}%</td>
                       <td>{row.reason}</td>
                     </tr>
                   ))}

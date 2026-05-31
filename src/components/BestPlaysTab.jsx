@@ -21,8 +21,10 @@ function BestPlaysTab({
   showDebugPanels = false,
 }) {
   const topBestPlaysSection = useMemo(() => findSection(sections, "top-10-best-plays"), [sections]);
+  const morePlaysSection = useMemo(() => findSection(sections, "more-plays"), [sections]);
 
   const topBestPlays = useMemo(() => safeArray(topBestPlaysSection?.picks).slice(0, 3), [topBestPlaysSection]);
+  const morePlays = useMemo(() => safeArray(morePlaysSection?.picks), [morePlaysSection]);
 
   const fallbackNotice = topBestPlaysSection?.fallbackNotice || "";
   const tierDebug = filterDiagnostics?.bestPlayFilterAudit?.tierDebugSummary || filterDiagnostics?.tierDebugSummary;
@@ -48,7 +50,9 @@ function BestPlaysTab({
           {fallbackNotice ? <p className="compact-form-notice">{fallbackNotice}</p> : null}
         </div>
 
-        <BestPlayFilterDiagnostics filterDiagnostics={filterDiagnostics} showExtended={showDebugPanels} />
+        {showDebugPanels ? (
+          <BestPlayFilterDiagnostics filterDiagnostics={filterDiagnostics} showExtended={showDebugPanels} />
+        ) : null}
 
         {topBestPlays.length ? (
           <div className="compact-card-list">
@@ -57,7 +61,12 @@ function BestPlaysTab({
                 key={prop?.id || `${prop?.playerName}-${prop?.statType}-${prop?.line}-${index}`}
                 name={`Best Plays #${index + 1}`}
               >
-                <BestPlayRowCard prop={prop} rank={index + 1} onOpen={onOpen} />
+                <BestPlayRowCard
+                  prop={prop}
+                  rank={index + 1}
+                  rankLabel={prop.bestPlayRankLabel}
+                  onOpen={onOpen}
+                />
               </SectionErrorBoundary>
             ))}
           </div>
@@ -67,6 +76,33 @@ function BestPlaysTab({
           </p>
         )}
       </section>
+
+      {morePlays.length ? (
+        <section className="compact-section">
+          <div className="compact-section__head">
+            <h2>{morePlaysSection?.title || "More Plays"}</h2>
+            {morePlaysSection?.eyebrow ? (
+              <p className="compact-section__eyebrow">{morePlaysSection.eyebrow}</p>
+            ) : null}
+          </div>
+          <div className="compact-card-list">
+            {morePlays.map((prop, index) => (
+              <SectionErrorBoundary
+                key={prop?.id || `${prop?.playerName}-${prop?.statType}-${prop?.line}-more-${index}`}
+                name={`More Plays #${index + 1}`}
+              >
+                <BestPlayRowCard
+                  prop={prop}
+                  rank={prop.bestPlayRank ?? index + 4}
+                  rankLabel={prop.bestPlayRankLabel}
+                  compact
+                  onOpen={onOpen}
+                />
+              </SectionErrorBoundary>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {showDebugPanels ? (
         <div className="debug-diagnostics-stack">

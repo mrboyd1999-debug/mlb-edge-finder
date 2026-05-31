@@ -41,7 +41,7 @@ function resolveTierLabel(prop = {}) {
   return prop.playCategoryLabel || resolveTierDisplayLabel(prop) || "Play";
 }
 
-function BestPlayRowCard({ prop, onOpen, rank }) {
+function BestPlayRowCard({ prop, onOpen, rank, rankLabel, compact = false }) {
   const enriched = withPlayerImageUrl(prop || {});
 
   useEffect(() => {
@@ -74,7 +74,13 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
     : formatEdgeDisplay(enriched);
   const projection = resolveProjectionValue(enriched);
   const projectionLabel = projection != null && projection > 0 ? formatNumber(projection) : "—";
-  const rankScore = enriched.topPlayFinalScore ?? enriched.sortScore ?? "—";
+  const displayRankLabel = rankLabel || (rank != null ? `#${rank}` : null);
+  const reasonText =
+    enriched.qualificationReason ||
+    enriched.cardDescription ||
+    enriched.bestPlayFilterReason ||
+    enriched.probabilityExplanation ||
+    "";
   const ppLine = enriched.prizePicksLineLabel;
   const udLine = enriched.underdogLineLabel;
   const activeLine = enriched.activeLineLabel ?? (enriched.line != null ? formatNumber(enriched.line) : "—");
@@ -102,11 +108,13 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
         <PlayerImage prop={enriched} />
         <div style={styles.bestPlayRowMeta}>
           <div className="best-play-row-top-line">
-            {rank != null ? <span style={styles.bestPlayRowRank}>#{rank}</span> : null}
+            {displayRankLabel ? <span style={styles.bestPlayRowRank}>{displayRankLabel}</span> : null}
             <h3 style={styles.bestPlayRowPlayer}>{playerName}</h3>
-            <span className={`best-play-row-tier best-play-row-tier--${String(enriched.tier || enriched.finalTier || "c").toLowerCase()}`}>
-              {tierLabel}
-            </span>
+            {!compact ? (
+              <span className={`best-play-row-tier best-play-row-tier--${String(enriched.tier || enriched.finalTier || "c").toLowerCase()}`}>
+                {tierLabel}
+              </span>
+            ) : null}
           </div>
           <p style={styles.bestPlayRowSubline}>
             {matchup} · {market}
@@ -131,10 +139,12 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
             <span>
               Edge <strong>{edgeLabels?.displayEdgeLabel ?? "—"}</strong>
             </span>
-            <span>
-              Rank <strong>{rankScore}</strong>
-            </span>
           </div>
+          {reasonText ? (
+            <p className="best-play-row-subline" style={{ marginTop: 6, fontSize: 12, opacity: 0.9 }}>
+              {reasonText}
+            </p>
+          ) : null}
         </div>
       </div>
     </article>

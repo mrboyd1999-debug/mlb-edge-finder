@@ -4,6 +4,7 @@
 
 import { computePlayabilityScore } from "./propCalibration.js";
 import { isBlockedNonMlbPipelineProp, isSupportedMlbMarket } from "./mlbAllowedMarkets.js";
+import { canonicalMarketKey } from "./marketNormalization.js";
 import { PENALTY_AGGRESSIVE_RISK, PENALTY_OUTLIER } from "./probabilityCalibration.js";
 import { qualifiesEliteRecentFormCap } from "./mlbPlayConfidence.js";
 
@@ -255,6 +256,19 @@ export function resolveRecentFormScore(prop = {}) {
   return Math.max(0, Math.min(100, num <= 1 ? num * 100 : num));
 }
 
+export function resolveMarketPriorityBonus(prop = {}) {
+  const market = canonicalMarketKey(prop);
+  if (market === "hrr") return 10;
+  if (market === "totalBases") return 8;
+  if (market === "hits") return 7;
+  if (market === "rbis") return 4;
+  if (market === "fantasyScore") return -5;
+  if (!isSupportedMlbMarket(prop) || isBlockedNonMlbPipelineProp(prop)) return -10;
+  const tier = String(prop.finalTier || prop.tier || "").toUpperCase();
+  if (tier === "C") return -5;
+  return 0;
+}
+
 /** Top Play final score for Verified Plays ranking. */
 export function computeTopPlayFinalScore(prop = {}) {
   const probability = finite(prop.probabilityScore ?? prop.verifiedProbability ?? prop.probabilityNormalized, 0);
@@ -264,8 +278,9 @@ export function computeTopPlayFinalScore(prop = {}) {
   );
   const edgeScore = resolveNormalizedEdgeScore(prop);
   const recentForm = resolveRecentFormScore(prop);
+  const marketBonus = resolveMarketPriorityBonus(prop);
   const score =
-    probability * 0.45 + confidence * 0.25 + edgeScore * 0.2 + recentForm * 0.1;
+    probability * 0.45 + confidence * 0.25 + edgeScore * 0.2 + recentForm * 0.1 + marketBonus;
   return Math.round(score * 100) / 100;
 }
 
