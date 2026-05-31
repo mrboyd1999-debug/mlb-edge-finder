@@ -39,7 +39,11 @@ import { resolvePropSport } from "./mlbOnlyMode.js";
 import { resolveProjectionConfidenceLevel, classifyPropTier, attachBoardQualityFields, attachFinalTierFields, resolvePropEdge, TIER_A_MIN_CONFIDENCE, TIER_A_MIN_PLAYABILITY, TIER_A_MIN_EDGE } from "./boardQuality.js";
 import { applyBoardProbabilityCaps } from "./mlbBoardPipeline.js";
 import { attachFinalPlayMetrics, applyPitcherPendingMetricPenalty } from "./tierClassification.js";
-import { computeCalibratedProbability } from "./probabilityCalibration.js";
+import {
+  computeCalibratedProbability,
+  resolveAbsoluteEdgePercent,
+  resolveProjectionEdgeProbabilityFloor,
+} from "./probabilityCalibration.js";
 import { isInflatedProbabilityProp } from "./probabilityIntegrity.js";
 import { attachMarketProjectionValidation } from "./marketProjectionValidation.js";
 import {
@@ -365,7 +369,34 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
       { ...prop, projectionSanityAudit: sanityAudit, probabilityCalibration },
       probabilityCalibration.probability
     );
+    const edgeFloor = resolveProjectionEdgeProbabilityFloor(
+      resolveAbsoluteEdgePercent(projection, line, edgePercent)
+    );
+    if (edgeFloor != null && verifiedProbability < edgeFloor) {
+      verifiedProbability = edgeFloor;
+    }
   }
+  const historicalStatus =
+    prop.historicalStatus ||
+    (probabilityCalibration?.hitRates?.seasonRateValid ? "present" : "neutral");
+  const probabilityDebug = {
+    edge: edgePercent,
+    rawProbability: probabilityCalibration?.rawProbability ?? null,
+    adjustedProbability:
+      probabilityCalibration?.adjustedProbability ??
+      probabilityCalibration?.penalizedProbability ??
+      null,
+    finalProbability: verifiedProbability,
+    rawConfidence: modelConfidence,
+    finalConfidence: displayConfidence,
+    probabilityFloorApplied:
+      resolveProjectionEdgeProbabilityFloor(resolveAbsoluteEdgePercent(projection, line, edgePercent)) ??
+      probabilityCalibration?.probabilityFloorApplied ??
+      null,
+    historicalPenalty: probabilityCalibration?.historicalPenalty ?? 0,
+    pitcherPenalty: 0,
+    historicalStatus,
+  };
   const edgeScore = edgeMagnitude;
   const edgeLabels = playability.edgeDisplay ?? formatValidatedEdgeDisplay({ ...prop, edge, edgePercent, line });
   const direction =
@@ -436,6 +467,8 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     historicalProbability: probabilityCalibration?.historicalProbability ?? null,
     projectionProbability: probabilityCalibration?.projectionProbability ?? null,
     calibrationPenalty: probabilityCalibration?.calibrationPenalty ?? 0,
+    probabilityDebug,
+    historicalStatus,
     inflatedProbability: isInflatedProbabilityProp(
       { ...prop, probabilityScore: verifiedProbability },
       verifiedProbability

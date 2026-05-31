@@ -62,7 +62,9 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
   const confidenceLabel = confidenceValue != null ? `${confidenceValue}%` : "—";
   const probabilityValue = resolveNormalizedProbability(enriched);
   const probLabel = probabilityValue != null ? `${probabilityValue}%` : "—";
-  const tierLabel = enriched.playCategoryLabel || resolveTierDisplayLabel(enriched);
+  const tierLabel = enriched.isDebugPlay
+    ? "DEBUG PLAY"
+    : enriched.playCategoryLabel || resolveTierDisplayLabel(enriched);
   const riskLevel = String(enriched.riskLevel || "HIGH").toUpperCase();
   const edgeLabels = enriched.rawEdgeLabel
     ? { displayEdgeLabel: enriched.displayEdgeLabel }
@@ -96,7 +98,7 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
           <div className="best-play-row-top-line">
             {rank != null ? <span style={styles.bestPlayRowRank}>#{rank}</span> : null}
             <h3 style={styles.bestPlayRowPlayer}>{playerName}</h3>
-            <span className={`best-play-row-tier best-play-row-tier--${String(enriched.tier || enriched.finalTier || "c").toLowerCase()}`}>
+            <span className={`best-play-row-tier best-play-row-tier--${enriched.isDebugPlay ? "debug" : String(enriched.tier || enriched.finalTier || "c").toLowerCase()}`}>
               {tierLabel}
             </span>
           </div>

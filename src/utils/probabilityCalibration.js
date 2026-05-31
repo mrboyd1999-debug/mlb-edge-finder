@@ -18,8 +18,11 @@ export const CALIBRATION_MAX_VERIFIED = CALIBRATION_ELITE_MAX_PROBABILITY;
 export const CALIBRATION_MAX_RESEARCH = CALIBRATION_DEFAULT_MAX_PROBABILITY;
 
 export const PROJECTION_QUALITY_LOW_CONFIDENCE_CAP = 70;
-export const PENALTY_OUTLIER = 15;
-export const PENALTY_AGGRESSIVE_RISK = 10;
+export const PENALTY_OUTLIER = 8;
+export const PENALTY_AGGRESSIVE_RISK = 5;
+export const PROJECTION_EDGE_FLOOR_15 = 60;
+export const PROJECTION_EDGE_FLOOR_25 = 65;
+export const PROJECTION_EDGE_FLOOR_35 = 70;
 export const SAMPLE_SIZE_MIN_GAMES = 20;
 export const SAMPLE_SIZE_CONFIDENCE_MULTIPLIER = 0.85;
 export const CONFIDENCE_PROBABILITY_BUFFER = 5;
@@ -145,7 +148,7 @@ export function computeMatchupAdjustment(prop = {}) {
     else if (rank <= 8) adj -= 5;
     else if (rank <= 12) adj -= 2;
   } else if (hasMissingOpponentData(prop)) {
-    adj -= 4;
+    adj -= 2;
   } else if (String(prop.opponent || "").trim()) {
     adj += 1.5;
   }
@@ -153,8 +156,8 @@ export function computeMatchupAdjustment(prop = {}) {
   const confidence = String(prop.matchupConfidence || "").toUpperCase();
   if (confidence === "HIGH") adj += 3;
   else if (confidence === "MEDIUM" || confidence === "FORM") adj += 1;
-  else if (isLowMatchupProp(prop)) adj -= 5;
-  else if (hasMissingMatchupData(prop)) adj -= 7;
+  else if (isLowMatchupProp(prop)) adj -= 2.5;
+  else if (hasMissingMatchupData(prop)) adj -= 3.5;
 
   const form = finite(prop.formConfidenceScore);
   if (form != null) adj += (form - 50) * 0.07;
@@ -163,7 +166,25 @@ export function computeMatchupAdjustment(prop = {}) {
   if (/favorable|boost|plus|weak pitching|short porch|wind out/i.test(note)) adj += 2;
   if (/tough|suppress|elite|degrom|skubal/i.test(note)) adj -= 2;
 
-  return round1(clamp(adj, -14, 16));
+  return round1(clamp(adj, -7, 16));
+}
+
+export function resolveAbsoluteEdgePercent(projection = null, line = null, edgePercent = null) {
+  const pct = finite(edgePercent);
+  if (pct != null) return Math.abs(pct);
+  const proj = finite(projection);
+  const ln = finite(line);
+  if (proj == null || ln == null || ln <= 0) return null;
+  return round1((Math.abs(proj - ln) / ln) * 100);
+}
+
+export function resolveProjectionEdgeProbabilityFloor(edgePercent = null) {
+  const edge = finite(edgePercent);
+  if (edge == null) return null;
+  if (edge > 35) return PROJECTION_EDGE_FLOOR_35;
+  if (edge > 25) return PROJECTION_EDGE_FLOOR_25;
+  if (edge > 15) return PROJECTION_EDGE_FLOOR_15;
+  return null;
 }
 
 function resolveProbabilityConfidence(prop = {}, options = {}) {
@@ -324,15 +345,16 @@ export function resolveProjectionProbability(prop = {}, projection = null, line 
   return clamp(Math.round(prob), 35, 68);
 }
 
-export function computeHistoryProjectionDisagreementPenalty(historicalProb, projectionProb) {
+export function computeHistoryProjectionDisagreementPenalty(historicalProb, projectionProb, { seasonValid = true } = {}) {
+  if (!seasonValid) return 0;
   const historical = finite(historicalProb);
   const projection = finite(projectionProb);
   if (historical == null || projection == null) return 0;
   const gap = projection - historical;
   if (gap <= 8) return 0;
-  if (gap <= 15) return 10;
-  if (gap <= 25) return 15;
-  return 20;
+  if (gap <= 15) return 5;
+  if (gap <= 25) return 8;
+  return 10;
 }
 
 export function applyProbabilitySanityChecks(probability, hitRates = {}, matchupScore = 50) {
@@ -341,7 +363,7 @@ export function applyProbabilitySanityChecks(probability, hitRates = {}, matchup
   const score = finite(matchupScore) ?? 50;
   let adjusted = probability;
   if (l5 != null && l10 != null && l5 < 50 && l10 < 50 && score <= PROBABILITY_SANITY_MATCHUP_UNLOCK) {
-    adjusted = Math.min(adjusted, PROBABILITY_SANITY_LOW_HIT_RATE_CAP);
+    adjusted = Math.min(adjusted, PROBABILITY_SANITY_LOW_HIT_RATE_CAP + 4);
   }
   return Math.round(adjusted);
 }
@@ -408,9 +430,6 @@ function resolveProbabilityCeiling(prop = {}, metrics = {}, hitRates = {}, confi
     !penalties.projectionConfidenceLow;
 
   let ceiling = eliteUnlock ? CALIBRATION_ELITE_MAX_PROBABILITY : CALIBRATION_DEFAULT_MAX_PROBABILITY;
-  if (!penalties.seasonValid) {
-    ceiling = Math.min(ceiling, CALIBRATION_SEASON_MISSING_MAX_PROBABILITY);
-  }
 
   return {
     ceiling,
@@ -468,16 +487,27 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
 
   const calibrationPenalty = computeHistoryProjectionDisagreementPenalty(
     historicalProbability,
-    projectionProbability
+    projectionProbability,
+    { seasonValid }
   );
+  const historicalPenalty = seasonValid ? calibrationPenalty : 0;
+  const pitcherPenalty = 0;
+  const absoluteEdgePercent = resolveAbsoluteEdgePercent(projection, line, metrics.edgePercent);
+  const edgeProbabilityFloor = resolveProjectionEdgeProbabilityFloor(absoluteEdgePercent);
 
   const cap = resolveProbabilityCeiling(prop, metrics, hitRates, resolveProbabilityConfidence(prop, options), penalties);
   const penalizedProbability = round2(
-    prePenaltyProbability - penalties.totalPenalty - calibrationPenalty * 0.65
+    prePenaltyProbability - penalties.totalPenalty - calibrationPenalty * 0.325
   );
   let probability = clamp(penalizedProbability, CALIBRATION_MIN_PROBABILITY, cap.ceiling);
   probability = applyProbabilitySanityChecks(probability, hitRates, matchupScore);
   probability = applyProbabilityDistributionSpread(probability, prePenaltyProbability, prop, metrics);
+  const adjustedBeforeFloor = probability;
+  let probabilityFloorApplied = null;
+  if (edgeProbabilityFloor != null && probability < edgeProbabilityFloor) {
+    probability = edgeProbabilityFloor;
+    probabilityFloorApplied = edgeProbabilityFloor;
+  }
   probability = Math.round(probability);
   const probabilityTier = resolveProbabilityTier(probability);
   const probabilityExplanation = buildProbabilityExplanation({
@@ -500,12 +530,16 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
     finalProbability: `${probabilityExplanation.finalProbability}%`,
     calibrationPenalty: calibrationPenalty ? `-${calibrationPenalty}` : "0",
     projectionQuality: `${round1(marketValidationScore)}%`,
-    projectionEdge: `${round1(projectionProbability)}%`,
+    projectionEdge: `${round1(absoluteEdgePercent ?? projectionProbability)}%`,
     edgeScore: `${round1(marketValidationScore)}%`,
     edgeContribution: marketContribution,
     prePenaltyProbability: `${round1(prePenaltyProbability)}%`,
     rawProbability: `${round1(prePenaltyProbability)}%`,
+    adjustedProbability: `${round1(adjustedBeforeFloor)}%`,
     penalizedProbability: `${round1(penalizedProbability)}%`,
+    probabilityFloorApplied: probabilityFloorApplied != null ? `${probabilityFloorApplied}%` : "0",
+    historicalPenalty: historicalPenalty ? `-${historicalPenalty}` : "0",
+    pitcherPenalty: "0",
     calibratedProbability: `${round1(probability)}%`,
     probabilityTier,
     seasonHitRateLabel: hitRates.seasonLabel,
@@ -535,6 +569,11 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
     rawProbability: prePenaltyProbability,
     prePenaltyProbability,
     penalizedProbability,
+    adjustedProbability: adjustedBeforeFloor,
+    probabilityFloorApplied,
+    historicalPenalty,
+    pitcherPenalty,
+    edge: absoluteEdgePercent,
     calibratedProbability: probability,
     probabilityTier,
     historicalProbability,
@@ -549,6 +588,8 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
       missingSeasonPenalty: penalties.missingSeasonPenalty,
       sampleSizePenalty: penalties.sampleSizePenalty,
       calibrationPenalty,
+      historicalPenalty,
+      pitcherPenalty,
       totalPenalty: penalties.totalPenalty + calibrationPenalty,
       sampleSizeSmall: penalties.sampleSizeSmall,
       seasonMissingCap: penalties.seasonMissingCap,
@@ -557,6 +598,11 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
       rawProbability: prePenaltyProbability,
       prePenaltyProbability,
       penalizedProbability,
+      adjustedProbability: adjustedBeforeFloor,
+      probabilityFloorApplied,
+      historicalPenalty,
+      pitcherPenalty,
+      edge: absoluteEdgePercent,
       calibratedProbability: probability,
       probabilityTier,
       historicalProbability,

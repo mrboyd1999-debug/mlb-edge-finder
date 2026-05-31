@@ -41,6 +41,7 @@ import { buildProbabilityDistributionAudit,
 } from "./probabilityDistributionAudit.js";
 import { buildProjectionSanityAudit } from "./projectionSanityAudit.js";
 import { enrichBestPlayRankingFields } from "./bestPlayRanking.js";
+import { logProbabilityEngineSummary } from "./probabilityEngineAudit.js";
 import { computePlayabilityBreakdown } from "./playabilityScoring.js";
 import {
   buildTopVerifiedScoringAuditRows,
@@ -860,5 +861,10 @@ export function logVerificationDashboardAudit(props = [], options = {}) {
     regressionReasons: dashboard.regressionReasons,
   });
 
-  return { ...dashboard, scoreAudit, regression };
+  const probabilityEngineSummary = logProbabilityEngineSummary(props, {
+    verifiedCount: dashboard.verifiedPasses ?? dashboard.verifiedCount ?? 0,
+    failedProbability: dashboard.failedProbability ?? 0,
+  });
+
+  return { ...dashboard, scoreAudit, regression, probabilityEngineSummary };
 }

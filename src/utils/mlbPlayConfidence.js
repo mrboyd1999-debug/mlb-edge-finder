@@ -14,10 +14,10 @@ export const CONFIDENCE_WEIGHTS = {
 };
 
 export const CONFIDENCE_PENALTY_CAPS = {
-  missingPitcher: 2,
-  missingSeason: 1,
-  missingSeasonEliteRecentCap: 2,
-  partialMatchup: 5,
+  missingPitcher: 0,
+  missingSeason: 0,
+  missingSeasonEliteRecentCap: 1,
+  partialMatchup: 3,
 };
 
 export const CONFIDENCE_FLOOR_MIN = 65;

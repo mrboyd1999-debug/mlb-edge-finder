@@ -173,14 +173,20 @@ const TOP_PROJECTED_DEBUG_COLUMNS = [
   { key: "player", label: "Player" },
   { key: "market", label: "Market" },
   { key: "projection", label: "Projection" },
-  { key: "probability", label: "Probability", suffix: "%" },
-  { key: "confidence", label: "Confidence", suffix: "%" },
-  { key: "tier", label: "Tier" },
-  { key: "matchedProfile", label: "Matched Profile" },
-  { key: "playerId", label: "Player ID" },
-  { key: "historicalSource", label: "Historical Source" },
+  { key: "line", label: "Line" },
+  { key: "edge", label: "Edge", suffix: "%" },
+  { key: "rawProbability", label: "Raw Prob", suffix: "%" },
+  { key: "adjustedProbability", label: "Adjusted Prob", suffix: "%" },
+  { key: "finalProbability", label: "Final Prob", suffix: "%" },
+  { key: "probabilityFloorApplied", label: "Floor Applied", suffix: "%" },
+  { key: "historicalPenalty", label: "Hist Penalty" },
+  { key: "pitcherPenalty", label: "Pitcher Penalty" },
+  { key: "rawConfidence", label: "Raw Conf", suffix: "%" },
+  { key: "finalConfidence", label: "Final Conf", suffix: "%" },
   { key: "historicalStatus", label: "Status" },
 ];
+
+const PROBABILITY_AUDIT_COLUMNS = TOP_PROJECTED_DEBUG_COLUMNS;
 
 function VerificationFailureBreakdown({ filterDiagnostics = null, heavyAuditEnabled = false }) {
   const dashboard = filterDiagnostics?.verificationDashboard || null;
@@ -193,7 +199,11 @@ function VerificationFailureBreakdown({ filterDiagnostics = null, heavyAuditEnab
   const scoreCloneAudit = dashboard?.scoreCloneAudit || null;
   const historicalCoverageAudit = dashboard?.historicalCoverageAudit || null;
   const historicalSampleRows = safeArray(historicalCoverageAudit?.sampleRows);
-  const topProjectedDebugPlays = safeArray(filterDiagnostics?.topProjectedDebugPlays);
+  const topProjectedDebugPlays = safeArray(
+    filterDiagnostics?.topProjectedDebugPlays || filterDiagnostics?.probabilityAuditRows
+  );
+  const probabilityAuditRows = safeArray(filterDiagnostics?.probabilityAuditRows);
+  const probabilitySummary = filterDiagnostics?.probabilityEngineSummary || null;
 
   const projectedProps =
     breakdown?.propsWithProjections ??
@@ -286,6 +296,16 @@ function VerificationFailureBreakdown({ filterDiagnostics = null, heavyAuditEnab
     { key: "tierB", label: "Tier B", value: tierB },
     { key: "tierC", label: "Tier C", value: tierC },
     { key: "tierD", label: "Tier D (Research)", value: tierD },
+    {
+      key: "averageProbability",
+      label: "Average Probability",
+      value: probabilitySummary?.averageProbability != null ? `${probabilitySummary.averageProbability}%` : "—",
+    },
+    {
+      key: "highestProbability",
+      label: "Highest Probability",
+      value: probabilitySummary?.highestProbability != null ? `${probabilitySummary.highestProbability}%` : "—",
+    },
   ];
 
   return (
@@ -345,6 +365,14 @@ function VerificationFailureBreakdown({ filterDiagnostics = null, heavyAuditEnab
         rows={topProjectedDebugPlays}
         columns={TOP_PROJECTED_DEBUG_COLUMNS}
         emptyMessage="No projected props available yet."
+        scrollable
+      />
+
+      <AuditTable
+        title="Projected Prop Probability Audit"
+        rows={probabilityAuditRows}
+        columns={PROBABILITY_AUDIT_COLUMNS}
+        emptyMessage="No probability audit rows yet."
         scrollable
       />
 

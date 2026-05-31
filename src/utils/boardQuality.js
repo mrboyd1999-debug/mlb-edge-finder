@@ -47,6 +47,7 @@ import {
   resolveSampleGames,
 } from "./mlbBoardPipeline.js";
 import { attachPropDisplayFields, resolveNormalizedConfidence, resolveNormalizedProbability } from "./propDisplayFields.js";
+import { passesVerifiedBestPlaysFilter } from "./bestPlaysPipelineDebug.js";
 
 export { classifyPropTier, getTierAFailures, getTierBFailures, buildTierDebugSummary, hasPositiveEdge, hasAllowedVerification, passesResearchPlayThresholds, passesBestPlayDisplayGate, BEST_PLAYS_BOARD_MIN, ELITE_TIER_METRICS, resolvePlayCategory, resolvePlayCategoryLabel } from "./tierClassification.js";
 import {
@@ -138,6 +139,7 @@ export const BEST_PLAY_MIN_SANITY = 0;
 export const MIN_UNIQUE_PLAYERS_TOP_10 = 5;
 export const MIN_PROJECTED_PROPS_FOR_BEST_PLAYS = 20;
 export const BEST_PLAYS_DISPLAY_LIMIT = 5;
+export const DEBUG_BEST_PLAYS_LIMIT = 10;
 export const TOP_BEST_PLAYS_TARGET = BEST_PLAYS_DISPLAY_LIMIT;
 export const CONFIDENCE_CALIBRATION_MIN = 50;
 export const CONFIDENCE_CALIBRATION_MAX = 95;
@@ -884,6 +886,36 @@ function passesVerifiedPlayShowThresholds(prop = {}) {
   return passesBestPlayBoardThresholds(prop);
 }
 
+export function buildTopProjectedDebugPlays(pool = [], { limit = DEBUG_BEST_PLAYS_LIMIT } = {}) {
+  const projected = (pool || [])
+    .filter((prop) => {
+      const projection = finite(prop.projection ?? prop.projectedValue, NaN);
+      return Number.isFinite(projection) && projection > 0;
+    })
+    .sort(compareTopPlayFinalScore)
+    .slice(0, limit);
+
+  return projected.map((prop, index) => {
+    const verified = passesVerifiedBestPlaysFilter(prop);
+    const boardEligible = passesBestPlayBoardThresholds(prop);
+    const isDebugPlay = !verified || !boardEligible;
+    return annotateBestPlayRankingAudit(
+      attachFinalTierFields({
+        ...prop,
+        isDebugPlay,
+        playCategory: isDebugPlay ? "DEBUG" : resolvePlayCategory(prop),
+        playCategoryLabel: isDebugPlay ? "DEBUG PLAY" : resolvePlayCategoryLabel(prop),
+        topPlayFinalScore: computeTopPlayFinalScore(prop),
+        topPlayRankExplanation: buildTopPlayRankExplanation(prop),
+        sortScore: computeTopPlayFinalScore(prop),
+        fallbackRankingScore: computeTopPlayFinalScore(prop),
+        bestPlayFilterReason: isDebugPlay ? "Probability or tier threshold failed" : "",
+      }),
+      index + 1
+    );
+  });
+}
+
 export function buildTopBestPlaysPicks(
   pool = [],
   {
@@ -943,8 +975,11 @@ export function buildTopBestPlaysPicks(
 
   diagnostics.boardDiagnostics = buildBestPlayBoardDiagnostics(pool, annotatedPicks, { limit });
 
+  const debugPlays = buildTopProjectedDebugPlays(pool, { limit: DEBUG_BEST_PLAYS_LIMIT });
+
   return {
     picks: annotatedPicks,
+    debugPlays,
     usedFallback,
     fallbackNotice,
     activeTier,

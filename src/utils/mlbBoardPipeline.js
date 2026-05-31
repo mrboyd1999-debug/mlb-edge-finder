@@ -224,19 +224,14 @@ export function applyBoardProbabilityCaps(prop = {}, probability = null) {
   let value = finite(probability ?? prop.probabilityScore ?? prop.verifiedProbability);
   if (value == null) return null;
 
-  const hitRates = prop.probabilityCalibration?.hitRates || {};
-  const seasonMissing = !hitRates.seasonRateValid && !hasSeasonRate(prop);
   const sampleGames = resolveSampleGames(prop);
-  const pitcherStatus = resolvePitcherStatus(prop);
   const flags = prop.projectionSanityAudit || {};
   const aggressive = prop.projectionRisk === "AGGRESSIVE" || flags.projectionRisk === "AGGRESSIVE";
   const outlier = Boolean(prop.projectionOutlierDetected || flags.outlierDetected || flags.outlierWarning);
 
-  if (seasonMissing) value = Math.min(value, 68);
-  if (sampleGames != null && sampleGames < 10) value = Math.min(value, 66);
-  if (pitcherStatus !== "verified") value = Math.min(value, 71);
+  if (sampleGames != null && sampleGames < 10) value = Math.min(value, 69);
 
-  if (aggressive || outlier) value = Math.min(value, 72);
+  if (aggressive || outlier) value = Math.min(value, 74);
 
   return Math.round(Math.max(50, value));
 }

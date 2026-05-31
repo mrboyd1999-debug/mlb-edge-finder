@@ -22,7 +22,7 @@ function BestPlaysTab({
 }) {
   const topBestPlaysSection = useMemo(() => findSection(sections, "top-10-best-plays"), [sections]);
 
-  const topBestPlays = useMemo(() => safeArray(topBestPlaysSection?.picks).slice(0, 5), [topBestPlaysSection]);
+  const topBestPlays = useMemo(() => safeArray(topBestPlaysSection?.picks).slice(0, 10), [topBestPlaysSection]);
 
   const fallbackNotice = topBestPlaysSection?.fallbackNotice || "";
   const tierDebug = filterDiagnostics?.bestPlayFilterAudit?.tierDebugSummary || filterDiagnostics?.tierDebugSummary;

@@ -17,7 +17,7 @@ export const RESEARCH_TIER_METRICS = { confidence: 65 };
 /** Best Plays board — same thresholds as Tier B; tier priority handles A vs B vs C */
 export const BEST_PLAYS_BOARD_MIN = { ...TIER_B_METRICS };
 export const BEST_PLAY_DISPLAY_MIN = BEST_PLAYS_BOARD_MIN;
-export const PITCHER_PENDING_CONFIDENCE_PENALTY = 2;
+export const PITCHER_PENDING_CONFIDENCE_PENALTY = 0;
 
 function finite(value, fallback = NaN) {
   const num = Number(value);
