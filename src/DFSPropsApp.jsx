@@ -5206,6 +5206,7 @@ export default function DFSPropsApp() {
             onSaveManualStats={handleManualStatsSave}
             onSavePick={saveThisPick}
             isSaved={isPropSaved(selectedEvaluation, savedPicks)}
+            showDebugPanels={showDebugPanels}
             variant={isManualAnalyzerProp(selectedEvaluation) ? "manual" : "breakdown"}
           />
         </SectionErrorBoundary>

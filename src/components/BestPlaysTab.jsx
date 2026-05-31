@@ -28,6 +28,7 @@ function BestPlaysTab({
   }, [topBestPlaysSection]);
 
   const fallbackNotice = topBestPlaysSection?.fallbackNotice || "";
+  const tierDebug = filterDiagnostics?.bestPlayFilterAudit?.tierDebugSummary || filterDiagnostics?.tierDebugSummary;
 
   if (loading) {
     return (
@@ -43,25 +44,6 @@ function BestPlaysTab({
   return (
     <div className="compact-tab-panel">
       {loadError ? <p className="compact-form-notice">{loadError}</p> : null}
-
-      {showDebugPanels && filterDiagnostics?.verificationCounts ? (
-        <p className="compact-form-notice">
-          Projected Props {filterDiagnostics.verificationCounts.projectedProps ?? 0}
-          {" · "}
-          Verified Full {filterDiagnostics.verificationCounts.verifiedFull ?? 0}
-          {" · "}
-          Verified Partial {filterDiagnostics.verificationCounts.verifiedPartial ?? 0}
-          {" · "}
-          Tier A {filterDiagnostics.verificationCounts.tierA ?? 0}
-          {" · "}
-          Tier B {filterDiagnostics.verificationCounts.tierB ?? 0}
-          {" · "}
-          Tier C {filterDiagnostics.verificationCounts.tierC ?? 0}
-        </p>
-      ) : null}
-
-      {showDebugPanels ? <BestPlayFilterDiagnostics filterDiagnostics={filterDiagnostics} /> : null}
-      {showDebugPanels ? <TierAuditPanel auditRows={filterDiagnostics?.tierAuditBatch} limit={12} /> : null}
 
       <section className="compact-section">
         <div className="compact-section__head">
@@ -84,6 +66,18 @@ function BestPlaysTab({
           <p className="compact-empty">{NO_VERIFIED_PLAYS_MESSAGE}</p>
         )}
       </section>
+
+      {showDebugPanels ? (
+        <div className="debug-diagnostics-stack">
+          {tierDebug ? (
+            <p className="compact-form-notice">
+              Tier A {tierDebug.tierA ?? 0} · Tier B {tierDebug.tierB ?? 0} · Tier C {tierDebug.tierC ?? 0}
+            </p>
+          ) : null}
+          <BestPlayFilterDiagnostics filterDiagnostics={filterDiagnostics} />
+          <TierAuditPanel auditRows={filterDiagnostics?.tierAuditBatch} limit={12} />
+        </div>
+      ) : null}
     </div>
   );
 }

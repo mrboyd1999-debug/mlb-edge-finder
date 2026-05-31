@@ -1,7 +1,6 @@
 import { memo, useMemo, useState } from "react";
 import { formatDateTime, formatNumber } from "../utils/formatters.js";
-import { resolveTierDisplayLabel } from "../utils/boardQuality.js";
-import { buildSavedPickSummary } from "../utils/savedPicksStorage.js";
+import { buildSavedPickSummary, formatSavedTierLabel } from "../utils/savedPicksStorage.js";
 
 const GRADE_OPTIONS = ["pending", "won", "lost", "push"];
 
@@ -23,14 +22,16 @@ function SavedPickRow({ pick, onOpen, onDelete, onGrade }) {
           <strong>{pick.playerName}</strong>
           <span>Saved {formatDateTime(pick.savedAt) || "—"}</span>
         </div>
+        <p>{pick.matchup || `${pick.team || "—"} vs ${pick.opponent || "—"}`}</p>
         <p>
           {pick.market} · {pick.recommendedSide} · Line {formatNumber(pick.line)} · Proj{" "}
           {pick.projection != null ? formatNumber(pick.projection) : "—"}
         </p>
         <div className="saved-pick-row__metrics">
           <span>Edge {pick.edge != null ? formatNumber(pick.edge) : "—"}</span>
+          <span>Prob {Number.isFinite(Number(pick.probability)) ? `${Math.round(Number(pick.probability))}%` : "—"}</span>
           <span>Conf {Number.isFinite(Number(pick.confidence)) ? `${Math.round(Number(pick.confidence))}%` : "—"}</span>
-          <span>{resolveTierDisplayLabel({ tier: pick.tier })}</span>
+          <span>{formatSavedTierLabel(pick.tier)}</span>
           <span className={`saved-pick-row__status saved-pick-row__status--${pick.resultStatus || "pending"}`}>
             {formatGradeLabel(pick.resultStatus)}
           </span>
@@ -43,7 +44,11 @@ function SavedPickRow({ pick, onOpen, onDelete, onGrade }) {
             <button
               key={status}
               type="button"
-              className={pick.resultStatus === status ? "saved-pick-row__grade-btn saved-pick-row__grade-btn--active" : "saved-pick-row__grade-btn"}
+              className={
+                pick.resultStatus === status
+                  ? "saved-pick-row__grade-btn saved-pick-row__grade-btn--active"
+                  : "saved-pick-row__grade-btn"
+              }
               onClick={() => onGrade?.(pick.id, { resultStatus: status, actualResult })}
             >
               {formatGradeLabel(status)}
@@ -57,11 +62,11 @@ function SavedPickRow({ pick, onOpen, onDelete, onGrade }) {
             value={actualResult}
             onChange={(event) => setActualResult(event.target.value)}
             onBlur={() => onGrade?.(pick.id, { resultStatus: pick.resultStatus || "pending", actualResult })}
-            placeholder="e.g. 2 hits"
+            placeholder="e.g. 2 H+R+RBI"
           />
         </label>
         <button type="button" className="compact-prop-card__btn compact-prop-card__btn--danger" onClick={() => onDelete?.(pick)}>
-          Remove
+          Delete
         </button>
       </div>
     </article>
@@ -91,14 +96,31 @@ function SavedPicksTab({ picks = [], onOpen, onDelete, onClearAll, onGrade }) {
         </button>
       </div>
 
-      <div className="saved-pick-summary">
-        <span>Total <strong>{summary.total}</strong></span>
-        <span>Pending <strong>{summary.pending}</strong></span>
-        <span>Won <strong>{summary.won}</strong></span>
-        <span>Lost <strong>{summary.lost}</strong></span>
-        <span>Push <strong>{summary.push}</strong></span>
-        <span>Win rate <strong>{summary.winRate != null ? `${summary.winRate}%` : "—"}</strong></span>
-      </div>
+      <section className="outcome-tracker-panel">
+        <h3>Outcome Tracker</h3>
+        <div className="saved-pick-summary">
+          <span>Total <strong>{summary.total}</strong></span>
+          <span>Pending <strong>{summary.pending}</strong></span>
+          <span>Won <strong>{summary.won}</strong></span>
+          <span>Lost <strong>{summary.lost}</strong></span>
+          <span>Push <strong>{summary.push}</strong></span>
+          <span>
+            Win rate{" "}
+            <strong>{summary.hasGradedPicks ? `${summary.winRate}%` : "No graded picks yet."}</strong>
+          </span>
+        </div>
+        <div className="outcome-tracker-tier-records">
+          <span>Tier A Record: <strong>{summary.tierARecord.label}</strong></span>
+          <span>Tier B Record: <strong>{summary.tierBRecord.label}</strong></span>
+          <span>Tier C Record: <strong>{summary.tierCRecord.label}</strong></span>
+          <span>
+            Last 50 win rate:{" "}
+            <strong>
+              {summary.last50Graded > 0 ? `${summary.last50WinRate}%` : "No graded picks yet."}
+            </strong>
+          </span>
+        </div>
+      </section>
 
       <div className="saved-pick-list">
         {picks.map((pick) => (

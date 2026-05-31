@@ -14,9 +14,9 @@ export const CONFIDENCE_WEIGHTS = {
 };
 
 export const CONFIDENCE_PENALTY_CAPS = {
-  missingPitcher: 5,
-  missingSeason: 3,
-  missingSeasonEliteRecentCap: 5,
+  missingPitcher: 2,
+  missingSeason: 1,
+  missingSeasonEliteRecentCap: 2,
   partialMatchup: 5,
 };
 
@@ -214,14 +214,7 @@ export function resolveConfidencePenalties(prop = {}) {
       amount: CONFIDENCE_PENALTY_CAPS.partialMatchup,
     });
   }
-  const integrityPenalty = resolveIntegrityConfidencePenalty(prop);
-  if (integrityPenalty > 0) {
-    penalties.push({
-      key: "integrity",
-      label: "Integrity penalty",
-      amount: integrityPenalty,
-    });
-  }
+  const integrityPenalty = 0;
   const penaltyTotal = penalties.reduce((sum, row) => sum + row.amount, 0);
   return {
     penalties,

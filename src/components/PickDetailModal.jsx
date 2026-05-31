@@ -165,6 +165,7 @@ export default function PickDetailModal({
   onSaveManualStats,
   onSavePick,
   isSaved = false,
+  showDebugPanels = false,
   variant = "breakdown",
 }) {
   const manualProp = variant === "manual" && isManualAnalyzerProp(rawProp);
@@ -515,7 +516,7 @@ export default function PickDetailModal({
                 </div>
               ) : null}
 
-              {prop.confidenceComponents || prop.confidenceBreakdown?.components ? (
+              {showDebugPanels && (prop.confidenceComponents || prop.confidenceBreakdown?.components) ? (
                 <div className="pick-detail-modal-section">
                   <SectionErrorBoundary name="Confidence Components">
                     <ConfidenceComponentsPanel audit={prop.confidenceComponents || prop.confidenceBreakdown} />
@@ -523,7 +524,7 @@ export default function PickDetailModal({
                 </div>
               ) : null}
 
-              {prop.tierAudit || prop.confidenceAudit ? (
+              {showDebugPanels && (prop.tierAudit || prop.confidenceAudit) ? (
                 <div className="pick-detail-modal-section">
                   <SectionErrorBoundary name="Tier Audit">
                     <TierAuditPanel auditRows={[prop.tierAudit].filter(Boolean)} limit={1} />
@@ -531,7 +532,7 @@ export default function PickDetailModal({
                 </div>
               ) : null}
 
-              {breakdownMode && prop.dataIntegrity ? (
+              {showDebugPanels && breakdownMode && prop.dataIntegrity ? (
                 <div className="pick-detail-modal-section">
                   <DataIntegrityPanel audit={prop.dataIntegrity} />
                 </div>

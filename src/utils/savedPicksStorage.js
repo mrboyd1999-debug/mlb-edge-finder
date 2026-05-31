@@ -1,5 +1,5 @@
 import { safeParseJSON } from "./safeParseJSON.js";
-import { resolveRecommendedSide, resolveFinalTier } from "./boardQuality.js";
+import { resolveRecommendedSide, resolveFinalTier, resolveTierDisplayLabel } from "./boardQuality.js";
 import { resolveVerificationStatus } from "./verificationStatus.js";
 import { resolveProjectionValue } from "./projectionQuality.js";
 import { formatEdgeDisplay } from "./conservativeProjection.js";
@@ -13,6 +13,20 @@ function normalizeResultStatus(value = "pending") {
   if (key === "loss" || key === "lost") return "lost";
   if (key === "push") return "push";
   return "pending";
+}
+
+function tierKey(value = "") {
+  const key = String(value || "C").trim().toUpperCase().replace(/^TIER\s*/i, "");
+  if (key === "A" || key === "PREMIUM") return "A";
+  if (key === "B" || key === "PLAYABLE") return "B";
+  return "C";
+}
+
+function buildTierRecord(rows = []) {
+  const won = rows.filter((row) => normalizeResultStatus(row.resultStatus) === "won").length;
+  const lost = rows.filter((row) => normalizeResultStatus(row.resultStatus) === "lost").length;
+  const push = rows.filter((row) => normalizeResultStatus(row.resultStatus) === "push").length;
+  return { won, lost, push, label: `${won}-${lost}-${push}` };
 }
 
 export function buildSavedPickDedupKey(pick = {}) {
@@ -58,7 +72,7 @@ export function buildSavedPickFromProp(prop = {}) {
     dataSource: prop.platform || prop.source || prop.dataSource || "",
     resultStatus: "pending",
     actualResult: "",
-    gradedAt: "",
+    gradedAt: null,
     propSnapshot: prop,
   };
 }
@@ -115,7 +129,7 @@ export function updateSavedPickResult(id, { resultStatus, actualResult = "" } = 
       ...row,
       resultStatus: normalized,
       actualResult: actualResult ?? row.actualResult ?? "",
-      gradedAt: normalized === "pending" ? "" : new Date().toISOString(),
+      gradedAt: normalized === "pending" ? null : new Date().toISOString(),
     };
   });
   writeSavedPicks(picks);
@@ -131,6 +145,21 @@ export function buildSavedPickSummary(picks = []) {
   const graded = won + lost;
   const winRate = graded > 0 ? Math.round((won / graded) * 100) : null;
 
+  const tierA = rows.filter((row) => tierKey(row.tier) === "A");
+  const tierB = rows.filter((row) => tierKey(row.tier) === "B");
+  const tierC = rows.filter((row) => tierKey(row.tier) === "C");
+
+  const last50 = [...rows]
+    .sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime())
+    .slice(0, 50);
+  const last50Graded = last50.filter((row) => {
+    const status = normalizeResultStatus(row.resultStatus);
+    return status === "won" || status === "lost";
+  });
+  const last50Won = last50Graded.filter((row) => normalizeResultStatus(row.resultStatus) === "won").length;
+  const last50WinRate =
+    last50Graded.length > 0 ? Math.round((last50Won / last50Graded.length) * 100) : null;
+
   return {
     total: rows.length,
     pending,
@@ -138,10 +167,20 @@ export function buildSavedPickSummary(picks = []) {
     lost,
     push,
     winRate,
+    hasGradedPicks: graded > 0,
+    tierARecord: buildTierRecord(tierA),
+    tierBRecord: buildTierRecord(tierB),
+    tierCRecord: buildTierRecord(tierC),
+    last50WinRate,
+    last50Graded: last50Graded.length,
   };
 }
 
 export function isPropSaved(prop = {}, savedPicks = []) {
   const key = buildSavedPickDedupKey(buildSavedPickFromProp(prop));
   return (savedPicks || readSavedPicks()).some((row) => buildSavedPickDedupKey(row) === key);
+}
+
+export function formatSavedTierLabel(tier = "") {
+  return resolveTierDisplayLabel({ tier: tierKey(tier) });
 }

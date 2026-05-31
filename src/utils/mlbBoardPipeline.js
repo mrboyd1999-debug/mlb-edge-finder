@@ -23,15 +23,15 @@ export const BEST_PLAYS_MIN = {
 };
 
 export const TIER_A_RULES = {
-  confidence: 70,
+  confidence: 80,
   probability: 70,
-  playability: 75,
+  playability: 0,
 };
 
 export const TIER_B_RULES = {
-  confidence: 60,
+  confidence: 70,
   probability: 60,
-  playability: 70,
+  playability: 0,
 };
 
 export const NO_VERIFIED_PLAYS_MESSAGE = "No verified MLB plays meet today's safety threshold.";
@@ -141,7 +141,11 @@ export function isResearchCandidate(prop = {}) {
   const partialEligible =
     allowFallbackVerification && verificationStatus === VERIFICATION_STATUS.PARTIAL;
 
-  if (pitcherVerification === PITCHER_VERIFICATION.FAIL) return true;
+  if (pitcherVerification === PITCHER_VERIFICATION.FAIL) {
+    if (finite(confidence) != null && confidence < 70 && finite(probability) != null && probability < 60) {
+      return true;
+    }
+  }
   if (dataStatus === DATA_STATUS.RESEARCH_ONLY) return true;
   if (
     !partialEligible &&
@@ -187,31 +191,22 @@ export function passesBestPlayBoardGate(prop = {}) {
   if (isResearchCandidate(prop)) return false;
 
   const verificationStatus = prop.verificationStatus || resolveVerificationStatus(prop);
-  const dataStatus = resolveMlbDataStatus(prop);
-  const tier = String(prop.tier || prop.finalTier || "").toUpperCase();
-  if (tier !== "A" && tier !== "B") return false;
+  if (verificationStatus !== VERIFICATION_STATUS.FULL && verificationStatus !== VERIFICATION_STATUS.PARTIAL) {
+    return false;
+  }
 
   const confidence = resolvePropConfidence(prop);
   const probability = resolvePropProbability(prop);
-  const playability = resolvePropPlayability(prop);
-  const mins = tier === "A" ? TIER_A_RULES : TIER_B_RULES;
+  if (finite(confidence) < 60 || finite(probability) < 55) return false;
 
-  if (tier === "A") {
-    if (verificationStatus !== VERIFICATION_STATUS.FULL) return false;
-    if (dataStatus !== DATA_STATUS.FULL_MLB_DATA) return false;
-  } else if (tier === "B") {
-    const dataOk =
-      dataStatus === DATA_STATUS.FULL_MLB_DATA ||
-      dataStatus === DATA_STATUS.REVIEW_NEEDED ||
-      (allowFallbackVerification && verificationStatus === VERIFICATION_STATUS.PARTIAL);
-    if (!dataOk) return false;
-  }
+  const line = finite(prop.line);
+  const projection = finite(prop.projection ?? prop.projectedValue);
+  if (line == null || projection == null) return false;
 
-  return (
-    finite(confidence) >= mins.confidence &&
-    finite(probability) >= mins.probability &&
-    finite(playability) >= mins.playability
-  );
+  const edge = finite(prop.edge);
+  if (Number.isFinite(edge)) return edge !== 0;
+
+  return projection !== line;
 }
 
 export function passesVerifiedSectionGate(prop = {}) {
