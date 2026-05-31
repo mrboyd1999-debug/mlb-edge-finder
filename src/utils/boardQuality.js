@@ -11,6 +11,8 @@ import {
   annotateBestPlayRankingAudit,
   resolveBestPlayRankingFlags,
 } from "./bestPlayRankingScore.js";
+import { attachIntegrityAuditFields, buildIntegrityAudit } from "./integrityAudit.js";
+import { resolveVerifiedHitRateSnapshot } from "./verifiedHitRates.js";
 
 export const MAX_PLAYER_PROPS_IN_TOP_LIST = 2;
 export const MAX_MARKET_PROPS_IN_TOP_LIST = 3;
@@ -34,6 +36,8 @@ export const VALUE_UNDER_MIN_CONFIDENCE = 60;
 export const VALUE_UNDER_MIN_PLAYABILITY = 60;
 export const SAFEST_FALLBACK_NOTICE =
   "No full-data safest plays yet. Showing best available Tier A/B.";
+export const TIER_REVIEW_NEEDED_LABEL = "Review Needed";
+export const OVERALL_PLAY_PENDING_MESSAGE = "Best available play — awaiting matchup verification.";
 export const BEST_PLAY_FALLBACK_NOTICE =
   "Filled remaining Best Plays slots from Tier A/B full-data pool.";
 export const BEST_PLAY_MIN_CONFIDENCE = 65;
@@ -303,20 +307,54 @@ export function hasMissingStats(prop = {}) {
 }
 
 export function classifyPropTier(prop = {}) {
+  const integrity = prop.integrityAudit || buildIntegrityAudit(prop);
   const confidence = resolvePropConfidence(prop);
   const playability = resolvePropPlayability(prop);
   const sanity = resolvePropSanity(prop);
+  const snapshot = resolveVerifiedHitRateSnapshot(prop);
+  const seasonAvailable =
+    Boolean(prop.seasonRateValid) ||
+    (integrity.seasonDataIntegrity >= 80 && snapshot.seasonLabel !== "—" && snapshot.seasonLabel !== "0%");
+  const recentAvailable = snapshot.last5Label !== "—" || snapshot.last10Label !== "—";
+  const projectionAvailable = finite(prop.projection ?? prop.projectedValue) != null;
+  const opponentAvailable = Boolean(String(prop.opponent || "").trim());
+
   if (
+    integrity.reviewNeeded ||
+    integrity.hitRateInvalid ||
+    integrity.probabilityMismatch ||
+    integrity.dataIntegrityWarning
+  ) {
+    return TIER_REVIEW_NEEDED_LABEL;
+  }
+
+  let tier = "C";
+  if (confidence >= TIER_B_MIN_CONFIDENCE && playability >= TIER_B_MIN_PLAYABILITY) {
+    tier = "B";
+  }
+
+  const qualifiesA =
     confidence >= TIER_A_MIN_CONFIDENCE &&
     playability >= TIER_A_MIN_PLAYABILITY &&
-    sanity >= TIER_A_MIN_SANITY
+    sanity >= TIER_A_MIN_SANITY &&
+    seasonAvailable &&
+    recentAvailable &&
+    projectionAvailable &&
+    opponentAvailable &&
+    integrity.tierAEligible;
+
+  if (qualifiesA) {
+    tier = "A";
+  } else if (
+    confidence >= TIER_A_MIN_CONFIDENCE &&
+    playability >= TIER_A_MIN_PLAYABILITY &&
+    sanity >= TIER_A_MIN_SANITY &&
+    !seasonAvailable
   ) {
-    return "A";
+    tier = "B";
   }
-  if (confidence >= TIER_B_MIN_CONFIDENCE && playability >= TIER_B_MIN_PLAYABILITY) {
-    return "B";
-  }
-  return "C";
+
+  return tier;
 }
 
 export function resolvePropTier(prop = {}) {
@@ -326,7 +364,7 @@ export function resolvePropTier(prop = {}) {
 export function passesBestPlayHardExclusions(prop = {}) {
   if (!isFullDataProp(prop)) return false;
   const tier = classifyPropTier(prop);
-  if (tier === "C") return false;
+  if (tier === "C" || tier === TIER_REVIEW_NEEDED_LABEL) return false;
   return true;
 }
 
@@ -445,9 +483,9 @@ export function compareBestPlaysRecoveryRank(a = {}, b = {}) {
 }
 
 function compareBestPlaysTierRank(a = {}, b = {}) {
-  const tierOrder = { A: 0, B: 1, C: 2, D: 3 };
-  const tierA = tierOrder[classifyPropTier(a)] ?? 3;
-  const tierB = tierOrder[classifyPropTier(b)] ?? 3;
+  const tierOrder = { A: 0, B: 1, [TIER_REVIEW_NEEDED_LABEL]: 2, C: 3, D: 4 };
+  const tierA = tierOrder[classifyPropTier(a)] ?? 4;
+  const tierB = tierOrder[classifyPropTier(b)] ?? 4;
   return tierA - tierB;
 }
 
@@ -612,23 +650,55 @@ export function compareOverallPlayRank(a = {}, b = {}) {
   return compareBestPlaysRank(a, b);
 }
 
+export function passesOverallPlayVerification(prop = {}) {
+  const integrity = prop.integrityAudit || buildIntegrityAudit(prop);
+  const sanity = resolvePropSanity(prop) ?? 0;
+  return (
+    integrity.integrityScore >= 90 &&
+    integrity.pitcherIntegrity >= 80 &&
+    sanity >= 90 &&
+    integrity.tierAEligible
+  );
+}
+
 export function selectOverallPlay(pool = []) {
   const eligible = (pool || []).filter(isFullDataProp);
-  const constrained = applyBestPlayRankConstraints(
+  const verified = applyBestPlayRankConstraints(
     eligible.filter((prop) => {
       const flags = resolveBestPlayRankingFlags(prop);
-      return !flags.projectionConfidenceLow && !flags.outlierDetected;
+      return (
+        !flags.projectionConfidenceLow &&
+        !flags.outlierDetected &&
+        passesOverallPlayVerification(prop)
+      );
     })
   );
-  if (constrained[0]) return constrained[0];
+  if (verified[0]) {
+    return { ...verified[0], overallPlayVerified: true };
+  }
 
-  const fallback = applyBestPlayRankConstraints(eligible);
-  return fallback[0] || null;
+  const fallback = applyBestPlayRankConstraints(
+    eligible.filter((prop) => passesOverallPlayVerification(prop))
+  );
+  if (fallback[0]) {
+    return { ...fallback[0], overallPlayVerified: true };
+  }
+
+  const best = applyBestPlayRankConstraints(eligible);
+  return best[0] ? { ...best[0], overallPlayVerified: false } : null;
 }
 
 export function buildOverallPlayExplanation(prop = {}) {
+  if (prop.overallPlayVerified === false) {
+    return OVERALL_PLAY_PENDING_MESSAGE;
+  }
   const confidence = Math.round(resolvePropConfidence(prop));
-  const probability = Math.round(resolvePropProbability(prop));
+  const probability = Math.round(
+    resolvePropProbability(prop) ??
+      prop.calibratedProbability ??
+      prop.probabilityTruth?.calibratedProbability ??
+      0
+  );
   const playability = Math.round(resolvePropPlayability(prop));
   const line = finite(prop.line, NaN);
   const projection = finite(prop.projection ?? prop.projectedValue, NaN);
@@ -728,9 +798,10 @@ export function attachBoardQualityFields(prop = {}) {
   const edgeLabels = formatValidatedEdgeDisplay(prop);
   const fullDataReason = resolveFullDataReason(prop);
   const fullData = isFullDataProp(prop);
-  const propTier = classifyPropTier(prop);
   const withSeason = attachSeasonHitRateFields(prop);
-  const withIntegrity = attachDataIntegrityFields(withSeason);
+  const withIntegrityAudit = attachIntegrityAuditFields(withSeason);
+  const propTier = classifyPropTier(withIntegrityAudit);
+  const withIntegrity = attachDataIntegrityFields(withIntegrityAudit);
   const dataQualityBadge = resolveBoardDataQualityBadge({ ...withIntegrity, isFullData: fullData, partialData: !fullData });
   return {
     ...withIntegrity,
@@ -743,7 +814,9 @@ export function attachBoardQualityFields(prop = {}) {
     isFullData: fullData,
     partialData: !fullData,
     confidenceTier: propTier,
-    confidenceTierLabel: `Tier ${propTier}`,
+    confidenceTierLabel:
+      propTier === TIER_REVIEW_NEEDED_LABEL ? TIER_REVIEW_NEEDED_LABEL : `Tier ${propTier}`,
+    reviewNeeded: propTier === TIER_REVIEW_NEEDED_LABEL || Boolean(withIntegrityAudit.reviewNeeded),
     dataStatus: fullData ? "FULL_DATA" : "PARTIAL_DATA",
     dataQualityBadge,
     dataQualityLabel: dataQualityBadge.label,

@@ -159,11 +159,11 @@ import {
   classifyPropTier,
 } from "./boardQuality.js";
 
-const TIER_SORT_ORDER = { A: 0, B: 1, C: 2, D: 3 };
+const TIER_SORT_ORDER = { A: 0, B: 1, "Review Needed": 2, C: 3, D: 4 };
 
 function compareBestPlaysTierRank(a = {}, b = {}) {
-  const tierA = TIER_SORT_ORDER[classifyPropTier(a)] ?? 3;
-  const tierB = TIER_SORT_ORDER[classifyPropTier(b)] ?? 3;
+  const tierA = TIER_SORT_ORDER[classifyPropTier(a)] ?? 4;
+  const tierB = TIER_SORT_ORDER[classifyPropTier(b)] ?? 4;
   return tierA - tierB;
 }
 

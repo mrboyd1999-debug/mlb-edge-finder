@@ -446,7 +446,7 @@ const MIN_STREAK_CONFIDENCE = 65;
 const MIN_GOBLIN_CONFIDENCE = 68;
 const MIN_DEMON_CONFIDENCE = CONFIDENCE_THRESHOLDS.DEMON;
 const MIN_START_BUFFER_MS = 60 * 1000;
-const NO_EDGE_MESSAGE = "No betting edge detected. More data needed before this becomes a confident pick.";
+import { resolveBettingEdgeMessage, NO_EDGE_MESSAGE } from "./utils/bettingEdgeMessage.js";
 const NEEDS_STATS_MESSAGE = "This prop needs more stats before a confident pick can be made.";
 const STREAK_WARNING = "Low multiplier does not guarantee the pick will hit. Verify before adding to streak.";
 const NO_ACTIVE_SCHEDULED_PROPS_MESSAGE = NO_VERIFIED_PROPS_MESSAGE;
@@ -6628,11 +6628,16 @@ function isRecommendedPick(prop) {
 }
 
 function watchlistMessageForProp(prop) {
+  const edgeMessage = resolveBettingEdgeMessage(prop);
+  if (edgeMessage !== NO_EDGE_MESSAGE) {
+    return edgeMessage;
+  }
+
   if (prop.projectionSource === "missing" || !Number.isFinite(prop.projection)) {
     return `${NO_EDGE_MESSAGE} ${NEEDS_STATS_MESSAGE}`;
   }
 
-  if (!prop.bestPick || prop.edge === 0) {
+  if (prop.edge != null && prop.edge <= 0) {
     return NO_EDGE_MESSAGE;
   }
 

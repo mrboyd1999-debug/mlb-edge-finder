@@ -15,8 +15,12 @@ import { resolveVerifiedHitRateSnapshot } from "./verifiedHitRates.js";
 import {
   normalizeLegacyStarterNote,
   STARTER_PENDING_LABEL,
+  validatePitcherForMatchup,
 } from "./opponentStarter.js";
 import { formatWhip } from "./formatters.js";
+import { attachProbabilityTruthFields } from "./probabilityTruth.js";
+import { attachIntegrityAuditFields } from "./integrityAudit.js";
+import { resolveBettingEdgeMessage } from "./bettingEdgeMessage.js";
 import {
   HISTORICAL_DATA_UNAVAILABLE_WARNING,
   resolveHistoricalDataPresent,
@@ -289,25 +293,23 @@ export function buildEdgeValidation(prop = {}, metrics = {}) {
 export function buildMatchupAudit(prop = {}) {
   const team = String(prop.team || "").trim().toUpperCase() || "—";
   const opponent = String(prop.opponent || "").trim().toUpperCase() || "—";
-  const pitcherRaw = normalizeLegacyStarterNote(
-    prop.opposingPitcher || prop.opponentStarterNote || prop.pitcherName || prop.startingPitcher || "",
-    prop.team,
-    prop.opponent,
-    prop.probablePitchers
-  );
-  const pitcher = pitcherRaw || STARTER_PENDING_LABEL;
+  const pitcherValidation = validatePitcherForMatchup(prop);
+  const pitcher = pitcherValidation.pitcher || STARTER_PENDING_LABEL;
   const venue = String(prop.venue || prop.ballpark || prop.stadium || prop.homeBallpark || "").trim() || "—";
   const whip = finite(prop.opponentPitcherWhip);
   const whipLabel = formatWhip(whip);
-  const matchupScore =
+  let matchupScore =
     finite(prop.matchupScore) ??
     finite(prop.formConfidenceScore) ??
     computeFormConfidenceScore(prop);
+  if (pitcherValidation.matchupPenalty) {
+    matchupScore = clamp((matchupScore ?? 50) - pitcherValidation.matchupPenalty, 30, 95);
+  }
 
   const hasRichMatchup = Boolean(
     prop.matchupNote ||
       prop.handednessMatchup ||
-      opponent !== "—" ||
+      (opponent !== "—" && opponent !== "") ||
       (pitcher !== "—" && pitcher !== STARTER_PENDING_LABEL) ||
       prop.formBaseline != null
   );
@@ -316,13 +318,20 @@ export function buildMatchupAudit(prop = {}) {
     team,
     opponent,
     pitcher,
+    pitcherStatus: pitcherValidation.pitcherStatus,
+    pitcherValidated: pitcherValidation.pitcherValidated,
+    pitcherInvalid: pitcherValidation.pitcherInvalid,
+    pitcherTeam: pitcherValidation.pitcherTeam ?? null,
+    matchupPenalty: pitcherValidation.matchupPenalty ?? 0,
     whip: whipLabel,
     venue,
     matchupScore: matchupScore != null ? Math.round(matchupScore) : null,
     matchupConfidence: prop.matchupConfidence || "—",
     matchupNote: prop.matchupNote || "",
-    complete: hasRichMatchup && prop.matchupConfidence !== "LOW",
+    complete: hasRichMatchup && prop.matchupConfidence !== "LOW" && !pitcherValidation.pitcherInvalid,
     formBaseline: prop.formBaseline ?? null,
+    pitcherIntegrity: pitcherValidation.pitcherValidated ? 95 : pitcherValidation.pitcherInvalid ? 0 : 45,
+    opponentIntegrity: opponent !== "—" && opponent !== "" ? 85 : 0,
   };
 }
 
@@ -334,17 +343,27 @@ export function attachModelValidationFields(prop = {}, metrics = {}) {
     const edgeValidation = buildEdgeValidation(prop, metrics);
     const matchupAudit = buildMatchupAudit(prop);
     const hitRates = probabilityAudit?.hitRates || buildHitRateSnapshot(prop);
+    const withTruth = attachProbabilityTruthFields(
+      {
+        ...prop,
+        probabilityAudit,
+        probabilityCalibration: probabilityAudit?.calibration || prop.probabilityCalibration || null,
+        edgeValidation,
+        matchupAudit,
+        hitRateSnapshot: hitRates,
+        probabilityExplanation: probabilityAudit?.summary || "",
+        hitRateLine: `L5 ${hitRates?.last5Label ?? "—"} · L10 ${hitRates?.last10Label ?? "—"} · Season ${hitRates?.seasonLabel ?? "—"}`,
+        bettingEdgeMessage: resolveBettingEdgeMessage({
+          ...prop,
+          probabilityAudit,
+          calibratedProbability: probabilityAudit?.calibratedProbability,
+        }),
+        pitcherStatus: matchupAudit.pitcherStatus,
+      },
+      probabilityAudit
+    );
 
-    return attachDataIntegrityFields({
-      ...prop,
-      probabilityAudit,
-      probabilityCalibration: probabilityAudit?.calibration || prop.probabilityCalibration || null,
-      edgeValidation,
-      matchupAudit,
-      hitRateSnapshot: hitRates,
-      probabilityExplanation: probabilityAudit?.summary || "",
-      hitRateLine: `L5 ${hitRates?.last5Label ?? "—"} · L10 ${hitRates?.last10Label ?? "—"} · Season ${hitRates?.seasonLabel ?? "—"}`,
-    });
+    return attachDataIntegrityFields(attachIntegrityAuditFields(withTruth));
   } catch (error) {
     console.error("[ModelValidation] attach failed", prop?.playerName || prop?.player, error);
     return {

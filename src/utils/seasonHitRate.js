@@ -22,8 +22,16 @@ function normalizeHitRatePercent(value) {
   const num = finite(value);
   if (num == null) return null;
   if (num <= 0) return num === 0 ? 0 : null;
-  if (num <= 1) return Math.round(num * 1000) / 10;
-  return Math.round(num * 10) / 10;
+  let pct = num <= 1 ? Math.round(num * 1000) / 10 : Math.round(num * 10) / 10;
+  if (pct > 100) {
+    console.warn("[HitRate] Invalid hit rate clamped:", value, "→ 100");
+    pct = 100;
+  }
+  return pct;
+}
+
+export function sanitizeHitRatePercent(value) {
+  return normalizeHitRatePercent(value);
 }
 
 function toDisplayLabel(rate) {

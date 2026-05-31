@@ -33,6 +33,7 @@ import {
 } from "./tierHistoricalValidation.js";
 import { isSupportedMlbMarket, isBlockedNonMlbPipelineProp } from "./mlbAllowedMarkets.js";
 import { hasVerifiedHistoricalAttachment, isFallbackProjectionProp } from "./projectionQuality.js";
+import { buildIntegrityAudit } from "./integrityAudit.js";
 import {
   selectOverallPlay,
   compareOverallPlayRank,
@@ -106,10 +107,15 @@ function resolveSanityScore(prop = {}) {
   return finite(prop.projectionSanityScore ?? prop.projectionSanityAudit?.sanityScore);
 }
 
-function qualifiesTierA({ probability, confidence, playability, sanity, historicalPresent, hitRateValidated, audit }) {
+function qualifiesTierA({ probability, confidence, playability, sanity, historicalPresent, hitRateValidated, audit, prop = {} }) {
+  const integrity = prop.integrityAudit || buildIntegrityAudit(prop);
   if (!historicalPresent) return false;
   if (!hitRateValidated) return false;
   if (audit?.blocksTierA) return false;
+  if (integrity.hitRateInvalid || integrity.probabilityMismatch || integrity.dataIntegrityWarning) return false;
+  if (integrity.integrityScore < 90) return false;
+  if (integrity.seasonDataIntegrity < 80) return false;
+  if (!String(prop.opponent || "").trim()) return false;
   if (sanity == null || sanity < VERIFIED_TIER_A.minSanity) return false;
   return (
     probability >= VERIFIED_TIER_A.minProbability &&
@@ -202,6 +208,7 @@ export function classifyVerifiedTier(prop = {}) {
       historicalPresent: historical.present,
       hitRateValidated: hitRates.present,
       audit,
+      prop,
     })
   ) {
     tier = VERIFIED_TIER_A.id;

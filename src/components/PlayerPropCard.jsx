@@ -174,7 +174,8 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
   const hitRatePct = (() => {
     const rate = prop.recentHitRate ?? prop.last5HitRate ?? prop.last10HitRate ?? prop.profile?.recentHitRate;
     if (!Number.isFinite(Number(rate))) return null;
-    return Math.round(Number(rate) * 100);
+    const num = Number(rate);
+    return Math.min(100, Math.round(num <= 1 ? num * 100 : num));
   })();
   const opponentRank = prop.opponentRank ?? prop.profile?.opponentRank ?? null;
   const opponentAllowed = prop.opponentAllowed ?? prop.profile?.opponentAllowed ?? null;

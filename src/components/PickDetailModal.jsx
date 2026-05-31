@@ -59,7 +59,8 @@ import {
 } from "../utils/manualPropScoring.js";
 import { styles, riskStyle } from "../theme/styles.js";
 
-const NO_EDGE_MESSAGE = "No betting edge detected. More data needed before this becomes a confident pick.";
+import { formatHitRatePercentSafe } from "../utils/formatters.js";
+import { resolveBettingEdgeMessage } from "../utils/bettingEdgeMessage.js";
 
 function hasValue(value) {
   if (value == null) return false;
@@ -715,17 +716,49 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
               <MetricIf label="Completeness" value={Number.isFinite(Number(prop.dataCompleteness)) ? `${Math.round(Number(prop.dataCompleteness))}%` : null} />
               <MetricIf label="EV score" value={Number.isFinite(Number(prop.expectedValueScore)) ? `${Math.round(Number(prop.expectedValueScore))}/100` : null} />
               <MetricIf label="Volatility" value={Number.isFinite(Number(prop.volatilityScore)) ? `${Math.round(Number(prop.volatilityScore))}/100` : null} />
+              <MetricIf
+                label="Raw probability"
+                value={
+                  prop.rawProbability != null
+                    ? `${Math.round(Number(prop.rawProbability))}%`
+                    : prop.probabilityTruth?.rawProbability != null
+                      ? `${Math.round(Number(prop.probabilityTruth.rawProbability))}%`
+                      : null
+                }
+              />
+              <MetricIf
+                label="Calibrated probability"
+                value={
+                  prop.calibratedProbability != null
+                    ? `${Math.round(Number(prop.calibratedProbability))}%`
+                    : prop.probabilityTruth?.calibratedProbability != null
+                      ? `${Math.round(Number(prop.probabilityTruth.calibratedProbability))}%`
+                      : prop.probabilityScore != null
+                        ? `${Math.round(Number(prop.probabilityScore))}%`
+                        : null
+                }
+              />
+              <MetricIf
+                label="Confidence"
+                value={
+                  prop.confidence != null
+                    ? `${Math.round(Number(prop.confidence))}%`
+                    : prop.displayConfidenceScore != null
+                      ? `${Math.round(Number(prop.displayConfidenceScore))}%`
+                      : null
+                }
+              />
               <MetricIf label="Model prob" value={formatPercent(prop.modelProbability)} />
               <MetricIf label="EV (prob)" value={formatSignedPercent(prop.expectedValue)} />
               <MetricIf
                 label="L5 / L10"
                 value={
                   prop.last5HitRate != null || prop.last10HitRate != null || prop.recentHitRate != null
-                    ? `${formatPercent(prop.last5HitRate)} / ${formatPercent(prop.last10HitRate || prop.recentHitRate)}`
+                    ? `${formatHitRatePercentSafe(prop.last5HitRate)} / ${formatHitRatePercentSafe(prop.last10HitRate || prop.recentHitRate)}`
                     : null
                 }
               />
-              <MetricIf label="Historical hit" value={prop.historicalHitRate == null ? null : formatPercent(prop.historicalHitRate)} />
+              <MetricIf label="Historical hit" value={prop.historicalHitRate == null ? null : formatHitRatePercentSafe(prop.historicalHitRate)} />
               <MetricIf label="Sportsbook line" value={formatMaybeLine(prop.sportsbookLine ?? prop.sportsbookComparison?.marketAverageLine)} />
               <MetricIf label="Line movement" value={lineMovementStatusText(prop) !== "No movement yet" ? lineMovementStatusText(prop) : null} />
               <MetricIf label="Matchup" value={prop.matchupRating && prop.matchupRating !== "Neutral" ? prop.matchupRating : null} />
@@ -819,7 +852,7 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
             <div style={{ ...styles.evaluationText, marginTop: "8px", fontSize: "11px" }}>
               <p>{keyStatsSummary(prop)}</p>
               <p>{usageContextForProp(prop)}</p>
-              {!ready ? <p>{prop.watchlistMessage || NO_EDGE_MESSAGE}</p> : null}
+              {!ready ? <p>{prop.bettingEdgeMessage || prop.watchlistMessage || resolveBettingEdgeMessage(prop)}</p> : null}
             </div>
           </div>
         </details>

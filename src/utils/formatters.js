@@ -45,7 +45,17 @@ export function formatPercent(value) {
   if (value == null || value === "") return "-";
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";
-  return `${Math.round(number * 100)}%`;
+  const pct = number <= 1 ? Math.round(number * 100) : Math.round(number);
+  return `${Math.min(100, pct)}%`;
+}
+
+/** Hit rates may already be stored as 0–100 after enrichment. */
+export function formatHitRatePercentSafe(value) {
+  if (value == null || value === "") return "—";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "—";
+  const pct = number <= 1 ? Math.round(number * 100) : Math.round(number);
+  return `${Math.min(100, pct)}%`;
 }
 
 /** WHIP must never display as 0 — use N/A when unavailable. */

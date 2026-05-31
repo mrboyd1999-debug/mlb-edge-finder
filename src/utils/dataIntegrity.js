@@ -7,6 +7,7 @@ import { resolveHistoricalDataPresent } from "./tierHistoricalValidation.js";
 import { isFullDataProp } from "./boardQuality.js";
 import { resolveProjectionValue } from "./projectionQuality.js";
 import { STARTER_PENDING_LABEL } from "./opponentStarter.js";
+import { buildIntegrityAudit } from "./integrityAudit.js";
 
 export const INTEGRITY_VERIFIED = "verified";
 export const INTEGRITY_PARTIAL = "partial";
@@ -74,11 +75,19 @@ function resolveProbabilityDataScore(prop = {}) {
 }
 
 export function buildDataIntegrityAudit(prop = {}) {
+  const integrityAudit = prop.integrityAudit || buildIntegrityAudit(prop);
   return {
     playerDataScore: resolvePlayerDataScore(prop),
     matchupDataScore: resolveMatchupDataScore(prop),
     projectionDataScore: resolveProjectionDataScore(prop),
     probabilityDataScore: resolveProbabilityDataScore(prop),
+    integrityScore: integrityAudit.integrityScore,
+    pitcherIntegrity: integrityAudit.pitcherIntegrity,
+    opponentIntegrity: integrityAudit.opponentIntegrity,
+    seasonDataIntegrity: integrityAudit.seasonDataIntegrity,
+    penalties: integrityAudit.penalties,
+    tierAEligible: integrityAudit.tierAEligible,
+    reviewNeeded: integrityAudit.reviewNeeded,
   };
 }
 

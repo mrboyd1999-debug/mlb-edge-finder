@@ -5,6 +5,7 @@
 import { mlbTeamsMatch, normalizeMlbTeamKey } from "./mlbTeamMatch.js";
 
 export const STARTER_PENDING_LABEL = "Starter Pending";
+export const PITCHER_STATUS_UNKNOWN = "UNKNOWN";
 
 function teamSideKey(game = {}, side = "home") {
   const team = game.teams?.[side]?.team || {};
@@ -63,6 +64,84 @@ export function normalizeLegacyStarterNote(note = "", team = "", opponent = "", 
   if (!text || /starter pending/i.test(text)) {
     return resolveOpponentStarterDisplay({ team, opponent, probablePitchers });
   }
-  if (!text.includes(" vs ")) return text;
-  return resolveOpponentStarterDisplay({ team, opponent, probablePitchers });
+  if (/ vs /i.test(text)) {
+    return resolveOpponentStarterDisplay({ team, opponent, probablePitchers });
+  }
+  return text;
+}
+
+/** Pitcher must belong to one of the two teams in the current game. */
+export function validatePitcherForMatchup(prop = {}) {
+  const team = String(prop.team || "").trim();
+  const opponent = String(prop.opponent || "").trim();
+  const pitcherTeam = String(
+    prop.opposingPitcherTeam || prop.pitcherTeam || prop.matchupAudit?.pitcherTeam || ""
+  ).trim();
+  const rawPitcher = String(
+    prop.opposingPitcher || prop.opponentStarterNote || prop.matchupAudit?.pitcher || ""
+  ).trim();
+  const game = prop.probablePitchers?.game || prop.game || null;
+
+  if (!team || !opponent) {
+    return {
+      pitcher: STARTER_PENDING_LABEL,
+      pitcherStatus: PITCHER_STATUS_UNKNOWN,
+      pitcherValidated: false,
+      pitcherInvalid: true,
+      matchupPenalty: 8,
+    };
+  }
+
+  if (/ vs /i.test(rawPitcher)) {
+    return {
+      pitcher: STARTER_PENDING_LABEL,
+      pitcherStatus: PITCHER_STATUS_UNKNOWN,
+      pitcherValidated: false,
+      pitcherInvalid: true,
+      matchupPenalty: 10,
+    };
+  }
+
+  const resolved = normalizeLegacyStarterNote(rawPitcher, team, opponent, prop.probablePitchers);
+  if (!resolved || resolved === STARTER_PENDING_LABEL) {
+    return {
+      pitcher: STARTER_PENDING_LABEL,
+      pitcherStatus: PITCHER_STATUS_UNKNOWN,
+      pitcherValidated: false,
+      pitcherInvalid: false,
+      matchupPenalty: 6,
+    };
+  }
+
+  if (pitcherTeam) {
+    const onTeam = mlbTeamsMatch(pitcherTeam, team) || mlbTeamsMatch(pitcherTeam, opponent);
+    if (!onTeam) {
+      return {
+        pitcher: STARTER_PENDING_LABEL,
+        pitcherStatus: PITCHER_STATUS_UNKNOWN,
+        pitcherValidated: false,
+        pitcherInvalid: true,
+        matchupPenalty: 12,
+      };
+    }
+  }
+
+  if (game && !gameIncludesBothTeams(game, team, opponent)) {
+    return {
+      pitcher: STARTER_PENDING_LABEL,
+      pitcherStatus: PITCHER_STATUS_UNKNOWN,
+      pitcherValidated: false,
+      pitcherInvalid: true,
+      matchupPenalty: 10,
+    };
+  }
+
+  return {
+    pitcher: resolved,
+    pitcherStatus: "VERIFIED",
+    pitcherValidated: true,
+    pitcherInvalid: false,
+    pitcherTeam: pitcherTeam || null,
+    matchupPenalty: 0,
+  };
 }

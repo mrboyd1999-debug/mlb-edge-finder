@@ -109,41 +109,47 @@ function hasRecentFormData(prop = {}) {
   );
 }
 
-/** Weighted confidence aligned with projection edge and form. */
-export function computeMlbConfidenceBreakdown(prop = {}, projection = null) {
-  const projectionQuality = scoreProjectionQuality(prop, projection);
-  const sourceReliability = scoreSourceReliability(prop, projection);
-  const lineEdge = scoreLineEdge(prop, projection);
-  const recentForm = scoreRecentForm(prop, projection);
-  const sampleSize = scoreSampleSize(prop);
-  const matchupQuality = scoreMatchupQuality(prop);
+function resolveHistoricalHitRateScore(prop = {}) {
+  const toPct = (value) => {
+    const num = finite(value);
+    if (num == null) return null;
+    return num <= 1 ? num * 100 : num;
+  };
+  const l5 = toPct(prop.last5HitRate);
+  const l10 = toPct(prop.last10HitRate ?? prop.recentHitRate);
+  if (l5 != null && l10 != null) return round2(l5 * 0.4 + l10 * 0.6);
+  return l10 ?? l5 ?? 50;
+}
 
-  let rawScore;
-  if (hasRecentFormData(prop)) {
-    rawScore =
+/** Weight: 40% historical hit rate, 30% projection quality, 20% matchup, 10% market edge. */
+export function computeMlbConfidenceBreakdown(prop = {}, projection = null) {
+  const historicalHitRate = resolveHistoricalHitRateScore(prop);
+  const projectionQuality = scoreProjectionQuality(prop, projection);
+  const matchupQuality = scoreMatchupQuality(prop);
+  const lineEdge = scoreLineEdge(prop, projection);
+  const sampleSize = scoreSampleSize(prop);
+
+  let rawScore = round2(
+    historicalHitRate * 0.4 +
       projectionQuality * 0.3 +
-      lineEdge * 0.28 +
-      sourceReliability * 0.18 +
-      recentForm * 0.12 +
-      sampleSize * 0.07 +
-      matchupQuality * 0.05;
-  } else {
-    rawScore =
-      projectionQuality * 0.38 +
-      lineEdge * 0.32 +
-      sourceReliability * 0.22 +
-      sampleSize * 0.04 +
-      matchupQuality * 0.04;
+      matchupQuality * 0.2 +
+      lineEdge * 0.1
+  );
+
+  const seasonGames = finite(prop.seasonGamesPlayed ?? prop.seasonGames) ?? 0;
+  if (seasonGames < 100) {
+    rawScore = Math.min(rawScore, historicalHitRate + 20);
   }
 
   return {
+    historicalHitRate,
     projectionQuality,
-    sourceReliability,
-    lineEdge,
-    recentForm,
-    sampleSize,
     matchupQuality,
-    rawScore: round2(rawScore),
+    lineEdge,
+    sampleSize,
+    sourceReliability: scoreSourceReliability(prop, projection),
+    recentForm: scoreRecentForm(prop, projection),
+    rawScore,
     final: round2(clamp(rawScore, 35, 90)),
   };
 }

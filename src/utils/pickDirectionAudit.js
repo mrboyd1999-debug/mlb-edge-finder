@@ -128,7 +128,11 @@ export function formatHitRatePercent(value) {
   if (value == null || value === "") return "—";
   const num = Number(value);
   if (!Number.isFinite(num)) return "—";
-  const pct = num <= 1 ? Math.round(num * 100) : Math.round(num);
+  let pct = num <= 1 ? Math.round(num * 100) : Math.round(num);
+  if (pct > 100) {
+    console.warn("[HitRate] Invalid hit rate clamped:", value, "→ 100");
+    pct = 100;
+  }
   return `${pct}%`;
 }
 

@@ -41,6 +41,12 @@ function DataIntegrityPanel({ audit = null }) {
   return (
     <div className="data-integrity-panel" style={{ marginTop: 8 }}>
       <strong style={{ fontSize: 11 }}>Data integrity</strong>
+      {audit.integrityScore != null ? (
+        <p style={{ fontSize: 11, color: "#e2e8f0", marginTop: 4 }}>
+          Integrity score: <strong>{Math.round(Number(audit.integrityScore))}</strong>
+          {audit.reviewNeeded ? " · Review Needed" : ""}
+        </p>
+      ) : null}
       <div
         style={{
           display: "grid",
@@ -54,6 +60,25 @@ function DataIntegrityPanel({ audit = null }) {
         <IntegrityCell label="Projection Data Score" value={audit.projectionDataScore} />
         <IntegrityCell label="Probability Data Score" value={audit.probabilityDataScore} />
       </div>
+      {audit.pitcherIntegrity != null || audit.opponentIntegrity != null || audit.seasonDataIntegrity != null ? (
+        <div style={{ display: "grid", gap: 4, marginTop: 8, fontSize: 10, color: "#94a3b8" }}>
+          {audit.pitcherIntegrity != null ? (
+            <span>
+              Pitcher integrity: <strong style={{ color: "#e2e8f0" }}>{audit.pitcherIntegrity}</strong>
+            </span>
+          ) : null}
+          {audit.opponentIntegrity != null ? (
+            <span>
+              Opponent integrity: <strong style={{ color: "#e2e8f0" }}>{audit.opponentIntegrity}</strong>
+            </span>
+          ) : null}
+          {audit.seasonDataIntegrity != null ? (
+            <span>
+              Season data integrity: <strong style={{ color: "#e2e8f0" }}>{audit.seasonDataIntegrity}</strong>
+            </span>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
