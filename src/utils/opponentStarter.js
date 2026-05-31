@@ -46,9 +46,76 @@ export function resolveOpponentStarterFromGame(game = {}, team = "", opponent = 
 
   if (team && mlbTeamsMatch(team, homeName)) return awayPitcher;
   if (team && mlbTeamsMatch(team, awayName)) return homePitcher;
-  if (opponent && mlbTeamsMatch(opponent, homeName)) return homePitcher;
-  if (opponent && mlbTeamsMatch(opponent, awayName)) return awayPitcher;
+
+  if (!team && opponent && mlbTeamsMatch(opponent, homeName)) return homePitcher;
+  if (!team && opponent && mlbTeamsMatch(opponent, awayName)) return awayPitcher;
   return null;
+}
+
+export function buildPitcherMatchupAudit(prop = {}, probablePitchers = null) {
+  const team = String(prop.team || "").trim();
+  const opponent = String(prop.opponent || "").trim();
+  const game = probablePitchers?.game || prop.probablePitchers?.game || prop.game || null;
+  const resolved = resolveOpponentStarterDisplay({ team, opponent, probablePitchers: probablePitchers || prop.probablePitchers });
+  const validation = validatePitcherForMatchup({
+    ...prop,
+    probablePitchers: probablePitchers || prop.probablePitchers,
+    opposingPitcher: resolved,
+    opponentStarterNote: resolved,
+  });
+
+  const audit = {
+    gameId: game?.gamePk ?? probablePitchers?.gameId ?? prop.gameId ?? null,
+    team,
+    opponent,
+    teamId: game?.teams?.home?.team?.id && mlbTeamsMatch(team, game?.teams?.home?.team?.abbreviation || game?.teams?.home?.team?.name)
+      ? game.teams.home.team.id
+      : game?.teams?.away?.team?.id && mlbTeamsMatch(team, game?.teams?.away?.team?.abbreviation || game?.teams?.away?.team?.name)
+        ? game.teams.away.team.id
+        : prop.teamId ?? null,
+    opponentTeamId: game?.teams?.home?.team?.id && mlbTeamsMatch(opponent, game?.teams?.home?.team?.abbreviation || game?.teams?.home?.team?.name)
+      ? game.teams.home.team.id
+      : game?.teams?.away?.team?.id && mlbTeamsMatch(opponent, game?.teams?.away?.team?.abbreviation || game?.teams?.away?.team?.name)
+        ? game.teams.away.team.id
+        : prop.opponentTeamId ?? null,
+    homeTeam: game?.teams?.home?.team?.abbreviation || probablePitchers?.homeTeam || null,
+    awayTeam: game?.teams?.away?.team?.abbreviation || probablePitchers?.awayTeam || null,
+    homePitcher: game?.teams?.home?.probablePitcher?.fullName || probablePitchers?.homePitcher || null,
+    awayPitcher: game?.teams?.away?.probablePitcher?.fullName || probablePitchers?.awayPitcher || null,
+    starterLookup: {
+      team,
+      opponent,
+      matchedGame: Boolean(game || probablePitchers?.matchedGame),
+      resolvedStarter: resolved,
+    },
+    pitcherLookup: validation,
+  };
+
+  if (validation.pitcherInvalid || !audit.gameId) {
+    console.info("[Pitcher Matchup Audit]", {
+      player: prop.playerName || prop.player,
+      team,
+      opponent,
+      ...audit,
+    });
+  }
+
+  return audit;
+}
+
+export function normalizePropPitcherFields(prop = {}, probablePitchers = null) {
+  const audit = buildPitcherMatchupAudit(prop, probablePitchers);
+  const pitcher = audit.pitcherLookup.pitcher || STARTER_PENDING_LABEL;
+  return {
+    ...prop,
+    probablePitchers: probablePitchers || prop.probablePitchers || null,
+    opposingPitcher: pitcher,
+    opponentStarterNote: pitcher,
+    pitcherMatchupAudit: audit,
+    gameId: audit.gameId ?? prop.gameId ?? null,
+    teamId: audit.teamId ?? prop.teamId ?? null,
+    opponentTeamId: audit.opponentTeamId ?? prop.opponentTeamId ?? null,
+  };
 }
 
 export function resolveOpponentStarterDisplay({ team = "", opponent = "", probablePitchers = null } = {}) {

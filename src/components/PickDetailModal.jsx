@@ -6,6 +6,7 @@ import DataQualityBadge from "./DataQualityBadge.jsx";
 import PlayerImage from "./PlayerImage.jsx";
 import ProjectionSanityAuditPanel from "./ProjectionSanityAuditPanel.jsx";
 import ConfidenceComponentsPanel from "./ConfidenceComponentsPanel.jsx";
+import TierAuditPanel from "./TierAuditPanel.jsx";
 import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import {
   formatHitRatePercent,
@@ -639,6 +640,14 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
           <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
             <SectionErrorBoundary name="Confidence Components">
               <ConfidenceComponentsPanel audit={prop.confidenceComponents || prop.confidenceBreakdown} />
+            </SectionErrorBoundary>
+          </div>
+        ) : null}
+
+        {prop.tierAudit || prop.confidenceAudit ? (
+          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
+            <SectionErrorBoundary name="Tier Audit">
+              <TierAuditPanel auditRows={[prop.tierAudit].filter(Boolean)} limit={1} />
             </SectionErrorBoundary>
           </div>
         ) : null}

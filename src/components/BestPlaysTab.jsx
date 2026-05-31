@@ -4,6 +4,7 @@ import BestPlayHeroCard from "./BestPlayHeroCard.jsx";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
 import PerformanceTracker from "./PerformanceTracker.jsx";
 import BestPlayFilterDiagnostics from "./BestPlayFilterDiagnostics.jsx";
+import TierAuditPanel from "./TierAuditPanel.jsx";
 import { compareVerifiedPlaysRank, compareBestPlaysRank, applyBestPlayRankConstraints } from "../utils/bestPlayRankingScore.js";
 import {
   VERIFIED_DISPLAY_MAX,
@@ -141,6 +142,8 @@ function BestPlaysTab({
           ) : null}
 
           <BestPlayFilterDiagnostics filterDiagnostics={filterDiagnostics} />
+
+          <TierAuditPanel auditRows={filterDiagnostics?.tierAuditBatch} limit={12} />
 
           <BestPlaysSection
             section={topBestPlaysSection}

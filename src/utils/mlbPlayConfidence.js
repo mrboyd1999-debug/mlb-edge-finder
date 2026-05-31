@@ -16,6 +16,7 @@ export const CONFIDENCE_WEIGHTS = {
 export const CONFIDENCE_PENALTY_CAPS = {
   missingPitcher: 5,
   missingSeason: 3,
+  missingSeasonEliteRecentCap: 5,
   partialMatchup: 5,
 };
 
@@ -105,6 +106,22 @@ function resolveHistoricalHitRateScore(prop = {}) {
   return l10 ?? l5 ?? season ?? 55;
 }
 
+export function qualifiesEliteRecentFormCap(prop = {}) {
+  const sample = Number(
+    prop.last10Games ??
+      prop.hitRateSnapshot?.last10Games ??
+      prop.sampleSize ??
+      prop.games ??
+      prop.gameLogCount ??
+      0
+  );
+  const hitRate = resolveHistoricalHitRateScore(prop);
+  const projectionIntegrity = Number(prop.integrityAudit?.projectionIntegrity);
+  const hasRecentHitRate = prop.last10HitRate != null || prop.last5HitRate != null || prop.recentHitRate != null;
+  const recentSampleReady = sample >= 10 || hasRecentHitRate;
+  return recentSampleReady && projectionIntegrity >= 90 && hitRate >= 70;
+}
+
 function isMissingPitcherData(prop = {}) {
   const integrity = prop.integrityAudit || {};
   if (integrity.pitcherIntegrity === 0) return true;
@@ -142,19 +159,78 @@ export function isProjectionIntegrityVerified(prop = {}) {
   return (sanity.sanityScore ?? 0) >= 70 && !sanity.projectionMismatch;
 }
 
+function resolveIntegrityConfidencePenalty(prop = {}) {
+  const audit = prop.integrityAudit || {};
+  let penalty = 0;
+  const projectionIntegrity = finite(audit.projectionIntegrity);
+  const seasonIntegrity = finite(audit.seasonDataIntegrity);
+  const integrityScore = finite(audit.integrityScore);
+  if (projectionIntegrity != null && projectionIntegrity < 90) {
+    penalty += Math.min(8, (90 - projectionIntegrity) / 4);
+  }
+  if (seasonIntegrity != null && seasonIntegrity < 80) {
+    penalty += Math.min(8, (80 - seasonIntegrity) / 5);
+  }
+  if (integrityScore != null && integrityScore < 85) {
+    penalty += Math.min(6, (85 - integrityScore) / 6);
+  }
+  if (audit.pitcherIntegrity === 0 && !isMissingPitcherData(prop)) {
+    penalty += 2;
+  }
+  return round1(Math.min(12, penalty));
+}
+
+function resolveSeasonPenaltyAmount(prop = {}) {
+  if (!isMissingSeasonData(prop)) return 0;
+  const base = CONFIDENCE_PENALTY_CAPS.missingSeason;
+  if (qualifiesEliteRecentFormCap(prop)) {
+    return Math.min(base, CONFIDENCE_PENALTY_CAPS.missingSeasonEliteRecentCap);
+  }
+  return base;
+}
+
 export function resolveConfidencePenalties(prop = {}) {
   const penalties = [];
   if (isMissingPitcherData(prop)) {
-    penalties.push({ key: "missingPitcher", label: "Missing pitcher", amount: CONFIDENCE_PENALTY_CAPS.missingPitcher });
+    penalties.push({
+      key: "missingPitcher",
+      label: "Missing pitcher",
+      amount: CONFIDENCE_PENALTY_CAPS.missingPitcher,
+    });
   }
   if (isMissingSeasonData(prop)) {
-    penalties.push({ key: "missingSeason", label: "Missing season rate", amount: CONFIDENCE_PENALTY_CAPS.missingSeason });
+    penalties.push({
+      key: "missingSeason",
+      label: qualifiesEliteRecentFormCap(prop)
+        ? "Missing season rate (elite recent cap)"
+        : "Missing season rate",
+      amount: resolveSeasonPenaltyAmount(prop),
+    });
   }
   if (isPartialMatchupData(prop)) {
-    penalties.push({ key: "partialMatchup", label: "Partial matchup", amount: CONFIDENCE_PENALTY_CAPS.partialMatchup });
+    penalties.push({
+      key: "partialMatchup",
+      label: "Partial matchup",
+      amount: CONFIDENCE_PENALTY_CAPS.partialMatchup,
+    });
+  }
+  const integrityPenalty = resolveIntegrityConfidencePenalty(prop);
+  if (integrityPenalty > 0) {
+    penalties.push({
+      key: "integrity",
+      label: "Integrity penalty",
+      amount: integrityPenalty,
+    });
   }
   const penaltyTotal = penalties.reduce((sum, row) => sum + row.amount, 0);
-  return { penalties, penaltyTotal: round1(penaltyTotal) };
+  return {
+    penalties,
+    penaltyTotal: round1(penaltyTotal),
+    seasonPenalty: penalties.find((row) => row.key === "missingSeason")?.amount ?? 0,
+    pitcherPenalty: penalties.find((row) => row.key === "missingPitcher")?.amount ?? 0,
+    matchupPenalty: penalties.find((row) => row.key === "partialMatchup")?.amount ?? 0,
+    integrityPenalty,
+  };
 }
 
 export function applyConfidenceDisplayFloor(prop = {}, projection = null, confidence = null, playability = null) {
@@ -187,7 +263,8 @@ export function computeMlbConfidenceBreakdown(prop = {}, projection = null) {
       matchupQuality * CONFIDENCE_WEIGHTS.matchup
   );
 
-  const { penalties, penaltyTotal } = resolveConfidencePenalties(prop);
+  const { penalties, penaltyTotal, seasonPenalty, pitcherPenalty, matchupPenalty, integrityPenalty } =
+    resolveConfidencePenalties(prop);
   const afterPenalties = round2(clamp(weightedBase - penaltyTotal, CONFIDENCE_MIN, CONFIDENCE_MAX));
   const withFloor = applyConfidenceDisplayFloor(prop, projection, afterPenalties, prop.playabilityScore);
   const floorApplied = withFloor > afterPenalties;
@@ -209,6 +286,10 @@ export function computeMlbConfidenceBreakdown(prop = {}, projection = null) {
     weightedBase,
     penalties,
     penaltyTotal,
+    seasonPenalty,
+    pitcherPenalty,
+    matchupPenalty,
+    integrityPenalty,
     rawScore: weightedBase,
     afterPenalties,
     floorApplied,

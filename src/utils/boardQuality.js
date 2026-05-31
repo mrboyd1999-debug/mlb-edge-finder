@@ -18,7 +18,7 @@ import {
   canSelectOverallPlayAtRank,
 } from "./integrityAudit.js";
 import { resolveVerifiedHitRateSnapshot } from "./verifiedHitRates.js";
-import { STARTER_PENDING_LABEL } from "./opponentStarter.js";
+import { STARTER_PENDING_LABEL, normalizePropPitcherFields } from "./opponentStarter.js";
 
 export const MAX_PLAYER_PROPS_IN_TOP_LIST = 2;
 export const MAX_MARKET_PROPS_IN_TOP_LIST = 3;
@@ -58,12 +58,13 @@ export const FALLBACK_RANK_WEIGHTS = {
   sanity: 0.1,
 };
 export const TIER_A_MIN_CONFIDENCE = 75;
-export const TIER_A_MIN_PLAYABILITY = 80;
+export const TIER_A_MIN_PLAYABILITY = 75;
 export const TIER_A_MIN_EDGE = 0.5;
-export const TIER_A_MIN_LAST10_HIT_RATE = 60;
 export const TIER_B_MIN_CONFIDENCE = 65;
 export const TIER_B_MIN_PLAYABILITY = 70;
 export const TIER_B_MIN_EDGE = 0.3;
+/** Legacy — not used for A/B/C tier gates. */
+export const TIER_A_MIN_LAST10_HIT_RATE = 60;
 export const TIER_B_MIN_LAST10_HIT_RATE = 50;
 /** Legacy probability gates — not used for A/B/C tier classification. */
 export const TIER_A_MIN_PROBABILITY = 65;
@@ -407,7 +408,6 @@ export function getTierAFailures(prop = {}) {
   const confidence = resolvePropConfidence(prop);
   const playability = resolvePropPlayability(prop);
   const edge = resolvePropEdge(prop);
-  const last10 = resolveLast10HitRate(prop);
 
   if (!Number.isFinite(confidence) || confidence < TIER_A_MIN_CONFIDENCE) {
     failures.push(`confidence ${formatTierMetric(confidence)} < ${TIER_A_MIN_CONFIDENCE}`);
@@ -418,9 +418,6 @@ export function getTierAFailures(prop = {}) {
   if (!Number.isFinite(edge) || edge < TIER_A_MIN_EDGE) {
     failures.push(`edge ${formatTierMetric(edge)} < ${TIER_A_MIN_EDGE}`);
   }
-  if (!Number.isFinite(last10) || last10 < TIER_A_MIN_LAST10_HIT_RATE) {
-    failures.push(`last10 hit rate ${formatTierMetric(last10)} < ${TIER_A_MIN_LAST10_HIT_RATE}`);
-  }
   return failures;
 }
 
@@ -429,7 +426,6 @@ export function getTierBFailures(prop = {}) {
   const confidence = resolvePropConfidence(prop);
   const playability = resolvePropPlayability(prop);
   const edge = resolvePropEdge(prop);
-  const last10 = resolveLast10HitRate(prop);
 
   if (!Number.isFinite(confidence) || confidence < TIER_B_MIN_CONFIDENCE) {
     failures.push(`confidence ${formatTierMetric(confidence)} < ${TIER_B_MIN_CONFIDENCE}`);
@@ -439,9 +435,6 @@ export function getTierBFailures(prop = {}) {
   }
   if (!Number.isFinite(edge) || edge < TIER_B_MIN_EDGE) {
     failures.push(`edge ${formatTierMetric(edge)} < ${TIER_B_MIN_EDGE}`);
-  }
-  if (!Number.isFinite(last10) || last10 < TIER_B_MIN_LAST10_HIT_RATE) {
-    failures.push(`last10 hit rate ${formatTierMetric(last10)} < ${TIER_B_MIN_LAST10_HIT_RATE}`);
   }
   return failures;
 }
@@ -589,7 +582,6 @@ export function buildBestPlayFilterDiagnostics(pool = []) {
       if (audit.tierAFailures.some((row) => row.startsWith("confidence"))) counts.rejectedByConfidence += 1;
       if (audit.tierAFailures.some((row) => row.startsWith("playability"))) counts.rejectedByPlayability += 1;
       if (audit.tierBFailures.some((row) => row.startsWith("edge"))) counts.rejectedByEdge += 1;
-      if (audit.tierBFailures.some((row) => row.startsWith("last10"))) counts.rejectedByLast10 += 1;
       counts.tierRejectionLog.push({
         player: prop.playerName || prop.player || "Unknown",
         market: prop.statType || prop.market || prop.propType || "—",
@@ -1007,14 +999,15 @@ export function resolveProjectionConfidenceLevel(prop = {}) {
 
 export function attachBoardQualityFields(prop = {}) {
   const withPitcherPenalty = applyPitcherPendingConfidencePenalty(prop);
-  const edgeLabels = formatValidatedEdgeDisplay(withPitcherPenalty);
-  const fullDataReason = resolveFullDataReason(withPitcherPenalty);
-  const fullData = isFullDataProp(withPitcherPenalty);
-  const withSeason = attachSeasonHitRateFields(withPitcherPenalty);
+  const withPitcherNormalized = normalizePropPitcherFields(withPitcherPenalty);
+  const edgeLabels = formatValidatedEdgeDisplay(withPitcherNormalized);
+  const fullDataReason = resolveFullDataReason(withPitcherNormalized);
+  const fullData = isFullDataProp(withPitcherNormalized);
+  const withSeason = attachSeasonHitRateFields(withPitcherNormalized);
   const withIntegrityAudit = attachIntegrityAuditFields(withSeason);
-  const propTier = classifyPropTier(withIntegrityAudit);
   const withIntegrity = attachDataIntegrityFields(withIntegrityAudit);
   const dataQualityBadge = resolveBoardDataQualityBadge({ ...withIntegrity, isFullData: fullData, partialData: !fullData });
+  const propTier = classifyPropTier(prop);
   return {
     ...withIntegrity,
     ...edgeLabels,

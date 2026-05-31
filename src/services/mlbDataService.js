@@ -7,6 +7,7 @@ import { resolvePropSport } from "../utils/mlbOnlyMode.js";
 import { mlbTeamsMatch } from "../utils/mlbTeamMatch.js";
 import {
   gameIncludesBothTeams,
+  normalizePropPitcherFields,
   resolveOpponentStarterFromGame,
   resolveOpponentStarterDisplay,
   STARTER_PENDING_LABEL,
@@ -480,9 +481,12 @@ export async function fetchMlbProbablePitchers({ date = new Date(), team = "", o
   const result = {
     date: dateText,
     matchedGame: true,
+    gameId: match.gamePk ?? null,
     game: match,
     homeTeam: match.teams?.home?.team?.abbreviation || match.teams?.home?.team?.name || "",
     awayTeam: match.teams?.away?.team?.abbreviation || match.teams?.away?.team?.name || "",
+    homeTeamId: match.teams?.home?.team?.id ?? null,
+    awayTeamId: match.teams?.away?.team?.id ?? null,
     homePitcher,
     awayPitcher,
     opponentStarter,
@@ -1193,7 +1197,10 @@ export async function analyzeMlbPropWithData(prop = {}, { buildProfile = null } 
       reasons: model.reasons,
     });
 
-    return { ...applyModelToProp(prop, model), mlbPipelineTrace: trace };
+    return normalizePropPitcherFields(
+      { ...applyModelToProp(prop, model), mlbPipelineTrace: trace },
+      data.probablePitchers
+    );
   } catch (error) {
     console.error("[MLB Projection] analyze failed", {
       player: prop.playerName,

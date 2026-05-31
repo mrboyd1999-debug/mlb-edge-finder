@@ -13,7 +13,9 @@ import {
   classifyVerifiedTier,
   sanitizeProjectionValue,
 } from "./bestPlaysPipelineDebug.js";
-import { computeMlbPlayConfidence, computeMlbConfidenceBreakdown, applyConfidenceDisplayFloor } from "./mlbPlayConfidence.js";
+import { computeMlbPlayConfidence, computeMlbConfidenceBreakdown, applyConfidenceDisplayFloor, qualifiesEliteRecentFormCap } from "./mlbPlayConfidence.js";
+import { buildConfidenceAuditLog, buildTierAuditEntry, logPropConfidenceAudit } from "./tierAudit.js";
+import { normalizePropPitcherFields } from "./opponentStarter.js";
 import { attachBestPlayExplanation } from "./bestPlayExplanation.js";
 import { attachModelValidationFields } from "./modelValidation.js";
 import {
@@ -35,7 +37,7 @@ import { enrichPickDirectionFields, resolveProjectionLeanDisplay } from "./pickD
 import { isPitcherStrikeoutMarket } from "./topMlbPlaysRanking.js";
 import { isMlbPitcherMarket } from "../modules/mlbPitcherData.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
-import { resolveProjectionConfidenceLevel, classifyPropTier, attachBoardQualityFields } from "./boardQuality.js";
+import { resolveProjectionConfidenceLevel, classifyPropTier, attachBoardQualityFields, resolvePropEdge, TIER_A_MIN_CONFIDENCE, TIER_A_MIN_PLAYABILITY, TIER_A_MIN_EDGE } from "./boardQuality.js";
 import { computeCalibratedProbability } from "./probabilityCalibration.js";
 import { attachMarketProjectionValidation } from "./marketProjectionValidation.js";
 import {
@@ -197,6 +199,7 @@ export function enrichBestPlayRankingFields(prop = {}) {
 }
 
 function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
+  prop = normalizePropPitcherFields(prop);
   const rawProjection = resolveBestPlayStatSpecificProjection(prop);
   const validatedProp = attachMarketProjectionValidation(
     { ...prop, projection: rawProjection, projectedValue: rawProjection },
@@ -234,9 +237,10 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     prop.confidenceComponents ??
     computeMlbConfidenceBreakdown({ ...prop, projection }, projection);
   const modelConfidence =
-    metrics.adjustedConfidence ??
+    baseConfidenceBreakdown.afterPenalties ??
     baseConfidenceBreakdown.final ??
     computeMlbPlayConfidence({ ...prop, projection }, projection) ??
+    metrics.adjustedConfidence ??
     prop.displayConfidenceScore ??
     prop.confidenceScore ??
     prop.confidence;
@@ -251,7 +255,12 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     projectedValue: projection,
     projectionSanityAudit: sanityAudit,
   });
-  const afterSanityConfidence = applySanityConfidencePenalty(modelConfidence, sanityAudit);
+  let afterSanityConfidence = applySanityConfidencePenalty(modelConfidence, sanityAudit);
+  let sanityPenalty = Math.max(0, Math.round(modelConfidence - afterSanityConfidence));
+  if (qualifiesEliteRecentFormCap({ ...prop, projectionSanityAudit: sanityAudit }) && sanityPenalty > 5) {
+    afterSanityConfidence = Math.round(modelConfidence - 5);
+    sanityPenalty = 5;
+  }
   const playabilityBreakdown = computePlayabilityBreakdown(
     {
       ...prop,
@@ -269,14 +278,24 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
       probability: verifiedProbability,
     }
   );
-  const playabilityScore = playabilityBreakdown.finalPlayability;
-  const displayConfidence = applyConfidenceDisplayFloor(
+  const playabilityScore = Math.max(
+    playabilityBreakdown.finalPlayability,
+    finiteOr(prop.playabilityScore, NaN)
+  );
+  let displayConfidence = applyConfidenceDisplayFloor(
     { ...prop, projectionSanityAudit: sanityAudit },
     projection,
     afterSanityConfidence,
     playabilityScore
   );
-  const sanityPenalty = Math.max(0, Math.round(modelConfidence - afterSanityConfidence));
+  if (
+    qualifiesEliteRecentFormCap({ ...prop, projectionSanityAudit: sanityAudit }) &&
+    modelConfidence >= 70 &&
+    playabilityScore >= TIER_A_MIN_PLAYABILITY &&
+    resolvePropEdge({ ...prop, projection, edge: metrics.edge ?? prop.edge }) >= TIER_A_MIN_EDGE
+  ) {
+    displayConfidence = Math.max(displayConfidence, TIER_A_MIN_CONFIDENCE);
+  }
   const confidenceBreakdown = {
     ...baseConfidenceBreakdown,
     sanityPenalty,
@@ -284,6 +303,21 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     final: displayConfidence,
     floorApplied: displayConfidence > afterSanityConfidence,
   };
+  const confidenceAudit = buildConfidenceAuditLog(
+    { ...prop, projectionSanityAudit: sanityAudit, displayConfidenceScore: displayConfidence, playabilityScore },
+    projection,
+    {
+      breakdown: confidenceBreakdown,
+      sanityPenalty,
+      finalConfidence: displayConfidence,
+      tier: classifyPropTier({ ...prop, displayConfidenceScore: displayConfidence, playabilityScore }),
+    }
+  );
+  logPropConfidenceAudit(prop, confidenceAudit);
+  const tierAudit = buildTierAuditEntry(
+    { ...prop, displayConfidenceScore: displayConfidence, playabilityScore, confidenceAudit },
+    { confidenceAudit, projection, playability: playabilityScore }
+  );
   const tierLabel = classifyBestPlayTier({
     ...prop,
     projection,
@@ -410,6 +444,9 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     playabilityAudit: playabilityBreakdown,
     confidenceBreakdown,
     confidenceComponents: confidenceBreakdown,
+    confidenceAudit,
+    tierAudit,
+    confidenceSanityPenalty: sanityPenalty,
     projectionFormulaAudit,
     projectionFormulaValid: projectionFormulaAudit.projectionFormulaValid,
     projectionFormulaError: projectionFormulaAudit.projectionFormulaError,
@@ -436,7 +473,7 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
   ranked.confidenceTierLabel = ranked.confidenceTier ? `Tier ${ranked.confidenceTier}` : null;
   ranked.verifiedTier = ranked.confidenceTier;
   ranked.verifiedTierLabel = ranked.confidenceTierLabel;
-  return attachBoardQualityFields(
+  const finalized = attachBoardQualityFields(
     attachModelValidationFields(
       attachProjectionSanityAudit(ranked, {
         audit: sanityAudit,
@@ -452,6 +489,16 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
       }
     )
   );
+  finalized.playabilityScore = playabilityScore;
+  finalized.playabilityBreakdown = {
+    ...(finalized.playabilityBreakdown || playabilityBreakdown),
+    finalPlayability: playabilityScore,
+  };
+  finalized.confidenceTier = classifyPropTier(finalized);
+  finalized.confidenceTierLabel = finalized.confidenceTier ? `Tier ${finalized.confidenceTier}` : null;
+  finalized.verifiedTier = finalized.confidenceTier;
+  finalized.verifiedTierLabel = finalized.confidenceTierLabel;
+  return finalized;
 }
 
 export function passesBestPlaysFilter(prop = {}) {

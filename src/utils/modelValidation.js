@@ -291,9 +291,10 @@ export function buildEdgeValidation(prop = {}, metrics = {}) {
 }
 
 export function buildMatchupAudit(prop = {}) {
-  const team = String(prop.team || "").trim().toUpperCase() || "—";
-  const opponent = String(prop.opponent || "").trim().toUpperCase() || "—";
-  const pitcherValidation = validatePitcherForMatchup(prop);
+  const normalized = normalizePropPitcherFields(prop);
+  const team = String(normalized.team || "").trim().toUpperCase() || "—";
+  const opponent = String(normalized.opponent || "").trim().toUpperCase() || "—";
+  const pitcherValidation = validatePitcherForMatchup(normalized);
   const pitcher = pitcherValidation.pitcher || STARTER_PENDING_LABEL;
   const venue = String(prop.venue || prop.ballpark || prop.stadium || prop.homeBallpark || "").trim() || "—";
   const whip = finite(prop.opponentPitcherWhip);
@@ -336,6 +337,7 @@ export function buildMatchupAudit(prop = {}) {
 }
 
 import { attachDataIntegrityFields } from "./dataIntegrity.js";
+import { normalizePropPitcherFields } from "./opponentStarter.js";
 
 export function attachModelValidationFields(prop = {}, metrics = {}) {
   try {

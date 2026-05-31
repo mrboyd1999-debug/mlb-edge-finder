@@ -65,6 +65,7 @@ import {
   buildOverallPlayExplanation,
   buildTopBestPlaysPicks,
 } from "./boardQuality.js";
+import { buildTierAuditBatch } from "./tierAudit.js";
 import {
   selectStartupProjectionCandidates,
 } from "./startupPerformance.js";
@@ -460,6 +461,7 @@ export function resolveTopMlbPlaySections(
   filterDiagnostics.bestPlayQualifiedStrict = bestPlaysResult.qualifiedStrict;
   filterDiagnostics.bestPlayProjectedCount = projectedCount;
   filterDiagnostics.bestPlayUsedFallback = bestPlaysResult.usedFallback;
+  filterDiagnostics.tierAuditBatch = buildTierAuditBatch(topBestPlayPicks);
   filterDiagnostics.tierAProbabilityAudit = auditTierAProbabilityPool(boardQualityPool);
 
   const overallPlayCandidate = selectOverallPlay(boardQualityPool);

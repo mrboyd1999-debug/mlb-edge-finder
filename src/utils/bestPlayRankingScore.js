@@ -5,6 +5,7 @@
 import { computePlayabilityScore } from "./propCalibration.js";
 import { isBlockedNonMlbPipelineProp, isSupportedMlbMarket } from "./mlbAllowedMarkets.js";
 import { PENALTY_AGGRESSIVE_RISK, PENALTY_OUTLIER } from "./probabilityCalibration.js";
+import { qualifiesEliteRecentFormCap } from "./mlbPlayConfidence.js";
 
 function finite(value, fallback = 0) {
   const num = Number(value);
@@ -128,7 +129,11 @@ export function computeBestPlayRankingPenalties(prop = {}) {
   const sampleGames = resolveRankingSampleGames(prop);
   const outlierPenalty = flags.outlierDetected ? RANKING_PENALTY_OUTLIER : 0;
   const aggressiveRiskPenalty = flags.projectionRiskAggressive ? PENALTY_AGGRESSIVE_RISK : 0;
-  const missingSeasonPenalty = seasonAvailable ? 0 : RANKING_PENALTY_MISSING_SEASON;
+  const missingSeasonPenalty = seasonAvailable
+    ? 0
+    : qualifiesEliteRecentFormCap(prop)
+      ? Math.min(RANKING_PENALTY_MISSING_SEASON, 5)
+      : RANKING_PENALTY_MISSING_SEASON;
   const sampleSizePenalty =
     sampleGames != null && sampleGames < 20 ? RANKING_PENALTY_SMALL_SAMPLE : 0;
 

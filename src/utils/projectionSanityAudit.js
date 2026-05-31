@@ -606,7 +606,7 @@ export function attachProjectionSanityAudit(prop = {}, options = {}) {
       ? rawPlayability
       : applySanityPlayabilityPenalty(rawPlayability, audit);
 
-    if (!historicalPresent) {
+    if (!historicalPresent && !options.skipSanityRescore) {
       adjustedConfidence = applyMissingHistoricalConfidencePenalty(adjustedConfidence, prop);
     }
 
