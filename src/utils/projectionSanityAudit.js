@@ -26,6 +26,11 @@ import {
   resolveProjectionHistoricalCalibration,
   PROJECTION_MISMATCH_FLAG as HISTORICAL_MISMATCH_FLAG,
 } from "./projectionHistoricalCalibration.js";
+import {
+  PROJECTION_OUTLIER_DETECTED,
+  validateMarketProjection,
+  attachMarketProjectionValidation,
+} from "./marketProjectionValidation.js";
 
 function finite(value) {
   const num = Number(value);
@@ -47,7 +52,8 @@ function pctWeight(weight) {
 
 export const PROJECTION_OUTLIER_FLAG = "PROJECTION OUTLIER";
 export { PROJECTION_MISMATCH_FLAG } from "./projectionHistoricalCalibration.js";
-export const PROJECTION_OUTLIER_WARNING = "⚠ Projection Outlier";
+export { PROJECTION_OUTLIER_DETECTED } from "./marketProjectionValidation.js";
+export const PROJECTION_OUTLIER_WARNING = PROJECTION_OUTLIER_DETECTED;
 export {
   TIER_A_MIN_SANITY_SCORE,
   TIER_B_MIN_SANITY_SCORE,
@@ -87,6 +93,12 @@ export const MARKET_SANITY_RULES = {
     seasonOutlierPct: 0.35,
     last10OutlierPct: 0.35,
     maxAbsolute: 4,
+  },
+  hrr: {
+    label: "Hits+Runs+RBIs",
+    seasonOutlierPct: 0.35,
+    last10OutlierPct: 0.35,
+    maxAbsolute: 5,
   },
   totalBases: {
     label: "Total Bases",
@@ -330,7 +342,9 @@ function buildProjectionSanityAuditUnsafe(prop = {}) {
 
   const resolvedMarketKey = marketKey;
   const rule = MARKET_SANITY_RULES[resolvedMarketKey] || null;
-  const projection = resolveProjectionValue(prop);
+  const rawProjection = resolveProjectionValue(prop);
+  const marketValidation = validateMarketProjection(prop, rawProjection);
+  const projection = marketValidation.validatedProjection ?? rawProjection;
   const line = finite(prop.line);
   const supported = projection != null && line != null && line > 0;
   const { last5, last10, season } = resolveHistoricalAverages(prop);
@@ -480,14 +494,22 @@ function buildProjectionSanityAuditUnsafe(prop = {}) {
     mismatchFlags,
     seasonDeviationPct: seasonDeviationPct != null ? round1(seasonDeviationPct * 100) : null,
     last10DeviationPct: last10DeviationPct != null ? round1(last10DeviationPct * 100) : null,
+    rawProjection: marketValidation.rawProjection,
+    validatedProjection: projection,
+    marketProjectionCap: marketValidation.marketCap,
+    projectionValidationConfidence: marketValidation.projectionConfidence,
+    projectionRisk: marketValidation.projectionRisk,
+    projectionClamped: marketValidation.projectionClamped,
+    projectionOutlierDetected: marketValidation.outlierDetected,
+    outlierSupportReasons: marketValidation.outlierSupportReasons,
+    marketValidation,
     isOutlier,
     isAverageOutlier,
     outlierFlags,
     outlierWarning: capValidation.sanityFail
       ? SANITY_FAIL_FLAG
-      : isAverageOutlier
-        ? PROJECTION_OUTLIER_WARNING
-        : "",
+      : marketValidation.outlierWarning ||
+        (isAverageOutlier ? PROJECTION_OUTLIER_DETECTED : ""),
     sanityFail: capValidation.sanityFail,
     sanityFailReason: capValidation.reason || "",
     projectionCap: capValidation.cap,
@@ -508,6 +530,8 @@ function buildProjectionSanityAuditUnsafe(prop = {}) {
 
   if (capValidation.sanityFail) {
     audit.summary = `${SANITY_FAIL_FLAG}: ${capValidation.reason}`;
+  } else if (marketValidation.projectionClamped) {
+    audit.summary = `Projection clamped from ${formatNumber(marketValidation.rawProjection)} to ${formatNumber(projection)} (${marketValidation.clampReason || "market cap"})`;
   } else if (projectionMismatch) {
     audit.summary = `${HISTORICAL_MISMATCH_FLAG}: projection ${audit.projectionLabel} exceeds historical cap ${calibration?.historicalCap != null ? formatNumber(calibration.historicalCap) : "—"} (+${audit.projectionHistoricalDeviationPct ?? "—"}% vs baseline)`;
   } else if (calibration?.calibrationTier === "large") {
@@ -566,7 +590,8 @@ export function attachProjectionSanityAudit(prop = {}, options = {}) {
       return applyMissingMarketKeyFallback(prop, MISSING_MARKET_KEY_REASON);
     }
 
-    const audit = options.audit || buildProjectionSanityAudit(prop);
+    const validatedProp = attachMarketProjectionValidation(prop, resolveProjectionValue(prop));
+    const audit = options.audit || buildProjectionSanityAudit(validatedProp);
     const historicalPresent = audit?.historicalDataPresent ?? resolveHistoricalDataPresent(prop).present;
     const rawConfidence =
       options.confidence ??
@@ -588,13 +613,22 @@ export function attachProjectionSanityAudit(prop = {}, options = {}) {
     const usesNeutralHistoricalFallback = !historicalPresent;
 
     const merged = {
-      ...prop,
+      ...validatedProp,
       projectionSanityAudit: audit,
       projectionSanityScore: audit?.sanityScore ?? 0,
       projectionMismatch: audit?.projectionMismatch ?? false,
       projectionMismatchFlag: audit?.projectionMismatch ? HISTORICAL_MISMATCH_FLAG : "",
-      projectionOutlier: audit?.isOutlier ?? false,
-      projectionOutlierFlag: audit?.outlierWarning || audit?.outlierFlags?.[0] || "",
+      projectionOutlier: audit?.isOutlier ?? validatedProp.projectionOutlierDetected ?? false,
+      projectionOutlierFlag:
+        audit?.outlierWarning ||
+        validatedProp.projectionOutlierWarning ||
+        audit?.outlierFlags?.[0] ||
+        "",
+      projectionOutlierWarning: validatedProp.projectionOutlierWarning || audit?.outlierWarning || "",
+      projectionValidation: validatedProp.projectionValidation || audit?.marketValidation || null,
+      projectionValidationConfidence:
+        validatedProp.projectionValidationConfidence || audit?.projectionValidationConfidence,
+      projectionRisk: validatedProp.projectionRisk || audit?.projectionRisk,
       projectionSanityFail: audit?.sanityFail ?? false,
       historicalDataPresent: historicalPresent,
       usesNeutralHistoricalFallback,

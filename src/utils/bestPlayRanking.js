@@ -36,6 +36,7 @@ import { isMlbPitcherMarket } from "../modules/mlbPitcherData.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
 import { resolveProjectionConfidenceLevel, classifyPropTier, attachBoardQualityFields } from "./boardQuality.js";
 import { computeCalibratedProbability } from "./probabilityCalibration.js";
+import { attachMarketProjectionValidation } from "./marketProjectionValidation.js";
 import {
   computeDisplayPropMetrics,
   evaluateMlbPlayability,
@@ -195,19 +196,25 @@ export function enrichBestPlayRankingFields(prop = {}) {
 }
 
 function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
-  const projection = resolveBestPlayStatSpecificProjection(prop);
+  const rawProjection = resolveBestPlayStatSpecificProjection(prop);
+  const validatedProp = attachMarketProjectionValidation(
+    { ...prop, projection: rawProjection, projectedValue: rawProjection },
+    rawProjection
+  );
+  const projection = validatedProp.projection;
+  const marketValidation = validatedProp.projectionValidation;
   const line = finiteOr(prop.line, NaN);
   const games = resolveGamesPlayed(prop);
   const leanDirection = resolveLeanDirection(prop);
   const metrics =
-    prop.probabilityScore != null && prop.edge != null
+    prop.probabilityScore != null && prop.edge != null && !validatedProp.projectionClamped
       ? {
           edge: prop.edge,
           edgePercent: prop.edgePercent,
           probabilityScore: prop.probabilityScore,
           lean: prop.lean,
         }
-      : computeDisplayPropMetrics({ ...prop, projection, line });
+      : computeDisplayPropMetrics({ ...validatedProp, projection, line });
   const playability = evaluateMlbPlayability(
     {
       ...prop,
@@ -232,7 +239,7 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     prop.confidenceBreakdown ??
     computeMlbConfidenceBreakdown({ ...prop, projection }, projection);
   const sanityAudit = buildProjectionSanityAudit({
-    ...prop,
+    ...validatedProp,
     projection,
     projectedValue: projection,
   });
@@ -396,6 +403,13 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     marketContext,
     recommendedSide: prop.recommendedSide || direction,
     invalidReason: resolveBestPlayInvalidReason({ ...prop, projection }),
+    rawProjection: marketValidation?.rawProjection ?? rawProjection,
+    projectionValidation: marketValidation,
+    projectionValidationConfidence: marketValidation?.projectionConfidence,
+    projectionRisk: marketValidation?.projectionRisk,
+    projectionOutlierDetected: marketValidation?.outlierDetected,
+    projectionOutlierWarning: marketValidation?.outlierWarning,
+    projectionClamped: marketValidation?.projectionClamped,
   });
   ranked.rankScore = computeTopPickScore(ranked);
   ranked.weightedBestPlayScore = ranked.topPickScore;

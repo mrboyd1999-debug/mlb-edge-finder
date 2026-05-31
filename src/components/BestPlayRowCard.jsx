@@ -108,6 +108,21 @@ function BestPlayRowCard({
   const projectionSanityAudit = enriched.projectionSanityAudit;
   const projectionFormulaAudit = enriched.projectionFormulaAudit;
   const playabilityBreakdown = enriched.playabilityBreakdown ?? enriched.playabilityAudit;
+  const projectionValidation =
+    enriched.projectionValidation || enriched.projectionSanityAudit?.marketValidation || null;
+  const projectionOutlierWarning =
+    enriched.projectionOutlierWarning ||
+    projectionValidation?.outlierWarning ||
+    enriched.projectionSanityAudit?.outlierWarning ||
+    "";
+  const projectionValidationConfidence =
+    enriched.projectionValidationConfidence ||
+    projectionValidation?.projectionConfidence ||
+    enriched.projectionSanityAudit?.projectionValidationConfidence;
+  const projectionRisk =
+    enriched.projectionRisk ||
+    projectionValidation?.projectionRisk ||
+    enriched.projectionSanityAudit?.projectionRisk;
   const filterReason = enriched.bestPlayFilterReason || enriched.bestPlayExclusionReason || "";
   const reason =
     explanation?.reason ||
@@ -196,6 +211,16 @@ function BestPlayRowCard({
           {filterReason ? (
             <p className="best-play-row-filter-reason" style={{ ...styles.bestPlayRowSubline, marginTop: 4, fontSize: 11 }}>
               {filterReason}
+            </p>
+          ) : null}
+          {projectionOutlierWarning ? (
+            <p
+              className="best-play-row-outlier-warning"
+              style={{ ...styles.bestPlayRowSubline, marginTop: 4, fontSize: 11, color: "#fbbf24" }}
+            >
+              {projectionOutlierWarning}
+              {projectionValidationConfidence ? ` · Confidence ${projectionValidationConfidence}` : ""}
+              {projectionRisk ? ` · Risk ${projectionRisk}` : ""}
             </p>
           ) : null}
           {hasAuditDetails ? (

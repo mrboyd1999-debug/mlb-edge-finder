@@ -53,10 +53,36 @@ function ProjectionSanityAuditPanel({ audit = null, compact = false }) {
         <SideBySideCell label="Last 10 Avg" value={audit.last10Label} />
         <SideBySideCell label="Season Avg" value={audit.seasonLabel} />
         <SideBySideCell label="Projection" value={audit.projectionLabel} highlight />
+        {audit.rawProjection != null && audit.rawProjection !== audit.validatedProjection ? (
+          <SideBySideCell label="Raw projection" value={safeFixed(audit.rawProjection, 1)} />
+        ) : null}
+        {audit.marketProjectionCap != null ? (
+          <SideBySideCell label="Market cap" value={safeFixed(audit.marketProjectionCap, 1)} />
+        ) : null}
         {audit.historicalProjectionCap != null ? (
           <SideBySideCell label="History cap" value={safeFixed(audit.historicalProjectionCap, 1)} />
         ) : null}
       </div>
+
+      {audit.projectionValidationConfidence || audit.projectionRisk ? (
+        <div className="projection-sanity-audit__rates">
+          {audit.projectionValidationConfidence ? (
+            <span>
+              Projection confidence: <strong>{audit.projectionValidationConfidence}</strong>
+            </span>
+          ) : null}
+          {audit.projectionRisk ? (
+            <span>
+              Projection risk: <strong>{audit.projectionRisk}</strong>
+            </span>
+          ) : null}
+          {audit.projectionClamped ? (
+            <span>
+              Clamped: <strong>Yes</strong>
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       {audit.projectionHistoricalDeviationPct != null ? (
         <div className="projection-sanity-audit__rates">

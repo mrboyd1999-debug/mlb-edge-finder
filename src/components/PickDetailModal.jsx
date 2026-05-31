@@ -366,6 +366,18 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
               strong
             />
           ) : null}
+          {breakdownMode && prop.rawProjection != null && prop.rawProjection !== (prop.projection ?? prop.projectedValue) ? (
+            <MetricIf label="Raw projection" value={formatNumber(prop.rawProjection)} />
+          ) : null}
+          {breakdownMode && prop.projectionValidationConfidence ? (
+            <MetricIf label="Projection confidence" value={prop.projectionValidationConfidence} />
+          ) : null}
+          {breakdownMode && prop.projectionRisk ? (
+            <MetricIf label="Projection risk" value={prop.projectionRisk} />
+          ) : null}
+          {breakdownMode && prop.projectionOutlierWarning ? (
+            <MetricIf label="Projection warning" value={prop.projectionOutlierWarning} />
+          ) : null}
           {breakdownMode ? <MetricIf label="Lean" value={lean} strong /> : null}
           {manualProp && !noVerifiedPlay ? <MetricIf label="Risk" value={prop.riskLevel} /> : null}
           {!manualProp ? <MetricIf label="Risk" value={prop.riskLevel} /> : null}
