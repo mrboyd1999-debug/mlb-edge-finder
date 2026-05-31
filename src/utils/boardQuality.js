@@ -17,6 +17,13 @@ export const VALUE_UNDER_MIN_CONFIDENCE = 65;
 export const VALUE_UNDER_MIN_PLAYABILITY = 60;
 export const SAFEST_FALLBACK_NOTICE =
   "No full-data safest plays yet. Showing best available Tier A/B.";
+export const BEST_PLAY_MIN_CONFIDENCE = 70;
+export const BEST_PLAY_MIN_PROBABILITY = 70;
+export const BEST_PLAY_MIN_PLAYABILITY = 70;
+export const BEST_PLAY_MIN_SANITY = 80;
+export const MIN_UNIQUE_PLAYERS_TOP_10 = 5;
+export const CONFIDENCE_CALIBRATION_MIN = 50;
+export const CONFIDENCE_CALIBRATION_MAX = 95;
 
 function finite(value, fallback = 0) {
   const num = Number(value);
@@ -79,6 +86,41 @@ export function applyPlayerDiversityFilter(
     out.push(prop);
   }
   return out;
+}
+
+/** Prefer unique players first, then allow second prop up to maxPerPlayer. */
+export function applyBestPlaysDiversityFilter(
+  props = [],
+  { limit = 10, maxPerPlayer = MAX_PLAYER_PROPS_IN_TOP_LIST, minUniquePlayers = MIN_UNIQUE_PLAYERS_TOP_10 } = {}
+) {
+  const sorted = [...props];
+  const counts = new Map();
+  const out = [];
+  const seen = new Set();
+
+  for (const prop of sorted) {
+    if (out.length >= limit) break;
+    const key = playerKey(prop);
+    if (!key || counts.has(key)) continue;
+    counts.set(key, 1);
+    out.push(prop);
+    seen.add(prop);
+  }
+
+  for (const prop of sorted) {
+    if (out.length >= limit) break;
+    if (seen.has(prop)) continue;
+    const key = playerKey(prop);
+    if (!key) continue;
+    const used = counts.get(key) || 0;
+    if (used >= maxPerPlayer) continue;
+    counts.set(key, used + 1);
+    out.push(prop);
+    seen.add(prop);
+  }
+
+  void minUniquePlayers;
+  return out.slice(0, limit);
 }
 
 export function computeValidatedEdgePercent(prop = {}) {
@@ -151,12 +193,36 @@ export function hasPartialDataBadge(prop = {}) {
   return /partial data/i.test(String(badge?.label || prop.dataQualityLabel || ""));
 }
 
+export function hasPartialDataFlags(prop = {}) {
+  if (prop.partialData === true) return true;
+  if (prop.partialStats === true) return true;
+  const dataStatus = String(prop.dataStatus || "").trim().toLowerCase();
+  if (dataStatus === "partial" || /partial/.test(dataStatus)) return true;
+  if (prop.missingPitcher === true) return true;
+  if (prop.missingGameContext === true) return true;
+  return hasPartialDataBadge(prop);
+}
+
 export function passesFullDataBestPlayRequirements(prop = {}) {
+  if (hasPartialDataFlags(prop)) return false;
   const projection = finite(prop.projection ?? prop.projectedValue, NaN);
   if (!Number.isFinite(projection) || projection <= 0) return false;
   if (!hasMlbStatsApiData(prop)) return false;
   if (!hasSportsDataIoData(prop)) return false;
-  if (hasPartialDataBadge(prop)) return false;
+  return true;
+}
+
+export function passesBestPlayGate(prop = {}) {
+  if (hasPartialDataFlags(prop)) return false;
+  const confidence = resolvePropConfidence(prop);
+  const tier = classifyConfidenceTier(confidence);
+  if (tier === "C" || tier === "D") return false;
+  if (confidence < BEST_PLAY_MIN_CONFIDENCE) return false;
+  if (resolvePropProbability(prop) < BEST_PLAY_MIN_PROBABILITY) return false;
+  if (resolvePropPlayability(prop) < BEST_PLAY_MIN_PLAYABILITY) return false;
+  if (resolvePropSanity(prop) < BEST_PLAY_MIN_SANITY) return false;
+  const projection = finite(prop.projection ?? prop.projectedValue, NaN);
+  if (!Number.isFinite(projection) || projection <= 0) return false;
   return true;
 }
 
@@ -193,22 +259,12 @@ export function resolveProjectionGap(prop = {}) {
 }
 
 export function passesTopFiveBestPlayGate(prop = {}) {
-  const confidence = resolvePropConfidence(prop);
-  const tier = classifyConfidenceTier(confidence);
-  if (tier === "C" || tier === "D") return false;
-  return passesFullDataBestPlayRequirements(prop);
+  return passesBestPlayGate(prop);
 }
 
 export function passesSafestPlayGate(prop = {}) {
-  if (!passesFullDataBestPlayRequirements(prop)) return false;
-  const confidence = resolvePropConfidence(prop);
-  const tier = classifyConfidenceTier(confidence);
-  if (tier === "C" || tier === "D") return false;
-  if (confidence < SAFEST_MIN_CONFIDENCE) return false;
-  if (resolvePropPlayability(prop) < SAFEST_MIN_PLAYABILITY) return false;
-  if (resolvePropSanity(prop) < SAFEST_MIN_SANITY) return false;
-  if (resolvePropProbability(prop) < SAFEST_MIN_PROBABILITY) return false;
-  return true;
+  if (!passesBestPlayGate(prop)) return false;
+  return resolvePropConfidence(prop) >= SAFEST_MIN_CONFIDENCE;
 }
 
 export function passesValueUnderGate(prop = {}) {
@@ -226,6 +282,46 @@ export function passesValueUnderGate(prop = {}) {
 
 function compareNumericDesc(a = {}, b = {}, resolver = () => 0) {
   return resolver(b) - resolver(a);
+}
+
+export function compareOverallPlayRank(a = {}, b = {}) {
+  return (
+    compareNumericDesc(a, b, resolvePropConfidence) ||
+    compareNumericDesc(a, b, resolvePropProbability) ||
+    compareNumericDesc(a, b, resolvePropPlayability) ||
+    compareNumericDesc(a, b, resolvePropSanity) ||
+    compareHighestEdgePlays(a, b)
+  );
+}
+
+export function selectOverallPlay(pool = []) {
+  return (
+    [...pool]
+      .filter(passesBestPlayGate)
+      .filter((prop) => classifyConfidenceTier(resolvePropConfidence(prop)) === "A")
+      .sort(compareOverallPlayRank)[0] || null
+  );
+}
+
+export function buildOverallPlayExplanation(prop = {}) {
+  const confidence = Math.round(resolvePropConfidence(prop));
+  const probability = Math.round(resolvePropProbability(prop));
+  const playability = Math.round(resolvePropPlayability(prop));
+  const line = finite(prop.line, NaN);
+  const projection = finite(prop.projection ?? prop.projectedValue, NaN);
+  let projectionLabel = "Projection aligned with line";
+  if (Number.isFinite(line) && Number.isFinite(projection)) {
+    const gap = Math.round((projection - line) * 10) / 10;
+    projectionLabel =
+      gap > 0
+        ? `Projection +${gap} over line`
+        : gap < 0
+          ? `Projection ${gap} under line`
+          : "Projection aligned with line";
+  }
+  const tier = classifyConfidenceTier(confidence);
+  const dataLabel = hasPartialDataFlags(prop) ? "Partial MLB data" : "Full MLB data";
+  return `Why ranked #1: Confidence ${confidence}% · Probability ${probability}% · Playability ${playability} · ${projectionLabel} · Tier ${tier} · ${dataLabel}`;
 }
 
 export function compareSafestPlaysRank(a = {}, b = {}) {
@@ -260,7 +356,7 @@ export function buildSafestPlaysSection(pool = [], { limit = TOP_SECTION_LIMIT }
   const fallbackPicks = buildTopSectionPicks(strictPool, {
     compareFn: compareSafestPlaysRank,
     limit,
-    filterFn: passesTopFiveBestPlayGate,
+    filterFn: passesBestPlayGate,
   });
   return {
     picks: fallbackPicks,

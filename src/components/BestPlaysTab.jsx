@@ -3,7 +3,7 @@ import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import BestPlayHeroCard from "./BestPlayHeroCard.jsx";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
 import PerformanceTracker from "./PerformanceTracker.jsx";
-import { compareVerifiedPlaysRank, compareBestPlaysRank, passesHeroOverallPlayGate } from "../utils/bestPlayRankingScore.js";
+import { compareVerifiedPlaysRank, compareBestPlaysRank } from "../utils/bestPlayRankingScore.js";
 import {
   VERIFIED_DISPLAY_MAX,
   NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
@@ -58,6 +58,7 @@ function BestPlaysSection({ section, onOpen, cacheStatus = "", sortFn = null, li
 
 function BestPlaysTab({
   sections = [],
+  overallPlay = null,
   loading = false,
   loadingStage = "",
   loadError = "",
@@ -84,9 +85,7 @@ function BestPlaysTab({
       .slice(0, VERIFIED_DISPLAY_MAX);
   }, [verifiedSection]);
 
-  const heroPlay = useMemo(() => {
-    return topBestPlays.find(passesHeroOverallPlayGate) || verifiedPicks.find(passesHeroOverallPlayGate) || null;
-  }, [topBestPlays, verifiedPicks]);
+  const heroPlay = useMemo(() => overallPlay, [overallPlay]);
   const failureReason = loadError || filterDiagnostics?.error || "";
   const blockStaleRender = shouldBlockVerifiedPlayRender(renderSourceAudit);
   const liveProviderActive = Number(renderSourceAudit?.liveProviderCount ?? 0) > 0;

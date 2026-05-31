@@ -52,14 +52,18 @@ import { resolveBestPlayProjection, PROJECTION_JOIN_DEBUG, passesVerifiedBestPla
 import { compareBestPlaysRank } from "./bestPlayRankingScore.js";
 import {
   dedupeByPlayerMarketBestScore,
-  applyPlayerDiversityFilter,
+  applyBestPlaysDiversityFilter,
   buildTopSectionPicks,
   compareHighestEdgePlaysRank,
   compareValueSidePlaysRank,
   TOP_SECTION_LIMIT,
   passesTopFiveBestPlayGate,
+  passesBestPlayGate,
   buildSafestPlaysSection,
   buildValueUndersSection,
+  selectOverallPlay,
+  buildOverallPlayExplanation,
+  MIN_UNIQUE_PLAYERS_TOP_10,
 } from "./boardQuality.js";
 import {
   selectStartupProjectionCandidates,
@@ -437,10 +441,20 @@ export function resolveTopMlbPlaySections(
     historicalPool.filter(passesVerifiedBestPlaysFilter).map((prop) => enrichBestPlayRankingFields(prop))
   );
 
-  const topBestPlayPicks = applyPlayerDiversityFilter([...boardQualityPool].sort(compareBestPlaysRank), {
+  const bestPlaysEligible = boardQualityPool.filter(passesBestPlayGate);
+  const topBestPlayPicks = applyBestPlaysDiversityFilter([...bestPlaysEligible].sort(compareBestPlaysRank), {
     limit: TOP_BEST_PLAYS_LIMIT,
     maxPerPlayer: MAX_PLAYER_APPEARANCES,
+    minUniquePlayers: MIN_UNIQUE_PLAYERS_TOP_10,
   }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
+
+  const overallPlayCandidate = selectOverallPlay(boardQualityPool);
+  const overallPlay = overallPlayCandidate
+    ? {
+        ...annotateHighestProbabilityPlay(overallPlayCandidate, 1),
+        overallPlayExplanation: buildOverallPlayExplanation(overallPlayCandidate),
+      }
+    : null;
 
   const safestSectionResult = buildSafestPlaysSection(boardQualityPool, { limit: TOP_SECTION_LIMIT });
   const topSafestPicks = safestSectionResult.picks.map((prop, idx) =>
@@ -491,14 +505,14 @@ export function resolveTopMlbPlaySections(
     {
       id: "top-10-best-plays",
       title: "Best Plays",
-      eyebrow: "Top 10 sorted by probability, confidence, then projection edge · Max 2 props per player",
+      eyebrow: "Top 10 · Tier A/B only · Full data · Confidence 70+ · Max 2 props per player",
       emptyMessage: topBestPlayPicks.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
       picks: topBestPlayPicks,
     },
     {
       id: "top-5-safest",
       title: "Safest Plays",
-      eyebrow: "Full data only · Confidence 75+ · Playability 70+ · Sanity 80+ · Probability 70+",
+      eyebrow: "Tier A/B · Full data · Confidence 75+ · Playability 70+ · Sanity 80+ · Probability 70+",
       emptyMessage: topSafestPicks.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
       fallbackNotice: safestSectionResult.fallbackNotice || "",
       picks: topSafestPicks,
@@ -575,5 +589,6 @@ export function resolveTopMlbPlaySections(
     isLive: liveVerifiedCount > 0,
     pipelineDebug,
     sections,
+    overallPlay,
   };
 }

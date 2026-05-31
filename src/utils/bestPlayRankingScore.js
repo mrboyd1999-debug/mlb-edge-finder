@@ -20,7 +20,12 @@ export const HERO_MIN_CONFIDENCE = 60;
 export const HERO_MIN_PLAYABILITY = 60;
 export const HERO_MIN_SANITY = 65;
 
-import { computeValidatedEdgePercent, clampValidatedEdgePercent } from "./boardQuality.js";
+import {
+  computeValidatedEdgePercent,
+  clampValidatedEdgePercent,
+  passesBestPlayGate,
+  classifyConfidenceTier,
+} from "./boardQuality.js";
 
 export function resolveRankingEdgePercent(prop = {}) {
   const direct = finite(prop.edgePercent, NaN);
@@ -102,23 +107,12 @@ export function passesTopVerifiedPlaysGate(prop = {}) {
 }
 
 export function passesHeroOverallPlayGate(prop = {}) {
-  if (!passesTopVerifiedPlaysGate(prop)) return false;
-
-  const probability = finite(prop.probabilityScore ?? prop.verifiedProbability, NaN);
+  if (!passesBestPlayGate(prop)) return false;
   const confidence = finite(
     prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence,
     NaN
   );
-  const playability = resolvePlayabilityScore(prop);
-  const sanity = resolveSanityScore(prop);
-  const audit = prop.projectionSanityAudit;
-
-  if (audit?.sanityFail || prop.projectionSanityFail) return false;
-  if (!Number.isFinite(probability) || probability < HERO_MIN_PROBABILITY) return false;
-  if (!Number.isFinite(confidence) || confidence < HERO_MIN_CONFIDENCE) return false;
-  if (!Number.isFinite(playability) || playability < HERO_MIN_PLAYABILITY) return false;
-  if (sanity == null || sanity < HERO_MIN_SANITY) return false;
-  return true;
+  return classifyConfidenceTier(confidence) === "A";
 }
 
 /** Top Verified sort: playability → confidence → probability → edge */

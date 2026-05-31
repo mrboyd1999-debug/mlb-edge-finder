@@ -93,6 +93,7 @@ function DfsAnalyzerLayout({
 
       <ProviderFeedModeBanner
         audit={providerCoverageAudit}
+        renderSourceAudit={renderSourceAudit}
         loading={loading}
         cacheStatus={cacheStatus}
         boardCacheTimestamp={boardCacheTimestamp}
@@ -145,6 +146,7 @@ function DfsAnalyzerLayout({
         <SectionErrorBoundary name="Verified Plays" onError={onSectionError}>
           <BestPlaysTab
             sections={topMlbPlayBoard?.sections || []}
+            overallPlay={topMlbPlayBoard?.overallPlay || null}
             loading={loading}
             loadingStage={loadingStage}
             pipelineDiagnostics={pipelineDiagnostics}

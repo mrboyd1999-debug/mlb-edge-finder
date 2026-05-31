@@ -33,6 +33,11 @@ import {
 } from "./tierHistoricalValidation.js";
 import { isSupportedMlbMarket, isBlockedNonMlbPipelineProp } from "./mlbAllowedMarkets.js";
 import { hasVerifiedHistoricalAttachment, isFallbackProjectionProp } from "./projectionQuality.js";
+import {
+  selectOverallPlay,
+  compareOverallPlayRank,
+  buildOverallPlayExplanation,
+} from "./boardQuality.js";
 
 export { NO_TIER_A_PLAYS_MESSAGE, NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE };
 export {
@@ -535,10 +540,26 @@ export function selectVerifiedPlaysWithFallback(props = [], options = {}) {
 }
 
 export function selectHeroOverallPlay(props = [], limit = 1) {
+  if (limit <= 1) {
+    const hero = selectOverallPlay(props);
+    if (!hero) return [];
+    return [
+      annotateTopPickRankingFields(
+        {
+          ...enforceVerifiedTierFields(hero),
+          topVerifiedRank: 1,
+          isHighestProbabilityPick: true,
+          bestPlayPool: "highest-probability",
+          overallPlayExplanation: buildOverallPlayExplanation(hero),
+        },
+        1
+      ),
+    ];
+  }
   return [...(props || [])]
     .filter(passesHeroOverallPlayGate)
     .map((prop) => enforceVerifiedTierFields(prop))
-    .sort(compareVerifiedPlaysRank)
+    .sort(compareOverallPlayRank)
     .slice(0, limit)
     .map((prop, index) =>
       annotateTopPickRankingFields(
@@ -547,6 +568,7 @@ export function selectHeroOverallPlay(props = [], limit = 1) {
           topVerifiedRank: index + 1,
           isHighestProbabilityPick: true,
           bestPlayPool: "highest-probability",
+          overallPlayExplanation: buildOverallPlayExplanation(prop),
         },
         index + 1
       )

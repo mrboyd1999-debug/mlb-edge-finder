@@ -4,12 +4,14 @@ import { computeStandardEdge, computeRelativeEdgePercent, computeStandardPropMet
 import { computeMlbPlayConfidence } from "./mlbPlayConfidence.js";
 import { classifyVerifiedTier } from "./verifiedTierSystem.js";
 import { resolveProjectionLeanDisplay, resolveProjectionLean } from "./pickDirectionAudit.js";
-import { computeCalibratedProbability } from "./probabilityCalibration.js";
+import { computeCalibratedProbability, resolveCalibrationHitRates, computeMatchupAdjustment } from "./probabilityCalibration.js";
 import {
   formatValidatedEdgeDisplay,
-  hasPartialDataBadge,
+  hasPartialDataFlags,
   PARTIAL_DATA_CONFIDENCE_PENALTY,
   classifyConfidenceTier,
+  CONFIDENCE_CALIBRATION_MIN,
+  CONFIDENCE_CALIBRATION_MAX,
 } from "./boardQuality.js";
 
 export const PICK_TIER_VERIFIED = "Verified Play";
@@ -99,22 +101,45 @@ export function hasMissingSportsbookComparison(prop = {}) {
   return !prop.sportsbookComparison && !Number(prop.sportsbookBooksCount || 0);
 }
 
-/** Apply research-gap penalties to raw confidence before tiering. */
+/** Apply weighted hit-rate blend capped at realistic MLB confidence. */
+function normalizeHitRatePercent(value) {
+  const num = finiteOr(value, NaN);
+  if (!Number.isFinite(num)) return 50;
+  if (num <= 1) return num * 100;
+  return num;
+}
+
+function matchupScoreForConfidence(prop = {}) {
+  const adj = computeMatchupAdjustment(prop);
+  return clamp(50 + adj * 2, 50, 95);
+}
+
 export function computeAdjustedConfidence(prop = {}) {
-  const projection = resolveProjectionValue(prop);
-  const modelConfidence = computeMlbPlayConfidence(prop, projection);
-  const base = finiteOr(prop.confidenceScore ?? prop.confidence, NaN);
-  let adjusted = Number.isFinite(base) ? base * 0.35 + modelConfidence * 0.65 : modelConfidence;
-  if (isLowMatchupProp(prop)) adjusted -= 3;
-  else if (hasMissingMatchupData(prop)) adjusted -= 10;
-  if (hasMissingOpponentData(prop)) adjusted -= 6;
-  if (hasMissingSportsbookComparison(prop)) adjusted -= 4;
-  if (hasPartialDataBadge(prop)) adjusted -= PARTIAL_DATA_CONFIDENCE_PENALTY;
-  const line = finiteOr(prop.line, NaN);
-  if (projection != null && Number.isFinite(line) && line > 0) {
-    adjusted += Math.min(3, (Math.abs(projection - line) / line) * 8);
+  const hitRates = resolveCalibrationHitRates(prop);
+  const recentHitRate = normalizeHitRatePercent(
+    prop.last10HitRate ?? prop.recentHitRate ?? hitRates.last10HitRate ?? 50
+  );
+  const seasonHitRate = normalizeHitRatePercent(
+    prop.seasonHitRate ?? prop.historicalHitRate ?? hitRates.seasonHitRate ?? 50
+  );
+  const projectionProbability = finiteOr(prop.probabilityScore ?? prop.verifiedProbability, 50);
+  const matchupScore = matchupScoreForConfidence(prop);
+
+  let confidence =
+    recentHitRate * 0.4 +
+    seasonHitRate * 0.3 +
+    projectionProbability * 0.2 +
+    matchupScore * 0.1;
+
+  if (hasPartialDataFlags(prop)) {
+    confidence -= PARTIAL_DATA_CONFIDENCE_PENALTY;
   }
-  return clamp(Math.round(adjusted * 100) / 100, 0, 100);
+
+  return clamp(
+    Math.round(confidence * 10) / 10,
+    CONFIDENCE_CALIBRATION_MIN,
+    CONFIDENCE_CALIBRATION_MAX
+  );
 }
 
 export function resolveTierProjectionValue(prop = {}) {

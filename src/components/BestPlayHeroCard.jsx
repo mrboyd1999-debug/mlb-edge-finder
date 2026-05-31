@@ -7,6 +7,7 @@ import { withPlayerImageUrl } from "../utils/playerImageFields.js";
 import { formatPlatformSideLabel, recommendationPalette, resolvePickSide } from "../utils/pickRecommendation.js";
 import { displayFullMarketLabel } from "../utils/propLabels.js";
 import { resolveProjectionValue } from "../utils/projectionQuality.js";
+import { buildOverallPlayExplanation } from "../utils/boardQuality.js";
 
 function BestPlayHeroCard({ prop, onOpen, cacheStatus = "" }) {
   if (!prop) return null;
@@ -35,12 +36,14 @@ function BestPlayHeroCard({ prop, onOpen, cacheStatus = "" }) {
     enriched.projectionMismatchFlag ||
     "";
   const reason =
+    enriched.overallPlayExplanation ||
+    buildOverallPlayExplanation(enriched) ||
     enriched.verifiedPlayExplanation?.reason ||
     enriched.qualifyReason ||
     enriched.whyThisPick ||
     enriched.rankingReason ||
     enriched.marketContext ||
-    "Top combined score across probability, confidence, playability, and edge.";
+    "Top combined score across confidence, probability, playability, and edge.";
 
   function openDetails() {
     onOpen?.(enriched);
