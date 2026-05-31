@@ -2,9 +2,10 @@
  * Best Plays debug helpers — MLB-only, no fabricated projections.
  */
 
-import { resolveProjectionValue } from "./projectionQuality.js";
+import { resolveProjectionValue, isFallbackProjectionProp } from "./projectionQuality.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
 import { resolveEdgeMagnitude } from "./bestPlayRanking.js";
+import { isSupportedMlbMarket, isBlockedNonMlbPipelineProp } from "./mlbAllowedMarkets.js";
 import {
   computeDisplayPropMetrics,
   isResearchCandidate,
@@ -17,7 +18,17 @@ import {
   passesVerifiedTierFilter,
   passesResearchTierFilter,
   classifyVerifiedTier,
+  resolveVerifiedMetrics,
+  VERIFIED_BASE_MIN_PROBABILITY,
+  VERIFIED_BASE_MIN_CONFIDENCE,
 } from "./verifiedTierSystem.js";
+import {
+  allowFallbackVerification,
+  isBoardEligibleVerification,
+  resolveVerificationStatus,
+  resolvePlayProjection,
+  VERIFICATION_STATUS,
+} from "./verificationStatus.js";
 
 export const BEST_PLAYS_DEBUG_MODE = false;
 export const BEST_PLAYS_DEBUG_SAMPLE_SIZE = 0;
@@ -110,6 +121,38 @@ export function classifyBestPlayTier(prop = {}) {
 /** Phase 3: tier A/B/C probability + confidence gates — matchup gaps no longer hard-block verified. */
 export function passesVerifiedBestPlaysFilter(prop = {}) {
   return passesVerifiedTierFilter(prop);
+}
+
+export function passesPartialBestPlaysFilter(prop = {}) {
+  if (!passesMinimalBestPlaysFilter(prop)) return false;
+  if (resolvePropSport(prop) !== "MLB") return false;
+  if (isBlockedNonMlbPipelineProp(prop)) return false;
+  if (!isSupportedMlbMarket(prop)) return false;
+  if (isFallbackProjectionProp(prop)) return false;
+  if (prop.projectionUnavailable || prop.unverifiedGradeBlocked) return false;
+
+  const projection = resolvePlayProjection(prop);
+  if (projection == null || projection <= VERIFIED_MIN_PROJECTION) return false;
+
+  const { probability, confidence, playability } = resolveVerifiedMetrics(prop);
+  if (!Number.isFinite(probability) || probability < VERIFIED_BASE_MIN_PROBABILITY) return false;
+  if (!Number.isFinite(confidence) || confidence < VERIFIED_BASE_MIN_CONFIDENCE) return false;
+  if (!Number.isFinite(playability)) return false;
+  return true;
+}
+
+/** Board pool — FULL strict path or PARTIAL fallback when MLB Stats API is unavailable. */
+export function passesPlayboardPoolFilter(prop = {}) {
+  if (!isBoardEligibleVerification(prop)) return false;
+
+  const status = resolveVerificationStatus(prop);
+  if (status === VERIFICATION_STATUS.FULL) {
+    return passesVerifiedBestPlaysFilter(prop) || passesPartialBestPlaysFilter(prop);
+  }
+  if (allowFallbackVerification && status === VERIFICATION_STATUS.PARTIAL) {
+    return passesPartialBestPlaysFilter(prop);
+  }
+  return false;
 }
 
 export { classifyVerifiedTier };

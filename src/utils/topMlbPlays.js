@@ -49,25 +49,27 @@ import {
   logPipelineMergeDiagnostics,
 } from "../services/mlb/projectionMergePipeline.js";
 import { enrichBestPlayRankingFields } from "./bestPlayRanking.js";
-import { resolveBestPlayProjection, PROJECTION_JOIN_DEBUG, passesVerifiedBestPlaysFilter } from "./bestPlaysPipelineDebug.js";
+import { resolveBestPlayProjection, PROJECTION_JOIN_DEBUG, passesPlayboardPoolFilter } from "./bestPlaysPipelineDebug.js";
 import { compareBestPlaysRank, annotateBestPlayRankingAudit } from "./bestPlayRankingScore.js";
 import {
   dedupeByPlayerMarketBestScore,
   buildTopSectionPicks,
   compareHighestEdgePlaysRank,
-  compareValueSidePlaysRank,
   TOP_SECTION_LIMIT,
-  passesTopFiveBestPlayGate,
+  VALUE_SECTION_LIMIT,
   passesTopFiveEdgeGate,
   buildSafestPlaysSection,
   buildValueUndersSection,
+  buildValueOversSection,
   selectOverallPlay,
   buildOverallPlayExplanation,
   buildTopBestPlaysPicks,
   resolveFinalTier,
   logFinalTierTable,
   NO_VERIFIED_PLAYS_MESSAGE,
+  countFinalTierPool,
 } from "./boardQuality.js";
+import { countVerificationStatuses } from "./verificationStatus.js";
 import { buildTierAuditBatch, logConfidenceSuppressionBatch } from "./tierAudit.js";
 import {
   selectStartupProjectionCandidates,
@@ -438,9 +440,12 @@ export function resolveTopMlbPlaySections(
   verifiedPicks = dedupeByPlayerMarketBestScore(verifiedPicks);
   highestPicks = dedupeByPlayerMarketBestScore(highestPicks);
 
+  const enrichedForBoard = historicalPool.map((prop) => enrichBestPlayRankingFields(prop));
   const boardQualityPool = dedupeByPlayerMarketBestScore(
-    historicalPool.filter(passesVerifiedBestPlaysFilter).map((prop) => enrichBestPlayRankingFields(prop))
+    enrichedForBoard.filter(passesPlayboardPoolFilter)
   );
+  const verificationCounts = countVerificationStatuses(boardQualityPool);
+  const tierCounts = countFinalTierPool(boardQualityPool);
 
   const projectedCount =
     engineProjectedPool.length ||
@@ -466,6 +471,12 @@ export function resolveTopMlbPlaySections(
   filterDiagnostics.bestPlayUsedFallback = bestPlaysResult.usedFallback;
   filterDiagnostics.top10ByScore = bestPlaysResult.diagnostics?.top10ByScore || [];
   filterDiagnostics.tierPropLog = bestPlaysResult.diagnostics?.tierPropLog || [];
+  filterDiagnostics.verificationCounts = {
+    ...verificationCounts,
+    tierA: tierCounts.tierA,
+    tierB: tierCounts.tierB,
+    tierC: tierCounts.tierC,
+  };
   filterDiagnostics.tierAuditBatch = buildTierAuditBatch(boardQualityPool);
   filterDiagnostics.confidenceSuppressionLog = logConfidenceSuppressionBatch(boardQualityPool);
   filterDiagnostics.tierAProbabilityAudit = auditTierAProbabilityPool(boardQualityPool);
@@ -493,17 +504,15 @@ export function resolveTopMlbPlaySections(
     filterFn: passesTopFiveEdgeGate,
   }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
 
-  const valueUndersResult = buildValueUndersSection(boardQualityPool, { limit: TOP_SECTION_LIMIT });
+  const valueUndersResult = buildValueUndersSection(boardQualityPool, { limit: VALUE_SECTION_LIMIT });
   const topValueUnders = valueUndersResult.picks.map((prop, idx) =>
     annotateHighestProbabilityPlay(prop, idx + 1)
   );
 
-  const topValueOvers = buildTopSectionPicks(boardQualityPool, {
-    compareFn: compareValueSidePlaysRank,
-    side: "OVER",
-    limit: TOP_SECTION_LIMIT,
-    filterFn: passesTopFiveBestPlayGate,
-  }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
+  const valueOversResult = buildValueOversSection(boardQualityPool, { limit: VALUE_SECTION_LIMIT });
+  const topValueOvers = valueOversResult.picks.map((prop, idx) =>
+    annotateHighestProbabilityPlay(prop, idx + 1)
+  );
 
   filterDiagnostics.selected = highestPicks.length;
   filterDiagnostics.eligible = strictEligible;
@@ -531,7 +540,7 @@ export function resolveTopMlbPlaySections(
     {
       id: "top-10-best-plays",
       title: "Best Plays",
-      eyebrow: "Top 10 · Tier A → B → C · Sort score ranked",
+      eyebrow: "Top 10 · Tier A → B → projected · Full or partial verification",
       emptyMessage: topBestPlayPicks.length ? "" : NO_VERIFIED_PLAYS_MESSAGE,
       fallbackNotice: bestPlaysResult.fallbackNotice || "",
       picks: topBestPlayPicks,
@@ -539,7 +548,7 @@ export function resolveTopMlbPlaySections(
     {
       id: "top-5-safest",
       title: "Safest Plays",
-      eyebrow: "Tier A only · Full MLB data · Verified only",
+      eyebrow: "Confidence ≥70 · Probability ≥65 · Full or partial verification",
       emptyMessage: topSafestPicks.length ? "" : NO_VERIFIED_PLAYS_MESSAGE,
       fallbackNotice: safestSectionResult.fallbackNotice || "",
       picks: topSafestPicks,
@@ -547,7 +556,7 @@ export function resolveTopMlbPlaySections(
     {
       id: "top-5-value-unders",
       title: "Value Unders",
-      eyebrow: "Tier A + B · Full data · Non-research only",
+      eyebrow: "Confidence ≥60 · Probability ≥60 · Negative edge · Top 10",
       emptyMessage: topValueUnders.length ? "" : NO_VERIFIED_PLAYS_MESSAGE,
       picks: topValueUnders,
       cardVariant: "valueUnder",
@@ -555,7 +564,7 @@ export function resolveTopMlbPlaySections(
     {
       id: "top-5-value-overs",
       title: "Value Overs",
-      eyebrow: "Tier A + B · Full data · Non-research only",
+      eyebrow: "Confidence ≥60 · Probability ≥60 · Positive edge · Top 10",
       emptyMessage: topValueOvers.length ? "" : NO_VERIFIED_PLAYS_MESSAGE,
       picks: topValueOvers,
     },

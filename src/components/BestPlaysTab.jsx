@@ -97,6 +97,22 @@ function BestPlaysTab({
         </SectionErrorBoundary>
       ) : null}
 
+      {showDebugPanels && filterDiagnostics?.verificationCounts ? (
+        <p className="compact-form-notice">
+          Projected Props {filterDiagnostics.verificationCounts.projectedProps ?? 0}
+          {" · "}
+          Verified Full {filterDiagnostics.verificationCounts.verifiedFull ?? 0}
+          {" · "}
+          Verified Partial {filterDiagnostics.verificationCounts.verifiedPartial ?? 0}
+          {" · "}
+          Tier A {filterDiagnostics.verificationCounts.tierA ?? 0}
+          {" · "}
+          Tier B {filterDiagnostics.verificationCounts.tierB ?? 0}
+          {" · "}
+          Tier C {filterDiagnostics.verificationCounts.tierC ?? 0}
+        </p>
+      ) : null}
+
       {showDebugPanels && filterDiagnostics?.bestPlayFilterAudit ? (
         <p className="compact-form-notice">
           Tier pool A {filterDiagnostics.bestPlayFilterAudit.tierA ?? 0} · B{" "}
@@ -139,7 +155,7 @@ function BestPlaysTab({
         }}
         onOpen={onOpen}
         cacheStatus={cacheStatus}
-        limit={5}
+        limit={10}
       />
       <BestPlaysSection
         section={{
@@ -148,7 +164,7 @@ function BestPlaysTab({
         }}
         onOpen={onOpen}
         cacheStatus={cacheStatus}
-        limit={5}
+        limit={10}
       />
 
       <PerformanceTracker dashboard={performanceTracker} />

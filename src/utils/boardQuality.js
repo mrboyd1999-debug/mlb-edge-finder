@@ -20,6 +20,12 @@ import {
 import { resolveVerifiedHitRateSnapshot } from "./verifiedHitRates.js";
 import { STARTER_PENDING_LABEL, normalizePropPitcherFields, PITCHER_VERIFICATION, resolvePitcherVerification } from "./opponentStarter.js";
 import {
+  allowFallbackVerification,
+  attachVerificationStatusFields,
+  resolveVerificationStatus,
+  VERIFICATION_STATUS,
+} from "./verificationStatus.js";
+import {
   DATA_STATUS,
   NO_VERIFIED_PLAYS_MESSAGE,
   TIER_A_RULES,
@@ -43,6 +49,13 @@ export const BEST_PLAYS_DIVERSITY_MARKETS = [
   "runs",
 ];
 export const TOP_SECTION_LIMIT = 5;
+export const VALUE_SECTION_LIMIT = 10;
+export const VALUE_MIN_CONFIDENCE = 60;
+export const VALUE_MIN_PROBABILITY = 60;
+export const SAFEST_PARTIAL_MIN_CONFIDENCE = 70;
+export const SAFEST_PARTIAL_MIN_PROBABILITY = 65;
+export const PROJECTED_FALLBACK_NOTICE =
+  "No Tier A/B plays today — showing highest-confidence projected plays.";
 export const MAX_DISPLAY_EDGE_PERCENT = 40;
 export const PARTIAL_DATA_CONFIDENCE_PENALTY = 10;
 export const TOP_FIVE_MIN_CONFIDENCE = 70;
@@ -421,7 +434,11 @@ function formatTierMetric(value) {
 
 export function getTierAFailures(prop = {}) {
   const failures = [];
+  const verificationStatus = prop.verificationStatus || resolveVerificationStatus(prop);
   if (isResearchCandidate(prop)) failures.push("research candidate");
+  if (verificationStatus !== VERIFICATION_STATUS.FULL) {
+    failures.push(`verificationStatus ${verificationStatus || VERIFICATION_STATUS.UNVERIFIED}`);
+  }
   if (resolveMlbDataStatus(prop) !== DATA_STATUS.FULL_MLB_DATA) failures.push("dataStatus not FULL_MLB_DATA");
   const confidence = resolvePropConfidence(prop);
   const probability = resolvePropProbability(prop);
@@ -451,8 +468,13 @@ export function getTierBFailures(prop = {}) {
   const failures = [];
   if (isResearchCandidate(prop)) failures.push("research candidate");
   const dataStatus = resolveMlbDataStatus(prop);
-  if (dataStatus !== DATA_STATUS.FULL_MLB_DATA && dataStatus !== DATA_STATUS.REVIEW_NEEDED) {
-    failures.push("dataStatus not FULL_MLB_DATA or REVIEW_NEEDED");
+  const verificationStatus = prop.verificationStatus || resolveVerificationStatus(prop);
+  const dataOk =
+    dataStatus === DATA_STATUS.FULL_MLB_DATA ||
+    dataStatus === DATA_STATUS.REVIEW_NEEDED ||
+    (allowFallbackVerification && verificationStatus === VERIFICATION_STATUS.PARTIAL);
+  if (!dataOk) {
+    failures.push("dataStatus not FULL_MLB_DATA, REVIEW_NEEDED, or PARTIAL verification");
   }
   const confidence = resolvePropConfidence(prop);
   const probability = resolvePropProbability(prop);
@@ -763,11 +785,21 @@ function buildBestPlaysTierPools(pool = []) {
   const eligible = (pool || []).filter((prop) => playerKey(prop) && marketKey(prop) && passesBestPlayBoardGate(prop));
   const tierA = eligible.filter((prop) => resolveFinalTier(prop) === "A");
   const tierB = eligible.filter((prop) => resolveFinalTier(prop) === "B");
-  const tierC = (pool || []).filter((prop) => resolveFinalTier(prop) === "C" || isResearchCandidate(prop));
-  return { eligible, tierA, tierB, tierC, fullData: eligible.filter(isFullDataProp) };
+  const tierC = (pool || []).filter(
+    (prop) =>
+      (resolveFinalTier(prop) === "C" || isResearchCandidate(prop)) &&
+      (prop.verificationStatus || resolveVerificationStatus(prop)) !== VERIFICATION_STATUS.UNVERIFIED
+  );
+  const projectedFallback = (pool || [])
+    .filter((prop) => {
+      const projection = finite(prop.projection ?? prop.projectedValue, NaN);
+      return Number.isFinite(projection) && projection > 0;
+    })
+    .sort((a, b) => resolvePropConfidence(b) - resolvePropConfidence(a));
+  return { eligible, tierA, tierB, tierC, projectedFallback, fullData: eligible.filter(isFullDataProp) };
 }
 
-function resolveBestPlaysSourcePool({ tierA, tierB }) {
+function resolveBestPlaysSourcePool({ tierA, tierB, tierC, projectedFallback }) {
   if (tierA.length >= TOP_BEST_PLAYS_TARGET) {
     return {
       sourcePool: tierA,
@@ -790,6 +822,22 @@ function resolveBestPlaysSourcePool({ tierA, tierB }) {
       activeTier: "B",
       usedFallback: true,
       fallbackNotice: BEST_PLAY_FALLBACK_NOTICE,
+    };
+  }
+  if (tierC?.length) {
+    return {
+      sourcePool: tierC,
+      activeTier: "C",
+      usedFallback: true,
+      fallbackNotice: TIER_C_FALLBACK_NOTICE,
+    };
+  }
+  if (projectedFallback?.length) {
+    return {
+      sourcePool: projectedFallback,
+      activeTier: "projected",
+      usedFallback: true,
+      fallbackNotice: PROJECTED_FALLBACK_NOTICE,
     };
   }
   return {
@@ -937,35 +985,63 @@ export function resolveProjectionGap(prop = {}) {
   return line - projection;
 }
 
+export function resolveSignedEdge(prop = {}) {
+  const edge = finite(prop.edge, NaN);
+  if (Number.isFinite(edge)) return edge;
+  const line = finite(prop.line, NaN);
+  const projection = finite(prop.projection ?? prop.projectedValue, NaN);
+  if (Number.isFinite(line) && Number.isFinite(projection)) return projection - line;
+  return NaN;
+}
+
 export function passesTopFiveEdgeGate(prop = {}) {
-  return isFullDataProp(prop);
+  return passesValueOverGate(prop);
 }
 
 export function passesValueSideGate(prop = {}) {
-  if (isResearchCandidate(prop)) return false;
-  if (!passesBestPlayBoardGate(prop)) return false;
-  const tier = resolveFinalTier(prop);
-  return tier === "A" || tier === "B";
+  return passesValueOverGate(prop) || passesValueUnderGate(prop);
+}
+
+export function passesValueOverGate(prop = {}) {
+  const verificationStatus = prop.verificationStatus || resolveVerificationStatus(prop);
+  if (verificationStatus === VERIFICATION_STATUS.UNVERIFIED) return false;
+  const confidence = resolvePropConfidence(prop);
+  const probability = resolvePropProbability(prop);
+  const edge = resolveSignedEdge(prop);
+  if (!Number.isFinite(confidence) || confidence < VALUE_MIN_CONFIDENCE) return false;
+  if (!Number.isFinite(probability) || probability < VALUE_MIN_PROBABILITY) return false;
+  if (!Number.isFinite(edge) || edge <= 0) return false;
+  if (resolveRecommendedSide(prop) !== "OVER") return false;
+  return true;
 }
 
 export function passesTopFiveBestPlayGate(prop = {}) {
-  return passesValueSideGate(prop);
+  return passesValueOverGate(prop);
 }
 
 export function passesSafestPlayGate(prop = {}) {
-  if (!passesBestPlayBoardGate(prop)) return false;
-  return resolveFinalTier(prop) === "A";
+  const verificationStatus = prop.verificationStatus || resolveVerificationStatus(prop);
+  if (verificationStatus === VERIFICATION_STATUS.UNVERIFIED) return false;
+  const confidence = resolvePropConfidence(prop);
+  const probability = resolvePropProbability(prop);
+  if (!Number.isFinite(confidence) || confidence < SAFEST_PARTIAL_MIN_CONFIDENCE) return false;
+  if (!Number.isFinite(probability) || probability < SAFEST_PARTIAL_MIN_PROBABILITY) return false;
+  if (verificationStatus === VERIFICATION_STATUS.FULL) {
+    return resolveFinalTier(prop) === "A";
+  }
+  return allowFallbackVerification && verificationStatus === VERIFICATION_STATUS.PARTIAL;
 }
 
 export function passesValueUnderGate(prop = {}) {
-  if (!passesValueSideGate(prop)) return false;
-  const lean = String(prop.lean || prop.pick || prop.side || "").toLowerCase();
-  const side = resolveRecommendedSide(prop);
-  const isUnder = side === "UNDER" || /under|less|lower/.test(lean);
-  if (!isUnder) return false;
-  const line = finite(prop.line, NaN);
-  const projection = finite(prop.projection ?? prop.projectedValue, NaN);
-  if (!Number.isFinite(line) || !Number.isFinite(projection) || projection >= line) return false;
+  const verificationStatus = prop.verificationStatus || resolveVerificationStatus(prop);
+  if (verificationStatus === VERIFICATION_STATUS.UNVERIFIED) return false;
+  const confidence = resolvePropConfidence(prop);
+  const probability = resolvePropProbability(prop);
+  const edge = resolveSignedEdge(prop);
+  if (!Number.isFinite(confidence) || confidence < VALUE_MIN_CONFIDENCE) return false;
+  if (!Number.isFinite(probability) || probability < VALUE_MIN_PROBABILITY) return false;
+  if (!Number.isFinite(edge) || edge >= 0) return false;
+  if (resolveRecommendedSide(prop) !== "UNDER") return false;
   return true;
 }
 
@@ -1073,9 +1149,13 @@ export function compareSafestPlaysRank(a = {}, b = {}) {
 }
 
 export function compareValueUndersRank(a = {}, b = {}) {
+  const edgeA = resolveSignedEdge(a);
+  const edgeB = resolveSignedEdge(b);
+  if (Number.isFinite(edgeA) && Number.isFinite(edgeB) && edgeA !== edgeB) {
+    return edgeA - edgeB;
+  }
   return (
     compareNumericDesc(a, b, resolvePropConfidence) ||
-    compareNumericDesc(a, b, resolveProjectionGap) ||
     compareNumericDesc(a, b, resolvePropProbability) ||
     compareNumericDesc(a, b, resolvePropPlayability)
   );
@@ -1088,21 +1168,90 @@ export function buildSafestPlaysSection(pool = [], { limit = TOP_SECTION_LIMIT }
     limit,
     filterFn: passesSafestPlayGate,
   });
+  if (strictPicks.length) {
+    return { picks: strictPicks, usedFallback: false, fallbackNotice: "" };
+  }
+
+  const fallbackPicks = buildTopSectionPicks(strictPool, {
+    compareFn: compareSafestPlaysRank,
+    limit,
+    filterFn: (prop = {}) => {
+      const verificationStatus = prop.verificationStatus || resolveVerificationStatus(prop);
+      if (verificationStatus === VERIFICATION_STATUS.UNVERIFIED) return false;
+      const confidence = resolvePropConfidence(prop);
+      const probability = resolvePropProbability(prop);
+      return (
+        Number.isFinite(confidence) &&
+        confidence >= SAFEST_PARTIAL_MIN_CONFIDENCE &&
+        Number.isFinite(probability) &&
+        probability >= SAFEST_PARTIAL_MIN_PROBABILITY
+      );
+    },
+  });
+
   return {
-    picks: strictPicks,
-    usedFallback: false,
-    fallbackNotice: strictPicks.length ? "" : SAFEST_FALLBACK_NOTICE,
+    picks: fallbackPicks,
+    usedFallback: Boolean(fallbackPicks.length),
+    fallbackNotice: fallbackPicks.length ? SAFEST_FALLBACK_NOTICE : "",
   };
 }
 
-export function buildValueUndersSection(pool = [], { limit = TOP_SECTION_LIMIT } = {}) {
-  const picks = buildTopSectionPicks(dedupeByPlayerMarketBestScore(pool), {
+export function buildValueUndersSection(pool = [], { limit = VALUE_SECTION_LIMIT } = {}) {
+  const strictPool = dedupeByPlayerMarketBestScore(pool);
+  const picks = buildTopSectionPicks(strictPool, {
     compareFn: compareValueUndersRank,
     side: "UNDER",
     limit,
     filterFn: passesValueUnderGate,
   });
-  return { picks, fallbackNotice: "", usedFallback: false };
+  if (picks.length) {
+    return { picks, fallbackNotice: "", usedFallback: false };
+  }
+
+  const fallbackPicks = buildTopSectionPicks(strictPool, {
+    compareFn: compareValueUndersRank,
+    side: "UNDER",
+    limit,
+    filterFn: (prop = {}) => {
+      const verificationStatus = prop.verificationStatus || resolveVerificationStatus(prop);
+      return verificationStatus !== VERIFICATION_STATUS.UNVERIFIED && resolveSignedEdge(prop) < 0;
+    },
+  });
+
+  return {
+    picks: fallbackPicks,
+    fallbackNotice: fallbackPicks.length ? "Showing best available under plays." : "",
+    usedFallback: Boolean(fallbackPicks.length),
+  };
+}
+
+export function buildValueOversSection(pool = [], { limit = VALUE_SECTION_LIMIT } = {}) {
+  const strictPool = dedupeByPlayerMarketBestScore(pool);
+  const picks = buildTopSectionPicks(strictPool, {
+    compareFn: compareValueSidePlaysRank,
+    side: "OVER",
+    limit,
+    filterFn: passesValueOverGate,
+  });
+  if (picks.length) {
+    return { picks, fallbackNotice: "", usedFallback: false };
+  }
+
+  const fallbackPicks = buildTopSectionPicks(strictPool, {
+    compareFn: compareValueSidePlaysRank,
+    side: "OVER",
+    limit,
+    filterFn: (prop = {}) => {
+      const verificationStatus = prop.verificationStatus || resolveVerificationStatus(prop);
+      return verificationStatus !== VERIFICATION_STATUS.UNVERIFIED && resolveSignedEdge(prop) > 0;
+    },
+  });
+
+  return {
+    picks: fallbackPicks,
+    fallbackNotice: fallbackPicks.length ? "Showing best available over plays." : "",
+    usedFallback: Boolean(fallbackPicks.length),
+  };
 }
 
 export function resolveProjectionConfidenceLevel(prop = {}) {
@@ -1143,23 +1292,25 @@ export function attachBoardQualityFields(prop = {}) {
   const fullData = normalized.dataStatus === DATA_STATUS.FULL_MLB_DATA;
   const dataQualityBadge = resolveBoardDataQualityBadge({ ...normalized, isFullData: fullData, partialData: !fullData });
   const propTier = classifyPropTier(normalized);
-  return attachFinalTierFields({
-    ...normalized,
-    ...edgeLabels,
-    rawEdgeLabel: edgeLabels.rawEdgeLabel,
-    displayEdgeLabel: edgeLabels.displayEdgeLabel,
-    edgePercent: edgeLabels.edgePercent ?? withPitcherPenalty.edgePercent,
-    projectionConfidenceLevel: resolveProjectionConfidenceLevel(normalized),
-    fullDataReason,
-    isFullData: fullData,
-    partialData: !fullData,
-    reviewNeeded:
-      hasIntegrityReviewFlags(withIntegrityAudit) ||
-      propTier === TIER_REVIEW_NEEDED_LABEL ||
-      normalized.cardPlayLabel === "Review Needed",
-    dataQualityBadge,
-    dataQualityLabel: dataQualityBadge.label,
-  });
+  return attachFinalTierFields(
+    attachVerificationStatusFields({
+      ...normalized,
+      ...edgeLabels,
+      rawEdgeLabel: edgeLabels.rawEdgeLabel,
+      displayEdgeLabel: edgeLabels.displayEdgeLabel,
+      edgePercent: edgeLabels.edgePercent ?? withPitcherPenalty.edgePercent,
+      projectionConfidenceLevel: resolveProjectionConfidenceLevel(normalized),
+      fullDataReason,
+      isFullData: fullData,
+      partialData: !fullData,
+      reviewNeeded:
+        hasIntegrityReviewFlags(withIntegrityAudit) ||
+        propTier === TIER_REVIEW_NEEDED_LABEL ||
+        normalized.cardPlayLabel === "Review Needed",
+      dataQualityBadge,
+      dataQualityLabel: dataQualityBadge.label,
+    })
+  );
 }
 
 export function resolveRecommendedSide(prop = {}) {
@@ -1181,10 +1332,16 @@ function compareHighestEdgePlays(a = {}, b = {}) {
 }
 
 function compareValueSidePlays(a = {}, b = {}) {
+  const confCmp = resolvePropConfidence(b) - resolvePropConfidence(a);
+  if (confCmp !== 0) return confCmp;
+  const edgeA = resolveSignedEdge(a);
+  const edgeB = resolveSignedEdge(b);
+  if (Number.isFinite(edgeA) && Number.isFinite(edgeB) && edgeA !== edgeB) {
+    return edgeB - edgeA;
+  }
   return (
-    compareHighestEdgePlays(a, b) ||
     finite(b.probabilityScore ?? b.verifiedProbability, 0) -
-      finite(a.probabilityScore ?? a.verifiedProbability, 0)
+    finite(a.probabilityScore ?? a.verifiedProbability, 0)
   );
 }
 
