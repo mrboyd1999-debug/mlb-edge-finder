@@ -34,7 +34,7 @@ export const TIER_B_RULES = {
   playability: 70,
 };
 
-export const NO_VERIFIED_PLAYS_MESSAGE = "No plays matched current filters — showing best available projections.";
+export const NO_VERIFIED_PLAYS_MESSAGE = "No verified MLB plays meet today's safety threshold.";
 
 function finite(value) {
   const num = Number(value);

@@ -4,7 +4,7 @@ import CompactApiHeader from "./CompactApiHeader.jsx";
 import CompactAppTabs from "./CompactAppTabs.jsx";
 import SystemStatusCard from "./SystemStatusCard.jsx";
 import VerificationFailureBreakdown from "./VerificationFailureBreakdown.jsx";
-import ManualPropsPanel from "./ManualPropsPanel.jsx";
+import PlayerLookupPanel from "./PlayerLookupPanel.jsx";
 import BestPlaysTab from "./BestPlaysTab.jsx";
 import PlatformFeedTab from "./PlatformFeedTab.jsx";
 import SavedPicksTab from "./SavedPicksTab.jsx";
@@ -36,10 +36,7 @@ function DfsAnalyzerLayout({
   onRefresh,
   lastUpdatedLabel,
   learningSaveNotice,
-  manualAnalyzerProps,
-  onAnalyzeManualProp,
-  onRemoveManualProp,
-  onClearManualProps,
+  boardLookupProps = [],
   onOpenProp,
   onSavePick,
   topMlbPlayBoard,
@@ -50,6 +47,7 @@ function DfsAnalyzerLayout({
   savedDisplayPicks,
   onRemoveSavedPick,
   onClearSavedPicks,
+  onGradeSavedPick,
   onSectionError,
   showDebugPanels,
   onShowDebugPanelsChange,
@@ -62,9 +60,7 @@ function DfsAnalyzerLayout({
   providerCoverageAudit = null,
   renderSourceAudit = null,
   cacheStatus = "",
-  boardCacheTimestamp = "",
   liveBoardPipelineTrace = null,
-  performanceTracker = null,
 }) {
   const [connectionReport, setConnectionReport] = useState(() => {
     const meta = readSettingsMeta();
@@ -93,6 +89,16 @@ function DfsAnalyzerLayout({
         lastUpdated={lastUpdatedLabel}
       />
 
+      <ProviderFeedModeBanner
+        apiHealth={apiHealth}
+        connectionReport={connectionReport}
+        audit={providerCoverageAudit}
+        renderSourceAudit={renderSourceAudit}
+        mlbPipelineStatus={mlbPipelineStatus}
+        pipelineProjectionStats={pipelineRenderCounts?.projectionStats ?? null}
+        loading={loading}
+      />
+
       <CompactAppTabs activeTab={appView} onChange={setAppView} />
 
       {learningSaveNotice ? <p className="compact-form-notice">{learningSaveNotice}</p> : null}
@@ -101,33 +107,12 @@ function DfsAnalyzerLayout({
         <SectionErrorBoundary name="Verified Plays" onError={onSectionError}>
           <BestPlaysTab
             sections={topMlbPlayBoard?.sections || []}
-            overallPlay={topMlbPlayBoard?.overallPlay || null}
             loading={loading}
             loadingStage={loadingStage}
-            pipelineDiagnostics={pipelineDiagnostics}
             loadError={loadError}
             onOpen={onOpenProp}
-            onSave={onSavePick}
             filterDiagnostics={topMlbPlayBoard?.filterDiagnostics}
-            renderSourceAudit={renderSourceAudit}
-            cacheStatus={cacheStatus}
-            performanceTracker={performanceTracker}
             showDebugPanels={debugPanelsVisible}
-          />
-        </SectionErrorBoundary>
-      ) : null}
-
-      {appView === "manual" ? (
-        <SectionErrorBoundary name="Player Lookup" onError={onSectionError}>
-          <ManualPropsPanel
-            props={manualAnalyzerProps}
-            loading={loading}
-            notice={learningSaveNotice}
-            onAnalyzeProp={onAnalyzeManualProp}
-            onRemoveProp={onRemoveManualProp}
-            onClearAll={onClearManualProps}
-            onOpenProp={onOpenProp}
-            onSavePick={onSavePick}
           />
         </SectionErrorBoundary>
       ) : null}
@@ -145,6 +130,12 @@ function DfsAnalyzerLayout({
         </SectionErrorBoundary>
       ) : null}
 
+      {appView === "manual" ? (
+        <SectionErrorBoundary name="Player Lookup" onError={onSectionError}>
+          <PlayerLookupPanel boardProps={boardLookupProps} loading={loading} onOpenProp={onOpenProp} />
+        </SectionErrorBoundary>
+      ) : null}
+
       {appView === "saved" ? (
         <SectionErrorBoundary name="Saved Picks" onError={onSectionError}>
           <SavedPicksTab
@@ -152,20 +143,14 @@ function DfsAnalyzerLayout({
             onOpen={onOpenProp}
             onDelete={onRemoveSavedPick}
             onClearAll={onClearSavedPicks}
+            onGrade={onGradeSavedPick}
           />
         </SectionErrorBoundary>
       ) : null}
 
-      <ProviderFeedModeBanner
-        apiHealth={apiHealth}
-        connectionReport={connectionReport}
-        audit={providerCoverageAudit}
-        renderSourceAudit={renderSourceAudit}
-        loading={loading}
-      />
-
       {debugPanelsVisible ? (
-        <>
+        <details className="compact-settings-details debug-diagnostics-panel" open>
+          <summary>Debug Diagnostics</summary>
           <LiveBoardPipelineBanner
             trace={liveBoardPipelineTrace}
             renderSourceAudit={renderSourceAudit}
@@ -188,43 +173,38 @@ function DfsAnalyzerLayout({
             filterDiagnostics={verificationFilterDiagnostics || topMlbPlayBoard?.filterDiagnostics}
             heavyAuditEnabled
           />
-        </>
+          <HistoricalCoverageBanner audit={statsAttachmentAudit} loading={loading} />
+          <ApiSetupBanner onOpenSettings={() => setAppView("settings")} />
+          <ProjectionProviderWarning status={debugInfo?.projectionProvider} />
+          <SettingsPanel
+            onSaved={onSettingsSaved}
+            onClearCaches={onSettingsSaved}
+            onConnectionReportChange={handleConnectionReportChange}
+            feedHealthContext={feedHealthContext}
+          />
+          <details className="compact-settings-details developer-debug-details">
+            <summary>Developer Debug</summary>
+            <DeveloperDebugPanel
+              connectionReport={connectionReport}
+              lastTestedAt={connectionReport?.testedAt || readSettingsMeta().lastTestedAt || ""}
+              apiHealth={apiHealth}
+              mlbPipelineStatus={mlbPipelineStatus}
+              feedHealthContext={feedHealthContext}
+              underdogDebugSnapshot={underdogDebugSnapshot}
+              rejectionAudit={debugInfo?.rejectionAudit}
+              projectionCoverageAudit={debugInfo?.projectionCoverageAudit}
+              statsAttachmentAudit={debugInfo?.statsAttachmentAudit}
+              pipelinePropCountAudit={debugInfo?.pipelinePropCountAudit}
+              providerCoverageAudit={debugInfo?.providerCoverageAudit}
+              prizePicksDiagnostics={debugInfo?.sources?.PrizePicks?.diagnostics}
+              bestPlaysFilter={topMlbPlayBoard?.filterDiagnostics}
+              showDebugPanels={showDebugPanels}
+              onShowDebugPanelsChange={onShowDebugPanelsChange}
+              debugModeEnabled={debugModeEnabled}
+            />
+          </details>
+        </details>
       ) : null}
-
-      <HistoricalCoverageBanner audit={statsAttachmentAudit} loading={loading} />
-
-      <ApiSetupBanner onOpenSettings={() => setAppView("settings")} />
-
-      <ProjectionProviderWarning status={debugInfo?.projectionProvider} />
-
-      <SettingsPanel
-        onSaved={onSettingsSaved}
-        onClearCaches={onSettingsSaved}
-        onConnectionReportChange={handleConnectionReportChange}
-        feedHealthContext={feedHealthContext}
-      />
-
-      <details className="compact-settings-details developer-debug-details">
-        <summary>Developer Debug</summary>
-        <DeveloperDebugPanel
-          connectionReport={connectionReport}
-          lastTestedAt={connectionReport?.testedAt || readSettingsMeta().lastTestedAt || ""}
-          apiHealth={apiHealth}
-          mlbPipelineStatus={mlbPipelineStatus}
-          feedHealthContext={feedHealthContext}
-          underdogDebugSnapshot={underdogDebugSnapshot}
-          rejectionAudit={debugInfo?.rejectionAudit}
-          projectionCoverageAudit={debugInfo?.projectionCoverageAudit}
-          statsAttachmentAudit={debugInfo?.statsAttachmentAudit}
-          pipelinePropCountAudit={debugInfo?.pipelinePropCountAudit}
-          providerCoverageAudit={debugInfo?.providerCoverageAudit}
-          prizePicksDiagnostics={debugInfo?.sources?.PrizePicks?.diagnostics}
-          bestPlaysFilter={topMlbPlayBoard?.filterDiagnostics}
-          showDebugPanels={showDebugPanels}
-          onShowDebugPanelsChange={onShowDebugPanelsChange}
-          debugModeEnabled={debugModeEnabled}
-        />
-      </details>
     </main>
   );
 }

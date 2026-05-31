@@ -72,7 +72,7 @@ export const OVERALL_PLAY_PENDING_MESSAGE = "Best available play — awaiting ma
 export const BEST_PLAY_FALLBACK_NOTICE =
   "No Tier A plays today — showing highest scoring Tier B plays.";
 export const TIER_C_FALLBACK_NOTICE =
-  "No Tier A/B plays today — showing highest scoring Tier C plays.";
+  "No Tier A/B plays today — showing research candidates only.";
 export const REVIEW_NEEDED_FALLBACK_NOTICE = TIER_C_FALLBACK_NOTICE;
 export const PITCHER_PENDING_CONFIDENCE_PENALTY = 10;
 export const PITCHER_PENDING_TAG = "Pitcher Pending";
@@ -591,10 +591,15 @@ export function resolveFinalTier(prop = {}) {
 }
 
 export function resolveFinalTierLabel(prop = {}) {
-  if (prop.finalTierLabel && prop.tier === prop.finalTier) return prop.finalTierLabel;
+  return resolveTierDisplayLabel(prop);
+}
+
+export function resolveTierDisplayLabel(prop = {}) {
   const tier = resolveFinalTier(prop);
-  if (tier === "RESEARCH") return "Research";
-  return tier === TIER_REVIEW_NEEDED_LABEL ? TIER_REVIEW_NEEDED_LABEL : `Tier ${tier}`;
+  if (tier === "A") return "Premium";
+  if (tier === "B") return "Playable";
+  if (tier === "C" || tier === "RESEARCH") return "Research";
+  return `Tier ${tier}`;
 }
 
 /** Attach tier and sync all legacy tier alias fields. */
@@ -641,6 +646,14 @@ export function logFinalTierTable(pool = [], label = "Final tier audit") {
 
 export function resolvePropTier(prop = {}) {
   return resolveFinalTier(prop);
+}
+
+export function passesBestPlayDisplayThresholds(prop = {}) {
+  const confidence = resolvePropConfidence(prop);
+  const probability = resolvePropProbability(prop);
+  if (!Number.isFinite(confidence) || confidence < 60) return false;
+  if (!Number.isFinite(probability) || probability < 55) return false;
+  return true;
 }
 
 export function passesBestPlayHardExclusions(prop = {}) {
@@ -782,13 +795,20 @@ export function compareBestPlaysRecoveryRank(a = {}, b = {}) {
 }
 
 function buildBestPlaysTierPools(pool = []) {
-  const eligible = (pool || []).filter((prop) => playerKey(prop) && marketKey(prop) && passesBestPlayBoardGate(prop));
+  const eligible = (pool || []).filter(
+    (prop) =>
+      playerKey(prop) &&
+      marketKey(prop) &&
+      passesBestPlayBoardGate(prop) &&
+      passesBestPlayDisplayThresholds(prop)
+  );
   const tierA = eligible.filter((prop) => resolveFinalTier(prop) === "A");
   const tierB = eligible.filter((prop) => resolveFinalTier(prop) === "B");
   const tierC = (pool || []).filter(
     (prop) =>
       (resolveFinalTier(prop) === "C" || isResearchCandidate(prop)) &&
-      (prop.verificationStatus || resolveVerificationStatus(prop)) !== VERIFICATION_STATUS.UNVERIFIED
+      (prop.verificationStatus || resolveVerificationStatus(prop)) !== VERIFICATION_STATUS.UNVERIFIED &&
+      passesBestPlayDisplayThresholds(prop)
   );
   const projectedFallback = (pool || [])
     .filter((prop) => {
@@ -920,7 +940,10 @@ export function buildTopBestPlaysPicks(
     });
   }
 
-  picks = applyBestPlayRankConstraints(picks.slice(0, limit), { limit });
+  picks = applyBestPlayRankConstraints(
+    picks.filter(passesBestPlayDisplayThresholds).slice(0, limit),
+    { limit }
+  );
 
   diagnostics.activeTier = activeTier;
   diagnostics.tierADisplayed = picks.filter((prop) => resolveFinalTier(prop) === "A").length;

@@ -194,6 +194,14 @@ import {
   resolveUnderdogStreakEmptyMessage,
 } from "./utils/underdogPickPool.js";
 import { resolveTopMlbPlaySections, auditTopMlbPlayPool } from "./utils/topMlbPlays.js";
+import {
+  readSavedPicks,
+  savePickToStorage,
+  removeSavedPickById,
+  clearSavedPicks,
+  updateSavedPickResult,
+  isPropSaved,
+} from "./utils/savedPicksStorage.js";
 import { mergeScoredIntoDisplayProps } from "./utils/mergeScoredDisplayProps.js";
 import {
   resetPipelineExecutionCounters,
@@ -3462,6 +3470,7 @@ export default function DFSPropsApp() {
   const [refreshingFeeds, setRefreshingFeeds] = useState(false);
   const [error, setError] = useState("");
   const [history, setHistory] = useState(() => trimHistoryToLimit(readHistory()));
+  const [savedPicks, setSavedPicks] = useState(() => readSavedPicks());
   const [parlayHistory, setParlayHistory] = useState(() => trimHistoryToLimit(readParlayHistory()));
   const [lastUpdated, setLastUpdated] = useState("");
   const [cacheStatus, setCacheStatus] = useState("");
@@ -4298,10 +4307,8 @@ export default function DFSPropsApp() {
     [boardDisplayProps]
   );
   const visibleHistory = useMemo(() => history.filter(isSupportedHistoryPick), [history]);
-  const savedDisplayPicks = useMemo(
-    () => visibleHistory.map(historyPickToDisplayProp).slice(0, 60),
-    [visibleHistory]
-  );
+  const savedDisplayPicks = useMemo(() => savedPicks, [savedPicks]);
+  const boardLookupProps = useMemo(() => boardDisplayProps || [], [boardDisplayProps]);
   const streakSportBoards = useMemo(
     () => Object.fromEntries(STREAK_TAB_OPTIONS.map((option) => [option.value, emptyStreakSportBoard(option.value)])),
     []
@@ -4930,20 +4937,29 @@ export default function DFSPropsApp() {
     setParlayHistory(updatedParlays);
   }
 
+  function clearSavedPicksList() {
+    if (!window.confirm("Clear all saved picks?")) return;
+    setSavedPicks(clearSavedPicks());
+    setLearningSaveNotice("Saved picks cleared.");
+  }
+
+  function removeSavedPick(pick = {}) {
+    const id = pick.id;
+    if (!id) return;
+    setSavedPicks(removeSavedPickById(id));
+    setLearningSaveNotice("Saved pick removed.");
+  }
+
+  function gradeSavedPick(id, payload = {}) {
+    setSavedPicks(updateSavedPickResult(id, payload));
+    setLearningSaveNotice("Saved pick result updated.");
+  }
+
   function clearHistory() {
     if (!window.confirm("Clear all saved pick history?")) return;
     writeHistory([]);
     setHistory([]);
     setLearningSaveNotice("Saved picks cleared.");
-  }
-
-  function removeSavedPick(pick = {}) {
-    const id = pick.id || pick.historyId;
-    if (!id) return;
-    const updated = history.filter((row) => row.id !== id);
-    writeHistory(updated);
-    setHistory(updated);
-    setLearningSaveNotice("Saved pick removed.");
   }
 
   function exportHistoryCsv() {
@@ -4990,22 +5006,15 @@ export default function DFSPropsApp() {
 
   function saveThisPick(prop) {
     if (!prop) return;
-    if (isManualAnalyzerProp(prop)) {
-      const updated = saveLearningPicks([prop], "Manual Analyzer Pick", {
-        allowResearch: true,
-        allowManualAnalyzer: true,
-      });
-      setHistory(updated);
-      setLearningSaveNotice("Manual pick saved for accuracy review.");
+    const result = savePickToStorage(prop);
+    setSavedPicks(result.picks);
+    if (result.duplicate) {
+      setLearningSaveNotice("Pick already saved.");
       return;
     }
-    if (!isVerifiedSportsbookProp(prop)) {
-      setLearningSaveNotice("Only verified sportsbook picks can be saved.");
-      return;
+    if (result.saved) {
+      setLearningSaveNotice("Pick saved.");
     }
-    const updated = saveLearningPicks([prop], "Manually Saved Pick", { allowResearch: true });
-    setHistory(updated);
-    setLearningSaveNotice("Pick saved for accuracy review.");
   }
 
   async function handleAnalyzeManualProp(form) {
@@ -5160,10 +5169,7 @@ export default function DFSPropsApp() {
       onRefresh={() => loadProps({ force: true })}
       lastUpdatedLabel={lastUpdatedLabel}
       learningSaveNotice={learningSaveNotice}
-      manualAnalyzerProps={manualAnalyzerProps}
-      onAnalyzeManualProp={handleAnalyzeManualProp}
-      onRemoveManualProp={handleRemoveManualProp}
-      onClearManualProps={handleClearManualProps}
+      boardLookupProps={boardLookupProps}
       onOpenProp={setSelectedEvaluation}
       onSavePick={saveThisPick}
       topMlbPlayBoard={topMlbPlayBoard}
@@ -5171,7 +5177,8 @@ export default function DFSPropsApp() {
       debugPanelsVisible={debugPanelsVisible}
       savedDisplayPicks={savedDisplayPicks}
       onRemoveSavedPick={removeSavedPick}
-      onClearSavedPicks={clearHistory}
+      onClearSavedPicks={clearSavedPicksList}
+      onGradeSavedPick={gradeSavedPick}
       onSectionError={handleSectionRenderError}
       showDebugPanels={showDebugPanels}
       onShowDebugPanelsChange={setShowDebugPanels}
@@ -5198,6 +5205,7 @@ export default function DFSPropsApp() {
             onClose={() => setSelectedEvaluation(null)}
             onSaveManualStats={handleManualStatsSave}
             onSavePick={saveThisPick}
+            isSaved={isPropSaved(selectedEvaluation, savedPicks)}
             variant={isManualAnalyzerProp(selectedEvaluation) ? "manual" : "breakdown"}
           />
         </SectionErrorBoundary>

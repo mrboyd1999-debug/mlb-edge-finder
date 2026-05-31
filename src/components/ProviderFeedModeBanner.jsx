@@ -3,6 +3,7 @@ import { healthStateStyle } from "../services/sourceHealth.js";
 import {
   buildUserFacingProviderStatusRows,
   resolveCoreLiveDataAvailable,
+  resolveStatsVerificationStatus,
 } from "../utils/providerStatusHelper.js";
 
 function providerStatusStyle(status = "") {
@@ -12,6 +13,7 @@ function providerStatusStyle(status = "") {
   if (key === "temporarily unavailable" || key === "not configured" || key === "not tested") {
     return healthStateStyle("Warning");
   }
+  if (key.includes("partial")) return healthStateStyle("Warning");
   return healthStateStyle("Failed");
 }
 
@@ -20,6 +22,8 @@ function ProviderFeedModeBanner({
   connectionReport = null,
   audit = null,
   renderSourceAudit = null,
+  mlbPipelineStatus = null,
+  pipelineProjectionStats = null,
   loading = false,
 }) {
   const liveAvailable = resolveCoreLiveDataAvailable({
@@ -28,7 +32,12 @@ function ProviderFeedModeBanner({
     audit,
     renderSourceAudit,
   });
-  const providerRows = buildUserFacingProviderStatusRows({ apiHealth, connectionReport });
+  const statsVerification = resolveStatsVerificationStatus({ connectionReport, mlbPipelineStatus });
+  const providerRows = buildUserFacingProviderStatusRows({
+    apiHealth,
+    connectionReport,
+    pipelineProjectionStats,
+  });
   const headline = loading ? "Loading feeds…" : liveAvailable ? "Live Data Available" : "Cached Data";
   const headlineStyle = loading
     ? healthStateStyle("Refreshing")
@@ -46,14 +55,19 @@ function ProviderFeedModeBanner({
         {!loading ? <span style={headlineStyle}>{liveAvailable ? "Live" : "Cached"}</span> : null}
       </div>
       {!loading ? (
-        <ul className="provider-feed-mode-banner__providers">
-          {providerRows.map((row) => (
-            <li key={row.provider}>
-              <span className="provider-feed-mode-banner__provider-name">{row.provider}</span>
-              <span style={providerStatusStyle(row.status)}>{row.status}</span>
-            </li>
-          ))}
-        </ul>
+        <>
+          <p className="provider-feed-mode-banner__stats">
+            Stats Verification: <strong>{statsVerification.status}</strong>
+          </p>
+          <ul className="provider-feed-mode-banner__providers">
+            {providerRows.map((row) => (
+              <li key={row.provider}>
+                <span className="provider-feed-mode-banner__provider-name">{row.provider}</span>
+                <span style={providerStatusStyle(row.status)}>{row.status}</span>
+              </li>
+            ))}
+          </ul>
+        </>
       ) : null}
     </section>
   );

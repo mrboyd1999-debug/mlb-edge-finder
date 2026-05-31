@@ -40,7 +40,9 @@ import {
   resolveBoardDataQualityLabel,
   resolveFinalTier,
   resolveRecommendedSide,
+  resolveTierDisplayLabel,
 } from "../utils/boardQuality.js";
+import { resolveVerificationStatus } from "../utils/verificationStatus.js";
 import { buildHitRateSnapshot } from "../utils/modelValidation.js";
 import { resolveSeasonHitRateBundle, formatSeasonHitRateSource } from "../utils/seasonHitRate.js";
 import DataIntegrityPanel from "./DataIntegrityPanel.jsx";
@@ -156,7 +158,15 @@ function FlagRow({ flags = [], tone = "positive" }) {
   );
 }
 
-export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult, onSaveManualStats, onSavePick, variant = "breakdown" }) {
+export default function PickDetailModal({
+  prop: rawProp,
+  onClose,
+  onUpdateResult,
+  onSaveManualStats,
+  onSavePick,
+  isSaved = false,
+  variant = "breakdown",
+}) {
   const manualProp = variant === "manual" && isManualAnalyzerProp(rawProp);
   const prop = useMemo(
     () => (manualProp ? rawProp : attachBoardQualityFields(rawProp)),
@@ -175,7 +185,7 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
         : pickSide === "under"
           ? "Under"
           : formatLeanSide(prop.bestPick || prop.side || "Watch");
-  const tierBadgeLabel = `Tier ${resolveFinalTier(prop)}`;
+  const tierBadgeLabel = resolveTierDisplayLabel(prop);
   const breakdownTitle = breakdownMode ? resolveBreakdownTitle(prop) : null;
   const projectionSourceLabel = formatBestPlayProjectionSource(prop);
   const last10HitRate = formatHitRatePercent(
@@ -272,6 +282,7 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
       })()
     : lean;
   const propLabel = prop.statType || prop.propType || prop.market || null;
+  const verificationLabel = prop.verificationStatus || resolveVerificationStatus(prop);
   const probabilityAuditRows = buildProbabilityAuditRows(prop, hitRateSnapshot, seasonHitRate);
   const probabilityLabel = prop.probabilityScore != null
     ? `${Math.round(Number(prop.probabilityScore))}%`
@@ -304,8 +315,9 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
           type="button"
           style={{ ...styles.secondaryButton, padding: "8px 10px", fontSize: "12px" }}
           onClick={() => onSavePick(prop)}
+          disabled={isSaved}
         >
-          Save
+          {isSaved ? "Saved" : "Save"}
         </button>
       ) : null}
       <button
@@ -369,7 +381,7 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
 
         <div className="pick-detail-modal-body">
           {!manualProp && finalTier === "C" ? (
-            <p className="pick-detail-modal-tier-warning">Tier C — research only, not a locked play</p>
+            <p className="pick-detail-modal-tier-warning">Research Candidate — not a locked play</p>
           ) : null}
 
           <div className="pick-detail-modal-summary">
@@ -390,6 +402,7 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
                 <SummaryMetric label="Probability" value={probabilityLabel} strong />
                 <SummaryMetric label="Confidence" value={confidenceLabel} strong />
                 {breakdownMode ? <SummaryMetric label="Tier" value={tierBadgeLabel} strong /> : null}
+                {breakdownMode ? <SummaryMetric label="Verification status" value={verificationLabel} /> : null}
               </>
             )}
           </div>

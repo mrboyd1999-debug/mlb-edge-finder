@@ -5,14 +5,13 @@ import { formatNumber } from "../utils/formatters.js";
 import { withPlayerImageUrl } from "../utils/playerImageFields.js";
 import {
   formatPlatformSideLabel,
-  recommendationPalette,
   resolvePickSide,
 } from "../utils/pickRecommendation.js";
 import { displayFullMarketLabel } from "../utils/propLabels.js";
 import { resolveProjectionValue } from "../utils/projectionQuality.js";
 import { formatEdgeDisplay } from "../utils/conservativeProjection.js";
 import { validatePickDirectionBeforeRender } from "../utils/pickDirectionAudit.js";
-import { resolveRecommendedSide, resolveFinalTier } from "../utils/boardQuality.js";
+import { resolveRecommendedSide, resolveTierDisplayLabel } from "../utils/boardQuality.js";
 
 function resolveLeanSideLabel(prop = {}, recommendedSide = "PASS") {
   if (recommendedSide === "UNDER") return "Lower";
@@ -23,45 +22,51 @@ function resolveLeanSideLabel(prop = {}, recommendedSide = "PASS") {
   return "Pass";
 }
 
-function BestPlayRowCard({
-  prop,
-  onOpen,
-  rank,
-  grouped = false,
-  cardVariant = "default",
-}) {
+function formatMatchup(prop = {}) {
+  const raw = String(prop.matchup || "").trim();
+  if (raw) return raw.replace(/\s+vs\.?\s+/gi, " @ ");
+  const team = prop.team || prop.playerTeam || "";
+  const opponent = prop.opponent || prop.opponentTeam || "";
+  if (team && opponent) return `${team} @ ${opponent}`;
+  return team || opponent || "";
+}
+
+function BestPlayRowCard({ prop, onOpen, rank }) {
   const enriched = withPlayerImageUrl(prop || {});
 
   useEffect(() => {
     validatePickDirectionBeforeRender(prop, "BestPlayRowCard");
   }, [prop]);
 
-  const side = resolvePickSide(enriched);
-  const sidePalette = recommendationPalette(side);
-  const playerName = enriched.playerName || enriched.player || "Unknown";
-  const propType = enriched.propType || enriched.statType || enriched.market || displayFullMarketLabel(enriched);
-  const line = formatNumber(enriched.line);
   const recommendedSide = resolveRecommendedSide(enriched);
   const leanSideLabel = resolveLeanSideLabel(enriched, recommendedSide);
+  const side = resolvePickSide(enriched);
   const sideLabel =
     recommendedSide === "PASS"
       ? side === "WATCH"
         ? "PASS"
         : formatPlatformSideLabel(enriched)
-      : recommendedSide;
+      : recommendedSide === "OVER"
+        ? "Higher"
+        : recommendedSide === "UNDER"
+          ? "Lower"
+          : recommendedSide;
+  const playerName = enriched.playerName || enriched.player || "Unknown";
+  const market = enriched.propType || enriched.statType || enriched.market || displayFullMarketLabel(enriched);
+  const matchup = formatMatchup(enriched);
+  const line = formatNumber(enriched.line);
   const probability = enriched.probabilityScore ?? enriched.verifiedProbability ?? 0;
   const probLabel = Number.isFinite(Number(probability)) ? `${Math.round(Number(probability))}%` : "—";
-  const tierLabel = `Tier ${resolveFinalTier(enriched)}`;
+  const tierLabel = resolveTierDisplayLabel(enriched);
   const displayConfidenceScore = enriched.displayConfidenceScore ?? enriched.confidenceScore ?? enriched.confidence;
   const confidenceLabel = Number.isFinite(Number(displayConfidenceScore))
     ? `${Math.round(Number(displayConfidenceScore))}%`
     : "—";
   const edgeLabels = enriched.rawEdgeLabel
-    ? { rawEdgeLabel: enriched.rawEdgeLabel, displayEdgeLabel: enriched.displayEdgeLabel }
+    ? { displayEdgeLabel: enriched.displayEdgeLabel }
     : formatEdgeDisplay(enriched);
   const projection = resolveProjectionValue(enriched);
   const projectionLabel = projection != null && projection > 0 ? formatNumber(projection) : "—";
-  const isValueUnder = cardVariant === "valueUnder";
 
   function openDetails(event) {
     event?.stopPropagation?.();
@@ -70,9 +75,7 @@ function BestPlayRowCard({
 
   return (
     <article
-      className={`best-play-row-card best-play-row-card--compact${grouped ? " best-play-row-card--grouped" : ""}${
-        isValueUnder ? " best-play-row-card--value-under" : ""
-      }`}
+      className="best-play-row-card best-play-row-card--compact"
       style={styles.bestPlayRowCard}
       role="button"
       tabIndex={0}
@@ -85,25 +88,21 @@ function BestPlayRowCard({
       }}
     >
       <div className="best-play-row-left" style={styles.bestPlayRowLeft}>
-        {!grouped ? <PlayerImage prop={enriched} /> : null}
+        <PlayerImage prop={enriched} />
         <div style={styles.bestPlayRowMeta}>
           <div className="best-play-row-top-line">
             {rank != null ? <span style={styles.bestPlayRowRank}>#{rank}</span> : null}
-            {!grouped ? <h3 style={styles.bestPlayRowPlayer}>{playerName}</h3> : null}
+            <h3 style={styles.bestPlayRowPlayer}>{playerName}</h3>
+            <span className={`best-play-row-tier best-play-row-tier--${String(enriched.tier || enriched.finalTier || "c").toLowerCase()}`}>
+              {tierLabel}
+            </span>
           </div>
-          {grouped ? (
-            <p style={styles.bestPlayRowSubline}>Line {line}</p>
-          ) : (
-            <p style={styles.bestPlayRowSubline}>
-              {propType} · Line {line}
-            </p>
-          )}
+          <p style={styles.bestPlayRowSubline}>
+            {matchup} · {market} · Line {line}
+          </p>
           <div className="prop-card-core-metrics prop-card-core-metrics--mobile" style={{ marginTop: 4 }}>
             <span>
-              Tier <strong>{tierLabel}</strong>
-            </span>
-            <span>
-              {isValueUnder ? "Side" : "Side"} <strong>{isValueUnder ? leanSideLabel : sideLabel}</strong>
+              Side <strong>{leanSideLabel !== "Pass" ? leanSideLabel : sideLabel}</strong>
             </span>
             <span>
               Projection <strong>{projectionLabel}</strong>
@@ -119,22 +118,6 @@ function BestPlayRowCard({
             </span>
           </div>
         </div>
-      </div>
-
-      <div className="best-play-row-metrics" style={styles.bestPlayRowMetrics}>
-        <div
-          style={{
-            ...styles.bestPlaySideBadge,
-            border: `1px solid ${sidePalette.border}`,
-            background: sidePalette.bannerBg,
-            color: sidePalette.bannerText,
-          }}
-        >
-          {isValueUnder ? leanSideLabel : sideLabel}
-        </div>
-        <button type="button" className="prop-card-why-link" style={styles.whyLink} onClick={openDetails}>
-          Details
-        </button>
       </div>
     </article>
   );

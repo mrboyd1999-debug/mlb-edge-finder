@@ -3,6 +3,7 @@
  */
 
 import { getOddsApiKey, getSportsDataApiKey } from "../services/runtimeSettings.js";
+import { resolveProjectionEngineStatus } from "./projectionPipelineStatus.js";
 
 export const PROVIDER_STATUS = {
   CONNECTED: "connected",
@@ -302,6 +303,7 @@ export function resolveCoreLiveDataAvailable({
 export function buildUserFacingProviderStatusRows({
   apiHealth = {},
   connectionReport = null,
+  pipelineProjectionStats = null,
 } = {}) {
   const meta = connectionReport || {};
   const rows = meta.results || [];
@@ -324,15 +326,74 @@ export function buildUserFacingProviderStatusRows({
   const ud = resolveUserFacingLineFeedStatus(apiHealth?.Underdog || {});
   const odds = resolveUserFacingOddsStatus(oddsRow, oddsKeyConfigured, Boolean(testedAt));
   const sd = resolveUserFacingSportsDataStatus(sdRow, sdKeyConfigured, Boolean(testedAt));
+  const projection = resolveProjectionEngineStatus({
+    projectionCount: pipelineProjectionStats?.projectionCount ?? pipelineProjectionStats?.withProjections ?? 0,
+    normalizedCount: pipelineProjectionStats?.normalizedCount ?? pipelineProjectionStats?.normalized ?? 0,
+    projectionCoverage: pipelineProjectionStats?.projectionCoverage ?? 0,
+    fetchFailed: Boolean(pipelineProjectionStats?.fetchFailed),
+    lastError: pipelineProjectionStats?.lastError || "",
+  });
 
   return [
-    { provider: "PrizePicks", status: pp.status, detail: pp.detail },
+    { provider: "Odds API", status: odds.status, detail: odds.detail },
+    { provider: "SportsDataIO", status: sd.status, detail: sd.detail },
     {
       provider: "Underdog",
       status: ud.status === "Live" ? "Live" : ud.status === "Cached" ? "Cached" : ud.status,
       detail: ud.detail,
     },
-    { provider: "SportsDataIO", status: sd.status, detail: sd.detail },
-    { provider: "Odds API", status: odds.status, detail: odds.detail },
+    { provider: "PrizePicks", status: pp.status, detail: pp.detail },
+    { provider: "Projection Engine", status: projection.status, detail: projection.detail },
   ];
+}
+
+/** User-facing stats verification label — SportsDataIO primary, MLB Stats optional fallback. */
+export function resolveStatsVerificationStatus({
+  connectionReport = null,
+  mlbPipelineStatus = null,
+} = {}) {
+  const meta = connectionReport || {};
+  const rows = meta.results || [];
+  const testedAt = meta.testedAt || "";
+  const find = (name) =>
+    rows.find((row) => String(row.provider || "").toLowerCase().includes(name.toLowerCase())) || null;
+  const sdRow = find("sportsdata");
+  const mlbRow = find("mlb stats");
+
+  let sdKeyConfigured = false;
+  try {
+    sdKeyConfigured = Boolean(getSportsDataApiKey());
+  } catch {
+    // ignore in non-browser contexts
+  }
+
+  const sd = resolveUserFacingSportsDataStatus(sdRow, sdKeyConfigured, Boolean(testedAt));
+  const sportsDataPipelineOk = Boolean(
+    sd.status === "Connected" ||
+      Number(mlbPipelineStatus?.sportsDataProfilesMatched ?? mlbPipelineStatus?.profilesMatched) > 0 ||
+      Number(mlbPipelineStatus?.projectionCount) > 0
+  );
+
+  if (sd.status === "Connected" || sportsDataPipelineOk) {
+    return {
+      status: "Live via SportsDataIO",
+      detail: sd.detail || "SportsDataIO player/stat data available",
+    };
+  }
+
+  const mlb = resolveStrictMlbStatsStatus({
+    testResult: mlbRow,
+    pipelineStats: mlbPipelineStatus || {},
+  });
+  if (mlb.status === "Connected") {
+    return {
+      status: "Live via MLB Stats API",
+      detail: mlb.detail,
+    };
+  }
+
+  return {
+    status: "Partial Verification",
+    detail: "Limited stat verification available",
+  };
 }
