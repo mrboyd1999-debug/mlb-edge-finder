@@ -116,8 +116,11 @@ function formatModalMatchup(prop = {}) {
 
 function buildSimpleProbabilityAuditRows(prop = {}, hitRateSnapshot = {}) {
   const audit = prop.probabilityAudit || {};
+  const calibration = prop.probabilityCalibration || audit.calibration || {};
+  const explanation = calibration.probabilityExplanation || prop.probabilityExplanation || {};
   const confidence = resolveNormalizedConfidence(prop);
   const probability = resolveNormalizedProbability(prop);
+  const integrityScore = prop.integrityScore ?? prop.propIntegrityScore ?? calibration.integrityScore;
   const last10 =
     hitRateSnapshot?.last10Label ??
     audit.last10HitRate ??
@@ -132,8 +135,30 @@ function buildSimpleProbabilityAuditRows(prop = {}, hitRateSnapshot = {}) {
   return [
     { label: "Confidence", value: confidence != null ? `${confidence}%` : null, strong: true },
     { label: "Probability", value: probability != null ? `${probability}%` : null, strong: true },
+    { label: "History", value: explanation.historicalProbability != null ? `${explanation.historicalProbability}%` : audit.historicalProbability ?? null },
+    { label: "Projection", value: explanation.projectionProbability != null ? `${explanation.projectionProbability}%` : audit.projectionProbability ?? null },
+    { label: "Final", value: explanation.finalProbability != null ? `${explanation.finalProbability}%` : probability != null ? `${probability}%` : null, strong: true },
+    { label: "Integrity Score", value: integrityScore != null ? `${integrityScore}/100` : null },
     { label: "Last 10 Hit Rate", value: last10 },
     { label: "Edge", value: edge, strong: true },
+  ].filter((row) => hasValue(row.value));
+}
+
+function buildConfidenceExplanationRows(prop = {}) {
+  const explanation = prop.confidenceExplanation || prop.confidenceBreakdown?.confidenceExplanation || {};
+  const lines = explanation.lines || [];
+  if (lines.length) {
+    return lines.map((line, index) => {
+      const [label, value] = String(line).split(":");
+      return { label: label?.trim() || `Factor ${index + 1}`, value: value?.trim() || line };
+    });
+  }
+  const breakdown = prop.confidenceBreakdown || prop.confidenceComponents || {};
+  return [
+    { label: "Data completeness", value: breakdown.dataCompleteness != null ? `${Math.round(breakdown.dataCompleteness)}%` : null },
+    { label: "Sample size", value: breakdown.sampleSize != null ? `${Math.round(breakdown.sampleSize)}%` : null },
+    { label: "Line verification", value: breakdown.lineVerification != null ? `${Math.round(breakdown.lineVerification)}%` : null },
+    { label: "Pitcher available", value: breakdown.pitcherAvailable != null ? `${Math.round(breakdown.pitcherAvailable)}%` : null },
   ].filter((row) => hasValue(row.value));
 }
 
@@ -311,6 +336,7 @@ export default function PickDetailModal({
   const propLabel = prop.statType || prop.propType || prop.market || null;
   const verificationLabel = prop.verificationStatus || resolveVerificationStatus(prop);
   const probabilityAuditRows = buildSimpleProbabilityAuditRows(prop, hitRateSnapshot);
+  const confidenceExplanationRows = buildConfidenceExplanationRows(prop);
   const advancedProbabilityAuditRows = buildAdvancedProbabilityAuditRows(prop);
   const opposingPitcherLabel = resolveOpposingPitcherDisplayLabel(prop);
   const probabilityLabel = (() => {
@@ -482,6 +508,16 @@ export default function PickDetailModal({
                       <SummaryMetric key={row.label} label={row.label} value={row.value} strong={row.strong} />
                     ))}
                   </div>
+                  {confidenceExplanationRows.length ? (
+                    <>
+                      <strong style={{ display: "block", marginTop: "10px", fontSize: "11px" }}>Confidence explanation</strong>
+                      <div className="compact-prop-grid" style={{ marginTop: "8px" }}>
+                        {confidenceExplanationRows.map((row) => (
+                          <SummaryMetric key={row.label} label={row.label} value={row.value} />
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
                   {showDebugPanels && advancedProbabilityAuditRows.length ? (
                     <>
                       <strong style={{ display: "block", marginTop: "10px", fontSize: "11px" }}>Advanced calculations</strong>

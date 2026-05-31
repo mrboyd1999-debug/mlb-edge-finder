@@ -34,12 +34,16 @@ export const CALIBRATION_HISTOGRAM_BUCKETS = [
 ];
 
 const PROBABILITY_BLEND = {
-  projectionQuality: 0.4,
-  seasonPerformance: 0.25,
-  recentForm: 0.2,
+  recentHitRate: 0.35,
+  seasonHitRate: 0.25,
+  projectionVsLine: 0.2,
   matchup: 0.1,
-  marketEdge: 0.05,
+  marketValidation: 0.1,
 };
+
+export const PROBABILITY_SANITY_LOW_HIT_RATE_CAP = 62;
+export const PROBABILITY_SANITY_MATCHUP_UNLOCK = 85;
+export const PROBABILITY_INFLATION_THRESHOLD = 20;
 
 function finite(value) {
   const num = Number(value);
@@ -60,26 +64,10 @@ function clamp(value, min, max) {
 
 /** Reduce 60% clustering — spread calibrated values across 55–75 when signal supports it. */
 function applyProbabilityDistributionSpread(probability, prePenaltyProbability, prop = {}, metrics = {}) {
-  const pre = finite(prePenaltyProbability);
-  const edgePercent =
-    finite(metrics.edgePercent) ??
-    finite(prop.edgePercent) ??
-    (finite(prop.edge) != null && finite(prop.line) > 0
-      ? Math.abs(finite(prop.edge) / finite(prop.line)) * 100
-      : null);
-
-  let adjusted = probability;
-  if (pre != null && probability >= 58 && probability <= 62 && Math.abs(pre - probability) >= 4) {
-    adjusted = Math.round(pre * 0.88);
-  }
-  if (edgePercent != null) {
-    adjusted += Math.round(Math.min(8, Math.max(-4, (edgePercent - 12) * 0.25)));
-  }
-  const recentForm = finite(prop.last10HitRate ?? prop.recentHitRate);
-  if (recentForm != null) {
-    adjusted += Math.round((recentForm - 55) * 0.08);
-  }
-  return clamp(Math.round(adjusted), CALIBRATION_MIN_PROBABILITY, CALIBRATION_DEFAULT_MAX_PROBABILITY);
+  void prePenaltyProbability;
+  void prop;
+  void metrics;
+  return probability;
 }
 
 function normalizeHitRatePercent(value) {
@@ -290,23 +278,101 @@ function resolveMarketEdgeScore(projection, line, edgePercent = null, flags = {}
   return score;
 }
 
-function resolveRecentFormScore(hitRates = {}) {
-  const recent = finite(hitRates.recentFormRate);
-  if (recent != null) return recent;
-  const l5 = finite(hitRates.last5HitRate);
-  const l10 = finite(hitRates.last10HitRate);
-  if (l5 != null && l10 != null) return round1(l5 * 0.4 + l10 * 0.6);
+function resolveRecentHitRateScore(hitRates = {}) {
+  const l5 = normalizeHitRatePercent(hitRates.last5HitRate);
+  const l10 = normalizeHitRatePercent(hitRates.last10HitRate);
+  if (l5 != null && l10 != null) return round1(l5 * 0.45 + l10 * 0.55);
   return l10 ?? l5 ?? 50;
+}
+
+/** Historical probability anchor from recent + season hit rates. */
+export function resolveHistoricalProbability(hitRates = {}) {
+  const recent = resolveRecentHitRateScore(hitRates);
+  const season = normalizeHitRatePercent(hitRates.seasonHitRate);
+  if (season != null && hitRates.seasonRateValid) {
+    return round1(recent * 0.58 + season * 0.42);
+  }
+  return round1(recent);
+}
+
+function resolveRecommendedSide(prop = {}) {
+  const side = String(prop.recommendedSide || prop.lean || prop.pick || prop.side || "").toUpperCase();
+  if (side.includes("UNDER") || side.includes("LESS")) return "UNDER";
+  if (side.includes("OVER") || side.includes("MORE")) return "OVER";
+  const projection = finite(prop.projection ?? prop.projectedValue);
+  const line = finite(prop.line);
+  if (projection != null && line != null && projection !== line) {
+    return projection > line ? "OVER" : "UNDER";
+  }
+  return "OVER";
+}
+
+/** Projection-implied probability from line gap — capped to avoid inflation. */
+export function resolveProjectionProbability(prop = {}, projection = null, line = null) {
+  const proj = finite(projection ?? prop.projection ?? prop.projectedValue);
+  const ln = finite(line ?? prop.line);
+  if (proj == null || ln == null || ln <= 0) return 50;
+  const side = resolveRecommendedSide(prop);
+  const gap = proj - ln;
+  const gapPct = (Math.abs(gap) / ln) * 100;
+  let prob = 50 + Math.min(22, gapPct * 0.55);
+  if (side === "UNDER") {
+    prob = gap < 0 ? prob : 50 - Math.min(18, gapPct * 0.45);
+  } else {
+    prob = gap > 0 ? prob : 50 - Math.min(18, gapPct * 0.45);
+  }
+  return clamp(Math.round(prob), 35, 68);
+}
+
+export function computeHistoryProjectionDisagreementPenalty(historicalProb, projectionProb) {
+  const historical = finite(historicalProb);
+  const projection = finite(projectionProb);
+  if (historical == null || projection == null) return 0;
+  const gap = projection - historical;
+  if (gap <= 8) return 0;
+  if (gap <= 15) return 10;
+  if (gap <= 25) return 15;
+  return 20;
+}
+
+export function applyProbabilitySanityChecks(probability, hitRates = {}, matchupScore = 50) {
+  const l5 = normalizeHitRatePercent(hitRates.last5HitRate);
+  const l10 = normalizeHitRatePercent(hitRates.last10HitRate);
+  const score = finite(matchupScore) ?? 50;
+  let adjusted = probability;
+  if (l5 != null && l10 != null && l5 < 50 && l10 < 50 && score <= PROBABILITY_SANITY_MATCHUP_UNLOCK) {
+    adjusted = Math.min(adjusted, PROBABILITY_SANITY_LOW_HIT_RATE_CAP);
+  }
+  return Math.round(adjusted);
+}
+
+export function buildProbabilityExplanation({ historicalProbability, projectionProbability, finalProbability, calibrationPenalty = 0 } = {}) {
+  return {
+    historicalProbability: Math.round(historicalProbability),
+    projectionProbability: Math.round(projectionProbability),
+    finalProbability: Math.round(finalProbability),
+    calibrationPenalty,
+    lines: [
+      `History: ${Math.round(historicalProbability)}%`,
+      `Projection: ${Math.round(projectionProbability)}%`,
+      `Final: ${Math.round(finalProbability)}%`,
+    ],
+    summary: `History: ${Math.round(historicalProbability)}% · Projection: ${Math.round(projectionProbability)}% · Final: ${Math.round(finalProbability)}%`,
+  };
+}
+
+function resolveMarketValidationScore(prop = {}, flags = {}) {
+  return resolveProjectionQualityScore(prop, flags);
 }
 
 function resolveBlendWeights(seasonValid) {
   if (seasonValid) return PROBABILITY_BLEND;
   return {
-    projectionQuality: PROBABILITY_BLEND.projectionQuality + PROBABILITY_BLEND.seasonPerformance,
-    seasonPerformance: 0,
-    recentForm: PROBABILITY_BLEND.recentForm,
+    recentHitRate: PROBABILITY_BLEND.recentHitRate + PROBABILITY_BLEND.seasonHitRate * 0.6,
+    seasonHitRate: 0,
+    projectionVsLine: PROBABILITY_BLEND.projectionVsLine,
     matchup: PROBABILITY_BLEND.matchup,
-    marketEdge: PROBABILITY_BLEND.marketEdge,
+    marketValidation: PROBABILITY_BLEND.marketValidation + PROBABILITY_BLEND.seasonHitRate * 0.4,
   };
 }
 
@@ -345,7 +411,6 @@ function resolveProbabilityCeiling(prop = {}, metrics = {}, hitRates = {}, confi
   if (!penalties.seasonValid) {
     ceiling = Math.min(ceiling, CALIBRATION_SEASON_MISSING_MAX_PROBABILITY);
   }
-  ceiling = Math.min(ceiling, confidenceCap);
 
   return {
     ceiling,
@@ -373,81 +438,91 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
   const line = finite(prop.line);
   if (projection == null || line == null || line <= 0) return null;
 
-  const confidence = resolveProbabilityConfidence(prop, options);
   const context = { seasonStats: options.seasonStats || prop.seasonStats || [] };
   const hitRates = resolveCalibrationHitRates(prop, line, context);
   const seasonValid = Boolean(hitRates.seasonRateValid && hitRates.seasonHitRate != null);
   const weights = resolveBlendWeights(seasonValid);
   const validationFlags = resolveProjectionValidationFlags(prop);
-  const penalties = resolveProbabilityPenalties(prop, hitRates, confidence);
+  const penalties = resolveProbabilityPenalties(prop, hitRates, resolveProbabilityConfidence(prop, options));
 
-  const projectionQualityScore = resolveProjectionQualityScore(prop, validationFlags);
-  const seasonPerformanceScore = seasonValid ? hitRates.seasonHitRate : 50;
-  const recentFormScore = resolveRecentFormScore(hitRates);
+  const recentHitRateScore = resolveRecentHitRateScore(hitRates);
+  const seasonHitRateScore = seasonValid ? normalizeHitRatePercent(hitRates.seasonHitRate) : recentHitRateScore;
+  const projectionProbability = resolveProjectionProbability(prop, projection, line);
+  const historicalProbability = resolveHistoricalProbability(hitRates);
   const matchupScore = resolveMatchupScore(prop);
-  const marketEdgeScore = resolveMarketEdgeScore(projection, line, metrics.edgePercent, validationFlags);
+  const marketValidationScore = resolveMarketValidationScore(prop, validationFlags);
 
-  const projectionContribution = round2(projectionQualityScore * weights.projectionQuality);
-  const seasonContribution = round2(seasonPerformanceScore * weights.seasonPerformance);
-  const recentContribution = round2(recentFormScore * weights.recentForm);
+  const recentContribution = round2(recentHitRateScore * weights.recentHitRate);
+  const seasonContribution = round2(seasonHitRateScore * weights.seasonHitRate);
+  const projectionContribution = round2(projectionProbability * weights.projectionVsLine);
   const matchupContribution = round2(matchupScore * weights.matchup);
-  const edgeContribution = round2(marketEdgeScore * weights.marketEdge);
+  const marketContribution = round2(marketValidationScore * weights.marketValidation);
 
   const prePenaltyProbability = round2(
-    projectionContribution +
+    recentContribution +
       seasonContribution +
-      recentContribution +
+      projectionContribution +
       matchupContribution +
-      edgeContribution
+      marketContribution
   );
 
-  const cap = resolveProbabilityCeiling(prop, metrics, hitRates, confidence, penalties);
-  const penalizedProbability = round2(prePenaltyProbability - penalties.totalPenalty);
+  const calibrationPenalty = computeHistoryProjectionDisagreementPenalty(
+    historicalProbability,
+    projectionProbability
+  );
+
+  const cap = resolveProbabilityCeiling(prop, metrics, hitRates, resolveProbabilityConfidence(prop, options), penalties);
+  const penalizedProbability = round2(
+    prePenaltyProbability - penalties.totalPenalty - calibrationPenalty * 0.65
+  );
   let probability = clamp(penalizedProbability, CALIBRATION_MIN_PROBABILITY, cap.ceiling);
-  probability = Math.min(probability, cap.ceiling);
-  if (!seasonValid) probability = Math.min(probability, CALIBRATION_SEASON_MISSING_MAX_PROBABILITY);
-  const sampleGames = finite(hitRates.last10Games ?? prop.sampleGames ?? prop.games);
-  if (sampleGames != null && sampleGames < 10) probability = Math.min(probability, 66);
-  if (validationFlags.projectionRiskAggressive || validationFlags.outlierDetected) {
-    probability = Math.min(probability, 72);
-  }
+  probability = applyProbabilitySanityChecks(probability, hitRates, matchupScore);
   probability = applyProbabilityDistributionSpread(probability, prePenaltyProbability, prop, metrics);
   probability = Math.round(probability);
   const probabilityTier = resolveProbabilityTier(probability);
+  const probabilityExplanation = buildProbabilityExplanation({
+    historicalProbability,
+    projectionProbability,
+    finalProbability: probability,
+    calibrationPenalty,
+  });
 
   const inputs = {
-    recentHitRate: `${round1(recentFormScore)}%`,
+    recentHitRate: `${round1(recentHitRateScore)}%`,
     last5HitRate: hitRates.last5Label,
     last10HitRate: hitRates.last10Label,
     seasonHitRate: seasonValid ? `${round1(hitRates.seasonHitRate)}%` : "—",
     seasonRateValid: seasonValid,
     seasonGamesPlayed: hitRates.seasonGamesPlayed ?? "—",
     seasonHitRateSource: formatSeasonHitRateSource(hitRates.seasonHitRateSource) || "—",
-    confidence: `${round1(confidence)}%`,
-    effectiveConfidence: `${round1(cap.effectiveConfidence)}%`,
-    projectionQuality: `${round1(projectionQualityScore)}%`,
-    projectionEdge: `${round1(marketEdgeScore)}%`,
-    edgeScore: `${round1(marketEdgeScore)}%`,
-    edgeContribution,
+    historicalProbability: `${probabilityExplanation.historicalProbability}%`,
+    projectionProbability: `${probabilityExplanation.projectionProbability}%`,
+    finalProbability: `${probabilityExplanation.finalProbability}%`,
+    calibrationPenalty: calibrationPenalty ? `-${calibrationPenalty}` : "0",
+    projectionQuality: `${round1(marketValidationScore)}%`,
+    projectionEdge: `${round1(projectionProbability)}%`,
+    edgeScore: `${round1(marketValidationScore)}%`,
+    edgeContribution: marketContribution,
     prePenaltyProbability: `${round1(prePenaltyProbability)}%`,
     rawProbability: `${round1(prePenaltyProbability)}%`,
     penalizedProbability: `${round1(penalizedProbability)}%`,
     calibratedProbability: `${round1(probability)}%`,
     probabilityTier,
-    finalProbability: `${round1(probability)}%`,
     seasonHitRateLabel: hitRates.seasonLabel,
     projectionContribution,
     seasonContribution,
     recentContribution,
     matchupContribution,
-    edgeContributionValue: edgeContribution,
+    edgeContributionValue: marketContribution,
     outlierPenalty: penalties.outlierPenalty ? `-${penalties.outlierPenalty}` : "0",
     aggressiveRiskPenalty: penalties.aggressiveRiskPenalty ? `-${penalties.aggressiveRiskPenalty}` : "0",
     missingSeasonPenalty: penalties.seasonValid ? "0" : `Cap ${CALIBRATION_SEASON_MISSING_MAX_PROBABILITY}%`,
     sampleSizePenalty: penalties.sampleSizeSmall
       ? `Confidence ×${SAMPLE_SIZE_CONFIDENCE_MULTIPLIER}`
       : "0",
-    totalPenalty: penalties.totalPenalty ? `-${penalties.totalPenalty}` : "0",
+    totalPenalty: penalties.totalPenalty + calibrationPenalty
+      ? `-${penalties.totalPenalty + calibrationPenalty}`
+      : "0",
     probabilityCap: `${round1(cap.ceiling)}%`,
     projectionVsLine:
       projection != null && line != null
@@ -462,6 +537,10 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
     penalizedProbability,
     calibratedProbability: probability,
     probabilityTier,
+    historicalProbability,
+    projectionProbability,
+    calibrationPenalty,
+    probabilityExplanation,
     inputs,
     hitRates,
     probabilityPenalties: {
@@ -469,7 +548,8 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
       aggressiveRiskPenalty: penalties.aggressiveRiskPenalty,
       missingSeasonPenalty: penalties.missingSeasonPenalty,
       sampleSizePenalty: penalties.sampleSizePenalty,
-      totalPenalty: penalties.totalPenalty,
+      calibrationPenalty,
+      totalPenalty: penalties.totalPenalty + calibrationPenalty,
       sampleSizeSmall: penalties.sampleSizeSmall,
       seasonMissingCap: penalties.seasonMissingCap,
     },
@@ -479,37 +559,41 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
       penalizedProbability,
       calibratedProbability: probability,
       probabilityTier,
-      projectionQualityScore,
+      historicalProbability,
+      projectionProbability,
+      calibrationPenalty,
+      probabilityExplanation,
+      recentHitRateScore,
+      seasonHitRateScore,
+      projectionProbabilityScore: projectionProbability,
       seasonPerformanceScore: seasonValid ? hitRates.seasonHitRate : null,
-      recentFormRate: recentFormScore,
-      recentHitRate: recentFormScore,
+      recentFormRate: recentHitRateScore,
+      recentHitRate: recentHitRateScore,
       seasonHitRate: seasonValid ? hitRates.seasonHitRate : null,
       seasonRateValid: seasonValid,
       seasonGamesPlayed: hitRates.seasonGamesPlayed,
       seasonEstimated: hitRates.seasonEstimated,
       seasonHitRateSource: hitRates.seasonHitRateSource,
       matchupScore,
-      edgeScore: marketEdgeScore,
+      edgeScore: marketValidationScore,
       edgePercent: cap.edgePercent,
-      confidence,
-      effectiveConfidence: cap.effectiveConfidence,
-      confidenceCap: cap.confidenceCap,
       projectionContribution,
       seasonContribution,
       recentContribution,
       matchupContribution,
-      edgeContribution,
+      edgeContribution: marketContribution,
       outlierPenalty: penalties.outlierPenalty,
       aggressiveRiskPenalty: penalties.aggressiveRiskPenalty,
       missingSeasonPenalty: penalties.missingSeasonPenalty,
       sampleSizePenalty: penalties.sampleSizePenalty,
-      totalPenalty: penalties.totalPenalty,
+      totalPenalty: penalties.totalPenalty + calibrationPenalty,
       probabilityPenalties: {
         outlierPenalty: penalties.outlierPenalty,
         aggressiveRiskPenalty: penalties.aggressiveRiskPenalty,
         missingSeasonPenalty: penalties.missingSeasonPenalty,
         sampleSizePenalty: penalties.sampleSizePenalty,
-        totalPenalty: penalties.totalPenalty,
+        calibrationPenalty,
+        totalPenalty: penalties.totalPenalty + calibrationPenalty,
       },
       projectionValidationConfidence: validationFlags.projectionConfidence,
       projectionRisk: validationFlags.projectionRisk,
@@ -592,5 +676,5 @@ export function computeEdgeContribution(edge, edgePercent, hitRates = {}, lean =
   const pct = finite(edgePercent);
   if (pct == null) return 0;
   const edgeScore = clamp(50 + Math.abs(pct) * 0.85, 50, 95);
-  return round1(edgeScore * PROBABILITY_BLEND.marketEdge);
+  return round1(edgeScore * PROBABILITY_BLEND.marketValidation);
 }

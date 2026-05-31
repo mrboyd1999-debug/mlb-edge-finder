@@ -3,6 +3,7 @@
  */
 
 import { PITCHER_VERIFICATION, resolvePitcherVerification } from "./opponentStarter.js";
+import { isInflatedProbabilityProp } from "./probabilityIntegrity.js";
 import {
   resolveVerificationStatus,
   VERIFICATION_STATUS,
@@ -114,6 +115,7 @@ export function passesResearchPlayThresholds(prop = {}) {
 }
 
 export function resolvePlayCategory(prop = {}) {
+  if (isInflatedProbabilityProp(prop)) return "RESEARCH";
   const confidence = resolvePropConfidence(prop);
   const probability = resolvePropProbability(prop);
   if (!Number.isFinite(confidence) || !Number.isFinite(probability)) return "RESEARCH";
@@ -138,6 +140,7 @@ export function resolvePlayCategoryLabel(prop = {}) {
 }
 
 export function classifyPropTier(prop = {}) {
+  if (isInflatedProbabilityProp(prop)) return "C";
   if (!hasTierBasics(prop)) return "C";
   if (!hasAllowedVerification(prop)) return "C";
   if (!hasPositiveEdge(prop)) return "C";

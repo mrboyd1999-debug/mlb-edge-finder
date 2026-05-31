@@ -23,6 +23,7 @@ import {
 import { resolveVerifiedHitRateSnapshot } from "./verifiedHitRates.js";
 import { STARTER_PENDING_LABEL, normalizePropPitcherFields, PITCHER_VERIFICATION, resolvePitcherVerification, OPPONENT_PITCHER_UNAVAILABLE_LABEL, PROBABLE_STARTER_PENDING_LABEL, resolveOpposingPitcherDisplayLabel } from "./opponentStarter.js";
 import { attachSportsDataPitcherFields } from "./sportsDataPitcherLookup.js";
+import { computePropIntegrityScore, isInflatedProbabilityProp } from "./probabilityIntegrity.js";
 import {
   allowFallbackVerification,
   attachVerificationStatusFields,
@@ -725,6 +726,7 @@ export function buildBestPlayFilterDiagnostics(pool = []) {
 }
 
 export function resolveBestPlayRejectionReason(prop = {}) {
+  if (isInflatedProbabilityProp(prop)) return "probability exceeds history";
   if (!hasAllowedVerification(prop)) return "unverified prop";
   if (!hasPositiveEdge(prop)) return "no positive edge";
   const probability = resolveNormalizedProbability(prop);
@@ -1279,7 +1281,13 @@ export function attachBoardQualityFields(prop = {}) {
   const withSeason = attachSeasonHitRateFields(withPitcherNormalized);
   const withIntegrityAudit = attachIntegrityAuditFields(withSeason);
   const withIntegrity = attachDataIntegrityFields(withIntegrityAudit);
-  const normalized = normalizeBoardProp(withIntegrity);
+  const integrity = computePropIntegrityScore(withIntegrity);
+  const normalized = normalizeBoardProp({
+    ...withIntegrity,
+    integrityScore: integrity.integrityScore,
+    propIntegrityScore: integrity.integrityScore,
+    integrityDeductions: integrity.integrityDeductions,
+  });
   const fullData = normalized.dataStatus === DATA_STATUS.FULL_MLB_DATA;
   const dataQualityBadge = resolveBoardDataQualityBadge({ ...normalized, isFullData: fullData, partialData: !fullData });
   const propTier = classifyPropTier(normalized);

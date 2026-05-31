@@ -39,6 +39,7 @@ import { resolvePropSport } from "./mlbOnlyMode.js";
 import { resolveProjectionConfidenceLevel, classifyPropTier, attachBoardQualityFields, attachFinalTierFields, resolvePropEdge, TIER_A_MIN_CONFIDENCE, TIER_A_MIN_PLAYABILITY, TIER_A_MIN_EDGE } from "./boardQuality.js";
 import { applyBoardProbabilityCaps } from "./mlbBoardPipeline.js";
 import { computeCalibratedProbability } from "./probabilityCalibration.js";
+import { isInflatedProbabilityProp } from "./probabilityIntegrity.js";
 import { attachMarketProjectionValidation } from "./marketProjectionValidation.js";
 import {
   computeDisplayPropMetrics,
@@ -303,6 +304,7 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     final: displayConfidence,
     floorApplied: displayConfidence > afterSanityConfidence,
   };
+  const confidenceExplanation = baseConfidenceBreakdown.confidenceExplanation || null;
   const confidenceAudit = buildConfidenceAuditLog(
     { ...prop, projectionSanityAudit: sanityAudit, displayConfidenceScore: displayConfidence, playabilityScore },
     projection,
@@ -429,6 +431,14 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     verifiedProbability,
     probabilityScore: verifiedProbability,
     probabilityCalibration,
+    probabilityExplanation: probabilityCalibration?.probabilityExplanation ?? null,
+    historicalProbability: probabilityCalibration?.historicalProbability ?? null,
+    projectionProbability: probabilityCalibration?.projectionProbability ?? null,
+    calibrationPenalty: probabilityCalibration?.calibrationPenalty ?? 0,
+    inflatedProbability: isInflatedProbabilityProp(
+      { ...prop, probabilityScore: verifiedProbability },
+      verifiedProbability
+    ),
     displayConfidenceScore: displayConfidence,
     adjustedConfidence: playability.adjustedConfidence,
     confidence: displayConfidence ?? prop.confidenceScore ?? prop.confidence,
@@ -449,6 +459,7 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     playabilityAudit: playabilityBreakdown,
     confidenceBreakdown,
     confidenceComponents: confidenceBreakdown,
+    confidenceExplanation,
     confidenceAudit,
     tierAudit,
     confidenceSanityPenalty: sanityPenalty,

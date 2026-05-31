@@ -205,21 +205,20 @@ function buildProbabilityAuditUnsafe(prop = {}, metrics = {}) {
     probabilityCap: breakdown.ceiling ?? null,
   };
 
-  const explanationLines = [
-    "Probability Breakdown",
-    `Projection Quality: ${calibrated?.inputs?.projectionQuality ?? "—"}`,
-    `Season: ${calibrated?.inputs?.seasonHitRate ?? "—"}`,
-    `Recent Form: ${calibrated?.inputs?.recentHitRate ?? hitRateSnapshot.last10Label}`,
-    `Pre-penalty: ${inputs.rawProbability != null ? `${inputs.rawProbability}%` : "—"}`,
-    `Penalties: outlier ${breakdown.outlierPenalty ?? 0}, aggressive ${breakdown.aggressiveRiskPenalty ?? 0}`,
-    `Matchup: ${breakdown.matchupContribution != null ? `${round1(breakdown.matchupContribution)} pts` : "—"}`,
-    `Market Edge: ${calibrated?.inputs?.projectionEdge ?? "—"}`,
-    `Calibrated Probability: ${pct(finalProbability)}`,
-    breakdown.eliteProbabilityUnlock ? "Elite unlock applied" : `Cap: ${breakdown.ceiling ?? 75}%`,
-  ];
+  const explanationLines = calibrated?.probabilityExplanation?.lines?.length
+    ? calibrated.probabilityExplanation.lines
+    : [
+        `History: ${calibrated?.historicalProbability ?? "—"}%`,
+        `Projection: ${calibrated?.projectionProbability ?? "—"}%`,
+        `Final: ${finalProbability ?? "—"}%`,
+      ];
 
   return {
     ...inputs,
+    historicalProbability: calibrated?.historicalProbability ?? null,
+    projectionProbability: calibrated?.projectionProbability ?? null,
+    probabilityExplanation: calibrated?.probabilityExplanation ?? null,
+    calibrationPenalty: calibrated?.calibrationPenalty ?? 0,
     projection,
     line,
     edge,
