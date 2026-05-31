@@ -92,10 +92,22 @@ const FALLBACK_SOURCE_PATTERN =
   /fallback|neutral|line-neutral|stat-fallback|manual-fallback|missing|unavailable|estimate|estimated|stat-type-mismatch/;
 
 /** True when projection is line/stat fallback rather than verified MLB historical model output. */
+export function isSportsDataIoProjection(prop = {}) {
+  const key = normalizeProjectionSourceKey(prop.projectionSource);
+  if (/sportsdata|mlb-verified|sportsdataio/.test(key)) return true;
+  return Boolean(
+    prop.isSportsDataSeasonProjection ||
+      prop.sportsDataGames != null ||
+      prop.sportsDataRawStat != null ||
+      prop.sportsDataPropLabel
+  );
+}
+
 export function isFallbackProjectionProp(prop = {}) {
   if (prop.isFallbackProjection || prop.projectionFallback || prop.projectionUnavailable || prop.unverifiedGradeBlocked) {
     return true;
   }
+  if (isSportsDataIoProjection(prop)) return false;
   const source = normalizeProjectionSourceKey(prop.projectionSource);
   if (FALLBACK_SOURCE_PATTERN.test(source)) return true;
   const label = String(prop.projectionSourceLabel || resolveProjectionDisplayLabel(prop, resolveProjectionQuality(prop)) || "")
@@ -159,6 +171,9 @@ function resolveProjectionDisplayLabel(prop = {}, quality = PROJECTION_QUALITY.M
   const fromSportsData = /sportsdata|mlb-verified|player-stats-model|merged/.test(key);
 
   if (quality === PROJECTION_QUALITY.MISSING) return "No projection data available";
+  if (/sportsdata|mlb-verified|sportsdataio/.test(key) || prop.isSportsDataSeasonProjection) {
+    return quality === PROJECTION_QUALITY.VERIFIED ? "Verified Projection" : "SportsDataIO Projection";
+  }
   if (!sportsDataConfigured || !fromSportsData) return "Fallback Projection";
   if (quality === PROJECTION_QUALITY.VERIFIED) return "Verified Projection";
   return "Fallback Projection";

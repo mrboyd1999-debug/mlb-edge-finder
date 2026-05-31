@@ -63,7 +63,9 @@ function BestPlaysTab({
             ))}
           </div>
         ) : (
-          <p className="compact-empty">{NO_VERIFIED_PLAYS_MESSAGE}</p>
+          <p className="compact-empty">
+            {topBestPlaysSection?.emptyMessage || NO_VERIFIED_PLAYS_MESSAGE}
+          </p>
         )}
       </section>
 

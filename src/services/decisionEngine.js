@@ -14,6 +14,7 @@ import { getPropVolatilityTier, meetsVolatilityTierRequirements, PROP_VOLATILITY
 import { getMlbMinEdgeForTier, isMlbQualityTierS, MLB_ONLY_MODE } from "../utils/mlbOnlyMode.js";
 import { applyPropCalibrationBundle } from "../utils/propCalibration.js";
 import { calibrateRealisticConfidence } from "../utils/mlbConfidenceEngine.js";
+import { resolveTierDisplayLabel } from "../utils/boardQuality.js";
 
 export { CONFIDENCE_THRESHOLDS };
 
@@ -477,15 +478,12 @@ export function enrichPropDecision(prop = {}, context = {}) {
   if (Number.isFinite(prop.projectedValue ?? prop.projection)) parts.push(`Projects ${round(prop.projectedValue ?? prop.projection)}`);
   if (bookDisagreement.sportsbookLine != null) parts.push(`book ${bookDisagreement.sportsbookLine}`);
   if (Number(prop.edge) > 0) parts.push(`${prop.bestPick} +${round(prop.edge)} edge`);
-  if (prop.confidenceScore) parts.push(`${prop.confidenceScore}% conf`);
-  if (prop.calibratedConfidence && prop.calibratedConfidence !== prop.confidenceScore) {
-    parts.push(`${prop.calibratedConfidence}% calibrated`);
-  }
+  const displayConf = Number(prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence);
+  if (Number.isFinite(displayConf)) parts.push(`${Math.round(displayConf)}% conf`);
   if (expectedValueScore >= 55) parts.push(`EV score ${expectedValueScore}`);
   if (volatilityScore >= 70) parts.push("stable volatility");
-  if (decisionTier === "topPicks") parts.push("Top Pick tier");
-  else if (decisionTier === "ready") parts.push("Ready to Bet tier");
-  else if (decisionTier === "demon") parts.push("Demon tier");
+  const tierLabel = resolveTierDisplayLabel(prop);
+  if (tierLabel) parts.push(tierLabel);
   if (parts.length) qualificationReason = parts.join(" · ");
 
   const sportsbookEdge = computeSportsbookEdge(prop, bookDisagreement);

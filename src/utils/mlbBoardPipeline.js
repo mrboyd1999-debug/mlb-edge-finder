@@ -29,12 +29,14 @@ export const TIER_A_RULES = {
 };
 
 export const TIER_B_RULES = {
-  confidence: 70,
-  probability: 60,
+  confidence: 68,
+  probability: 58,
   playability: 0,
 };
 
 export const NO_VERIFIED_PLAYS_MESSAGE = "No verified MLB plays meet today's safety threshold.";
+export const NO_TIER_AB_RESEARCH_MESSAGE =
+  "No Tier A/B verified plays today — showing research candidates.";
 
 function finite(value) {
   const num = Number(value);

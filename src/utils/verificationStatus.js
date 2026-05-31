@@ -23,12 +23,13 @@ function hasMlbStatsApiData(prop = {}) {
   );
 }
 
-function hasSportsDataIoData(prop = {}) {
+export function hasSportsDataIoData(prop = {}) {
   return Boolean(
     /sportsdata/i.test(String(prop.projectionSource || "")) ||
       prop.sportsDataGames != null ||
       prop.sportsDataRawStat != null ||
-      prop.sportsDataPropLabel
+      prop.sportsDataPropLabel ||
+      prop.isSportsDataSeasonProjection
   );
 }
 

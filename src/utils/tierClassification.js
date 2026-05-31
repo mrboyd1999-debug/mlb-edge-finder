@@ -4,13 +4,13 @@
 
 import { PITCHER_VERIFICATION, resolvePitcherVerification } from "./opponentStarter.js";
 import {
-  allowFallbackVerification,
   resolveVerificationStatus,
   VERIFICATION_STATUS,
 } from "./verificationStatus.js";
 
 export const TIER_A_METRICS = { confidence: 80, probability: 70 };
-export const TIER_B_METRICS = { confidence: 70, probability: 60 };
+export const TIER_B_METRICS = { confidence: 68, probability: 58 };
+export const RESEARCH_TIER_METRICS = { confidence: 65 };
 export const BEST_PLAY_DISPLAY_MIN = { confidence: 60, probability: 55 };
 
 function finite(value, fallback = NaN) {
@@ -99,6 +99,16 @@ export function applyTierCaps(prop = {}, tier = "C") {
   return capped;
 }
 
+export function passesResearchPlayThresholds(prop = {}) {
+  if (!hasTierBasics(prop)) return false;
+  if (!hasPositiveEdge(prop)) return false;
+  const status = prop.verificationStatus || resolveVerificationStatus(prop);
+  if (status === VERIFICATION_STATUS.UNVERIFIED) return false;
+  if (status !== VERIFICATION_STATUS.FULL && status !== VERIFICATION_STATUS.PARTIAL) return false;
+  const confidence = resolvePropConfidence(prop);
+  return Number.isFinite(confidence) && confidence >= RESEARCH_TIER_METRICS.confidence;
+}
+
 export function classifyPropTier(prop = {}) {
   if (!hasTierBasics(prop)) return "C";
   if (!hasAllowedVerification(prop)) return "C";
@@ -166,7 +176,7 @@ export function getTierBFailures(prop = {}) {
     const pitcherVerification =
       prop.pitcherVerification || resolvePitcherVerification(prop).pitcherVerification;
     if (pitcherVerification === PITCHER_VERIFICATION.FAIL) {
-      failures.push("capped at C: pitcherVerification FAIL with confidence < 70 or probability < 60");
+      failures.push("capped at C: pitcherVerification FAIL with confidence < 68 or probability < 58");
     }
   }
   return failures;

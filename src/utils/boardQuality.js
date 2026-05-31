@@ -28,6 +28,7 @@ import {
 import {
   DATA_STATUS,
   NO_VERIFIED_PLAYS_MESSAGE,
+  NO_TIER_AB_RESEARCH_MESSAGE,
   TIER_A_RULES,
   TIER_B_RULES,
   BEST_PLAYS_MIN,
@@ -38,8 +39,18 @@ import {
   normalizeBoardProp,
 } from "./mlbBoardPipeline.js";
 
-export { classifyPropTier, getTierAFailures, getTierBFailures, buildTierDebugSummary, hasPositiveEdge, hasAllowedVerification } from "./tierClassification.js";
-import { TIER_A_METRICS, TIER_B_METRICS } from "./tierClassification.js";
+export { classifyPropTier, getTierAFailures, getTierBFailures, buildTierDebugSummary, hasPositiveEdge, hasAllowedVerification, passesResearchPlayThresholds } from "./tierClassification.js";
+import {
+  TIER_A_METRICS,
+  TIER_B_METRICS,
+  classifyPropTier,
+  getTierAFailures,
+  getTierBFailures,
+  buildTierDebugSummary,
+  hasPositiveEdge,
+  hasAllowedVerification,
+  passesResearchPlayThresholds,
+} from "./tierClassification.js";
 
 export const MAX_PLAYER_PROPS_IN_TOP_LIST = 2;
 export const MAX_MARKET_PROPS_IN_TOP_LIST = 3;
@@ -74,8 +85,7 @@ export const TIER_REVIEW_NEEDED_LABEL = "Review Needed";
 export const OVERALL_PLAY_PENDING_MESSAGE = "Best available play — awaiting matchup verification.";
 export const BEST_PLAY_FALLBACK_NOTICE =
   "No Tier A plays today — showing highest scoring Tier B plays.";
-export const TIER_C_FALLBACK_NOTICE =
-  "No Tier A/B plays today — showing research candidates only.";
+export const TIER_C_FALLBACK_NOTICE = NO_TIER_AB_RESEARCH_MESSAGE;
 export const REVIEW_NEEDED_FALLBACK_NOTICE = TIER_C_FALLBACK_NOTICE;
 export const PITCHER_PENDING_CONFIDENCE_PENALTY = 10;
 export const PITCHER_PENDING_TAG = "Pitcher Pending";
@@ -503,7 +513,7 @@ export function compareBestPlaysDisplayRank(a = {}, b = {}) {
   return edgeB - edgeA;
 }
 
-export { NO_VERIFIED_PLAYS_MESSAGE, passesBestPlayBoardGate, isResearchCandidate, DATA_STATUS };
+export { NO_VERIFIED_PLAYS_MESSAGE, NO_TIER_AB_RESEARCH_MESSAGE, passesBestPlayBoardGate, isResearchCandidate, DATA_STATUS };
 
 /** Single source of truth — read stored tier on enriched props, compute otherwise. */
 export function resolveFinalTier(prop = {}) {
@@ -722,16 +732,13 @@ function buildBestPlaysTierPools(pool = []) {
     (prop) =>
       playerKey(prop) &&
       marketKey(prop) &&
-      passesBestPlayDisplayThresholds(prop) &&
-      hasAllowedVerification(prop)
+      hasAllowedVerification(prop) &&
+      hasPositiveEdge(prop)
   );
   const tierA = eligible.filter((prop) => classifyPropTier(prop) === "A");
   const tierB = eligible.filter((prop) => classifyPropTier(prop) === "B");
   const tierC = (pool || []).filter(
-    (prop) =>
-      classifyPropTier(prop) === "C" &&
-      (prop.verificationStatus || resolveVerificationStatus(prop)) !== VERIFICATION_STATUS.UNVERIFIED &&
-      passesBestPlayDisplayThresholds(prop)
+    (prop) => classifyPropTier(prop) === "C" && passesResearchPlayThresholds(prop)
   );
   const projectedFallback = (pool || [])
     .filter((prop) => {
@@ -832,6 +839,13 @@ function compareBestPlaysTierRank(a = {}, b = {}) {
   return tierA - tierB;
 }
 
+function passesVerifiedPlayShowThresholds(prop = {}, activeTier = "A") {
+  const tier = classifyPropTier(prop);
+  if (tier === "A" || tier === "B") return true;
+  if (activeTier === "C" || tier === "C") return passesResearchPlayThresholds(prop);
+  return passesBestPlayDisplayThresholds(prop);
+}
+
 export function buildTopBestPlaysPicks(
   pool = [],
   {
@@ -864,7 +878,7 @@ export function buildTopBestPlaysPicks(
   }
 
   picks = applyBestPlayRankConstraints(
-    picks.filter(passesBestPlayDisplayThresholds).slice(0, limit),
+    picks.filter((prop) => passesVerifiedPlayShowThresholds(prop, activeTier)).slice(0, limit),
     { limit }
   );
 

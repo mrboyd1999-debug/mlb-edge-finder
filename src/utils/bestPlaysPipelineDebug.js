@@ -24,11 +24,13 @@ import {
 } from "./verifiedTierSystem.js";
 import {
   allowFallbackVerification,
+  hasSportsDataIoData,
   isBoardEligibleVerification,
   resolveVerificationStatus,
   resolvePlayProjection,
   VERIFICATION_STATUS,
 } from "./verificationStatus.js";
+import { hasPositiveEdge } from "./tierClassification.js";
 
 export const BEST_PLAYS_DEBUG_MODE = false;
 export const BEST_PLAYS_DEBUG_SAMPLE_SIZE = 0;
@@ -128,16 +130,18 @@ export function passesPartialBestPlaysFilter(prop = {}) {
   if (resolvePropSport(prop) !== "MLB") return false;
   if (isBlockedNonMlbPipelineProp(prop)) return false;
   if (!isSupportedMlbMarket(prop)) return false;
-  if (isFallbackProjectionProp(prop)) return false;
+  if (isFallbackProjectionProp(prop) && !hasSportsDataIoData(prop)) return false;
   if (prop.projectionUnavailable || prop.unverifiedGradeBlocked) return false;
 
   const projection = resolvePlayProjection(prop);
   if (projection == null || projection <= VERIFIED_MIN_PROJECTION) return false;
 
-  const { probability, confidence, playability } = resolveVerifiedMetrics(prop);
-  if (!Number.isFinite(probability) || probability < VERIFIED_BASE_MIN_PROBABILITY) return false;
-  if (!Number.isFinite(confidence) || confidence < VERIFIED_BASE_MIN_CONFIDENCE) return false;
-  if (!Number.isFinite(playability)) return false;
+  const { probability, confidence } = resolveVerifiedMetrics(prop);
+  if (!Number.isFinite(confidence) || confidence < 65) return false;
+  if (!hasSportsDataIoData(prop)) {
+    if (!Number.isFinite(probability) || probability < VERIFIED_BASE_MIN_PROBABILITY) return false;
+  }
+  if (!hasPositiveEdge(prop)) return false;
   return true;
 }
 

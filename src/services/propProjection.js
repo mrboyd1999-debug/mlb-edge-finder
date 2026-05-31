@@ -3,6 +3,7 @@ import { canonicalMarketKey } from "../utils/marketNormalization.js";
 import { isTennisSportLabel } from "../utils/marketClassification.js";
 import { buildRealProjection, hasRealStatInputs } from "./realProjectionEngine.js";
 import { PROJECTION_UNAVAILABLE_LABEL } from "../modules/projectionBreakdown.js";
+import { resolveTierDisplayLabel } from "../utils/boardQuality.js";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -835,17 +836,14 @@ export function buildQualificationReason(prop = {}) {
   const parts = [];
   const projected = finiteNumber(prop.projectedValue ?? prop.projection);
   const edge = Number(prop.edge || 0);
-  const conf = Number(prop.confidenceScore ?? prop.confidence ?? 0);
+  const conf = Number(prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence ?? 0);
   const vol = finiteNumber(prop.volatility);
 
   if (Number.isFinite(projected)) parts.push(`Projects ${round(projected)}`);
   if (edge > 0 && prop.bestPick) parts.push(`${prop.bestPick} with ${round(edge)} edge vs books`);
-  if (conf >= PROJECTION_CONFIDENCE_THRESHOLDS.TOP_PICKS) {
-    parts.push(`${conf}% confidence (Top Pick tier)`);
-  } else if (conf >= PROJECTION_CONFIDENCE_THRESHOLDS.READY) {
-    parts.push(`${conf}% confidence (Ready tier)`);
-  } else if (conf > 0) {
-    parts.push(`${conf}% confidence`);
+  if (conf > 0) {
+    const tierLabel = resolveTierDisplayLabel(prop);
+    parts.push(tierLabel ? `${Math.round(conf)}% confidence (${tierLabel})` : `${Math.round(conf)}% confidence`);
   }
   if (Number.isFinite(vol)) parts.push(`volatility ${round(vol)}`);
   if (prop.riskLevel) parts.push(`${prop.riskLevel} risk`);
