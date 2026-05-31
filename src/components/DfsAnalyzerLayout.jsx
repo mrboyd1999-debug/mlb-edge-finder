@@ -18,6 +18,7 @@ import LiveBoardPipelineBanner from "./LiveBoardPipelineBanner.jsx";
 import ProviderFailureReasons from "./ProviderFailureReasons.jsx";
 import ProviderCoverageAuditSection from "./ProviderCoverageAuditSection.jsx";
 import LiveFeedDiagnosticsPanel from "./LiveFeedDiagnosticsPanel.jsx";
+import LivePropIngestionCountsPanel from "./LivePropIngestionCountsPanel.jsx";
 import LiveFeedTestPanel from "./LiveFeedTestPanel.jsx";
 import RenderingSourceDiagnosticsPanel from "./RenderingSourceDiagnosticsPanel.jsx";
 import { readSettingsMeta } from "../services/runtimeSettings.js";
@@ -158,6 +159,7 @@ function DfsAnalyzerLayout({
             loading={loading}
           />
           <ProviderFailureReasons audit={providerCoverageAudit} />
+          <LivePropIngestionCountsPanel audit={providerCoverageAudit} />
           <SystemStatusCard
             apiHealth={apiHealth}
             mlbPipelineStatus={mlbPipelineStatus}

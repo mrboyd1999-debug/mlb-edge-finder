@@ -407,6 +407,7 @@ export function buildProviderCoverageAudit({
     underdogParserMismatch: underdogAudit.parserMismatch,
     underdogRaw: underdogFetched,
     ingestionFallback: debugInfo.ingestionFallback || "",
+    pipelinePropCountAudit: pipeline,
     updatedAt: new Date().toISOString(),
   };
 

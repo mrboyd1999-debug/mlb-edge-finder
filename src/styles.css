@@ -1567,6 +1567,64 @@ body,
   margin-top: 8px;
 }
 
+.live-prop-ingestion-counts {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0a1018;
+}
+
+.live-prop-ingestion-counts__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: #e2e8f0;
+  font-size: 13px;
+}
+
+.live-prop-ingestion-counts__mode {
+  color: #fbbf24;
+  font-size: 12px;
+}
+
+.live-prop-ingestion-counts__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.live-prop-ingestion-counts__metric {
+  padding: 10px;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  background: #111827;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.live-prop-ingestion-counts__metric strong {
+  display: block;
+  margin-top: 4px;
+  color: #f8fafc;
+  font-size: 22px;
+}
+
+.live-prop-ingestion-counts__line {
+  margin: 6px 0 0;
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.live-prop-ingestion-counts__pipeline,
+.live-prop-ingestion-counts__providers {
+  margin-top: 8px;
+}
+
 .live-feed-test {
   margin: 12px 0;
   padding: 12px;
