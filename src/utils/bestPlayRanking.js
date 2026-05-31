@@ -303,7 +303,7 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
       confidence: displayConfidence,
       playability: playabilityScore,
     },
-    { verified: true }
+    { verified: true, seasonStats: prop.seasonStats || [] }
   );
   if (probabilityCalibration?.probability != null) {
     verifiedProbability = probabilityCalibration.probability;

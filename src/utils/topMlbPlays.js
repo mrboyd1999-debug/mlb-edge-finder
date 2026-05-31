@@ -40,6 +40,7 @@ import {
   areProjectionsComplete,
   syncBestPlaysFilterAudit,
 } from "../services/mlbProjectionPipelineLog.js";
+import { auditTierAProbabilityPool } from "./tierAProbabilityAudit.js";
 import { enrichMlbPropsBatch } from "../services/mlb/mlbEnrichmentPipeline.js";
 import { enrichPropsWithTeamLookup } from "./teamEnrichment.js";
 import { attachHistoricalStatsToProps } from "./historicalStatsLoader.js";
@@ -458,6 +459,7 @@ export function resolveTopMlbPlaySections(
   filterDiagnostics.bestPlayQualifiedStrict = bestPlaysResult.qualifiedStrict;
   filterDiagnostics.bestPlayProjectedCount = projectedCount;
   filterDiagnostics.bestPlayUsedFallback = bestPlaysResult.usedFallback;
+  filterDiagnostics.tierAProbabilityAudit = auditTierAProbabilityPool(boardQualityPool);
 
   const overallPlayCandidate = selectOverallPlay(boardQualityPool);
   const overallPlay = overallPlayCandidate

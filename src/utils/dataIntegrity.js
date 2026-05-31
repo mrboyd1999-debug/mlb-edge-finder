@@ -64,11 +64,12 @@ function resolveProbabilityDataScore(prop = {}) {
   const probability = finite(prop.probabilityScore ?? prop.verifiedProbability);
   const audit = prop.probabilityAudit;
   const hitRates = resolveVerifiedHitRateSnapshot(prop);
+  const seasonValid = Boolean(prop.seasonRateValid && hitRates.seasonLabel !== "—" && hitRates.seasonLabel !== "0%");
   return scoreFromChecks([
     probability != null && probability >= 50,
     Boolean(audit?.finalProbability != null || prop.probabilityCalibration),
     hitRates.last10Label !== "—",
-    hitRates.seasonLabel !== "—" && hitRates.seasonLabel !== "0%",
+    seasonValid,
   ]);
 }
 

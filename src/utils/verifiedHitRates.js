@@ -3,7 +3,7 @@
  */
 
 import { computeMlbHistoricalAveragesFromSplits } from "../services/playerStats.js";
-import { resolveSeasonHitRateBundle } from "./seasonHitRate.js";
+import { resolveMlbPerformanceBundle } from "./seasonHitRate.js";
 
 function finite(value) {
   const num = Number(value);
@@ -34,7 +34,7 @@ function estimateHitRateFromAverage(avg, line) {
   const ln = finite(line);
   if (baseline == null || ln == null || ln <= 0) return null;
   const gap = (baseline - ln) / ln;
-  return clamp(Math.round(50 + gap * 35), 15, 90);
+  return clamp(Math.round(50 + gap * 35), 15, 88);
 }
 
 function toLabel(rate) {
@@ -56,78 +56,76 @@ function resolveLast20HitRate(prop = {}, line = null) {
   return null;
 }
 
-function buildCoreHitRateSnapshot(prop = {}) {
+function buildCoreHitRateSnapshot(prop = {}, context = {}) {
+  const performance = resolveMlbPerformanceBundle(prop, context);
   const line = finite(prop.line);
   const last5 =
+    performance.last5HitRate ??
     resolveHitRatePercent(prop, "last5HitRate") ??
     estimateHitRateFromAverage(prop.last5Average ?? prop.recentForm, line);
   const last10 =
+    performance.last10HitRate ??
     resolveHitRatePercent(prop, "last10HitRate") ??
     resolveHitRatePercent(prop, "recentHitRate") ??
     estimateHitRateFromAverage(prop.last10Average, line);
-  const seasonBundle = resolveSeasonHitRateBundle(prop);
   const season =
-    seasonBundle.seasonRateValid && seasonBundle.seasonHitRate != null && seasonBundle.seasonHitRate > 0
-      ? seasonBundle.seasonHitRate
-      : resolveHitRatePercent(prop, "seasonHitRate") ??
-        resolveHitRatePercent(prop, "historicalHitRate") ??
-        estimateHitRateFromAverage(prop.seasonAverage, line);
-  const seasonLabel =
-    seasonBundle.displayLabel !== "—" && seasonBundle.displayLabel !== "0%"
-      ? seasonBundle.displayLabel
-      : last10 != null && last10 > 0
-        ? `${last10}%`
-        : season != null && season > 0
-          ? `${season}%`
-          : seasonBundle.displayLabel;
+    performance.seasonRateValid && performance.seasonHitRate != null
+      ? performance.seasonHitRate
+      : null;
 
   return {
     last5: last5 ?? null,
     last10: last10 ?? null,
-    season: seasonBundle.seasonHitRate ?? season ?? null,
-    last5Label: last5 != null ? `${last5}%` : "—",
-    last10Label: last10 != null ? `${last10}%` : "—",
-    seasonLabel,
-    seasonHitRateSource: seasonBundle.seasonHitRateSource,
-    seasonGames: seasonBundle.seasonGames,
-    seasonHits: seasonBundle.seasonHits,
+    season: season,
+    recentForm: performance.recentFormRate ?? null,
+    last5Label: last5 != null ? `${last5}%` : performance.last5Label ?? "—",
+    last10Label: last10 != null ? `${last10}%` : performance.last10Label ?? "—",
+    seasonLabel: season != null ? `${Math.round(season)}%` : "—",
+    seasonHitRateSource: performance.seasonHitRateSource,
+    seasonGames: performance.seasonGamesPlayed,
+    seasonGamesPlayed: performance.seasonGamesPlayed,
+    sampleGames: performance.sampleGames,
+    seasonHits: performance.seasonHits,
+    seasonRateValid: performance.seasonRateValid,
   };
 }
 
 /** Canonical hit-rate snapshot shared by cards, modal, and probability audit. */
-export function resolveVerifiedHitRateSnapshot(prop = {}) {
-  const snapshot = buildCoreHitRateSnapshot(prop);
+export function resolveVerifiedHitRateSnapshot(prop = {}, context = {}) {
+  const snapshot = buildCoreHitRateSnapshot(prop, context);
   const line = finite(prop.line);
   const last20 = resolveLast20HitRate(prop, line);
-  const seasonBundle = resolveSeasonHitRateBundle(prop);
+  const performance = resolveMlbPerformanceBundle(prop, context);
 
   return {
     ...snapshot,
     last20: last20 ?? null,
     last20Label: toLabel(last20),
     source: "verified-mlb-hit-rates",
-    seasonHitRateSource: seasonBundle.seasonHitRateSource,
-    gamesCount: seasonBundle.gamesCount ?? seasonBundle.sampleGames ?? seasonBundle.seasonGames,
-    gamesLabel: seasonBundle.gamesLabel,
-    gamesLabelKey: seasonBundle.gamesLabelKey,
+    seasonHitRateSource: performance.seasonHitRateSource,
+    gamesCount: performance.gamesCount,
+    gamesLabel: performance.gamesLabel,
+    gamesLabelKey: performance.gamesLabelKey,
     verified: Boolean(
       snapshot.last5Label !== "—" ||
         snapshot.last10Label !== "—" ||
-        (snapshot.seasonLabel !== "—" && snapshot.seasonLabel !== "0%")
+        (snapshot.seasonLabel !== "—" && snapshot.seasonRateValid)
     ),
   };
 }
 
-export function attachVerifiedHitRateFields(prop = {}) {
-  const snapshot = resolveVerifiedHitRateSnapshot(prop);
+export function attachVerifiedHitRateFields(prop = {}, context = {}) {
+  const snapshot = resolveVerifiedHitRateSnapshot(prop, context);
   return {
     ...prop,
     hitRateSnapshot: snapshot,
     last5HitRate: snapshot.last5 ?? prop.last5HitRate,
     last10HitRate: snapshot.last10 ?? prop.last10HitRate,
     last20HitRate: snapshot.last20 ?? prop.last20HitRate,
-    seasonHitRate: snapshot.season ?? prop.seasonHitRate,
-    seasonGames: snapshot.gamesCount ?? prop.seasonGames,
+    recentFormRate: snapshot.recentForm ?? prop.recentFormRate,
+    seasonHitRate: snapshot.seasonRateValid ? snapshot.season ?? prop.seasonHitRate : prop.seasonHitRate ?? null,
+    seasonGames: snapshot.seasonGamesPlayed ?? prop.seasonGames,
+    seasonGamesPlayed: snapshot.seasonGamesPlayed ?? prop.seasonGamesPlayed,
     seasonGamesLabel: snapshot.gamesLabel,
     seasonGamesLabelKey: snapshot.gamesLabelKey,
   };

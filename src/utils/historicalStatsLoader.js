@@ -154,6 +154,7 @@ function resolveSeasonHistoricalFallback(prop = {}, seasonStats = []) {
     last10Average: seasonAverage,
     seasonAverage,
     gameLogCount: Number(statRow.Games ?? statRow.GamesPlayed) || 0,
+    seasonGamesPlayed: Number(statRow.Games ?? statRow.GamesPlayed) || 0,
     hasGameLogs: false,
     historicalSource: "SportsDataIO season neutral fallback",
     historicalNeutralFallback: true,
@@ -161,47 +162,51 @@ function resolveSeasonHistoricalFallback(prop = {}, seasonStats = []) {
   };
 }
 
-function applyHistoricalFields(prop = {}, profile = null, fields = {}) {
+function applyHistoricalFields(prop = {}, profile = null, fields = {}, context = {}) {
   const gameLogCount = finite(fields.gameLogCount) ?? resolveGameLogCount(profile, prop);
-  const next = attachSeasonHitRateFields({
-    ...prop,
-    last5Average: finite(prop.last5Average) ?? finite(fields.last5Average),
-    last10Average: finite(prop.last10Average) ?? finite(fields.last10Average),
-    seasonAverage: finite(prop.seasonAverage) ?? finite(fields.seasonAverage),
-    recentForm: finite(prop.recentForm) ?? finite(fields.last5Average) ?? finite(fields.recentForm),
-    last5HitRate: finite(prop.last5HitRate) ?? finite(fields.last5HitRate),
-    last10HitRate: finite(prop.last10HitRate) ?? finite(fields.last10HitRate),
-    seasonHitRate:
-      finite(prop.seasonHitRate) ??
-      finite(fields.seasonHitRate) ??
-      finite(prop.historicalHitRate) ??
-      finite(fields.historicalHitRate),
-    recentHitRate: finite(prop.recentHitRate) ?? finite(fields.last10HitRate) ?? finite(fields.recentHitRate),
-    historicalHitRate:
-      finite(prop.historicalHitRate) ??
-      finite(fields.historicalHitRate) ??
-      finite(prop.seasonHitRate) ??
-      finite(fields.seasonHitRate),
-    sampleSize: finite(prop.sampleSize) ?? finite(fields.sampleSize) ?? gameLogCount ?? 0,
-    games: finite(prop.games) ?? finite(fields.games) ?? gameLogCount ?? 0,
-    seasonGamesPlayed:
-      finite(prop.seasonGamesPlayed) ??
-      finite(fields.seasonGamesPlayed) ??
-      gameLogCount ??
-      null,
-    hasGameLogs: prop.hasGameLogs ?? fields.hasGameLogs ?? (gameLogCount != null && gameLogCount >= 3),
-    gradingRows: prop.gradingRows ?? fields.splits ?? profile?.gradingRows ?? profile?.splits ?? null,
-    splits: prop.splits ?? fields.splits ?? profile?.splits ?? null,
-    historicalSource: fields.historicalSource || resolveHistoricalSource(profile, prop),
-    historicalStatsAttached: true,
-    historicalProfileKey: profile
-      ? `${profile.playerName || ""}|${profile.statType || ""}|${resolveProfilePlayerId(profile) || ""}`
-      : null,
-    matchedProfileId: resolveProfilePlayerId(profile) || resolvePropPlayerId(prop) || null,
-    sportsDataPlayerId: prop.sportsDataPlayerId ?? profile?.sportsDataPlayerId ?? profile?.playerId ?? null,
-    historicalNeutralFallback: Boolean(fields.historicalNeutralFallback),
-    historicalRecomputedFromSplits: Boolean(fields.historicalRecomputedFromSplits),
-  });
+  const next = attachSeasonHitRateFields(
+    {
+      ...prop,
+      last5Average: finite(prop.last5Average) ?? finite(fields.last5Average),
+      last10Average: finite(prop.last10Average) ?? finite(fields.last10Average),
+      seasonAverage: finite(prop.seasonAverage) ?? finite(fields.seasonAverage),
+      recentForm: finite(prop.recentForm) ?? finite(fields.last5Average) ?? finite(fields.recentForm),
+      last5HitRate: finite(prop.last5HitRate) ?? finite(fields.last5HitRate),
+      last10HitRate: finite(prop.last10HitRate) ?? finite(fields.last10HitRate),
+      seasonHitRate:
+        finite(prop.seasonHitRate) ??
+        finite(fields.seasonHitRate) ??
+        finite(prop.historicalHitRate) ??
+        finite(fields.historicalHitRate),
+      recentHitRate: finite(prop.recentHitRate) ?? finite(fields.last10HitRate) ?? finite(fields.recentHitRate),
+      historicalHitRate:
+        finite(prop.historicalHitRate) ??
+        finite(fields.historicalHitRate) ??
+        finite(prop.seasonHitRate) ??
+        finite(fields.seasonHitRate),
+      sampleSize: finite(prop.sampleSize) ?? finite(fields.sampleSize) ?? gameLogCount ?? 0,
+      games: finite(prop.games) ?? finite(fields.games) ?? gameLogCount ?? 0,
+      seasonGamesPlayed:
+        finite(prop.seasonGamesPlayed) ??
+        finite(fields.seasonGamesPlayed) ??
+        gameLogCount ??
+        null,
+      hasGameLogs: prop.hasGameLogs ?? fields.hasGameLogs ?? (gameLogCount != null && gameLogCount >= 3),
+      gradingRows: prop.gradingRows ?? fields.splits ?? profile?.gradingRows ?? profile?.splits ?? null,
+      splits: prop.splits ?? fields.splits ?? profile?.splits ?? null,
+      historicalSource: fields.historicalSource || resolveHistoricalSource(profile, prop),
+      historicalStatsAttached: true,
+      historicalProfileKey: profile
+        ? `${profile.playerName || ""}|${profile.statType || ""}|${resolveProfilePlayerId(profile) || ""}`
+        : null,
+      matchedProfileId: resolveProfilePlayerId(profile) || resolvePropPlayerId(prop) || null,
+      sportsDataPlayerId: prop.sportsDataPlayerId ?? profile?.sportsDataPlayerId ?? profile?.playerId ?? null,
+      historicalNeutralFallback: Boolean(fields.historicalNeutralFallback),
+      historicalRecomputedFromSplits: Boolean(fields.historicalRecomputedFromSplits),
+      seasonStats: context.seasonStats || prop.seasonStats || [],
+    },
+    { seasonStats: context.seasonStats || prop.seasonStats || [] }
+  );
   next.historicalCoverage = resolveHistoricalDataPresent(next).present;
   return next;
 }
@@ -248,13 +253,13 @@ export function attachHistoricalStatsFromProfile(prop = {}, context = {}) {
   if (profile && profileHasAttachableData(profile)) {
     const fields = resolveHistoricalFieldsFromProfile(profile, prop);
     if (fields) {
-      return applyHistoricalFields(prop, profile, fields);
+      return applyHistoricalFields(prop, profile, fields, context);
     }
   }
 
   const seasonFallback = resolveSeasonHistoricalFallback(prop, context.seasonStats || []);
   if (seasonFallback) {
-    return applyHistoricalFields(prop, profile, seasonFallback);
+    return applyHistoricalFields(prop, profile, seasonFallback, context);
   }
 
   return {

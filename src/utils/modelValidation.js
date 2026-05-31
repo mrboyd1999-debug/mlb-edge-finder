@@ -143,7 +143,11 @@ function buildProbabilityAuditUnsafe(prop = {}, metrics = {}) {
   const opponent = resolveOpponentAdjustment(prop);
   const park = resolveParkAdjustment(prop);
 
-  const calibrated = computeCalibratedProbability(prop, { edge, edgePercent, projection }, { verified: true });
+  const calibrated = computeCalibratedProbability(
+    prop,
+    { edge, edgePercent, projection },
+    { verified: true, seasonStats: prop.seasonStats || metrics.seasonStats || [] }
+  );
   const breakdown = calibrated?.breakdown || {};
   const finalProbability = calibrated?.probability ?? finite(prop.probabilityScore ?? prop.verifiedProbability) ?? null;
 
@@ -158,11 +162,15 @@ function buildProbabilityAuditUnsafe(prop = {}, metrics = {}) {
     edgeContribution:
       breakdown.edgeContribution != null ? `${round1(breakdown.edgeContribution)}` : "—",
     projectionEdge: calibrated?.inputs?.projectionEdge ?? "—",
-    last5Contribution: "—",
+    last5Contribution:
+      breakdown.recentContribution != null ? `${round1(breakdown.recentContribution * 0.4)}` : "—",
     last10Contribution: breakdown.recentContribution != null ? `${round1(breakdown.recentContribution)}` : "—",
     seasonContribution: breakdown.seasonContribution != null ? `${round1(breakdown.seasonContribution)}` : "—",
-    confidenceContribution: breakdown.confidenceContribution != null ? `${round1(breakdown.confidenceContribution)}` : "—",
-    playabilityContribution: breakdown.playabilityContribution != null ? `${round1(breakdown.playabilityContribution)}` : "—",
+    projectionContribution:
+      breakdown.projectionContribution != null ? `${round1(breakdown.projectionContribution)}` : "—",
+    matchupContribution: breakdown.matchupContribution != null ? `${round1(breakdown.matchupContribution)}` : "—",
+    confidenceContribution: "—",
+    playabilityContribution: "—",
     recentHitRate: calibrated?.inputs?.recentHitRate ?? hitRateSnapshot.last10Label,
     playability: calibrated?.inputs?.playability ?? "—",
     confidence: calibrated?.inputs?.confidence ?? "—",
@@ -178,13 +186,14 @@ function buildProbabilityAuditUnsafe(prop = {}, metrics = {}) {
 
   const explanationLines = [
     "Probability Breakdown",
-    `Recent: ${calibrated?.inputs?.recentHitRate ?? hitRateSnapshot.last10Label}`,
-    `Season: ${calibrated?.inputs?.seasonHitRate ?? hitRateSnapshot.seasonLabel}`,
-    `Projection Edge: ${calibrated?.inputs?.projectionEdge ?? "—"}`,
-    `Confidence: ${calibrated?.inputs?.confidence ?? "—"}`,
-    `Playability: ${calibrated?.inputs?.playability ?? "—"}`,
+    `Projection Quality: ${calibrated?.inputs?.projectionQuality ?? "—"}`,
+    `Season: ${calibrated?.inputs?.seasonHitRate ?? "—"}`,
+    `Recent Form: ${calibrated?.inputs?.recentHitRate ?? hitRateSnapshot.last10Label}`,
+    `Matchup: ${breakdown.matchupContribution != null ? `${round1(breakdown.matchupContribution)} pts` : "—"}`,
+    `Market Edge: ${calibrated?.inputs?.projectionEdge ?? "—"}`,
     `Raw Probability: ${inputs.rawProbability != null ? `${inputs.rawProbability}%` : "—"}`,
     `Calibrated Probability: ${pct(finalProbability)}`,
+    breakdown.eliteProbabilityUnlock ? "Elite unlock applied" : `Cap: ${breakdown.ceiling ?? 75}%`,
   ];
 
   return {

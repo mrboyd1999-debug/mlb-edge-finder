@@ -435,12 +435,16 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
             <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "3px", marginTop: "4px" }}>
               <MetricIf label="Last 5 hit rate" value={prop.probabilityAudit.last5HitRate} />
               <MetricIf label="Last 10 hit rate" value={prop.probabilityAudit.last10HitRate} />
+              <MetricIf label="Recent form" value={prop.probabilityAudit.recentHitRate} />
               <MetricIf label="Season hit rate" value={hitRateSnapshot.seasonLabel !== "0%" ? hitRateSnapshot.seasonLabel : seasonHitRate} />
               {seasonRateSourceLabel ? (
                 <MetricIf label="Season rate source" value={seasonRateSourceLabel} />
               ) : null}
               {gamesCountValue != null ? (
                 <MetricIf label={gamesCountLabel} value={gamesCountValue} />
+              ) : null}
+              {seasonBundle.seasonGamesPlayed != null && seasonBundle.gamesLabelKey === "sample" ? (
+                <MetricIf label="Season Games" value={seasonBundle.seasonGamesPlayed} />
               ) : null}
               {seasonBundle.seasonHits != null ? (
                 <MetricIf label="Season hits" value={seasonBundle.seasonHits} />

@@ -4,7 +4,13 @@ import { computeStandardEdge, computeRelativeEdgePercent, computeStandardPropMet
 import { computeMlbPlayConfidence } from "./mlbPlayConfidence.js";
 import { classifyVerifiedTier } from "./verifiedTierSystem.js";
 import { resolveProjectionLeanDisplay, resolveProjectionLean } from "./pickDirectionAudit.js";
-import { computeCalibratedProbability, resolveCalibrationHitRates, computeMatchupAdjustment } from "./probabilityCalibration.js";
+import {
+  computeCalibratedProbability,
+  resolveCalibrationHitRates,
+  computeMatchupAdjustment,
+  CALIBRATION_DEFAULT_MAX_PROBABILITY,
+  CALIBRATION_ELITE_MAX_PROBABILITY,
+} from "./probabilityCalibration.js";
 import {
   formatValidatedEdgeDisplay,
   hasPartialDataFlags,
@@ -210,11 +216,16 @@ export function resolveResearchReasons(prop = {}) {
 
 function applyProbabilityCaps(probability, prop = {}, { verified = false } = {}) {
   void verified;
-  const ceiling = 95;
+  const calibrationCeiling =
+    prop.probabilityCalibration?.breakdown?.ceiling ??
+    (prop.probabilityCalibration?.breakdown?.eliteProbabilityUnlock
+      ? CALIBRATION_ELITE_MAX_PROBABILITY
+      : CALIBRATION_DEFAULT_MAX_PROBABILITY);
+  const ceiling = calibrationCeiling;
   const floor = 50;
   let value = round1(probability);
   if (isResearchCandidate(prop) && !verified) {
-    return clamp(value, floor, Math.min(ceiling, 95));
+    return clamp(value, floor, Math.min(ceiling, CALIBRATION_DEFAULT_MAX_PROBABILITY));
   }
   return clamp(value, floor, ceiling);
 }
@@ -252,7 +263,10 @@ export function computeDisplayPropMetrics(prop = {}) {
   const edgeDisplay = formatEdgeDisplay({ ...prop, ...base, line });
   const adjustedConfidence = computeAdjustedConfidence(prop);
   const researchGap = isResearchCandidate(prop, { confidence: adjustedConfidence });
-  const calibrated = computeCalibratedProbability(prop, base, { verified: !researchGap });
+  const calibrated = computeCalibratedProbability(prop, base, {
+    verified: !researchGap,
+    seasonStats: prop.seasonStats || [],
+  });
   const probabilityScore =
     calibrated?.probability != null
       ? applyProbabilityCaps(calibrated.probability, prop, { verified: !researchGap })
