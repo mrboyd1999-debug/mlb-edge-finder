@@ -9,14 +9,15 @@ import {
   VERIFICATION_STATUS,
 } from "./verificationStatus.js";
 
-export const TIER_A_METRICS = { confidence: 80, probability: 70 };
+export const TIER_A_METRICS = { confidence: 75, probability: 70 };
 export const ELITE_TIER_METRICS = { confidence: 75, probability: 70 };
-/** Playable tier — probability >= 60, confidence >= 68 */
-export const TIER_B_METRICS = { confidence: 68, probability: 60 };
+/** Playable tier — probability >= 60, confidence >= 65 */
+export const TIER_B_METRICS = { confidence: 65, probability: 60 };
 export const RESEARCH_TIER_METRICS = { confidence: 65 };
-/** Best Plays board — stricter than Playable; below this stays on MLB Props only */
-export const BEST_PLAYS_BOARD_MIN = { confidence: 70, probability: 62 };
+/** Best Plays board — same thresholds as Tier B; tier priority handles A vs B vs C */
+export const BEST_PLAYS_BOARD_MIN = { ...TIER_B_METRICS };
 export const BEST_PLAY_DISPLAY_MIN = BEST_PLAYS_BOARD_MIN;
+export const PITCHER_PENDING_CONFIDENCE_PENALTY = 2;
 
 function finite(value, fallback = NaN) {
   const num = Number(value);
@@ -41,11 +42,50 @@ export function resolveSideForTier(prop = {}) {
 }
 
 export function resolvePropConfidence(prop = {}) {
-  return finite(prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence);
+  return finite(
+    prop.finalConfidence ??
+      prop.displayConfidenceScore ??
+      prop.confidenceScore ??
+      prop.confidence
+  );
 }
 
 export function resolvePropProbability(prop = {}) {
-  return finite(prop.probabilityScore ?? prop.verifiedProbability);
+  return finite(prop.finalProbability ?? prop.probabilityScore ?? prop.verifiedProbability);
+}
+
+/** Apply post-penalty SSOT metrics used by tier gates and Best Plays display. */
+export function attachFinalPlayMetrics(prop = {}, { confidence, probability } = {}) {
+  const finalConfidence = finite(confidence ?? resolvePropConfidence(prop));
+  const finalProbability = finite(probability ?? resolvePropProbability(prop));
+  return {
+    ...prop,
+    ...(Number.isFinite(finalConfidence)
+      ? {
+          finalConfidence,
+          displayConfidenceScore: finalConfidence,
+          confidenceScore: finalConfidence,
+          confidence: finalConfidence,
+        }
+      : {}),
+    ...(Number.isFinite(finalProbability)
+      ? {
+          finalProbability,
+          probabilityScore: finalProbability,
+          verifiedProbability: finalProbability,
+        }
+      : {}),
+  };
+}
+
+export function applyPitcherPendingMetricPenalty(prop = {}) {
+  const verification =
+    prop.pitcherVerification || resolvePitcherVerification(prop).pitcherVerification;
+  if (verification !== PITCHER_VERIFICATION.PENDING) return prop;
+  const confidence = resolvePropConfidence(prop);
+  if (!Number.isFinite(confidence)) return prop;
+  const penalized = Math.max(0, confidence - PITCHER_PENDING_CONFIDENCE_PENALTY);
+  return attachFinalPlayMetrics(prop, { confidence: penalized });
 }
 
 export function hasPositiveEdge(prop = {}) {
@@ -85,8 +125,6 @@ export function isMissingSeasonSource(prop = {}) {
 
 export function applyTierCaps(prop = {}, tier = "C") {
   let capped = tier;
-  const confidence = resolvePropConfidence(prop);
-  const probability = resolvePropProbability(prop);
   const pitcherVerification =
     prop.pitcherVerification || resolvePitcherVerification(prop).pitcherVerification;
 
@@ -94,11 +132,8 @@ export function applyTierCaps(prop = {}, tier = "C") {
     capped = "B";
   }
 
-  if (pitcherVerification === PITCHER_VERIFICATION.FAIL) {
-    if (confidence < TIER_B_METRICS.confidence || probability < TIER_B_METRICS.probability) {
-      return "C";
-    }
-    if (capped === "A") capped = "B";
+  if (pitcherVerification === PITCHER_VERIFICATION.FAIL && capped === "A") {
+    capped = "B";
   }
 
   return capped;
@@ -207,7 +242,7 @@ export function getTierBFailures(prop = {}) {
     const pitcherVerification =
       prop.pitcherVerification || resolvePitcherVerification(prop).pitcherVerification;
     if (pitcherVerification === PITCHER_VERIFICATION.FAIL) {
-      failures.push("capped at C: pitcherVerification FAIL with confidence < 68 or probability < 60");
+      failures.push("capped at C: pitcherVerification FAIL with invalid lookup data");
     }
   }
   return failures;

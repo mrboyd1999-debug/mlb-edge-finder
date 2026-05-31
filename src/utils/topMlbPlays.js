@@ -82,7 +82,7 @@ import {
 
 export const TOP_MLB_PLAYS_LIMIT = HIGHEST_PROBABILITY_MAX_PLAYS;
 export const SECTION_BEST_PLAYS = HIGHEST_PROBABILITY_MAX_PLAYS;
-export const TOP_BEST_PLAYS_LIMIT = 10;
+export const TOP_BEST_PLAYS_LIMIT = 5;
 export const MAX_PLAYER_APPEARANCES = 2;
 export const WAITING_FOR_PROJECTIONS_MESSAGE = "Waiting for verified projections…";
 export const FALLBACK_PROJECTIONS_LABEL = "Relaxed ranking applied";
@@ -563,7 +563,7 @@ export function resolveTopMlbPlaySections(
     {
       id: "top-10-best-plays",
       title: "Best Plays",
-      eyebrow: "Top 10 · Probability-first rank · Confidence ≥70 · Probability ≥62",
+      eyebrow: "Top 5 · Probability-first rank · Tier A ≥75/70 · Tier B ≥65/60",
       emptyMessage: topBestPlayPicks.length
         ? ""
         : resolveVerifiedPlaysEmptyMessage({

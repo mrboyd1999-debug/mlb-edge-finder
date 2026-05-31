@@ -275,8 +275,8 @@ export function validatePitcherForMatchup(prop = {}) {
       pitcher: STARTER_PENDING_LABEL,
       pitcherStatus: PITCHER_STATUS_UNKNOWN,
       pitcherValidated: false,
-      pitcherInvalid: true,
-      matchupPenalty: 8,
+      pitcherInvalid: false,
+      matchupPenalty: 2,
     };
   }
 
@@ -297,7 +297,7 @@ export function validatePitcherForMatchup(prop = {}) {
       pitcherStatus: PITCHER_STATUS_UNKNOWN,
       pitcherValidated: false,
       pitcherInvalid: false,
-      matchupPenalty: 6,
+      matchupPenalty: 2,
     };
   }
 

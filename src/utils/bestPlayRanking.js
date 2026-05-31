@@ -38,6 +38,7 @@ import { isMlbPitcherMarket } from "../modules/mlbPitcherData.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
 import { resolveProjectionConfidenceLevel, classifyPropTier, attachBoardQualityFields, attachFinalTierFields, resolvePropEdge, TIER_A_MIN_CONFIDENCE, TIER_A_MIN_PLAYABILITY, TIER_A_MIN_EDGE } from "./boardQuality.js";
 import { applyBoardProbabilityCaps } from "./mlbBoardPipeline.js";
+import { attachFinalPlayMetrics, applyPitcherPendingMetricPenalty } from "./tierClassification.js";
 import { computeCalibratedProbability } from "./probabilityCalibration.js";
 import { isInflatedProbabilityProp } from "./probabilityIntegrity.js";
 import { attachMarketProjectionValidation } from "./marketProjectionValidation.js";
@@ -506,7 +507,12 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     ...(finalized.playabilityBreakdown || playabilityBreakdown),
     finalPlayability: playabilityScore,
   };
-  return attachFinalTierFields(finalized);
+  const withFinalMetrics = attachFinalPlayMetrics(finalized, {
+    confidence: displayConfidence,
+    probability: verifiedProbability,
+  });
+  const withPitcherPenalty = applyPitcherPendingMetricPenalty(withFinalMetrics);
+  return attachFinalTierFields(withPitcherPenalty);
 }
 
 export function passesBestPlaysFilter(prop = {}) {

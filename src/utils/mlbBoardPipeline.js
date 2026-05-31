@@ -17,19 +17,19 @@ export const DATA_STATUS = {
 };
 
 export const BEST_PLAYS_MIN = {
-  confidence: 70,
-  probability: 62,
+  confidence: 65,
+  probability: 60,
   playability: 0,
 };
 
 export const TIER_A_RULES = {
-  confidence: 80,
+  confidence: 75,
   probability: 70,
   playability: 0,
 };
 
 export const TIER_B_RULES = {
-  confidence: 68,
+  confidence: 65,
   probability: 60,
   playability: 0,
 };

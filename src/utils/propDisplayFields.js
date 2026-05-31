@@ -26,15 +26,20 @@ export function applyConfidenceSanityCap(confidence, probability) {
 }
 
 export function resolveNormalizedConfidence(prop = {}) {
-  const raw = resolvePropConfidence(prop);
+  const raw = finite(
+    prop.finalConfidence ??
+      prop.displayConfidenceScore ??
+      prop.confidenceScore ??
+      prop.confidence
+  );
   if (!Number.isFinite(raw)) return null;
-  const probability = resolvePropProbability(prop);
+  const probability = resolveNormalizedProbability(prop);
   const capped = applyConfidenceSanityCap(raw, probability);
   return Math.round(Math.max(0, Math.min(100, capped)));
 }
 
 export function resolveNormalizedProbability(prop = {}) {
-  const value = resolvePropProbability(prop);
+  const value = finite(prop.finalProbability ?? prop.probabilityScore ?? prop.verifiedProbability);
   if (!Number.isFinite(value)) return null;
   return Math.round(Math.max(0, Math.min(100, value)));
 }

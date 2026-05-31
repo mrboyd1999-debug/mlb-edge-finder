@@ -60,6 +60,7 @@ import {
   buildTierDebugSummary,
   hasPositiveEdge,
   hasAllowedVerification,
+  hasTierBasics,
   passesResearchPlayThresholds,
   passesBestPlayDisplayGate,
   resolvePlayCategory,
@@ -136,7 +137,8 @@ export const BEST_PLAY_MIN_PLAYABILITY = BEST_PLAYS_MIN.playability;
 export const BEST_PLAY_MIN_SANITY = 0;
 export const MIN_UNIQUE_PLAYERS_TOP_10 = 5;
 export const MIN_PROJECTED_PROPS_FOR_BEST_PLAYS = 20;
-export const TOP_BEST_PLAYS_TARGET = 10;
+export const BEST_PLAYS_DISPLAY_LIMIT = 5;
+export const TOP_BEST_PLAYS_TARGET = BEST_PLAYS_DISPLAY_LIMIT;
 export const CONFIDENCE_CALIBRATION_MIN = 50;
 export const CONFIDENCE_CALIBRATION_MAX = 95;
 
@@ -511,18 +513,19 @@ export function resolveVerifiedPlaysEmptyMessage({
   if (loadedPropCount === 0 && boardPoolCount === 0) {
     return NO_MLB_PROPS_LOADED_MESSAGE;
   }
+  if (boardPoolCount === 0) {
+    return NO_MLB_PROPS_LOADED_MESSAGE;
+  }
   return NO_BEST_PLAYS_STANDARDS_MESSAGE;
 }
 
-/** Best Plays board gate — probability >= 62, confidence >= 70, verified edge. */
+/** Best Plays board gate — any classified tier with verified edge. */
 export function passesBestPlayBoardThresholds(prop = {}) {
   if (!hasAllowedVerification(prop)) return false;
   if (!hasPositiveEdge(prop)) return false;
-  const confidence = resolveNormalizedConfidence(prop);
-  const probability = resolveNormalizedProbability(prop);
-  if (confidence == null || confidence < BEST_PLAYS_BOARD_MIN.confidence) return false;
-  if (probability == null || probability < BEST_PLAYS_BOARD_MIN.probability) return false;
-  return true;
+  if (!hasTierBasics(prop)) return false;
+  const tier = classifyPropTier(prop);
+  return tier === "A" || tier === "B" || tier === "C";
 }
 
 /** Single source of truth — read stored tier on enriched props, compute otherwise. */
@@ -731,22 +734,12 @@ export function resolveBestPlayRejectionReason(prop = {}) {
   if (!hasPositiveEdge(prop)) return "no positive edge";
   const probability = resolveNormalizedProbability(prop);
   const confidence = resolveNormalizedConfidence(prop);
-  if (probability == null || probability < BEST_PLAYS_BOARD_MIN.probability) {
+  if (probability == null || probability < TIER_B_METRICS.probability) {
     return "probability below threshold";
   }
-  if (confidence == null || confidence < BEST_PLAYS_BOARD_MIN.confidence) {
+  if (confidence == null || confidence < TIER_B_METRICS.confidence) {
     return "confidence below threshold";
   }
-  const pitcherLabel = resolveOpposingPitcherDisplayLabel(prop);
-  if (
-    pitcherLabel === PROBABLE_STARTER_PENDING_LABEL ||
-    pitcherLabel === OPPONENT_PITCHER_UNAVAILABLE_LABEL ||
-    pitcherLabel === STARTER_PENDING_LABEL
-  ) {
-    return "missing pitcher";
-  }
-  const sampleGames = resolveSampleGames(prop);
-  if (sampleGames != null && sampleGames < 10) return "insufficient sample";
   return "other";
 }
 
@@ -799,9 +792,7 @@ function buildBestPlaysTierPools(pool = []) {
   );
   const tierA = eligible.filter((prop) => classifyPropTier(prop) === "A");
   const tierB = eligible.filter((prop) => classifyPropTier(prop) === "B");
-  const tierC = (pool || []).filter(
-    (prop) => classifyPropTier(prop) === "C" && passesResearchPlayThresholds(prop)
-  );
+  const tierC = eligible.filter((prop) => classifyPropTier(prop) === "C");
   const projectedFallback = (pool || [])
     .filter((prop) => {
       const projection = finite(prop.projection ?? prop.projectedValue, NaN);
@@ -811,13 +802,36 @@ function buildBestPlaysTierPools(pool = []) {
   return { eligible, tierA, tierB, tierC, projectedFallback, fullData: eligible.filter(isFullDataProp) };
 }
 
-function resolveBestPlaysSourcePool({ tierA, tierB }) {
-  const sourcePool = [...tierA, ...tierB].filter(passesBestPlayBoardThresholds);
+function resolveBestPlaysSourcePool({ tierA, tierB, tierC, projectedFallback }) {
+  const rankedA = [...tierA].sort(compareTopPlayFinalScore);
+  const rankedB = [...tierB].sort(compareTopPlayFinalScore);
+  const rankedC = [...tierC].sort(compareTopPlayFinalScore);
+  const combined = [...rankedA, ...rankedB, ...rankedC];
+
+  if (combined.length) {
+    let activeTier = "C";
+    let fallbackNotice = NO_TIER_AB_RESEARCH_MESSAGE;
+    if (rankedA.length) {
+      activeTier = "A";
+      fallbackNotice = "";
+    } else if (rankedB.length) {
+      activeTier = "B";
+      fallbackNotice = BEST_PLAY_FALLBACK_NOTICE;
+    }
+    return {
+      sourcePool: combined,
+      activeTier,
+      usedFallback: activeTier !== "A",
+      fallbackNotice,
+    };
+  }
+
+  const fallbackPool = [...(projectedFallback || [])].sort(compareTopPlayFinalScore);
   return {
-    sourcePool,
-    activeTier: sourcePool.length ? "qualified" : "none",
-    usedFallback: false,
-    fallbackNotice: "",
+    sourcePool: fallbackPool,
+    activeTier: fallbackPool.length ? "projected" : "none",
+    usedFallback: Boolean(fallbackPool.length),
+    fallbackNotice: fallbackPool.length ? NO_TIER_AB_RESEARCH_MESSAGE : "",
   };
 }
 
@@ -890,10 +904,10 @@ export function buildTopBestPlaysPicks(
     limit,
     maxPerPlayer,
     maxPerMarket,
-    minUniquePlayers: MIN_UNIQUE_PLAYERS_TOP_10,
+    minUniquePlayers: Math.min(MIN_UNIQUE_PLAYERS_TOP_10, limit),
   });
 
-  if (picks.length < limit && sourcePool.length) {
+  if (picks.length < limit && rankedSource.length) {
     picks = fillBestPlaysToLimit(picks, rankedSource, {
       limit,
       maxPerPlayer,
@@ -901,10 +915,7 @@ export function buildTopBestPlaysPicks(
     });
   }
 
-  picks = picks
-    .filter(passesBestPlayBoardThresholds)
-    .sort(compareTopPlayFinalScore)
-    .slice(0, limit);
+  picks = picks.sort(compareTopPlayFinalScore).slice(0, limit);
 
   diagnostics.activeTier = activeTier;
   diagnostics.tierADisplayed = picks.filter((prop) => resolveFinalTier(prop) === "A").length;
@@ -924,7 +935,7 @@ export function buildTopBestPlaysPicks(
         fallbackRankingScore: computeTopPlayFinalScore(prop),
         bestPlayActiveTier: activeTier,
         bestPlayFilterReason: tierAudit.reason,
-        bestPlayUsedFallback: false,
+        bestPlayUsedFallback: usedFallback,
       }),
       index + 1
     );
@@ -953,7 +964,10 @@ export function classifyConfidenceTier(confidence) {
 }
 
 export function resolvePropConfidence(prop = {}) {
-  return finite(prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence, NaN);
+  return finite(
+    prop.finalConfidence ?? prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence,
+    NaN
+  );
 }
 
 export function resolvePropPlayability(prop = {}) {
@@ -965,7 +979,7 @@ export function resolvePropSanity(prop = {}) {
 }
 
 export function resolvePropProbability(prop = {}) {
-  return finite(prop.probabilityScore ?? prop.verifiedProbability, NaN);
+  return finite(prop.finalProbability ?? prop.probabilityScore ?? prop.verifiedProbability, NaN);
 }
 
 export function resolveProjectionGap(prop = {}) {
