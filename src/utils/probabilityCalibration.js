@@ -2,6 +2,8 @@
  * Probability calibration — edge-driven blend capped at realistic MLB hit rates.
  */
 
+import { resolveSeasonHitRateBundle } from "./seasonHitRate.js";
+
 export const CALIBRATION_MIN_PROBABILITY = 50;
 export const CALIBRATION_MAX_VERIFIED = 95;
 export const CALIBRATION_MAX_RESEARCH = 95;
@@ -66,18 +68,28 @@ export function resolveCalibrationHitRates(prop = {}, line = null) {
     normalizeHitRatePercent(prop.last10HitRate) ??
     normalizeHitRatePercent(prop.recentHitRate) ??
     estimateHitRateFromAverage(prop.last10Average, ln);
+  const seasonBundle = resolveSeasonHitRateBundle(prop);
   const season =
-    normalizeHitRatePercent(prop.seasonHitRate) ??
-    normalizeHitRatePercent(prop.historicalHitRate) ??
-    estimateHitRateFromAverage(prop.seasonAverage, ln);
+    seasonBundle.seasonRateValid && seasonBundle.seasonHitRate != null
+      ? seasonBundle.seasonHitRate
+      : normalizeHitRatePercent(prop.seasonHitRate) ??
+        normalizeHitRatePercent(prop.historicalHitRate) ??
+        estimateHitRateFromAverage(prop.seasonAverage, ln);
 
   return {
     last5HitRate: last5,
     last10HitRate: last10,
     seasonHitRate: season,
+    seasonRateValid: Boolean(seasonBundle.seasonRateValid && seasonBundle.seasonHitRate > 0),
+    seasonHitRateSource: seasonBundle.seasonHitRateSource,
     last5Label: last5 != null ? `${last5}%` : "—",
     last10Label: last10 != null ? `${last10}%` : "—",
-    seasonLabel: season != null ? `${season}%` : "—",
+    seasonLabel:
+      seasonBundle.displayLabel !== "—"
+        ? seasonBundle.displayLabel
+        : season != null
+          ? `${season}%`
+          : "—",
   };
 }
 
@@ -171,12 +183,19 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
   const playability = resolveProbabilityPlayability(prop, options);
   const hitRates = resolveCalibrationHitRates(prop, line);
   const recentHitRate = hitRates.last10HitRate ?? hitRates.last5HitRate ?? confidence;
-  const seasonHitRate = hitRates.seasonHitRate ?? recentHitRate;
+  const seasonValid = Boolean(hitRates.seasonRateValid && hitRates.seasonHitRate > 0);
+  const seasonHitRate = seasonValid ? hitRates.seasonHitRate : null;
 
-  const recentContribution = round2(recentHitRate * PROBABILITY_WEIGHTS.recent);
-  const seasonContribution = round2(seasonHitRate * PROBABILITY_WEIGHTS.season);
-  const confidenceContribution = round2(confidence * PROBABILITY_WEIGHTS.confidence);
-  const playabilityContribution = round2(playability * PROBABILITY_WEIGHTS.playability);
+  const recentContribution = round2(recentHitRate * (seasonValid ? PROBABILITY_WEIGHTS.recent : 0.5));
+  const seasonContribution = seasonValid
+    ? round2(seasonHitRate * PROBABILITY_WEIGHTS.season)
+    : 0;
+  const confidenceContribution = round2(
+    confidence * (seasonValid ? PROBABILITY_WEIGHTS.confidence : 0.35)
+  );
+  const playabilityContribution = round2(
+    playability * (seasonValid ? PROBABILITY_WEIGHTS.playability : 0.15)
+  );
   const base = round2(
     recentContribution + seasonContribution + confidenceContribution + playabilityContribution
   );
@@ -188,7 +207,9 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
 
   const inputs = {
     recentHitRate: `${round1(recentHitRate)}%`,
-    seasonHitRate: `${round1(seasonHitRate)}%`,
+    seasonHitRate: seasonValid ? `${round1(seasonHitRate)}%` : "—",
+    seasonRateValid: seasonValid,
+    seasonHitRateSource: hitRates.seasonHitRateSource || "—",
     confidence: `${round1(confidence)}%`,
     playability: `${round1(playability)}%`,
     edgeBonus: `+${round1(edgeBonus)}`,
@@ -215,7 +236,9 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
     breakdown: {
       base,
       recentHitRate,
-      seasonHitRate,
+      seasonHitRate: seasonValid ? seasonHitRate : null,
+      seasonRateValid: seasonValid,
+      seasonHitRateSource: hitRates.seasonHitRateSource,
       confidence,
       playability,
       recentContribution,

@@ -11,6 +11,7 @@ import {
   sumSeasonFieldsPerGame,
 } from "./mlbHistoricalStatMapping.js";
 import { resolveHistoricalDataPresent } from "./tierHistoricalValidation.js";
+import { attachSeasonHitRateFields } from "./seasonHitRate.js";
 
 function finite(value) {
   const num = Number(value);
@@ -162,7 +163,7 @@ function resolveSeasonHistoricalFallback(prop = {}, seasonStats = []) {
 
 function applyHistoricalFields(prop = {}, profile = null, fields = {}) {
   const gameLogCount = finite(fields.gameLogCount) ?? resolveGameLogCount(profile, prop);
-  const next = {
+  const next = attachSeasonHitRateFields({
     ...prop,
     last5Average: finite(prop.last5Average) ?? finite(fields.last5Average),
     last10Average: finite(prop.last10Average) ?? finite(fields.last10Average),
@@ -195,7 +196,7 @@ function applyHistoricalFields(prop = {}, profile = null, fields = {}) {
     sportsDataPlayerId: prop.sportsDataPlayerId ?? profile?.sportsDataPlayerId ?? profile?.playerId ?? null,
     historicalNeutralFallback: Boolean(fields.historicalNeutralFallback),
     historicalRecomputedFromSplits: Boolean(fields.historicalRecomputedFromSplits),
-  };
+  });
   next.historicalCoverage = resolveHistoricalDataPresent(next).present;
   return next;
 }

@@ -1629,12 +1629,17 @@ export function computeMlbHistoricalAveragesFromSplits(splits = [], statType = "
   const values = valuesFromMlbSplits(filtered, statType).filter(Number.isFinite);
   const last5 = values.slice(0, 5);
   const last10 = values.slice(0, 10);
+  const last20 = values.slice(0, 20);
+  const last30 = values.slice(0, 30);
   return {
     last5Average: average(last5),
     last10Average: average(last10),
     seasonAverage: average(values),
     last5HitRate: hitRateVsLine(last5, line),
     last10HitRate: hitRateVsLine(last10, line),
+    last20HitRate: hitRateVsLine(last20, line),
+    last30HitRate: hitRateVsLine(last30, line),
+    seasonHitRate: hitRateVsLine(values, line),
     gameLogCount: filtered.length,
     hasGameLogs: filtered.length >= 3,
     splits: filtered,

@@ -10,6 +10,7 @@ import { hasMissingOpponentData, resolveProjectionValue } from "./conservativePr
 import { computeCalibratedProbability } from "./probabilityCalibration.js";
 import { computeFormConfidenceScore } from "./matchupEnrichment.js";
 import { formatHitRatePercent } from "./pickDirectionAudit.js";
+import { resolveSeasonHitRateBundle } from "./seasonHitRate.js";
 import {
   HISTORICAL_DATA_UNAVAILABLE_WARNING,
   resolveHistoricalDataPresent,
@@ -60,17 +61,32 @@ export function buildHitRateSnapshot(prop = {}) {
     resolveHitRatePercent(prop, "last10HitRate") ??
     resolveHitRatePercent(prop, "recentHitRate") ??
     estimateHitRateFromAverage(prop.last10Average, line);
+  const seasonBundle = resolveSeasonHitRateBundle(prop);
   const season =
-    resolveHitRatePercent(prop, "seasonHitRate") ??
-    estimateHitRateFromAverage(prop.seasonAverage, line);
+    seasonBundle.seasonRateValid && seasonBundle.seasonHitRate != null && seasonBundle.seasonHitRate > 0
+      ? seasonBundle.seasonHitRate
+      : resolveHitRatePercent(prop, "seasonHitRate") ??
+        resolveHitRatePercent(prop, "historicalHitRate") ??
+        estimateHitRateFromAverage(prop.seasonAverage, line);
+  const seasonLabel =
+    seasonBundle.displayLabel !== "—" && seasonBundle.displayLabel !== "0%"
+      ? seasonBundle.displayLabel
+      : last10 != null && last10 > 0
+        ? `${last10}%`
+        : season != null && season > 0
+          ? `${season}%`
+          : seasonBundle.displayLabel;
 
   return {
     last5: last5 ?? null,
     last10: last10 ?? null,
-    season: season ?? null,
+    season: seasonBundle.seasonHitRate ?? season ?? null,
     last5Label: last5 != null ? `${last5}%` : "—",
     last10Label: last10 != null ? `${last10}%` : "—",
-    seasonLabel: season != null ? `${season}%` : "—",
+    seasonLabel,
+    seasonHitRateSource: seasonBundle.seasonHitRateSource,
+    seasonGames: seasonBundle.seasonGames,
+    seasonHits: seasonBundle.seasonHits,
   };
 }
 

@@ -18,6 +18,7 @@ import {
   validatePickDirectionBeforeRender,
 } from "../utils/pickDirectionAudit.js";
 import { resolveRecommendedSide } from "../utils/boardQuality.js";
+import { resolveSeasonHitRateBundle } from "../utils/seasonHitRate.js";
 import ProjectionSanityAuditPanel from "./ProjectionSanityAuditPanel.jsx";
 import DataSourceTag from "./DataSourceTag.jsx";
 import { safeArray, safeFixed } from "../utils/safeStats.js";
@@ -91,9 +92,8 @@ function BestPlayRowCard({
       ? hitRates.last10 / 100
       : enriched.last10HitRate ?? enriched.recentHitRate ?? 0
   );
-  const seasonHitRate = formatHitRatePercent(
-    hitRates?.season != null ? hitRates.season / 100 : enriched.seasonHitRate ?? 0
-  );
+  const seasonBundle = resolveSeasonHitRateBundle(enriched);
+  const seasonHitRate = seasonBundle.displayLabel;
   const isVerifiedPlay = Boolean(
     enriched.verified || enriched.verifiedTier || enriched.pickTierLabel === "Verified Play"
   );
@@ -274,7 +274,7 @@ function BestPlayRowCard({
                   <p style={{ ...styles.bestPlayRowSubline, color: "#cbd5e1", marginTop: 2, fontSize: 11 }}>
                     Recent: <strong>{probabilityAudit.recentHitRate ?? probabilityAudit.last10HitRate ?? hitRates?.last10Label ?? last10HitRate}</strong>
                     {" · "}
-                    Season: <strong>{probabilityAudit.seasonHitRate ?? hitRates?.seasonLabel ?? seasonHitRate}</strong>
+                    Season: <strong>{seasonHitRate !== "0%" ? seasonHitRate : hitRates?.seasonLabel ?? seasonHitRate}</strong>
                     {" · "}
                     Confidence: <strong>{probabilityAudit.confidence ?? confidenceLabel}</strong>
                     {" · "}

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { dataQualityBadge } from "../services/dataQuality.js";
 import { buildPickExplanation, propPayoutLabel } from "../services/projectionEngine.js";
 import { isReadyToBet, READY_MIN_CONFIDENCE, READY_MIN_DATA_QUALITY, PROJECTION_CONFIDENCE_THRESHOLDS } from "../services/pickScoring.js";
 import { readManualStatsForProp } from "../services/pickStore.js";
@@ -35,6 +34,14 @@ import {
 } from "../utils/pickAnalysis.js";
 import { buildHistoricalPerformance } from "../utils/historicalPropAnalytics.js";
 import { safeArray } from "../utils/safeStats.js";
+import {
+  attachBoardQualityFields,
+  resolveBoardDataQualityBadge,
+  resolveBoardDataQualityLabel,
+  classifyPropTier,
+} from "../utils/boardQuality.js";
+import { resolveSeasonHitRateBundle } from "../utils/seasonHitRate.js";
+import { buildHitRateSnapshot } from "../utils/modelValidation.js";
 import { isManualAnalyzerProp } from "../utils/manualPropBuilder.js";
 import {
   AWAITING_PROJECTION_STATUS,
@@ -89,8 +96,12 @@ function FlagRow({ flags = [], tone = "positive" }) {
   );
 }
 
-export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveManualStats, onSavePick, variant = "breakdown" }) {
-  const manualProp = variant === "manual" && isManualAnalyzerProp(prop);
+export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult, onSaveManualStats, onSavePick, variant = "breakdown" }) {
+  const manualProp = variant === "manual" && isManualAnalyzerProp(rawProp);
+  const prop = useMemo(
+    () => (manualProp ? rawProp : attachBoardQualityFields(rawProp)),
+    [manualProp, rawProp]
+  );
   const breakdownMode = !manualProp;
   const hasProjection = hasValidProjection(prop);
   const noVerifiedPlay = manualProp && (!hasProjection || prop.projectionUnavailable);
@@ -116,12 +127,16 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
   const breakdownTitle = breakdownMode ? resolveBreakdownTitle(prop) : null;
   const projectionSourceLabel = formatBestPlayProjectionSource(prop);
   const last10HitRate = formatHitRatePercent(
-    prop.last10HitRate ?? prop.recentHitRate ?? prop.last5HitRate ?? 0
+    prop.last10HitRate ?? prop.recentHitRate ?? prop.last5HitRate ?? null
   );
-  const seasonHitRate = formatHitRatePercent(prop.seasonHitRate ?? prop.historicalHitRate ?? 0);
+  const seasonBundle = useMemo(() => resolveSeasonHitRateBundle(prop), [prop]);
+  const hitRateSnapshot = useMemo(() => buildHitRateSnapshot(prop), [prop]);
+  const seasonHitRate = seasonBundle.displayLabel;
+  const tierBadgeLabel = prop.confidenceTierLabel || `Tier ${classifyPropTier(prop)}`;
+  const boardDataLabel = resolveBoardDataQualityLabel(prop);
   const badge = manualProp
     ? prop.dataQualityBadge || { label: prop.scoringModeLabel || "Offline scoring mode", tone: "info" }
-    : prop.dataQualityBadge || dataQualityBadge(prop);
+    : resolveBoardDataQualityBadge(prop);
   const historical = useMemo(
     () => prop.historicalPerformance || buildHistoricalPerformance({
       sport: prop.sport,
@@ -264,6 +279,7 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
             )
           ) : (
             <>
+              <span style={styles.segmentActive}>{tierBadgeLabel}</span>
               <span style={ready ? styles.segmentActive : styles.segment}>{bandLabel}</span>
               <span style={riskStyle(prop.riskLevel)}>{prop.riskLevel || "Medium"}</span>
               {Number.isFinite(Number(prop.playabilityScore)) ? (
@@ -325,7 +341,16 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
           <MetricIf label="Prop" value={prop.statType} />
           {breakdownMode ? <MetricIf label="Projection Source" value={projectionSourceLabel} /> : null}
           {breakdownMode ? <MetricIf label="Last 10 Hit Rate" value={last10HitRate !== "—" ? last10HitRate : null} /> : null}
-          {breakdownMode ? <MetricIf label="Season Hit Rate" value={seasonHitRate !== "—" ? seasonHitRate : null} /> : null}
+          {breakdownMode ? <MetricIf label="Season Hit Rate" value={seasonHitRate !== "—" && seasonHitRate !== "0%" ? seasonHitRate : null} /> : null}
+          {breakdownMode && seasonBundle.seasonHitRateSource ? (
+            <MetricIf label="Season rate source" value={seasonBundle.seasonHitRateSource} />
+          ) : null}
+          {breakdownMode && seasonBundle.seasonGames != null ? (
+            <MetricIf label="Season games" value={seasonBundle.seasonGames} />
+          ) : null}
+          {breakdownMode && seasonBundle.seasonHits != null ? (
+            <MetricIf label="Season hits" value={seasonBundle.seasonHits} />
+          ) : null}
           {breakdownMode ? <MetricIf label="Source" value={prop.platform || prop.source} /> : null}
           {breakdownMode ? <MetricIf label="Line" value={formatNumber(prop.line)} strong /> : null}
           {breakdownMode ? (
@@ -392,7 +417,16 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
             <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "3px", marginTop: "4px" }}>
               <MetricIf label="Last 5 hit rate" value={prop.probabilityAudit.last5HitRate} />
               <MetricIf label="Last 10 hit rate" value={prop.probabilityAudit.last10HitRate} />
-              <MetricIf label="Season hit rate" value={prop.probabilityAudit.seasonHitRate} />
+              <MetricIf label="Season hit rate" value={hitRateSnapshot.seasonLabel !== "0%" ? hitRateSnapshot.seasonLabel : seasonHitRate} />
+              {seasonBundle.seasonHitRateSource ? (
+                <MetricIf label="Season rate source" value={seasonBundle.seasonHitRateSource} />
+              ) : null}
+              {seasonBundle.seasonGames != null ? (
+                <MetricIf label="Season games" value={seasonBundle.seasonGames} />
+              ) : null}
+              {seasonBundle.seasonHits != null ? (
+                <MetricIf label="Season hits" value={seasonBundle.seasonHits} />
+              ) : null}
               <MetricIf label="Projection vs line" value={prop.probabilityAudit.projectionVsLine} />
               <MetricIf label="Opponent adjustment" value={prop.probabilityAudit.opponentAdjustment} />
               <MetricIf label="Park adjustment" value={prop.probabilityAudit.parkAdjustment} />
@@ -442,18 +476,18 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
           </div>
         ) : null}
 
-        {breakdownMode && prop.hitRateSnapshot ? (
+        {breakdownMode && hitRateSnapshot ? (
           <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
             <strong style={{ fontSize: "11px" }}>Hit rate snapshot</strong>
             <div className="hit-rate-viz hit-rate-viz--modal">
               <span>
-                Last 5: <strong>{prop.hitRateSnapshot.last5Label}</strong>
+                Last 5: <strong>{hitRateSnapshot.last5Label}</strong>
               </span>
               <span>
-                Last 10: <strong>{prop.hitRateSnapshot.last10Label}</strong>
+                Last 10: <strong>{hitRateSnapshot.last10Label}</strong>
               </span>
               <span>
-                Season: <strong>{prop.hitRateSnapshot.seasonLabel}</strong>
+                Season: <strong>{hitRateSnapshot.seasonLabel !== "0%" ? hitRateSnapshot.seasonLabel : seasonHitRate}</strong>
               </span>
             </div>
           </div>
@@ -462,9 +496,9 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
         {(manualProp || Array.isArray(prop.projectionBreakdown)) && Array.isArray(prop.projectionBreakdown) && prop.projectionBreakdown.length > 0 ? (
           <div style={{ ...styles.explanationBlock, padding: "5px 6px", marginBottom: "4px" }}>
             <strong style={{ fontSize: "11px" }}>Projection breakdown</strong>
-            {prop.projectionLabel || prop.dataStatus ? (
+            {prop.projectionLabel || boardDataLabel ? (
               <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "10px", color: noVerifiedPlay ? "#94a3b8" : "#86efac" }}>
-                {noVerifiedPlay ? prop.statusMessage || AWAITING_PROJECTION_STATUS : prop.dataStatus || prop.projectionLabel}
+                {noVerifiedPlay ? prop.statusMessage || AWAITING_PROJECTION_STATUS : boardDataLabel || prop.projectionLabel}
               </p>
             ) : null}
             <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "3px", marginTop: "4px" }}>
@@ -481,12 +515,8 @@ export default function PickDetailModal({ prop, onClose, onUpdateResult, onSaveM
                   strong
                 />
               ) : null}
-              {prop.dataStatus || prop.projectionBreakdown.find((row) => row.label === "Data status") ? (
-                <MetricIf
-                  label="Data status"
-                  value={prop.dataStatus || prop.projectionBreakdown.find((row) => row.label === "Data status")?.display}
-                  strong={!noVerifiedPlay}
-                />
+              {boardDataLabel ? (
+                <MetricIf label="Data status" value={boardDataLabel} strong={!noVerifiedPlay} />
               ) : null}
             </div>
           </div>

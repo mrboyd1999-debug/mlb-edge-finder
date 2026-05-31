@@ -2,6 +2,8 @@
  * Phase 6/7/11 board quality — diversity, edge display, full-data lock, tier classification.
  */
 
+import { attachSeasonHitRateFields, resolveSeasonHitRateBundle } from "./seasonHitRate.js";
+
 export const MAX_PLAYER_PROPS_IN_TOP_LIST = 2;
 export const TOP_SECTION_LIMIT = 5;
 export const MAX_DISPLAY_EDGE_PERCENT = 40;
@@ -199,6 +201,17 @@ export function resolveFullDataReason(prop = {}) {
 
 export function isFullDataProp(prop = {}) {
   return resolveMissingFullDataFields(prop).length === 0;
+}
+
+export function resolveBoardDataQualityLabel(prop = {}) {
+  return isFullDataProp(prop) ? "Full MLB Data" : "Partial Data";
+}
+
+export function resolveBoardDataQualityBadge(prop = {}) {
+  return {
+    label: resolveBoardDataQualityLabel(prop),
+    tone: isFullDataProp(prop) ? "full" : "partial",
+  };
 }
 
 /** Partial only when a hard required field is missing — optional context never triggers this. */
@@ -658,19 +671,23 @@ export function attachBoardQualityFields(prop = {}) {
   const fullDataReason = resolveFullDataReason(prop);
   const fullData = isFullDataProp(prop);
   const propTier = classifyPropTier(prop);
+  const withSeason = attachSeasonHitRateFields(prop);
+  const dataQualityBadge = resolveBoardDataQualityBadge({ ...withSeason, isFullData: fullData, partialData: !fullData });
   return {
-    ...prop,
+    ...withSeason,
     ...edgeLabels,
     rawEdgeLabel: edgeLabels.rawEdgeLabel,
     displayEdgeLabel: edgeLabels.displayEdgeLabel,
     edgePercent: edgeLabels.edgePercent ?? prop.edgePercent,
-    projectionConfidenceLevel: resolveProjectionConfidenceLevel(prop),
+    projectionConfidenceLevel: resolveProjectionConfidenceLevel(withSeason),
     fullDataReason,
     isFullData: fullData,
     partialData: !fullData,
     confidenceTier: propTier,
     confidenceTierLabel: `Tier ${propTier}`,
     dataStatus: fullData ? "FULL_DATA" : "PARTIAL_DATA",
+    dataQualityBadge,
+    dataQualityLabel: dataQualityBadge.label,
   };
 }
 
