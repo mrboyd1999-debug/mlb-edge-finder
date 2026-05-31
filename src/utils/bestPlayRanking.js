@@ -34,7 +34,7 @@ import { enrichPickDirectionFields, resolveProjectionLeanDisplay } from "./pickD
 import { isPitcherStrikeoutMarket } from "./topMlbPlaysRanking.js";
 import { isMlbPitcherMarket } from "../modules/mlbPitcherData.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
-import { resolveProjectionConfidenceLevel, classifyConfidenceTier } from "./boardQuality.js";
+import { resolveProjectionConfidenceLevel, classifyPropTier, attachBoardQualityFields } from "./boardQuality.js";
 import {
   computeDisplayPropMetrics,
   evaluateMlbPlayability,
@@ -379,23 +379,23 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
   ranked.weightedBestPlayScore = ranked.topPickScore;
   ranked.verifiedRankingScore = ranked.topPickScore;
   ranked.projectionConfidenceLevel = resolveProjectionConfidenceLevel(ranked);
-  ranked.confidenceTier = classifyConfidenceTier(
-    ranked.displayConfidenceScore ?? ranked.confidenceScore ?? ranked.confidence
-  );
+  ranked.confidenceTier = classifyPropTier(ranked);
   ranked.confidenceTierLabel = ranked.confidenceTier ? `Tier ${ranked.confidenceTier}` : null;
-  return attachModelValidationFields(
-    attachProjectionSanityAudit(ranked, {
-      audit: sanityAudit,
-      confidence: displayConfidence,
-      playability: playabilityScore,
-      skipSanityRescore: true,
-    }),
-    {
-      edge,
-      edgePercent,
-      projection,
-      adjustedConfidence: playability.adjustedConfidence,
-    }
+  return attachBoardQualityFields(
+    attachModelValidationFields(
+      attachProjectionSanityAudit(ranked, {
+        audit: sanityAudit,
+        confidence: displayConfidence,
+        playability: playabilityScore,
+        skipSanityRescore: true,
+      }),
+      {
+        edge,
+        edgePercent,
+        projection,
+        adjustedConfidence: playability.adjustedConfidence,
+      }
+    )
   );
 }
 

@@ -188,7 +188,7 @@ export function resolveDisplayConfidence(prop = {}, tier = PICK_TIER_RESEARCH, a
   return Math.round(raw);
 }
 
-export { classifyConfidenceTier } from "./boardQuality.js";
+export { classifyConfidenceTier, classifyPropTier } from "./boardQuality.js";
 
 export function formatEdgeDisplay(prop = {}) {
   return formatValidatedEdgeDisplay(prop);

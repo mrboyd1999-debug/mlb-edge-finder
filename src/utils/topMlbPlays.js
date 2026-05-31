@@ -520,7 +520,10 @@ export function resolveTopMlbPlaySections(
       id: "top-10-best-plays",
       title: "Best Plays",
       eyebrow: "Top 10 · Tier A/B · Full data · Confidence 65+ · Max 2 props per player",
-      emptyMessage: topBestPlayPicks.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
+      emptyMessage:
+        topBestPlayPicks.length || (bestPlaysResult.diagnostics?.fullData ?? 0) > 0
+          ? ""
+          : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
       fallbackNotice: bestPlaysResult.fallbackNotice || "",
       picks: topBestPlayPicks,
     },

@@ -23,8 +23,8 @@ export const HERO_MIN_SANITY = 65;
 import {
   computeValidatedEdgePercent,
   clampValidatedEdgePercent,
-  passesTierABFullData,
-  classifyConfidenceTier,
+  isFullDataProp,
+  classifyPropTier,
 } from "./boardQuality.js";
 
 export function resolveRankingEdgePercent(prop = {}) {
@@ -107,12 +107,8 @@ export function passesTopVerifiedPlaysGate(prop = {}) {
 }
 
 export function passesHeroOverallPlayGate(prop = {}) {
-  if (!passesTierABFullData(prop)) return false;
-  const confidence = finite(
-    prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence,
-    NaN
-  );
-  return classifyConfidenceTier(confidence) === "A";
+  if (!isFullDataProp(prop)) return false;
+  return classifyPropTier(prop) === "A";
 }
 
 /** Top Verified sort: playability → confidence → probability → edge */

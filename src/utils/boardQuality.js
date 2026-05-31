@@ -1,8 +1,6 @@
 /**
- * Phase 6/7 board quality — diversity, edge display, projection confidence, section builders.
+ * Phase 6/7/11 board quality — diversity, edge display, full-data lock, tier classification.
  */
-
-import { dataQualityBadge } from "../services/dataQuality.js";
 
 export const MAX_PLAYER_PROPS_IN_TOP_LIST = 2;
 export const TOP_SECTION_LIMIT = 5;
@@ -28,6 +26,11 @@ export const MIN_PROJECTED_PROPS_FOR_BEST_PLAYS = 20;
 export const TOP_BEST_PLAYS_TARGET = 10;
 export const CONFIDENCE_CALIBRATION_MIN = 50;
 export const CONFIDENCE_CALIBRATION_MAX = 95;
+export const TIER_A_MIN_CONFIDENCE = 75;
+export const TIER_A_MIN_PLAYABILITY = 70;
+export const TIER_A_MIN_SANITY = 80;
+export const TIER_B_MIN_CONFIDENCE = 65;
+export const TIER_B_MIN_PLAYABILITY = 60;
 
 function finite(value, fallback = 0) {
   const num = Number(value);
@@ -171,6 +174,42 @@ export function formatValidatedEdgeDisplay(prop = {}) {
   };
 }
 
+export function hasMissingProjection(prop = {}) {
+  const projection = finite(prop.projection ?? prop.projectedValue, NaN);
+  return !Number.isFinite(projection) || projection <= 0;
+}
+
+export function resolveMissingFullDataFields(prop = {}) {
+  const missing = [];
+  if (!playerKey(prop)) missing.push("player");
+  if (!marketKey(prop)) missing.push("market");
+  const line = finite(prop.line, NaN);
+  if (!Number.isFinite(line) || line <= 0) missing.push("line");
+  if (hasMissingProjection(prop)) missing.push("projection");
+  const confidence = resolvePropConfidence(prop);
+  if (!Number.isFinite(confidence) || confidence <= 0) missing.push("confidence");
+  return missing;
+}
+
+export function resolveFullDataReason(prop = {}) {
+  const missing = resolveMissingFullDataFields(prop);
+  if (!missing.length) return "FULL_DATA: required projection fields present";
+  return `PARTIAL_DATA: missing ${missing.join(", ")}`;
+}
+
+export function isFullDataProp(prop = {}) {
+  return resolveMissingFullDataFields(prop).length === 0;
+}
+
+/** Partial only when a hard required field is missing — optional context never triggers this. */
+export function hasPartialDataFlags(prop = {}) {
+  return !isFullDataProp(prop);
+}
+
+export function hasPartialDataBadge(prop = {}) {
+  return hasPartialDataFlags(prop);
+}
+
 export function hasMlbStatsApiData(prop = {}) {
   return Boolean(
     prop.hasVerifiedStats ||
@@ -192,58 +231,45 @@ export function hasSportsDataIoData(prop = {}) {
   );
 }
 
-export function hasPartialDataBadge(prop = {}) {
-  const badge = prop.dataQualityBadge || dataQualityBadge(prop);
-  return /partial data/i.test(String(badge?.label || prop.dataQualityLabel || ""));
-}
-
-export function hasPartialDataFlags(prop = {}) {
-  if (prop.partialData === true) return true;
-  if (prop.partialStats === true) return true;
-  const dataStatus = String(prop.dataStatus || "").trim().toLowerCase();
-  if (dataStatus === "partial" || /partial/.test(dataStatus)) return true;
-  if (prop.missingPitcher === true) return true;
-  if (prop.missingGameContext === true) return true;
-  return hasPartialDataBadge(prop);
-}
-
 export function passesFullDataBestPlayRequirements(prop = {}) {
-  if (hasPartialDataFlags(prop)) return false;
-  const projection = finite(prop.projection ?? prop.projectedValue, NaN);
-  if (!Number.isFinite(projection) || projection <= 0) return false;
-  if (!hasMlbStatsApiData(prop)) return false;
-  if (!hasSportsDataIoData(prop)) return false;
-  return true;
-}
-
-export function hasMissingProjection(prop = {}) {
-  const projection = finite(prop.projection ?? prop.projectedValue, NaN);
-  return !Number.isFinite(projection) || projection <= 0;
+  return isFullDataProp(prop);
 }
 
 export function hasMissingStats(prop = {}) {
   return !hasMlbStatsApiData(prop);
 }
 
-export function isFullDataProp(prop = {}) {
-  if (hasPartialDataFlags(prop)) return false;
-  if (hasMissingProjection(prop)) return false;
-  if (hasMissingStats(prop)) return false;
-  return true;
+export function classifyPropTier(prop = {}) {
+  const confidence = resolvePropConfidence(prop);
+  const playability = resolvePropPlayability(prop);
+  const sanity = resolvePropSanity(prop);
+  if (
+    confidence >= TIER_A_MIN_CONFIDENCE &&
+    playability >= TIER_A_MIN_PLAYABILITY &&
+    sanity >= TIER_A_MIN_SANITY
+  ) {
+    return "A";
+  }
+  if (confidence >= TIER_B_MIN_CONFIDENCE && playability >= TIER_B_MIN_PLAYABILITY) {
+    return "B";
+  }
+  return "C";
+}
+
+export function resolvePropTier(prop = {}) {
+  return prop.confidenceTier || classifyPropTier(prop);
 }
 
 export function passesBestPlayHardExclusions(prop = {}) {
-  if (hasPartialDataFlags(prop)) return false;
-  if (hasMissingProjection(prop)) return false;
-  if (hasMissingStats(prop)) return false;
-  const tier = classifyConfidenceTier(resolvePropConfidence(prop));
-  if (tier === "C" || tier === "D") return false;
+  if (!isFullDataProp(prop)) return false;
+  const tier = classifyPropTier(prop);
+  if (tier === "C") return false;
   return true;
 }
 
 export function passesTierABFullData(prop = {}) {
   if (!isFullDataProp(prop)) return false;
-  const tier = classifyConfidenceTier(resolvePropConfidence(prop));
+  const tier = classifyPropTier(prop);
   return tier === "A" || tier === "B";
 }
 
@@ -260,13 +286,13 @@ export function passesBestPlayGate(prop = {}) {
 }
 
 export function resolveBestPlayExclusionReason(prop = {}) {
-  if (hasPartialDataFlags(prop)) return "Excluded: Partial Data";
-  if (hasMissingProjection(prop)) return "Excluded: Missing projection";
-  if (hasMissingStats(prop)) return "Excluded: Missing stats";
-  const confidence = resolvePropConfidence(prop);
-  const tier = classifyConfidenceTier(confidence);
+  if (!isFullDataProp(prop)) {
+    const detail = resolveFullDataReason(prop).replace(/^PARTIAL_DATA:\s*/, "");
+    return detail ? `Excluded: Partial Data (${detail})` : "Excluded: Partial Data";
+  }
+  const tier = classifyPropTier(prop);
   if (tier === "C") return "Excluded: Tier C";
-  if (tier === "D") return "Excluded: Tier D";
+  const confidence = resolvePropConfidence(prop);
   if (confidence < BEST_PLAY_MIN_CONFIDENCE) return "Excluded: Confidence below threshold";
   if (resolvePropProbability(prop) < BEST_PLAY_MIN_PROBABILITY) return "Excluded: Probability below threshold";
   if (resolvePropPlayability(prop) < BEST_PLAY_MIN_PLAYABILITY) return "Excluded: Playability below threshold";
@@ -285,41 +311,50 @@ export function resolveBestPlayThresholdMissReason(prop = {}) {
 
 export function buildBestPlayFilterDiagnostics(pool = []) {
   const counts = {
-    tierAFullData: 0,
-    tierBFullData: 0,
-    tierCFullData: 0,
+    totalProjected: (pool || []).length,
+    fullData: 0,
     partialData: 0,
+    tierA: 0,
+    tierB: 0,
+    tierC: 0,
     rejectedByConfidence: 0,
     rejectedByProbability: 0,
     rejectedByPlayability: 0,
+    rejectedByTierC: 0,
     qualifiedStrict: 0,
+    // legacy aliases for existing UI
+    tierAFullData: 0,
+    tierBFullData: 0,
+    tierCFullData: 0,
     missingProjection: 0,
     missingStats: 0,
   };
 
   for (const prop of pool || []) {
-    if (hasPartialDataFlags(prop)) {
+    if (!isFullDataProp(prop)) {
       counts.partialData += 1;
-      continue;
-    }
-    if (hasMissingProjection(prop)) {
-      counts.missingProjection += 1;
-      continue;
-    }
-    if (hasMissingStats(prop)) {
-      counts.missingStats += 1;
+      const missing = resolveMissingFullDataFields(prop);
+      if (missing.includes("projection")) counts.missingProjection += 1;
       continue;
     }
 
-    const confidence = resolvePropConfidence(prop);
-    const tier = classifyConfidenceTier(confidence);
-    if (tier === "A") counts.tierAFullData += 1;
-    else if (tier === "B") counts.tierBFullData += 1;
-    else if (tier === "C") counts.tierCFullData += 1;
+    counts.fullData += 1;
+    const tier = classifyPropTier(prop);
+    if (tier === "A") {
+      counts.tierA += 1;
+      counts.tierAFullData += 1;
+    } else if (tier === "B") {
+      counts.tierB += 1;
+      counts.tierBFullData += 1;
+    } else {
+      counts.tierC += 1;
+      counts.tierCFullData += 1;
+      counts.rejectedByTierC += 1;
+    }
 
-    if (tier === "C" || tier === "D") continue;
+    if (tier === "C") continue;
 
-    if (confidence < BEST_PLAY_MIN_CONFIDENCE) counts.rejectedByConfidence += 1;
+    if (resolvePropConfidence(prop) < BEST_PLAY_MIN_CONFIDENCE) counts.rejectedByConfidence += 1;
     if (resolvePropProbability(prop) < BEST_PLAY_MIN_PROBABILITY) counts.rejectedByProbability += 1;
     if (resolvePropPlayability(prop) < BEST_PLAY_MIN_PLAYABILITY) counts.rejectedByPlayability += 1;
     if (passesBestPlayGate(prop)) counts.qualifiedStrict += 1;
@@ -334,6 +369,7 @@ export function buildBestPlayRejectionSamples(pool = [], limit = 12) {
       player: prop.playerName || prop.player || "Unknown",
       market: prop.statType || prop.market || prop.propType || "—",
       reason: resolveBestPlayExclusionReason(prop) || resolveBestPlayThresholdMissReason(prop),
+      fullDataReason: prop.fullDataReason || resolveFullDataReason(prop),
       confidence: Math.round(resolvePropConfidence(prop)),
       probability: Math.round(resolvePropProbability(prop)),
     }))
@@ -365,7 +401,8 @@ export function buildTopBestPlaysPicks(
   });
 
   const shouldFill =
-    Number(projectedCount) >= MIN_PROJECTED_PROPS_FOR_BEST_PLAYS && picks.length < limit;
+    picks.length < limit &&
+    (Number(projectedCount) >= MIN_PROJECTED_PROPS_FOR_BEST_PLAYS || diagnostics.fullData > 0);
   let usedFallback = false;
 
   if (shouldFill) {
@@ -389,6 +426,16 @@ export function buildTopBestPlaysPicks(
       if (playerKeyValue) playerCounts.set(playerKeyValue, used + 1);
       usedFallback = true;
     }
+  }
+
+  if (diagnostics.fullData > 0 && picks.length === 0) {
+    const rescuePool = [...(pool || [])].filter(passesTierABFullData).sort(compareBestPlaysRecoveryRank);
+    picks = applyBestPlaysDiversityFilter(rescuePool, {
+      limit,
+      maxPerPlayer,
+      minUniquePlayers: MIN_UNIQUE_PLAYERS_TOP_10,
+    });
+    usedFallback = rescuePool.length > 0;
   }
 
   const annotatedPicks = picks.map((prop) => {
@@ -415,10 +462,9 @@ export function buildTopBestPlaysPicks(
 export function classifyConfidenceTier(confidence) {
   const conf = finite(confidence, NaN);
   if (!Number.isFinite(conf)) return "D";
-  if (conf >= 80) return "A";
-  if (conf >= 70) return "B";
-  if (conf >= 60) return "C";
-  return "D";
+  if (conf >= TIER_A_MIN_CONFIDENCE) return "A";
+  if (conf >= TIER_B_MIN_CONFIDENCE) return "B";
+  return "C";
 }
 
 export function resolvePropConfidence(prop = {}) {
@@ -458,9 +504,9 @@ export function passesSafestPlayGate(prop = {}) {
 }
 
 export function passesValueUnderGate(prop = {}) {
-  if (hasPartialDataFlags(prop)) return false;
-  const tier = classifyConfidenceTier(resolvePropConfidence(prop));
-  if (tier === "C" || tier === "D") return false;
+  if (!isFullDataProp(prop)) return false;
+  const tier = classifyPropTier(prop);
+  if (tier === "C") return false;
   const lean = String(prop.lean || prop.pick || prop.side || "").toLowerCase();
   const side = resolveRecommendedSide(prop);
   const isUnder = side === "UNDER" || /under|less|lower/.test(lean);
@@ -488,14 +534,14 @@ export function compareOverallPlayRank(a = {}, b = {}) {
 }
 
 export function selectOverallPlay(pool = []) {
-  const eligible = (pool || []).filter(passesTierABFullData);
+  const eligible = (pool || []).filter(isFullDataProp);
   const tierA = eligible
-    .filter((prop) => classifyConfidenceTier(resolvePropConfidence(prop)) === "A")
+    .filter((prop) => classifyPropTier(prop) === "A")
     .sort(compareOverallPlayRank);
   if (tierA[0]) return tierA[0];
 
   const tierB = eligible
-    .filter((prop) => classifyConfidenceTier(resolvePropConfidence(prop)) === "B")
+    .filter((prop) => classifyPropTier(prop) === "B")
     .sort(compareOverallPlayRank);
   return tierB[0] || null;
 }
@@ -516,8 +562,8 @@ export function buildOverallPlayExplanation(prop = {}) {
           ? `Projection ${gap} under line`
           : "Projection aligned with line";
   }
-  const tier = classifyConfidenceTier(confidence);
-  const dataLabel = hasPartialDataFlags(prop) ? "Partial MLB data" : "Full MLB data";
+  const tier = classifyPropTier(prop);
+  const dataLabel = isFullDataProp(prop) ? "Full MLB data" : "Partial MLB data";
   return `Why ranked #1: Confidence ${confidence}% · Probability ${probability}% · Playability ${playability} · ${projectionLabel} · Tier ${tier} · ${dataLabel}`;
 }
 
@@ -600,6 +646,9 @@ export function resolveProjectionConfidenceLevel(prop = {}) {
 
 export function attachBoardQualityFields(prop = {}) {
   const edgeLabels = formatValidatedEdgeDisplay(prop);
+  const fullDataReason = resolveFullDataReason(prop);
+  const fullData = isFullDataProp(prop);
+  const propTier = classifyPropTier(prop);
   return {
     ...prop,
     ...edgeLabels,
@@ -607,6 +656,12 @@ export function attachBoardQualityFields(prop = {}) {
     displayEdgeLabel: edgeLabels.displayEdgeLabel,
     edgePercent: edgeLabels.edgePercent ?? prop.edgePercent,
     projectionConfidenceLevel: resolveProjectionConfidenceLevel(prop),
+    fullDataReason,
+    isFullData: fullData,
+    partialData: !fullData,
+    confidenceTier: propTier,
+    confidenceTierLabel: `Tier ${propTier}`,
+    dataStatus: fullData ? "FULL_DATA" : "PARTIAL_DATA",
   };
 }
 

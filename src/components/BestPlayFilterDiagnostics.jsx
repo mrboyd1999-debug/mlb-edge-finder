@@ -20,17 +20,20 @@ function BestPlayFilterDiagnostics({ filterDiagnostics = null }) {
     <section className="verification-diagnostics best-play-filter-diagnostics" aria-label="Best Plays filter diagnostics">
       <h3 className="verification-diagnostics__title">Best Plays Filter Diagnostics</h3>
       <p className="verification-diagnostics__meta">
-        Strict qualified: {filterDiagnostics?.bestPlayQualifiedStrict ?? 0} · Projected pool:{" "}
-        {filterDiagnostics?.bestPlayProjectedCount ?? 0}
+        Strict qualified: {filterDiagnostics?.bestPlayQualifiedStrict ?? 0}
         {filterDiagnostics?.bestPlayUsedFallback ? " · Fallback fill active" : ""}
       </p>
       <div className="verification-diagnostics__grid">
-        <Metric label="Tier A Full Data" value={audit.tierAFullData} />
-        <Metric label="Tier B Full Data" value={audit.tierBFullData} />
-        <Metric label="Tier C Full Data" value={audit.tierCFullData} />
+        <Metric label="Total Projected" value={audit.totalProjected} />
+        <Metric label="Full Data" value={audit.fullData} />
         <Metric label="Partial Data" value={audit.partialData} />
+        <Metric label="Tier A" value={audit.tierA ?? audit.tierAFullData} />
+        <Metric label="Tier B" value={audit.tierB ?? audit.tierBFullData} />
+        <Metric label="Tier C" value={audit.tierC ?? audit.tierCFullData} />
         <Metric label="Rejected By Confidence" value={audit.rejectedByConfidence} />
         <Metric label="Rejected By Probability" value={audit.rejectedByProbability} />
+        <Metric label="Rejected By Playability" value={audit.rejectedByPlayability} />
+        <Metric label="Rejected By Tier C" value={audit.rejectedByTierC} />
       </div>
       {samples.length ? (
         <div className="verification-diagnostics__table-wrap">
@@ -41,6 +44,7 @@ function BestPlayFilterDiagnostics({ filterDiagnostics = null }) {
                 <th>Market</th>
                 <th>Confidence</th>
                 <th>Probability</th>
+                <th>Data</th>
                 <th>Reason</th>
               </tr>
             </thead>
@@ -51,6 +55,7 @@ function BestPlayFilterDiagnostics({ filterDiagnostics = null }) {
                   <td>{row.market}</td>
                   <td>{row.confidence}%</td>
                   <td>{row.probability}%</td>
+                  <td>{row.fullDataReason || "—"}</td>
                   <td>{row.reason}</td>
                 </tr>
               ))}
