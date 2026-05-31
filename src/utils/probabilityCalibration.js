@@ -379,7 +379,15 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
 
   const cap = resolveProbabilityCeiling(prop, metrics, hitRates, confidence, penalties);
   const penalizedProbability = round2(prePenaltyProbability - penalties.totalPenalty);
-  const probability = clamp(penalizedProbability, CALIBRATION_MIN_PROBABILITY, cap.ceiling);
+  let probability = clamp(penalizedProbability, CALIBRATION_MIN_PROBABILITY, cap.ceiling);
+  probability = Math.min(probability, cap.ceiling);
+  if (!seasonValid) probability = Math.min(probability, 60);
+  const sampleGames = finite(hitRates.last10Games ?? prop.sampleGames ?? prop.games);
+  if (sampleGames != null && sampleGames < 10) probability = Math.min(probability, 60);
+  if (validationFlags.projectionRiskAggressive || validationFlags.outlierDetected) {
+    probability = Math.min(probability, 70);
+  }
+  probability = Math.round(probability);
   const probabilityTier = resolveProbabilityTier(probability);
 
   const inputs = {

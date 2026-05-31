@@ -3518,7 +3518,11 @@ export default function DFSPropsApp() {
         cacheAnalytics: scopedBoard.cacheAnalytics || scopedBoard.cacheMetadata?.cacheAnalytics || scopedBoard.debugInfo?.cacheAnalytics || null,
       })
     );
-    setLastUpdated(scopedBoard.updatedAt || "");
+    setLastUpdated(
+      cacheLayer === "live" || cacheLayer === "fresh"
+        ? new Date().toISOString()
+        : scopedBoard.updatedAt || ""
+    );
     setCacheStatus(cacheLayer);
     setCacheNotice(scopedBoard.cacheNotice || "");
     setPipelineAudit(
@@ -5083,6 +5087,8 @@ export default function DFSPropsApp() {
       refreshCountdownSec={refreshCountdownSec}
       onRefresh={() => loadProps({ force: true })}
       lastUpdatedLabel={lastUpdatedLabel}
+      showDebugPanels={debugPanelsVisible}
+      onToggleDebugPanels={() => setShowDebugPanels((value) => !value)}
       learningSaveNotice={learningSaveNotice}
       manualAnalyzerProps={manualAnalyzerProps}
       onAnalyzeManualProp={handleAnalyzeManualProp}

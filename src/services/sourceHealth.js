@@ -128,8 +128,16 @@ export function resolveProviderConnectionStatus({
   const refreshDegraded = timedOut || fetchFailed || fallback || partial;
 
   if (hasActive) {
-    const liveOk = usable > 0 && !refreshDegraded;
-    if (liveOk) {
+    const liveSuccess = usable > 0 && parsed > 0 && !hasCached && !fetchFailed && !timedOut;
+    if (liveSuccess) {
+      return {
+        tier: CONNECTION_TIERS.CONNECTED,
+        badge: HEALTH_STATES.LIVE,
+        connected: true,
+        degraded: false,
+      };
+    }
+    if (usable > 0 && parsed > 0 && !hasCached) {
       return {
         tier: CONNECTION_TIERS.CONNECTED,
         badge: HEALTH_STATES.LIVE,

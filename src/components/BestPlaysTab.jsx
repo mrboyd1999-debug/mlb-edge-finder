@@ -5,12 +5,8 @@ import BestPlayRowCard from "./BestPlayRowCard.jsx";
 import PerformanceTracker from "./PerformanceTracker.jsx";
 import BestPlayFilterDiagnostics from "./BestPlayFilterDiagnostics.jsx";
 import TierAuditPanel from "./TierAuditPanel.jsx";
-import { compareVerifiedPlaysRank, compareBestPlaysRank, applyBestPlayRankConstraints } from "../utils/bestPlayRankingScore.js";
-import {
-  VERIFIED_DISPLAY_MAX,
-  NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
-} from "../utils/verifiedTierSystem.js";
-import { NO_LIVE_VERIFIED_PROPS_MESSAGE, shouldBlockVerifiedPlayRender } from "../utils/renderDataSourceAudit.js";
+import { compareBestPlaysRank, applyBestPlayRankConstraints } from "../utils/bestPlayRankingScore.js";
+import { NO_VERIFIED_PLAYS_MESSAGE } from "../utils/mlbBoardPipeline.js";
 import { safeArray } from "../utils/safeStats.js";
 import { liveBoardLoadingMessage } from "../utils/liveBoardLoading.js";
 
@@ -52,7 +48,7 @@ function BestPlaysSection({ section, onOpen, cacheStatus = "", sortFn = null, li
           ))}
         </div>
       ) : (
-        <p className="compact-empty">{section.emptyMessage || NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE}</p>
+        <p className="compact-empty">{section.emptyMessage || NO_VERIFIED_PLAYS_MESSAGE}</p>
       )}
     </section>
   );
@@ -69,11 +65,10 @@ function BestPlaysTab({
   renderSourceAudit = null,
   cacheStatus = "",
   performanceTracker = null,
+  showDebugPanels = false,
 }) {
   const topBestPlaysSection = useMemo(() => findSection(sections, "top-10-best-plays"), [sections]);
-  const verifiedSection = useMemo(() => findSection(sections, "verified-plays"), [sections]);
   const safestSection = useMemo(() => findSection(sections, "top-5-safest"), [sections]);
-  const highestEdgeSection = useMemo(() => findSection(sections, "top-5-highest-edge"), [sections]);
   const valueUndersSection = useMemo(() => findSection(sections, "top-5-value-unders"), [sections]);
   const valueOversSection = useMemo(() => findSection(sections, "top-5-value-overs"), [sections]);
 
@@ -81,20 +76,7 @@ function BestPlaysTab({
     return applyBestPlayRankConstraints(safeArray(topBestPlaysSection?.picks), { limit: 10 });
   }, [topBestPlaysSection]);
 
-  const verifiedPicks = useMemo(() => {
-    return safeArray(verifiedSection?.picks)
-      .sort(compareVerifiedPlaysRank)
-      .slice(0, VERIFIED_DISPLAY_MAX);
-  }, [verifiedSection]);
-
   const heroPlay = useMemo(() => overallPlay, [overallPlay]);
-  const failureReason = loadError || filterDiagnostics?.error || "";
-  const blockStaleRender = shouldBlockVerifiedPlayRender(renderSourceAudit);
-  const liveProviderActive = Number(renderSourceAudit?.liveProviderCount ?? 0) > 0;
-  const showIntegrityWarning =
-    renderSourceAudit?.dataIntegrityMismatch &&
-    renderSourceAudit?.integrityWarning &&
-    !liveProviderActive;
 
   if (loading) {
     return (
@@ -109,66 +91,67 @@ function BestPlaysTab({
 
   return (
     <div className="compact-tab-panel">
-      {showIntegrityWarning ? (
-        <p className="compact-form-notice prop-pipeline-counters__failure" role="alert">
-          {renderSourceAudit.integrityWarning}
+      {heroPlay ? (
+        <SectionErrorBoundary name="Hero Card">
+          <BestPlayHeroCard prop={heroPlay} onOpen={onOpen} cacheStatus={cacheStatus} />
+        </SectionErrorBoundary>
+      ) : null}
+
+      {showDebugPanels && filterDiagnostics?.bestPlayFilterAudit ? (
+        <p className="compact-form-notice">
+          Tier pool A {filterDiagnostics.bestPlayFilterAudit.tierA ?? 0} · B{" "}
+          {filterDiagnostics.bestPlayFilterAudit.tierB ?? 0} · C{" "}
+          {filterDiagnostics.bestPlayFilterAudit.tierC ?? 0}
+          {" · "}
+          Shown A {filterDiagnostics.bestPlayFilterAudit.tierADisplayed ?? 0} · B{" "}
+          {filterDiagnostics.bestPlayFilterAudit.tierBDisplayed ?? 0} · C{" "}
+          {filterDiagnostics.bestPlayFilterAudit.tierCDisplayed ?? 0}
         </p>
       ) : null}
 
-      {blockStaleRender ? (
-        <p className="compact-empty">{NO_LIVE_VERIFIED_PROPS_MESSAGE}</p>
-      ) : (
-        <>
-          {failureReason && !verifiedPicks.length && !topBestPlays.length ? (
-            <p className="compact-form-notice">{failureReason}</p>
-          ) : null}
+      {showDebugPanels ? <BestPlayFilterDiagnostics filterDiagnostics={filterDiagnostics} /> : null}
+      {showDebugPanels ? <TierAuditPanel auditRows={filterDiagnostics?.tierAuditBatch} limit={12} /> : null}
 
-          {heroPlay ? (
-            <SectionErrorBoundary name="Hero Card">
-              <BestPlayHeroCard prop={heroPlay} onOpen={onOpen} cacheStatus={cacheStatus} />
-            </SectionErrorBoundary>
-          ) : null}
+      <BestPlaysSection
+        section={{
+          ...(topBestPlaysSection || { title: "Best Plays", picks: [] }),
+          emptyMessage: topBestPlays.length ? "" : NO_VERIFIED_PLAYS_MESSAGE,
+        }}
+        onOpen={onOpen}
+        cacheStatus={cacheStatus}
+        sortFn={compareBestPlaysRank}
+        limit={10}
+      />
 
-          {filterDiagnostics?.bestPlayFilterAudit ? (
-            <p className="compact-form-notice">
-              Tier pool A {filterDiagnostics.bestPlayFilterAudit.tierA ?? 0} · B{" "}
-              {filterDiagnostics.bestPlayFilterAudit.tierB ?? 0} · C{" "}
-              {filterDiagnostics.bestPlayFilterAudit.tierC ?? 0}
-              {" · "}
-              Shown A {filterDiagnostics.bestPlayFilterAudit.tierADisplayed ?? 0} · B{" "}
-              {filterDiagnostics.bestPlayFilterAudit.tierBDisplayed ?? 0} · C{" "}
-              {filterDiagnostics.bestPlayFilterAudit.tierCDisplayed ?? 0}
-            </p>
-          ) : null}
+      <BestPlaysSection
+        section={{
+          ...(safestSection || { title: "Safest Plays", picks: [] }),
+          emptyMessage: safestSection?.picks?.length ? "" : NO_VERIFIED_PLAYS_MESSAGE,
+        }}
+        onOpen={onOpen}
+        cacheStatus={cacheStatus}
+        limit={5}
+      />
+      <BestPlaysSection
+        section={{
+          ...(valueUndersSection || { title: "Value Unders", picks: [] }),
+          emptyMessage: valueUndersSection?.picks?.length ? "" : NO_VERIFIED_PLAYS_MESSAGE,
+        }}
+        onOpen={onOpen}
+        cacheStatus={cacheStatus}
+        limit={5}
+      />
+      <BestPlaysSection
+        section={{
+          ...(valueOversSection || { title: "Value Overs", picks: [] }),
+          emptyMessage: valueOversSection?.picks?.length ? "" : NO_VERIFIED_PLAYS_MESSAGE,
+        }}
+        onOpen={onOpen}
+        cacheStatus={cacheStatus}
+        limit={5}
+      />
 
-          <BestPlayFilterDiagnostics filterDiagnostics={filterDiagnostics} />
-
-          <TierAuditPanel auditRows={filterDiagnostics?.tierAuditBatch} limit={12} />
-
-          <BestPlaysSection
-            section={topBestPlaysSection}
-            onOpen={onOpen}
-            cacheStatus={cacheStatus}
-            sortFn={compareBestPlaysRank}
-            limit={10}
-          />
-
-          <BestPlaysSection section={safestSection} onOpen={onOpen} cacheStatus={cacheStatus} limit={5} />
-          <BestPlaysSection section={valueUndersSection} onOpen={onOpen} cacheStatus={cacheStatus} limit={5} />
-          <BestPlaysSection section={highestEdgeSection} onOpen={onOpen} cacheStatus={cacheStatus} limit={5} />
-          <BestPlaysSection section={valueOversSection} onOpen={onOpen} cacheStatus={cacheStatus} limit={5} />
-
-          <PerformanceTracker dashboard={performanceTracker} />
-
-          <BestPlaysSection
-            section={verifiedSection}
-            onOpen={onOpen}
-            cacheStatus={cacheStatus}
-            sortFn={compareVerifiedPlaysRank}
-            limit={VERIFIED_DISPLAY_MAX}
-          />
-        </>
-      )}
+      <PerformanceTracker dashboard={performanceTracker} />
     </div>
   );
 }

@@ -8,6 +8,8 @@ function CompactApiHeader({
   refreshCountdownSec = 0,
   onRefresh,
   lastUpdated = "",
+  showDebugPanels = false,
+  onToggleDebugPanels,
 }) {
   const refreshLabel = loading
     ? "Loading…"
@@ -30,6 +32,11 @@ function CompactApiHeader({
         >
           {refreshLabel}
         </button>
+        {onToggleDebugPanels ? (
+          <button type="button" className="compact-app-header__refresh" onClick={onToggleDebugPanels}>
+            {showDebugPanels ? "Hide Debug" : "Show Debug"}
+          </button>
+        ) : null}
       </div>
     </header>
   );

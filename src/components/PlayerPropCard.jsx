@@ -125,10 +125,12 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
   const metricFade = noVerifiedPlay ? {} : manualMetricFadeStyle(prop.edge);
   const payoutLabel = payoutDisplayLabel(prop);
   const projVsLine = projectionVsLineLabel(prop);
-  const researchOnly = Boolean(prop.displayResearchOnly) || /research only/i.test(String(prop.bettingLabel || ""));
+  const researchOnly =
+    Boolean(prop.isResearchCandidate || prop.displayResearchOnly) ||
+    /research/i.test(String(prop.cardPlayLabel || prop.bettingLabel || ""));
   const playable = Boolean(prop.isDisplayPlayable) && !researchOnly;
   const cardStatus = prop.cardStatus || (prop.displayRejected ? "rejected" : playable ? "playable" : "research");
-  const cardStatusLabel = prop.pickTierLabel || prop.bettingLabel || resolveCardStatusLabel(prop);
+  const cardStatusLabel = prop.cardPlayLabel || prop.pickTierLabel || prop.bettingLabel || resolveCardStatusLabel(prop);
   const probabilityPct =
     prop.probabilityScore ??
     (Number.isFinite(Number(prop.modelProbability)) ? Math.round(Number(prop.modelProbability) * 100) : null);

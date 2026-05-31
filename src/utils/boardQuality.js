@@ -19,6 +19,18 @@ import {
 } from "./integrityAudit.js";
 import { resolveVerifiedHitRateSnapshot } from "./verifiedHitRates.js";
 import { STARTER_PENDING_LABEL, normalizePropPitcherFields } from "./opponentStarter.js";
+import {
+  DATA_STATUS,
+  NO_VERIFIED_PLAYS_MESSAGE,
+  TIER_A_RULES,
+  TIER_B_RULES,
+  BEST_PLAYS_MIN,
+  hasFullMlbDataFields,
+  resolveMlbDataStatus,
+  isResearchCandidate,
+  passesBestPlayBoardGate,
+  normalizeBoardProp,
+} from "./mlbBoardPipeline.js";
 
 export const MAX_PLAYER_PROPS_IN_TOP_LIST = 2;
 export const MAX_MARKET_PROPS_IN_TOP_LIST = 3;
@@ -57,13 +69,13 @@ export const FALLBACK_RANK_WEIGHTS = {
   playability: 0.2,
   sanity: 0.1,
 };
-/** Temporary emergency tier thresholds — confidence + probability + playability. */
-export const TIER_A_MIN_CONFIDENCE = 70;
-export const TIER_A_MIN_PLAYABILITY = 70;
-export const TIER_A_MIN_PROBABILITY = 65;
-export const TIER_B_MIN_CONFIDENCE = 60;
-export const TIER_B_MIN_PLAYABILITY = 65;
-export const TIER_B_MIN_PROBABILITY = 60;
+/** Production tier thresholds — probability + confidence + playability + full MLB data. */
+export const TIER_A_MIN_CONFIDENCE = TIER_A_RULES.confidence;
+export const TIER_A_MIN_PLAYABILITY = TIER_A_RULES.playability;
+export const TIER_A_MIN_PROBABILITY = TIER_A_RULES.probability;
+export const TIER_B_MIN_CONFIDENCE = TIER_B_RULES.confidence;
+export const TIER_B_MIN_PLAYABILITY = TIER_B_RULES.playability;
+export const TIER_B_MIN_PROBABILITY = TIER_B_RULES.probability;
 /** Legacy edge gates — not used for A/B/C tier classification. */
 export const TIER_A_MIN_EDGE = 0.5;
 export const TIER_B_MIN_EDGE = 0.3;
@@ -75,9 +87,9 @@ export const TIER_REVIEW_MIN_PLAYABILITY = TIER_B_MIN_PLAYABILITY;
 export const TIER_A_MIN_SANITY = 90;
 export const TIER_A_MIN_PITCHER_INTEGRITY = 70;
 export const TIER_B_MIN_SANITY = 85;
-export const BEST_PLAY_MIN_CONFIDENCE = TIER_REVIEW_MIN_CONFIDENCE;
-export const BEST_PLAY_MIN_PROBABILITY = TIER_REVIEW_MIN_PROBABILITY;
-export const BEST_PLAY_MIN_PLAYABILITY = TIER_REVIEW_MIN_PLAYABILITY;
+export const BEST_PLAY_MIN_CONFIDENCE = BEST_PLAYS_MIN.confidence;
+export const BEST_PLAY_MIN_PROBABILITY = BEST_PLAYS_MIN.probability;
+export const BEST_PLAY_MIN_PLAYABILITY = BEST_PLAYS_MIN.playability;
 export const BEST_PLAY_MIN_SANITY = 0;
 export const MIN_UNIQUE_PLAYERS_TOP_10 = 5;
 export const MIN_PROJECTED_PROPS_FOR_BEST_PLAYS = 20;
@@ -284,11 +296,14 @@ export function resolveFullDataReason(prop = {}) {
 }
 
 export function isFullDataProp(prop = {}) {
-  return resolveMissingFullDataFields(prop).length === 0;
+  return resolveMlbDataStatus(prop) === DATA_STATUS.FULL_MLB_DATA;
 }
 
 export function resolveBoardDataQualityLabel(prop = {}) {
-  return isFullDataProp(prop) ? "Full MLB Data" : "Partial Data";
+  const status = resolveMlbDataStatus(prop);
+  if (status === DATA_STATUS.FULL_MLB_DATA) return "Full MLB Data";
+  if (status === DATA_STATUS.RESEARCH_ONLY) return "Research Only";
+  return "Partial Data";
 }
 
 export function resolveBoardDataQualityBadge(prop = {}) {
@@ -405,6 +420,8 @@ function formatTierMetric(value) {
 
 export function getTierAFailures(prop = {}) {
   const failures = [];
+  if (isResearchCandidate(prop)) failures.push("research candidate");
+  if (resolveMlbDataStatus(prop) !== DATA_STATUS.FULL_MLB_DATA) failures.push("dataStatus not FULL_MLB_DATA");
   const confidence = resolvePropConfidence(prop);
   const probability = resolvePropProbability(prop);
   const playability = resolvePropPlayability(prop);
@@ -423,6 +440,8 @@ export function getTierAFailures(prop = {}) {
 
 export function getTierBFailures(prop = {}) {
   const failures = [];
+  if (isResearchCandidate(prop)) failures.push("research candidate");
+  if (resolveMlbDataStatus(prop) !== DATA_STATUS.FULL_MLB_DATA) failures.push("dataStatus not FULL_MLB_DATA");
   const confidence = resolvePropConfidence(prop);
   const probability = resolvePropProbability(prop);
   const playability = resolvePropPlayability(prop);
@@ -493,6 +512,23 @@ export function compareSortScore(a = {}, b = {}) {
 }
 
 export const compareFallbackRankingScore = compareSortScore;
+
+/** Best Plays display sort: tier A→B, probability, confidence, playability, edge%. */
+export function compareBestPlaysDisplayRank(a = {}, b = {}) {
+  const tierCmp = compareBestPlaysTierRank(a, b);
+  if (tierCmp !== 0) return tierCmp;
+  const probCmp = resolvePropProbability(b) - resolvePropProbability(a);
+  if (probCmp !== 0) return probCmp;
+  const confCmp = resolvePropConfidence(b) - resolvePropConfidence(a);
+  if (confCmp !== 0) return confCmp;
+  const playCmp = resolvePropPlayability(b) - resolvePropPlayability(a);
+  if (playCmp !== 0) return playCmp;
+  const edgeA = Math.abs(finite(a.edgePercent, finite(a.edge, 0)));
+  const edgeB = Math.abs(finite(b.edgePercent, finite(b.edge, 0)));
+  return edgeB - edgeA;
+}
+
+export { NO_VERIFIED_PLAYS_MESSAGE, passesBestPlayBoardGate, isResearchCandidate, DATA_STATUS };
 
 export function classifyPropTier(prop = {}) {
   if (passesQualificationTierA(prop)) return "A";
@@ -699,14 +735,14 @@ export function compareBestPlaysRecoveryRank(a = {}, b = {}) {
 }
 
 function buildBestPlaysTierPools(pool = []) {
-  const eligible = (pool || []).filter((prop) => playerKey(prop) && marketKey(prop));
+  const eligible = (pool || []).filter((prop) => playerKey(prop) && marketKey(prop) && passesBestPlayBoardGate(prop));
   const tierA = eligible.filter((prop) => resolveFinalTier(prop) === "A");
   const tierB = eligible.filter((prop) => resolveFinalTier(prop) === "B");
-  const tierC = eligible.filter((prop) => resolveFinalTier(prop) === "C");
+  const tierC = (pool || []).filter((prop) => resolveFinalTier(prop) === "C" || isResearchCandidate(prop));
   return { eligible, tierA, tierB, tierC, fullData: eligible.filter(isFullDataProp) };
 }
 
-function resolveBestPlaysSourcePool({ tierA, tierB, tierC }) {
+function resolveBestPlaysSourcePool({ tierA, tierB }) {
   if (tierA.length) {
     return {
       sourcePool: tierA,
@@ -724,10 +760,10 @@ function resolveBestPlaysSourcePool({ tierA, tierB, tierC }) {
     };
   }
   return {
-    sourcePool: tierC,
-    activeTier: "C",
-    usedFallback: true,
-    fallbackNotice: TIER_C_FALLBACK_NOTICE,
+    sourcePool: [],
+    activeTier: "none",
+    usedFallback: false,
+    fallbackNotice: "",
   };
 }
 
@@ -784,10 +820,10 @@ export function buildTopBestPlaysPicks(
   const diagnostics = buildBestPlayFilterDiagnostics(pool);
   const rejectionSamples = buildBestPlayRejectionSamples(pool);
   const tierPools = buildBestPlaysTierPools(pool);
-  const { eligible, tierA, tierB, tierC, fullData } = tierPools;
+  const { eligible, tierA, tierB } = tierPools;
   const { sourcePool, activeTier, usedFallback, fallbackNotice } = resolveBestPlaysSourcePool(tierPools);
   const strictEligible = [...tierA, ...tierB];
-  const rankedSource = applyBestPlayRankConstraints([...sourcePool].sort(compareSortScore));
+  const rankedSource = applyBestPlayRankConstraints([...sourcePool].sort(compareBestPlaysDisplayRank));
   let picks = applyBestPlaysDiversityFilter(rankedSource, {
     limit,
     maxPerPlayer,
@@ -795,52 +831,15 @@ export function buildTopBestPlaysPicks(
     minUniquePlayers: MIN_UNIQUE_PLAYERS_TOP_10,
   });
 
-  if (picks.length < limit) {
-    picks = fillBestPlaysToLimit(picks, [...sourcePool].sort(compareSortScore), {
+  if (picks.length < limit && sourcePool.length) {
+    picks = fillBestPlaysToLimit(picks, [...sourcePool].sort(compareBestPlaysDisplayRank), {
       limit,
       maxPerPlayer,
       maxPerMarket,
     });
-  }
-
-  if (picks.length < limit && tierC.length > 0 && activeTier !== "C") {
-    picks = fillBestPlaysToLimit(picks, [...tierC].sort(compareSortScore), {
-      limit,
-      maxPerPlayer,
-      maxPerMarket,
-    });
-  }
-
-  if (picks.length < limit && eligible.length > 0) {
-    picks = fillBestPlaysToLimit(picks, [...eligible].sort(compareSortScore), {
-      limit,
-      maxPerPlayer,
-      maxPerMarket,
-    });
-  }
-
-  if (eligible.length > 0 && picks.length === 0) {
-    picks = applyBestPlaysDiversityFilter([...eligible].sort(compareSortScore), {
-      limit,
-      maxPerPlayer,
-      maxPerMarket,
-      minUniquePlayers: MIN_UNIQUE_PLAYERS_TOP_10,
-    });
-  }
-
-  if (picks.length === 0 && eligible.length > 0) {
-    picks = [...eligible].sort(compareSortScore).slice(0, limit);
-  }
-
-  if (picks.length === 0 && tierB.length > 0) {
-    picks = [...tierB].sort(compareSortScore).slice(0, limit);
   }
 
   picks = applyBestPlayRankConstraints(picks.slice(0, limit), { limit });
-
-  if (picks.length === 0 && eligible.length > 0) {
-    picks = [...eligible].sort(compareSortScore).slice(0, limit);
-  }
 
   diagnostics.activeTier = activeTier;
   diagnostics.tierADisplayed = picks.filter((prop) => resolveFinalTier(prop) === "A").length;
@@ -910,8 +909,9 @@ export function passesTopFiveEdgeGate(prop = {}) {
 }
 
 export function passesValueSideGate(prop = {}) {
-  if (!isFullDataProp(prop)) return false;
-  const tier = classifyPropTier(prop);
+  if (isResearchCandidate(prop)) return false;
+  if (!passesBestPlayBoardGate(prop)) return false;
+  const tier = resolveFinalTier(prop);
   return tier === "A" || tier === "B";
 }
 
@@ -920,8 +920,8 @@ export function passesTopFiveBestPlayGate(prop = {}) {
 }
 
 export function passesSafestPlayGate(prop = {}) {
-  if (!isFullDataProp(prop)) return false;
-  return passesQualificationTierA(prop);
+  if (!passesBestPlayBoardGate(prop)) return false;
+  return resolveFinalTier(prop) === "A";
 }
 
 export function passesValueUnderGate(prop = {}) {
@@ -956,7 +956,7 @@ export function passesOverallPlayVerification(prop = {}) {
 }
 
 export function selectOverallPlay(pool = []) {
-  const eligible = (pool || []).filter(isFullDataProp);
+  const eligible = (pool || []).filter(passesBestPlayBoardGate);
   const ranked = applyBestPlayRankConstraints(
     eligible.filter((prop) => {
       const flags = resolveBestPlayRankingFlags(prop);
@@ -1103,24 +1103,27 @@ export function attachBoardQualityFields(prop = {}) {
   const withPitcherNormalized = normalizePropPitcherFields(withPitcherPenalty);
   const edgeLabels = formatValidatedEdgeDisplay(withPitcherNormalized);
   const fullDataReason = resolveFullDataReason(withPitcherNormalized);
-  const fullData = isFullDataProp(withPitcherNormalized);
   const withSeason = attachSeasonHitRateFields(withPitcherNormalized);
   const withIntegrityAudit = attachIntegrityAuditFields(withSeason);
   const withIntegrity = attachDataIntegrityFields(withIntegrityAudit);
-  const dataQualityBadge = resolveBoardDataQualityBadge({ ...withIntegrity, isFullData: fullData, partialData: !fullData });
-  const propTier = classifyPropTier(withIntegrity);
+  const normalized = normalizeBoardProp(withIntegrity);
+  const fullData = normalized.dataStatus === DATA_STATUS.FULL_MLB_DATA;
+  const dataQualityBadge = resolveBoardDataQualityBadge({ ...normalized, isFullData: fullData, partialData: !fullData });
+  const propTier = classifyPropTier(normalized);
   return attachFinalTierFields({
-    ...withIntegrity,
+    ...normalized,
     ...edgeLabels,
     rawEdgeLabel: edgeLabels.rawEdgeLabel,
     displayEdgeLabel: edgeLabels.displayEdgeLabel,
     edgePercent: edgeLabels.edgePercent ?? withPitcherPenalty.edgePercent,
-    projectionConfidenceLevel: resolveProjectionConfidenceLevel(withIntegrity),
+    projectionConfidenceLevel: resolveProjectionConfidenceLevel(normalized),
     fullDataReason,
     isFullData: fullData,
     partialData: !fullData,
-    reviewNeeded: hasIntegrityReviewFlags(withIntegrityAudit) || propTier === TIER_REVIEW_NEEDED_LABEL,
-    dataStatus: fullData ? "FULL_DATA" : "PARTIAL_DATA",
+    reviewNeeded:
+      hasIntegrityReviewFlags(withIntegrityAudit) ||
+      propTier === TIER_REVIEW_NEEDED_LABEL ||
+      normalized.cardPlayLabel === "Review Needed",
     dataQualityBadge,
     dataQualityLabel: dataQualityBadge.label,
   });

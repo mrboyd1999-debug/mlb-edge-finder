@@ -84,13 +84,17 @@ async function probeUrl(url, { timeoutMs, label = "MLB Stats API" } = {}) {
   }
 }
 
-export async function testMlbStatsApiConnection({ playerName = DEFAULT_CANARY_PLAYER } = {}) {
+export async function testMlbStatsApiConnection({ playerName = DEFAULT_CANARY_PLAYER, retries = 2 } = {}) {
   const timeoutMs = getMlbStatsFetchTimeoutMs();
   const testedAt = new Date().toISOString();
   const startedAt = Date.now();
 
-  const searchUrl = buildMlbStatsApiUrl("/v1/people/search", { names: playerName });
-  const search = await probeUrl(searchUrl, { timeoutMs, label: "search" });
+  let search = null;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const searchUrl = buildMlbStatsApiUrl("/v1/people/search", { names: playerName });
+    search = await probeUrl(searchUrl, { timeoutMs, label: attempt ? `search-retry-${attempt}` : "search" });
+    if (search.ok) break;
+  }
 
   const people = search.payload?.people || [];
   const playerCount = people.length;

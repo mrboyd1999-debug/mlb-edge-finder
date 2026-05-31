@@ -37,6 +37,7 @@ import { isPitcherStrikeoutMarket } from "./topMlbPlaysRanking.js";
 import { isMlbPitcherMarket } from "../modules/mlbPitcherData.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
 import { resolveProjectionConfidenceLevel, classifyPropTier, attachBoardQualityFields, attachFinalTierFields, resolvePropEdge, TIER_A_MIN_CONFIDENCE, TIER_A_MIN_PLAYABILITY, TIER_A_MIN_EDGE } from "./boardQuality.js";
+import { applyBoardProbabilityCaps } from "./mlbBoardPipeline.js";
 import { computeCalibratedProbability } from "./probabilityCalibration.js";
 import { attachMarketProjectionValidation } from "./marketProjectionValidation.js";
 import {
@@ -357,7 +358,10 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     { verified: true, seasonStats: prop.seasonStats || [] }
   );
   if (probabilityCalibration?.probability != null) {
-    verifiedProbability = probabilityCalibration.probability;
+    verifiedProbability = applyBoardProbabilityCaps(
+      { ...prop, projectionSanityAudit: sanityAudit, probabilityCalibration },
+      probabilityCalibration.probability
+    );
   }
   const edgeScore = edgeMagnitude;
   const edgeLabels = playability.edgeDisplay ?? formatValidatedEdgeDisplay({ ...prop, edge, edgePercent, line });

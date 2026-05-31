@@ -88,6 +88,8 @@ function DfsAnalyzerLayout({
         refreshBlocked={refreshBlocked}
         refreshCountdownSec={refreshCountdownSec}
         onRefresh={onRefresh}
+        showDebugPanels={debugPanelsVisible}
+        onToggleDebugPanels={onShowDebugPanelsChange ? () => onShowDebugPanelsChange(!showDebugPanels) : undefined}
         lastUpdated={lastUpdatedLabel}
       />
 
@@ -157,6 +159,7 @@ function DfsAnalyzerLayout({
             renderSourceAudit={renderSourceAudit}
             cacheStatus={cacheStatus}
             performanceTracker={performanceTracker}
+            showDebugPanels={debugPanelsVisible}
           />
         </SectionErrorBoundary>
       ) : null}

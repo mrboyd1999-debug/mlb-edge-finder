@@ -66,6 +66,7 @@ import {
   buildTopBestPlaysPicks,
   resolveFinalTier,
   logFinalTierTable,
+  NO_VERIFIED_PLAYS_MESSAGE,
 } from "./boardQuality.js";
 import { buildTierAuditBatch, logConfidenceSuppressionBatch } from "./tierAudit.js";
 import {
@@ -531,49 +532,32 @@ export function resolveTopMlbPlaySections(
       id: "top-10-best-plays",
       title: "Best Plays",
       eyebrow: "Top 10 · Tier A → B → C · Sort score ranked",
-      emptyMessage:
-        topBestPlayPicks.length || projectedCount > 0
-          ? ""
-          : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
+      emptyMessage: topBestPlayPicks.length ? "" : NO_VERIFIED_PLAYS_MESSAGE,
       fallbackNotice: bestPlaysResult.fallbackNotice || "",
       picks: topBestPlayPicks,
     },
     {
       id: "top-5-safest",
       title: "Safest Plays",
-      eyebrow: "Tier A only · Full data · Sort score ranked",
-      emptyMessage: topSafestPicks.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
+      eyebrow: "Tier A only · Full MLB data · Verified only",
+      emptyMessage: topSafestPicks.length ? "" : NO_VERIFIED_PLAYS_MESSAGE,
       fallbackNotice: safestSectionResult.fallbackNotice || "",
       picks: topSafestPicks,
     },
     {
-      id: "top-5-highest-edge",
-      title: "Top 5 Highest Edge Plays",
-      eyebrow: "Highest validated edge vs line · Any tier · Full data",
-      emptyMessage: topHighestEdgePicks.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
-      picks: topHighestEdgePicks,
-    },
-    {
       id: "top-5-value-unders",
       title: "Value Unders",
-      eyebrow: "Tier A + B · Projection below line",
-      emptyMessage: topValueUnders.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
+      eyebrow: "Tier A + B · Full data · Non-research only",
+      emptyMessage: topValueUnders.length ? "" : NO_VERIFIED_PLAYS_MESSAGE,
       picks: topValueUnders,
       cardVariant: "valueUnder",
     },
     {
       id: "top-5-value-overs",
-      title: "Top 5 Value Overs",
-      eyebrow: "Tier A + B · Best over recommendations by sort score and edge",
-      emptyMessage: topValueOvers.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
+      title: "Value Overs",
+      eyebrow: "Tier A + B · Full data · Non-research only",
+      emptyMessage: topValueOvers.length ? "" : NO_VERIFIED_PLAYS_MESSAGE,
       picks: topValueOvers,
-    },
-    {
-      id: "verified-plays",
-      title: sectionTitle,
-      eyebrow: sectionEyebrow,
-      emptyMessage: sectionEmptyMessage,
-      picks: sectionPicks,
     },
   ];
 

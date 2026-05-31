@@ -82,8 +82,21 @@ function resolveLineFeedStatus(feed = {}) {
   const statusLabel = String(feed.statusLabel || feed.lastError || "").trim();
   const tier = String(feed.connectionTier || feed.status || "");
   const active = Number(feed.activeUsableCount ?? feed.usableCount) || 0;
+  const parsed = Number(feed.parsedCount) || 0;
+  const cached = Boolean(feed.cached || /cached/i.test(statusLabel) || tier === CONNECTION_TIERS.WARNING);
   const timedOut =
     /timed?\s*out/i.test(statusLabel) || /timed?\s*out/i.test(feed.lastError || "") || tier === CONNECTION_TIERS.DEGRADED;
+
+  if (active > 0 && parsed > 0 && !cached) {
+    return { status: "Connected", detail: `Live connected — ${active} props` };
+  }
+
+  if (active > 0 && cached) {
+    return {
+      status: "Warning",
+      detail: `Using cached feed — live fetch failed (${active} props)`,
+    };
+  }
 
   if (active > 0) {
     if (tier === CONNECTION_TIERS.CONNECTED) {
@@ -170,17 +183,12 @@ function resolveMlbStatsStatus(stats = {}, attachmentAudit = null) {
     usingCache,
   });
 
-  if (hasAttachment) {
-    const status =
-      usingCache
-        ? "Warning"
-        : coverage >= 10 || gameLogsAttached >= 5 || last5Last10Attached >= 5
-          ? "Connected"
-          : "Warning";
-    return {
-      status,
-      detail: usingCache ? `${detail} · cached profiles in use` : detail,
-    };
+  if (hasAttachment && !usingCache) {
+    return { status: "Connected", detail: "Connected — player logs available" };
+  }
+
+  if (hasAttachment && usingCache) {
+    return { status: "Warning", detail: "Using cached MLB logs" };
   }
 
   if (stats.status === "Connected") {
