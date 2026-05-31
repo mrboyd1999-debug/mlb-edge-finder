@@ -5,6 +5,12 @@
 import { attachSeasonHitRateFields, resolveSeasonHitRateBundle } from "./seasonHitRate.js";
 import { attachDataIntegrityFields } from "./dataIntegrity.js";
 import { canonicalMarketKey } from "./marketNormalization.js";
+import {
+  applyBestPlayRankConstraints,
+  compareBestPlaysRank,
+  annotateBestPlayRankingAudit,
+  resolveBestPlayRankingFlags,
+} from "./bestPlayRankingScore.js";
 
 export const MAX_PLAYER_PROPS_IN_TOP_LIST = 2;
 export const MAX_MARKET_PROPS_IN_TOP_LIST = 3;
@@ -73,7 +79,13 @@ export function buildPlayerMarketKey(prop = {}) {
 }
 
 function defaultPickScore(prop = {}) {
-  return Number(prop.topPickScore ?? prop.verifiedRankingScore ?? prop.weightedBestPlayScore ?? 0);
+  return Number(
+    prop.bestPlayRankingScore ??
+      prop.topPickScore ??
+      prop.verifiedRankingScore ??
+      prop.weightedBestPlayScore ??
+      0
+  );
 }
 
 /** Keep highest-scoring prop per player + market type. */
@@ -429,14 +441,7 @@ export function buildBestPlayRejectionSamples(pool = [], limit = 12) {
 }
 
 export function compareBestPlaysRecoveryRank(a = {}, b = {}) {
-  const tierCmp = compareBestPlaysTierRank(a, b);
-  if (tierCmp !== 0) return tierCmp;
-
-  return (
-    compareNumericDesc(a, b, resolvePropProbability) ||
-    compareNumericDesc(a, b, resolvePropConfidence) ||
-    compareHighestEdgePlays(a, b)
-  );
+  return compareBestPlaysRank(a, b);
 }
 
 function compareBestPlaysTierRank(a = {}, b = {}) {
@@ -458,13 +463,16 @@ export function buildTopBestPlaysPicks(
   const diagnostics = buildBestPlayFilterDiagnostics(pool);
   const rejectionSamples = buildBestPlayRejectionSamples(pool);
   const strictEligible = (pool || []).filter(passesBestPlayGate);
-  const strictSorted = [...strictEligible].sort(compareBestPlaysRecoveryRank);
+  const strictSorted = applyBestPlayRankConstraints(
+    [...strictEligible].sort(compareBestPlaysRecoveryRank)
+  );
   let picks = applyBestPlaysDiversityFilter(strictSorted, {
     limit,
     maxPerPlayer,
     maxPerMarket,
     minUniquePlayers: MIN_UNIQUE_PLAYERS_TOP_10,
   });
+  picks = applyBestPlayRankConstraints(picks, { limit });
 
   const shouldFill =
     picks.length < limit &&
@@ -512,15 +520,18 @@ export function buildTopBestPlaysPicks(
     usedFallback = rescuePool.length > 0;
   }
 
-  const annotatedPicks = picks.map((prop) => {
+  const annotatedPicks = picks.map((prop, index) => {
     const strictPass = passesBestPlayGate(prop);
-    return {
-      ...prop,
-      bestPlayFilterReason: strictPass
-        ? ""
-        : resolveBestPlayThresholdMissReason(prop) || "Included via Tier A/B fallback",
-      bestPlayUsedFallback: !strictPass,
-    };
+    return annotateBestPlayRankingAudit(
+      {
+        ...prop,
+        bestPlayFilterReason: strictPass
+          ? ""
+          : resolveBestPlayThresholdMissReason(prop) || "Included via Tier A/B fallback",
+        bestPlayUsedFallback: !strictPass,
+      },
+      index + 1
+    );
   });
 
   return {
@@ -598,26 +609,21 @@ function compareNumericDesc(a = {}, b = {}, resolver = () => 0) {
 }
 
 export function compareOverallPlayRank(a = {}, b = {}) {
-  return (
-    compareNumericDesc(a, b, resolvePropConfidence) ||
-    compareNumericDesc(a, b, resolvePropProbability) ||
-    compareNumericDesc(a, b, resolvePropPlayability) ||
-    compareNumericDesc(a, b, resolvePropSanity) ||
-    compareHighestEdgePlays(a, b)
-  );
+  return compareBestPlaysRank(a, b);
 }
 
 export function selectOverallPlay(pool = []) {
   const eligible = (pool || []).filter(isFullDataProp);
-  const tierA = eligible
-    .filter((prop) => classifyPropTier(prop) === "A")
-    .sort(compareOverallPlayRank);
-  if (tierA[0]) return tierA[0];
+  const constrained = applyBestPlayRankConstraints(
+    eligible.filter((prop) => {
+      const flags = resolveBestPlayRankingFlags(prop);
+      return !flags.projectionConfidenceLow && !flags.outlierDetected;
+    })
+  );
+  if (constrained[0]) return constrained[0];
 
-  const tierB = eligible
-    .filter((prop) => classifyPropTier(prop) === "B")
-    .sort(compareOverallPlayRank);
-  return tierB[0] || null;
+  const fallback = applyBestPlayRankConstraints(eligible);
+  return fallback[0] || null;
 }
 
 export function buildOverallPlayExplanation(prop = {}) {

@@ -73,12 +73,18 @@ function BestPlayRowCard({
     : formatEdgeDisplay(enriched);
   const statusLabel = enriched.pickTierLabel || enriched.bettingLabel || "Research Candidate";
   const tierLabel = enriched.verifiedTier ? `Tier ${enriched.verifiedTier}` : statusLabel;
-  const rankingScore = enriched.topPickScore ?? enriched.verifiedRankingScore ?? enriched.weightedBestPlayScore;
+  const rankingScore =
+    enriched.bestPlayRankingScore ??
+    enriched.topPickScore ??
+    enriched.verifiedRankingScore ??
+    enriched.weightedBestPlayScore;
   const rankingLabel = Number.isFinite(Number(rankingScore)) ? safeFixed(rankingScore, 1) : "—";
+  const rankingPenalties = enriched.rankingPenalties;
+  const finalRankReason = enriched.finalRankReason || enriched.rankingReason || enriched.topPickRankingReason || "";
   const playabilityLabel = Number.isFinite(Number(enriched.playabilityScore))
     ? `${Math.round(Number(enriched.playabilityScore))}`
     : "—";
-  const rankingReason = enriched.rankingReason || enriched.topPickRankingReason || "";
+  const rankingReason = finalRankReason;
   const projection = resolveProjectionValue(enriched);
   const projectionLabel = projection != null && projection > 0 ? formatNumber(projection) : "—";
   const lean = enriched.lean || "Pass";
@@ -351,6 +357,21 @@ function BestPlayRowCard({
               {!isValueUnder && rankingReason ? (
                 <p style={{ ...styles.bestPlayRowSubline, color: "#e2e8f0", marginTop: 4, fontSize: 11 }}>
                   {rankingReason}
+                </p>
+              ) : null}
+              {rankingPenalties ? (
+                <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 10 }}>
+                  Ranking score <strong>{rankingLabel}</strong>
+                  {rankingPenalties.outlierPenalty ? ` · Outlier -${rankingPenalties.outlierPenalty}` : ""}
+                  {rankingPenalties.aggressiveRiskPenalty
+                    ? ` · Aggressive -${rankingPenalties.aggressiveRiskPenalty}`
+                    : ""}
+                  {rankingPenalties.missingSeasonPenalty
+                    ? ` · Season -${rankingPenalties.missingSeasonPenalty}`
+                    : ""}
+                  {rankingPenalties.sampleSizePenalty
+                    ? ` · Sample -${rankingPenalties.sampleSizePenalty}`
+                    : ""}
                 </p>
               ) : null}
             </div>

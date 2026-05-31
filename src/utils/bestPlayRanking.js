@@ -28,6 +28,7 @@ import {
 import {
   computeTopPickScore,
   annotateTopPickRankingFields,
+  annotateBestPlayRankingAudit,
 } from "./bestPlayRankingScore.js";
 import { buildMlbProjectionFormulaAudit } from "./mlbProjectionFormulaAudit.js";
 import { enrichPickDirectionFields, resolveProjectionLeanDisplay } from "./pickDirectionAudit.js";
@@ -353,7 +354,7 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
   });
 
   const statSpecificMissing = projection == null && resolvePropSport(prop) === "MLB";
-  const ranked = annotateTopPickRankingFields({
+  const ranked = annotateBestPlayRankingAudit({
     ...directed,
     projection,
     projectedValue: projection ?? prop.projectedValue,
@@ -411,9 +412,9 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     projectionOutlierWarning: marketValidation?.outlierWarning,
     projectionClamped: marketValidation?.projectionClamped,
   });
-  ranked.rankScore = computeTopPickScore(ranked);
-  ranked.weightedBestPlayScore = ranked.topPickScore;
-  ranked.verifiedRankingScore = ranked.topPickScore;
+  ranked.rankScore = ranked.bestPlayRankingScore ?? computeTopPickScore(ranked);
+  ranked.weightedBestPlayScore = ranked.bestPlayRankingScore ?? ranked.topPickScore;
+  ranked.verifiedRankingScore = ranked.bestPlayRankingScore ?? ranked.topPickScore;
   ranked.projectionConfidenceLevel = resolveProjectionConfidenceLevel(ranked);
   ranked.confidenceTier = classifyPropTier(ranked);
   ranked.confidenceTierLabel = ranked.confidenceTier ? `Tier ${ranked.confidenceTier}` : null;

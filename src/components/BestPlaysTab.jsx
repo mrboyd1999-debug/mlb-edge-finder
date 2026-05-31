@@ -4,7 +4,7 @@ import BestPlayHeroCard from "./BestPlayHeroCard.jsx";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
 import PerformanceTracker from "./PerformanceTracker.jsx";
 import BestPlayFilterDiagnostics from "./BestPlayFilterDiagnostics.jsx";
-import { compareVerifiedPlaysRank, compareBestPlaysRank } from "../utils/bestPlayRankingScore.js";
+import { compareVerifiedPlaysRank, compareBestPlaysRank, applyBestPlayRankConstraints } from "../utils/bestPlayRankingScore.js";
 import {
   VERIFIED_DISPLAY_MAX,
   NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
@@ -77,7 +77,7 @@ function BestPlaysTab({
   const valueOversSection = useMemo(() => findSection(sections, "top-5-value-overs"), [sections]);
 
   const topBestPlays = useMemo(() => {
-    return safeArray(topBestPlaysSection?.picks).sort(compareBestPlaysRank).slice(0, 10);
+    return applyBestPlayRankConstraints(safeArray(topBestPlaysSection?.picks), { limit: 10 });
   }, [topBestPlaysSection]);
 
   const verifiedPicks = useMemo(() => {

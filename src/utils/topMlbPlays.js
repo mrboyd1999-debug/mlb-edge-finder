@@ -50,7 +50,7 @@ import {
 } from "../services/mlb/projectionMergePipeline.js";
 import { enrichBestPlayRankingFields } from "./bestPlayRanking.js";
 import { resolveBestPlayProjection, PROJECTION_JOIN_DEBUG, passesVerifiedBestPlaysFilter } from "./bestPlaysPipelineDebug.js";
-import { compareBestPlaysRank } from "./bestPlayRankingScore.js";
+import { compareBestPlaysRank, annotateBestPlayRankingAudit } from "./bestPlayRankingScore.js";
 import {
   dedupeByPlayerMarketBestScore,
   buildTopSectionPicks,
@@ -451,7 +451,7 @@ export function resolveTopMlbPlaySections(
     maxPerPlayer: MAX_PLAYER_APPEARANCES,
   });
   const topBestPlayPicks = bestPlaysResult.picks.map((prop, idx) =>
-    annotateHighestProbabilityPlay(prop, idx + 1)
+    annotateHighestProbabilityPlay(annotateBestPlayRankingAudit(prop, idx + 1), idx + 1)
   );
 
   filterDiagnostics.bestPlayFilterAudit = bestPlaysResult.diagnostics;
@@ -464,7 +464,10 @@ export function resolveTopMlbPlaySections(
   const overallPlayCandidate = selectOverallPlay(boardQualityPool);
   const overallPlay = overallPlayCandidate
     ? {
-        ...annotateHighestProbabilityPlay(overallPlayCandidate, 1),
+        ...annotateHighestProbabilityPlay(
+          annotateBestPlayRankingAudit(overallPlayCandidate, 1),
+          1
+        ),
         overallPlayExplanation: buildOverallPlayExplanation(overallPlayCandidate),
       }
     : null;
