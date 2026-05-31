@@ -12,9 +12,17 @@ import { resolveProjectionQuality, PROJECTION_QUALITY } from "./projectionQualit
 export const CALIBRATION_MIN_PROBABILITY = 50;
 export const CALIBRATION_DEFAULT_MAX_PROBABILITY = 75;
 export const CALIBRATION_ELITE_MAX_PROBABILITY = 88;
+export const CALIBRATION_SEASON_MISSING_MAX_PROBABILITY = 70;
 export const CALIBRATION_MAX_PROBABILITY = CALIBRATION_ELITE_MAX_PROBABILITY;
 export const CALIBRATION_MAX_VERIFIED = CALIBRATION_ELITE_MAX_PROBABILITY;
 export const CALIBRATION_MAX_RESEARCH = CALIBRATION_DEFAULT_MAX_PROBABILITY;
+
+export const PROJECTION_QUALITY_LOW_CONFIDENCE_CAP = 70;
+export const PENALTY_OUTLIER = 15;
+export const PENALTY_AGGRESSIVE_RISK = 10;
+export const SAMPLE_SIZE_MIN_GAMES = 20;
+export const SAMPLE_SIZE_CONFIDENCE_MULTIPLIER = 0.85;
+export const CONFIDENCE_PROBABILITY_BUFFER = 5;
 
 export const CALIBRATION_HISTOGRAM_BUCKETS = [
   { id: "50-55", label: "50-55%", min: 50, max: 55 },
@@ -77,6 +85,7 @@ export function resolveCalibrationHitRates(prop = {}, line = null, context = {})
     last5Label: performance.last5Label,
     last10Label: performance.last10Label,
     last20Label: performance.last20Label,
+    last10Games: performance.last10Games,
     seasonLabel: performance.seasonRateValid ? performance.displayLabel : "—",
   };
 }
@@ -153,33 +162,108 @@ function resolveProbabilityConfidence(prop = {}, options = {}) {
   );
 }
 
-function resolveProjectionQualityScore(prop = {}) {
+function resolveProjectionValidationFlags(prop = {}) {
+  const audit = prop.projectionSanityAudit || {};
+  const validation = prop.projectionValidation || audit.marketValidation || {};
+  const projectionConfidence = String(
+    prop.projectionValidationConfidence ||
+      validation.projectionConfidence ||
+      audit.projectionValidationConfidence ||
+      ""
+  ).toUpperCase();
+  const projectionRisk = String(
+    prop.projectionRisk || validation.projectionRisk || audit.projectionRisk || ""
+  ).toUpperCase();
+  const outlierDetected = Boolean(
+    prop.projectionOutlierDetected ||
+      validation.outlierDetected ||
+      audit.projectionOutlierDetected ||
+      audit.outlierWarning ||
+      prop.projectionOutlierWarning
+  );
+
+  return {
+    projectionConfidence,
+    projectionRisk,
+    outlierDetected,
+    projectionConfidenceLow: projectionConfidence === "LOW",
+    projectionRiskAggressive: projectionRisk === "AGGRESSIVE",
+  };
+}
+
+function resolveSampleGames(prop = {}, hitRates = {}) {
+  return (
+    finite(hitRates.last10Games) ??
+    finite(prop.sampleGames) ??
+    finite(prop.gameLogCount) ??
+    finite(prop.sampleSize) ??
+    null
+  );
+}
+
+export function resolveProbabilityPenalties(prop = {}, hitRates = {}, confidence = 50) {
+  const flags = resolveProjectionValidationFlags(prop);
+  const seasonValid = Boolean(hitRates.seasonRateValid && hitRates.seasonHitRate != null);
+  const sampleGames = resolveSampleGames(prop, hitRates);
+  const sampleSizeSmall = sampleGames != null && sampleGames < SAMPLE_SIZE_MIN_GAMES;
+
+  const outlierPenalty = flags.outlierDetected ? PENALTY_OUTLIER : 0;
+  const aggressiveRiskPenalty = flags.projectionRiskAggressive ? PENALTY_AGGRESSIVE_RISK : 0;
+  const missingSeasonPenalty = 0;
+  const sampleSizePenalty = 0;
+
+  const totalPenalty = outlierPenalty + aggressiveRiskPenalty;
+
+  return {
+    ...flags,
+    seasonValid,
+    sampleGames,
+    sampleSizeSmall,
+    outlierPenalty,
+    aggressiveRiskPenalty,
+    missingSeasonPenalty,
+    sampleSizePenalty,
+    totalPenalty,
+    seasonMissingCap: seasonValid ? null : CALIBRATION_SEASON_MISSING_MAX_PROBABILITY,
+  };
+}
+
+function resolveProjectionQualityScore(prop = {}, flags = {}) {
   const sanity = finite(prop.projectionSanityScore ?? prop.projectionSanityAudit?.sanityScore);
-  if (sanity != null) return clamp(sanity, 45, 95);
+  let score =
+    sanity != null
+      ? clamp(sanity, 45, 95)
+      : resolveProjectionQuality(prop) === PROJECTION_QUALITY.VERIFIED
+        ? 82
+        : resolveProjectionQuality(prop) === PROJECTION_QUALITY.ESTIMATED
+          ? 62
+          : 50;
 
-  const quality = resolveProjectionQuality(prop);
-  if (quality === PROJECTION_QUALITY.VERIFIED) return 82;
-  if (quality === PROJECTION_QUALITY.ESTIMATED) return 62;
-  return 50;
+  if (flags.projectionConfidenceLow) score = Math.min(score, PROJECTION_QUALITY_LOW_CONFIDENCE_CAP);
+  if (flags.outlierDetected) score = Math.min(score, PROJECTION_QUALITY_LOW_CONFIDENCE_CAP);
+  if (flags.projectionRiskAggressive) score = Math.min(score, 65);
+  return score;
 }
 
-function resolveMatchupScore(prop = {}) {
-  const direct = finite(prop.matchupScore ?? prop.matchupAudit?.matchupScore);
-  if (direct != null) return clamp(direct, 40, 90);
-  const adj = computeMatchupAdjustment(prop);
-  return clamp(round1(50 + adj * 2), 40, 90);
-}
-
-function resolveMarketEdgeScore(projection, line, edgePercent = null) {
+function resolveMarketEdgeScore(projection, line, edgePercent = null, flags = {}) {
+  let score;
   const pct = finite(edgePercent);
   if (pct != null) {
-    return clamp(round1(50 + Math.abs(pct) * 0.85), 50, 95);
+    score = clamp(round1(50 + Math.abs(pct) * 0.85), 50, 95);
+  } else {
+    const proj = finite(projection);
+    const ln = finite(line);
+    if (proj == null || ln == null || ln <= 0) score = 50;
+    else {
+      const relativeGap = (Math.abs(proj - ln) / ln) * 100;
+      score = clamp(round1(50 + relativeGap * 0.75), 50, 95);
+    }
   }
-  const proj = finite(projection);
-  const ln = finite(line);
-  if (proj == null || ln == null || ln <= 0) return 50;
-  const relativeGap = (Math.abs(proj - ln) / ln) * 100;
-  return clamp(round1(50 + relativeGap * 0.75), 50, 95);
+
+  if (flags.projectionConfidenceLow) score = Math.min(score, PROJECTION_QUALITY_LOW_CONFIDENCE_CAP);
+  if (flags.outlierDetected) score = Math.min(score, PROJECTION_QUALITY_LOW_CONFIDENCE_CAP);
+  if (flags.projectionRiskAggressive) score = Math.min(score, 65);
+  return score;
 }
 
 function resolveRecentFormScore(hitRates = {}) {
@@ -202,7 +286,14 @@ function resolveBlendWeights(seasonValid) {
   };
 }
 
-function resolveProbabilityCeiling(prop = {}, metrics = {}, hitRates = {}, confidence = 50) {
+function resolveMatchupScore(prop = {}) {
+  const direct = finite(prop.matchupScore ?? prop.matchupAudit?.matchupScore);
+  if (direct != null) return clamp(direct, 40, 90);
+  const adj = computeMatchupAdjustment(prop);
+  return clamp(round1(50 + adj * 2), 40, 90);
+}
+
+function resolveProbabilityCeiling(prop = {}, metrics = {}, hitRates = {}, confidence = 50, penalties = {}) {
   const projection = finite(metrics.projection ?? resolveProjectionValue(prop));
   const line = finite(prop.line);
   const edgePercent =
@@ -211,18 +302,34 @@ function resolveProbabilityCeiling(prop = {}, metrics = {}, hitRates = {}, confi
       ? round1((Math.abs(projection - line) / line) * 100)
       : null);
   const seasonGames = finite(hitRates.seasonGamesPlayed ?? prop.seasonGamesPlayed ?? prop.seasonGames);
+  const effectiveConfidence = penalties.sampleSizeSmall
+    ? round1(confidence * SAMPLE_SIZE_CONFIDENCE_MULTIPLIER)
+    : confidence;
+  const confidenceCap = round1(effectiveConfidence + CONFIDENCE_PROBABILITY_BUFFER);
   const eliteUnlock =
+    penalties.seasonValid &&
     edgePercent != null &&
     edgePercent >= 20 &&
     seasonGames != null &&
     seasonGames >= MIN_SDIO_SEASON_GAMES &&
-    confidence >= 80;
+    effectiveConfidence >= 80 &&
+    !penalties.outlierDetected &&
+    !penalties.projectionRiskAggressive &&
+    !penalties.projectionConfidenceLow;
+
+  let ceiling = eliteUnlock ? CALIBRATION_ELITE_MAX_PROBABILITY : CALIBRATION_DEFAULT_MAX_PROBABILITY;
+  if (!penalties.seasonValid) {
+    ceiling = Math.min(ceiling, CALIBRATION_SEASON_MISSING_MAX_PROBABILITY);
+  }
+  ceiling = Math.min(ceiling, confidenceCap);
 
   return {
-    ceiling: eliteUnlock ? CALIBRATION_ELITE_MAX_PROBABILITY : CALIBRATION_DEFAULT_MAX_PROBABILITY,
+    ceiling,
     eliteUnlock,
     edgePercent,
     seasonGames,
+    effectiveConfidence,
+    confidenceCap,
   };
 }
 
@@ -247,12 +354,14 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
   const hitRates = resolveCalibrationHitRates(prop, line, context);
   const seasonValid = Boolean(hitRates.seasonRateValid && hitRates.seasonHitRate != null);
   const weights = resolveBlendWeights(seasonValid);
+  const validationFlags = resolveProjectionValidationFlags(prop);
+  const penalties = resolveProbabilityPenalties(prop, hitRates, confidence);
 
-  const projectionQualityScore = resolveProjectionQualityScore(prop);
+  const projectionQualityScore = resolveProjectionQualityScore(prop, validationFlags);
   const seasonPerformanceScore = seasonValid ? hitRates.seasonHitRate : 50;
   const recentFormScore = resolveRecentFormScore(hitRates);
   const matchupScore = resolveMatchupScore(prop);
-  const marketEdgeScore = resolveMarketEdgeScore(projection, line, metrics.edgePercent);
+  const marketEdgeScore = resolveMarketEdgeScore(projection, line, metrics.edgePercent, validationFlags);
 
   const projectionContribution = round2(projectionQualityScore * weights.projectionQuality);
   const seasonContribution = round2(seasonPerformanceScore * weights.seasonPerformance);
@@ -260,7 +369,7 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
   const matchupContribution = round2(matchupScore * weights.matchup);
   const edgeContribution = round2(marketEdgeScore * weights.marketEdge);
 
-  const rawProbability = round2(
+  const prePenaltyProbability = round2(
     projectionContribution +
       seasonContribution +
       recentContribution +
@@ -268,8 +377,9 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
       edgeContribution
   );
 
-  const cap = resolveProbabilityCeiling(prop, metrics, hitRates, confidence);
-  const probability = clamp(rawProbability, CALIBRATION_MIN_PROBABILITY, cap.ceiling);
+  const cap = resolveProbabilityCeiling(prop, metrics, hitRates, confidence, penalties);
+  const penalizedProbability = round2(prePenaltyProbability - penalties.totalPenalty);
+  const probability = clamp(penalizedProbability, CALIBRATION_MIN_PROBABILITY, cap.ceiling);
   const probabilityTier = resolveProbabilityTier(probability);
 
   const inputs = {
@@ -281,11 +391,14 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
     seasonGamesPlayed: hitRates.seasonGamesPlayed ?? "—",
     seasonHitRateSource: formatSeasonHitRateSource(hitRates.seasonHitRateSource) || "—",
     confidence: `${round1(confidence)}%`,
+    effectiveConfidence: `${round1(cap.effectiveConfidence)}%`,
     projectionQuality: `${round1(projectionQualityScore)}%`,
     projectionEdge: `${round1(marketEdgeScore)}%`,
     edgeScore: `${round1(marketEdgeScore)}%`,
     edgeContribution,
-    rawProbability: `${round1(rawProbability)}%`,
+    prePenaltyProbability: `${round1(prePenaltyProbability)}%`,
+    rawProbability: `${round1(prePenaltyProbability)}%`,
+    penalizedProbability: `${round1(penalizedProbability)}%`,
     calibratedProbability: `${round1(probability)}%`,
     probabilityTier,
     finalProbability: `${round1(probability)}%`,
@@ -295,6 +408,14 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
     recentContribution,
     matchupContribution,
     edgeContributionValue: edgeContribution,
+    outlierPenalty: penalties.outlierPenalty ? `-${penalties.outlierPenalty}` : "0",
+    aggressiveRiskPenalty: penalties.aggressiveRiskPenalty ? `-${penalties.aggressiveRiskPenalty}` : "0",
+    missingSeasonPenalty: penalties.seasonValid ? "0" : `Cap ${CALIBRATION_SEASON_MISSING_MAX_PROBABILITY}%`,
+    sampleSizePenalty: penalties.sampleSizeSmall
+      ? `Confidence ×${SAMPLE_SIZE_CONFIDENCE_MULTIPLIER}`
+      : "0",
+    totalPenalty: penalties.totalPenalty ? `-${penalties.totalPenalty}` : "0",
+    probabilityCap: `${round1(cap.ceiling)}%`,
     projectionVsLine:
       projection != null && line != null
         ? `${round1(projection - line) > 0 ? "+" : ""}${round1(projection - line)}`
@@ -303,13 +424,26 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
 
   return {
     probability,
-    rawProbability,
+    rawProbability: prePenaltyProbability,
+    prePenaltyProbability,
+    penalizedProbability,
     calibratedProbability: probability,
     probabilityTier,
     inputs,
     hitRates,
+    probabilityPenalties: {
+      outlierPenalty: penalties.outlierPenalty,
+      aggressiveRiskPenalty: penalties.aggressiveRiskPenalty,
+      missingSeasonPenalty: penalties.missingSeasonPenalty,
+      sampleSizePenalty: penalties.sampleSizePenalty,
+      totalPenalty: penalties.totalPenalty,
+      sampleSizeSmall: penalties.sampleSizeSmall,
+      seasonMissingCap: penalties.seasonMissingCap,
+    },
     breakdown: {
-      rawProbability,
+      rawProbability: prePenaltyProbability,
+      prePenaltyProbability,
+      penalizedProbability,
       calibratedProbability: probability,
       probabilityTier,
       projectionQualityScore,
@@ -325,15 +459,32 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
       edgeScore: marketEdgeScore,
       edgePercent: cap.edgePercent,
       confidence,
+      effectiveConfidence: cap.effectiveConfidence,
+      confidenceCap: cap.confidenceCap,
       projectionContribution,
       seasonContribution,
       recentContribution,
       matchupContribution,
       edgeContribution,
+      outlierPenalty: penalties.outlierPenalty,
+      aggressiveRiskPenalty: penalties.aggressiveRiskPenalty,
+      missingSeasonPenalty: penalties.missingSeasonPenalty,
+      sampleSizePenalty: penalties.sampleSizePenalty,
+      totalPenalty: penalties.totalPenalty,
+      probabilityPenalties: {
+        outlierPenalty: penalties.outlierPenalty,
+        aggressiveRiskPenalty: penalties.aggressiveRiskPenalty,
+        missingSeasonPenalty: penalties.missingSeasonPenalty,
+        sampleSizePenalty: penalties.sampleSizePenalty,
+        totalPenalty: penalties.totalPenalty,
+      },
+      projectionValidationConfidence: validationFlags.projectionConfidence,
+      projectionRisk: validationFlags.projectionRisk,
+      outlierDetected: validationFlags.outlierDetected,
       ceiling: cap.ceiling,
       eliteProbabilityUnlock: cap.eliteUnlock,
       blendWeights: weights,
-      capped: rawProbability > cap.ceiling,
+      capped: penalizedProbability > cap.ceiling || prePenaltyProbability > cap.ceiling,
       doubleCountingPrevented: !seasonValid,
     },
   };

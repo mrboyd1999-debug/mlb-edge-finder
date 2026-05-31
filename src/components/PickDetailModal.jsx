@@ -450,17 +450,74 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
                 <MetricIf label="Season hits" value={seasonBundle.seasonHits} />
               ) : null}
               <MetricIf label="Projection vs line" value={prop.probabilityAudit.projectionVsLine} />
+              <MetricIf
+                label="Projection quality"
+                value={prop.probabilityAudit.calibration?.inputs?.projectionQuality}
+              />
               <MetricIf label="Projection edge" value={prop.probabilityAudit.projectionEdge} />
+              <MetricIf
+                label="Market edge score"
+                value={prop.probabilityAudit.calibration?.inputs?.edgeScore}
+              />
               <MetricIf label="Edge contribution" value={prop.probabilityAudit.edgeContribution} />
               <MetricIf label="Opponent adjustment" value={prop.probabilityAudit.opponentAdjustment} />
               <MetricIf label="Park adjustment" value={prop.probabilityAudit.parkAdjustment} />
               <MetricIf
-                label="Raw probability"
+                label="Pre-penalty probability"
                 value={
-                  prop.probabilityAudit.rawProbability != null
-                    ? `${prop.probabilityAudit.rawProbability}%`
-                    : prop.probabilityAudit.calibration?.rawProbability != null
-                      ? `${Math.round(Number(prop.probabilityAudit.calibration.rawProbability) * 10) / 10}%`
+                  prop.probabilityAudit.prePenaltyProbability != null
+                    ? `${prop.probabilityAudit.prePenaltyProbability}%`
+                    : prop.probabilityAudit.rawProbability != null
+                      ? `${prop.probabilityAudit.rawProbability}%`
+                      : null
+                }
+              />
+              <MetricIf
+                label="Outlier penalty"
+                value={
+                  prop.probabilityAudit.outlierPenalty
+                    ? `-${prop.probabilityAudit.outlierPenalty}`
+                    : prop.probabilityAudit.probabilityPenalties?.outlierPenalty
+                      ? `-${prop.probabilityAudit.probabilityPenalties.outlierPenalty}`
+                      : "0"
+                }
+              />
+              <MetricIf
+                label="Aggressive risk penalty"
+                value={
+                  prop.probabilityAudit.aggressiveRiskPenalty
+                    ? `-${prop.probabilityAudit.aggressiveRiskPenalty}`
+                    : prop.probabilityAudit.probabilityPenalties?.aggressiveRiskPenalty
+                      ? `-${prop.probabilityAudit.probabilityPenalties.aggressiveRiskPenalty}`
+                      : "0"
+                }
+              />
+              <MetricIf
+                label="Missing season cap"
+                value={
+                  prop.probabilityAudit.calibration?.breakdown?.seasonRateValid === false
+                    ? "70%"
+                    : prop.probabilityAudit.missingSeasonPenalty === 0
+                      ? null
+                      : "70%"
+                }
+              />
+              <MetricIf
+                label="Sample size adjustment"
+                value={
+                  prop.probabilityAudit.calibration?.breakdown?.sampleSizeSmall ||
+                  prop.probabilityAudit.probabilityPenalties?.sampleSizeSmall
+                    ? "Confidence ×0.85"
+                    : null
+                }
+              />
+              <MetricIf
+                label="Probability cap"
+                value={
+                  prop.probabilityAudit.probabilityCap != null
+                    ? `${prop.probabilityAudit.probabilityCap}%`
+                    : prop.probabilityAudit.calibration?.breakdown?.ceiling != null
+                      ? `${prop.probabilityAudit.calibration.breakdown.ceiling}%`
                       : null
                 }
               />

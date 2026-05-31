@@ -174,14 +174,31 @@ function buildProbabilityAuditUnsafe(prop = {}, metrics = {}) {
     recentHitRate: calibrated?.inputs?.recentHitRate ?? hitRateSnapshot.last10Label,
     playability: calibrated?.inputs?.playability ?? "—",
     confidence: calibrated?.inputs?.confidence ?? "—",
-    rawProbability:
-      calibrated?.rawProbability != null
-        ? round1(calibrated.rawProbability)
-        : breakdown.rawProbability != null
-          ? round1(breakdown.rawProbability)
+    prePenaltyProbability:
+      calibrated?.prePenaltyProbability != null
+        ? round1(calibrated.prePenaltyProbability)
+        : breakdown.prePenaltyProbability != null
+          ? round1(breakdown.prePenaltyProbability)
           : null,
+    rawProbability:
+      calibrated?.prePenaltyProbability != null
+        ? round1(calibrated.prePenaltyProbability)
+        : calibrated?.rawProbability != null
+          ? round1(calibrated.rawProbability)
+          : breakdown.prePenaltyProbability != null
+            ? round1(breakdown.prePenaltyProbability)
+            : null,
+    penalizedProbability:
+      calibrated?.penalizedProbability != null ? round1(calibrated.penalizedProbability) : null,
     calibratedProbability: finalProbability != null ? round1(finalProbability) : null,
     probabilityTier: calibrated?.probabilityTier ?? calibrated?.inputs?.probabilityTier ?? "—",
+    probabilityPenalties: calibrated?.probabilityPenalties ?? breakdown.probabilityPenalties ?? null,
+    outlierPenalty: breakdown.outlierPenalty ?? 0,
+    aggressiveRiskPenalty: breakdown.aggressiveRiskPenalty ?? 0,
+    missingSeasonPenalty: breakdown.missingSeasonPenalty ?? 0,
+    sampleSizePenalty: breakdown.sampleSizePenalty ?? 0,
+    totalPenalty: breakdown.totalPenalty ?? 0,
+    probabilityCap: breakdown.ceiling ?? null,
   };
 
   const explanationLines = [
@@ -189,9 +206,10 @@ function buildProbabilityAuditUnsafe(prop = {}, metrics = {}) {
     `Projection Quality: ${calibrated?.inputs?.projectionQuality ?? "—"}`,
     `Season: ${calibrated?.inputs?.seasonHitRate ?? "—"}`,
     `Recent Form: ${calibrated?.inputs?.recentHitRate ?? hitRateSnapshot.last10Label}`,
+    `Pre-penalty: ${inputs.rawProbability != null ? `${inputs.rawProbability}%` : "—"}`,
+    `Penalties: outlier ${breakdown.outlierPenalty ?? 0}, aggressive ${breakdown.aggressiveRiskPenalty ?? 0}`,
     `Matchup: ${breakdown.matchupContribution != null ? `${round1(breakdown.matchupContribution)} pts` : "—"}`,
     `Market Edge: ${calibrated?.inputs?.projectionEdge ?? "—"}`,
-    `Raw Probability: ${inputs.rawProbability != null ? `${inputs.rawProbability}%` : "—"}`,
     `Calibrated Probability: ${pct(finalProbability)}`,
     breakdown.eliteProbabilityUnlock ? "Elite unlock applied" : `Cap: ${breakdown.ceiling ?? 75}%`,
   ];

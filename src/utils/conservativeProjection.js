@@ -10,6 +10,7 @@ import {
   computeMatchupAdjustment,
   CALIBRATION_DEFAULT_MAX_PROBABILITY,
   CALIBRATION_ELITE_MAX_PROBABILITY,
+  CALIBRATION_SEASON_MISSING_MAX_PROBABILITY,
 } from "./probabilityCalibration.js";
 import {
   formatValidatedEdgeDisplay,
@@ -214,13 +215,17 @@ export function resolveResearchReasons(prop = {}) {
   return reasons;
 }
 
-function applyProbabilityCaps(probability, prop = {}, { verified = false } = {}) {
+function applyProbabilityCaps(probability, prop = {}, { verified = false, calibration = null } = {}) {
   void verified;
+  const breakdown =
+    calibration?.breakdown ?? prop.probabilityCalibration?.breakdown ?? {};
   const calibrationCeiling =
-    prop.probabilityCalibration?.breakdown?.ceiling ??
-    (prop.probabilityCalibration?.breakdown?.eliteProbabilityUnlock
+    breakdown.ceiling ??
+    (breakdown.eliteProbabilityUnlock
       ? CALIBRATION_ELITE_MAX_PROBABILITY
-      : CALIBRATION_DEFAULT_MAX_PROBABILITY);
+      : breakdown.seasonRateValid === false
+        ? CALIBRATION_SEASON_MISSING_MAX_PROBABILITY
+        : CALIBRATION_DEFAULT_MAX_PROBABILITY);
   const ceiling = calibrationCeiling;
   const floor = 50;
   let value = round1(probability);
@@ -242,6 +247,7 @@ export function computeConservativeProbability(prop = {}, metrics = {}, options 
 
   return applyProbabilityCaps(calibrated.probability, prop, {
     verified: options.verified ?? false,
+    calibration: calibrated,
   });
 }
 
@@ -269,7 +275,10 @@ export function computeDisplayPropMetrics(prop = {}) {
   });
   const probabilityScore =
     calibrated?.probability != null
-      ? applyProbabilityCaps(calibrated.probability, prop, { verified: !researchGap })
+      ? applyProbabilityCaps(calibrated.probability, prop, {
+          verified: !researchGap,
+          calibration: calibrated,
+        })
       : null;
   return {
     ...base,
