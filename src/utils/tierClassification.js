@@ -9,6 +9,7 @@ import {
 } from "./verificationStatus.js";
 
 export const TIER_A_METRICS = { confidence: 80, probability: 70 };
+export const ELITE_TIER_METRICS = { confidence: 75, probability: 70 };
 /** Playable tier — probability >= 60, confidence >= 68 */
 export const TIER_B_METRICS = { confidence: 68, probability: 60 };
 export const RESEARCH_TIER_METRICS = { confidence: 65 };
@@ -110,6 +111,30 @@ export function passesResearchPlayThresholds(prop = {}) {
   if (status !== VERIFICATION_STATUS.FULL && status !== VERIFICATION_STATUS.PARTIAL) return false;
   const confidence = resolvePropConfidence(prop);
   return Number.isFinite(confidence) && confidence >= RESEARCH_TIER_METRICS.confidence;
+}
+
+export function resolvePlayCategory(prop = {}) {
+  const confidence = resolvePropConfidence(prop);
+  const probability = resolvePropProbability(prop);
+  if (!Number.isFinite(confidence) || !Number.isFinite(probability)) return "RESEARCH";
+  if (confidence >= ELITE_TIER_METRICS.confidence && probability >= ELITE_TIER_METRICS.probability) {
+    return "ELITE";
+  }
+  if (confidence >= BEST_PLAYS_BOARD_MIN.confidence && probability >= BEST_PLAYS_BOARD_MIN.probability) {
+    return "BEST";
+  }
+  if (confidence >= TIER_B_METRICS.confidence && probability >= TIER_B_METRICS.probability) {
+    return "PLAYABLE";
+  }
+  return "RESEARCH";
+}
+
+export function resolvePlayCategoryLabel(prop = {}) {
+  const category = resolvePlayCategory(prop);
+  if (category === "ELITE") return "Elite";
+  if (category === "BEST") return "Best Play";
+  if (category === "PLAYABLE") return "Playable";
+  return "Research";
 }
 
 export function classifyPropTier(prop = {}) {

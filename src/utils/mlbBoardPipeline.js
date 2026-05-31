@@ -232,10 +232,11 @@ export function applyBoardProbabilityCaps(prop = {}, probability = null) {
   const aggressive = prop.projectionRisk === "AGGRESSIVE" || flags.projectionRisk === "AGGRESSIVE";
   const outlier = Boolean(prop.projectionOutlierDetected || flags.outlierDetected || flags.outlierWarning);
 
-  if (seasonMissing) value = Math.min(value, 60);
-  if (sampleGames != null && sampleGames < 10) value = Math.min(value, 60);
-  if (pitcherStatus !== "verified") value = Math.min(value, 64);
-  if (aggressive || outlier) value = Math.min(value, 70);
+  if (seasonMissing) value = Math.min(value, 68);
+  if (sampleGames != null && sampleGames < 10) value = Math.min(value, 66);
+  if (pitcherStatus !== "verified") value = Math.min(value, 71);
+
+  if (aggressive || outlier) value = Math.min(value, 72);
 
   return Math.round(Math.max(50, value));
 }

@@ -486,6 +486,7 @@ export function resolveTopMlbPlaySections(
   filterDiagnostics.bestPlayQualifiedStrict = bestPlaysResult.qualifiedStrict;
   filterDiagnostics.bestPlayProjectedCount = projectedCount;
   filterDiagnostics.bestPlayUsedFallback = bestPlaysResult.usedFallback;
+  filterDiagnostics.boardDiagnostics = bestPlaysResult.boardDiagnostics || bestPlaysResult.diagnostics?.boardDiagnostics || null;
   filterDiagnostics.top10ByScore = bestPlaysResult.diagnostics?.top10ByScore || [];
   filterDiagnostics.tierPropLog = bestPlaysResult.diagnostics?.tierPropLog || [];
   filterDiagnostics.verificationCounts = {

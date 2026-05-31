@@ -7,6 +7,10 @@ import { normalizePlayerName } from "../utils/playerNames.js";
 import { computePerGameProjectionFromSeasonRow, resolveSportsDataPropLabel } from "../../api/lib/sportsDataMlbStatProjection.js";
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
 import { fetchSlateSnapshot } from "./sportsDataService.js";
+import {
+  attachSportsDataPitcherFields,
+  findSportsDataGameForTeam,
+} from "../utils/sportsDataPitcherLookup.js";
 import { recordProviderResponse } from "../utils/rawResponseDebug.js";
 import { ENRICHMENT_TIMEOUT_MESSAGE, getApiTimeoutMs, withFetchTimeout } from "../utils/apiTimeout.js";
 
@@ -41,6 +45,7 @@ function projectionFieldForMarket(marketKey = "") {
   if (marketKey === "homeRuns") return "HomeRuns";
   if (marketKey === "rbis") return "RunsBattedIn";
   if (marketKey === "runs") return "Runs";
+  if (marketKey === "walks") return "Walks";
   if (marketKey === "fantasyScore") return "FantasyPointsDraftKings";
   return "";
 }
@@ -81,6 +86,7 @@ export async function enrichPropsWithSportsData(props = []) {
 
   const projections = snapshot.projections?.data || [];
   const games = snapshot.games?.data || [];
+  const seasonRows = snapshot.seasonStats?.data || [];
   const warnings = [...(snapshot.warnings || [])].filter(Boolean);
   let enrichedCount = 0;
 
@@ -95,7 +101,7 @@ export async function enrichPropsWithSportsData(props = []) {
         : { projection: null, source: "missing", components: null };
     const projectionVal = resolved.projection;
     const team = prop.team || row?.Team || "";
-    const game = findGameForTeam(games, team);
+    const game = findGameForTeam(games, team) || findSportsDataGameForTeam(games, team);
     const opponent =
       prop.opponent ||
       (game && team
@@ -109,7 +115,7 @@ export async function enrichPropsWithSportsData(props = []) {
     if (!hasProjection && !team && !opponent) return prop;
 
     enrichedCount += 1;
-    return {
+    const base = {
       ...prop,
       team: team || prop.team,
       opponent: opponent || prop.opponent,
@@ -121,8 +127,11 @@ export async function enrichPropsWithSportsData(props = []) {
       sportsDataGames: row?.Games ?? row?.GamesPlayed ?? prop.sportsDataGames,
       projectionComponents: resolved.components || prop.projectionComponents || null,
       sportsDataEnriched: true,
+      sportsDataGame: game || prop.sportsDataGame || null,
       gameTime: prop.gameTime || prop.startTime || game?.DateTime || game?.Day || "",
     };
+
+    return attachSportsDataPitcherFields(base, { game, seasonRows });
   });
 
   return { props: enriched, warnings, enrichedCount };
@@ -131,8 +140,13 @@ export async function enrichPropsWithSportsData(props = []) {
 const SDIO_FALLBACK_MARKETS = [
   { statType: "Pitcher Strikeouts", field: "PitchingStrikeouts", lineFactor: 0.92, role: "pitcher" },
   { statType: "Hits Allowed", field: "HitsAllowed", altField: "PitchingHits", lineFactor: 0.92, role: "pitcher" },
-  { statType: "Hits+Runs+RBIs", field: "HitsRunsRBIs", lineFactor: 0.9, role: "hitter" },
+  { statType: "Hits", field: "Hits", lineFactor: 0.9, role: "hitter" },
   { statType: "Total Bases", field: "TotalBases", lineFactor: 0.9, role: "hitter" },
+  { statType: "Hits+Runs+RBIs", field: "HitsRunsRBIs", lineFactor: 0.9, role: "hitter" },
+  { statType: "RBIs", field: "RunsBattedIn", lineFactor: 0.9, role: "hitter" },
+  { statType: "Runs", field: "Runs", lineFactor: 0.9, role: "hitter" },
+  { statType: "Walks", field: "Walks", lineFactor: 0.9, role: "hitter" },
+  { statType: "Fantasy Score", field: "FantasyPointsDraftKings", lineFactor: 0.9, role: "hitter" },
 ];
 
 function roundHalf(value) {

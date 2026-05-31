@@ -3,9 +3,11 @@
  */
 
 import { mlbTeamsMatch, normalizeMlbTeamKey } from "./mlbTeamMatch.js";
+import { isSportsDataPitcherConnected } from "./sportsDataPitcherLookup.js";
 
 export const STARTER_PENDING_LABEL = "Pitcher Pending";
 export const OPPONENT_PITCHER_UNAVAILABLE_LABEL = "Opponent pitcher unavailable";
+export const PROBABLE_STARTER_PENDING_LABEL = "Probable starter pending";
 export const PITCHER_STATUS_UNKNOWN = "UNKNOWN";
 
 function isUnavailablePitcherLabel(value = "") {
@@ -15,7 +17,7 @@ function isUnavailablePitcherLabel(value = "") {
   return /pitcher pending|starter pending|opponent pitcher unavailable/i.test(text);
 }
 
-/** User-facing opposing pitcher — never returns "Pitcher Pending". */
+/** User-facing opposing pitcher — never returns "Pitcher Pending" or unavailable when SportsData is connected. */
 export function resolveOpposingPitcherDisplayLabel(prop = {}) {
   const partial = resolvePartialPitcherName(prop);
   const resolved =
@@ -32,10 +34,16 @@ export function resolveOpposingPitcherDisplayLabel(prop = {}) {
     prop.opponentStarterNote ||
     "";
   const text = String(resolved || "").trim();
-  if (isUnavailablePitcherLabel(text) || / vs /i.test(text)) {
-    return OPPONENT_PITCHER_UNAVAILABLE_LABEL;
+  if (text && !isUnavailablePitcherLabel(text) && !/ vs /i.test(text)) {
+    return text;
   }
-  return text;
+  if (isSportsDataPitcherConnected() || prop.sportsDataEnriched) {
+    return PROBABLE_STARTER_PENDING_LABEL;
+  }
+  if (String(prop.team || "").trim() && String(prop.opponent || "").trim()) {
+    return PROBABLE_STARTER_PENDING_LABEL;
+  }
+  return PROBABLE_STARTER_PENDING_LABEL;
 }
 
 function teamSideKey(game = {}, side = "home") {

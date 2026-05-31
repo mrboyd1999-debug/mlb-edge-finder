@@ -48,6 +48,8 @@ function BestPlaysTab({
           {fallbackNotice ? <p className="compact-form-notice">{fallbackNotice}</p> : null}
         </div>
 
+        <BestPlayFilterDiagnostics filterDiagnostics={filterDiagnostics} showExtended={showDebugPanels} />
+
         {topBestPlays.length ? (
           <div className="compact-card-list">
             {topBestPlays.map((prop, index) => (
@@ -73,7 +75,6 @@ function BestPlaysTab({
               Tier A {tierDebug.tierA ?? 0} · Tier B {tierDebug.tierB ?? 0} · Tier C {tierDebug.tierC ?? 0}
             </p>
           ) : null}
-          <BestPlayFilterDiagnostics filterDiagnostics={filterDiagnostics} />
           <TierAuditPanel auditRows={filterDiagnostics?.tierAuditBatch} limit={12} />
         </div>
       ) : null}

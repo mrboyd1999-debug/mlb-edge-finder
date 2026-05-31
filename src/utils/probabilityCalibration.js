@@ -58,6 +58,30 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+/** Reduce 60% clustering — spread calibrated values across 55–75 when signal supports it. */
+function applyProbabilityDistributionSpread(probability, prePenaltyProbability, prop = {}, metrics = {}) {
+  const pre = finite(prePenaltyProbability);
+  const edgePercent =
+    finite(metrics.edgePercent) ??
+    finite(prop.edgePercent) ??
+    (finite(prop.edge) != null && finite(prop.line) > 0
+      ? Math.abs(finite(prop.edge) / finite(prop.line)) * 100
+      : null);
+
+  let adjusted = probability;
+  if (pre != null && probability >= 58 && probability <= 62 && Math.abs(pre - probability) >= 4) {
+    adjusted = Math.round(pre * 0.88);
+  }
+  if (edgePercent != null) {
+    adjusted += Math.round(Math.min(8, Math.max(-4, (edgePercent - 12) * 0.25)));
+  }
+  const recentForm = finite(prop.last10HitRate ?? prop.recentHitRate);
+  if (recentForm != null) {
+    adjusted += Math.round((recentForm - 55) * 0.08);
+  }
+  return clamp(Math.round(adjusted), CALIBRATION_MIN_PROBABILITY, CALIBRATION_DEFAULT_MAX_PROBABILITY);
+}
+
 function normalizeHitRatePercent(value) {
   const num = finite(value);
   if (num == null) return null;
@@ -381,12 +405,13 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
   const penalizedProbability = round2(prePenaltyProbability - penalties.totalPenalty);
   let probability = clamp(penalizedProbability, CALIBRATION_MIN_PROBABILITY, cap.ceiling);
   probability = Math.min(probability, cap.ceiling);
-  if (!seasonValid) probability = Math.min(probability, 60);
+  if (!seasonValid) probability = Math.min(probability, CALIBRATION_SEASON_MISSING_MAX_PROBABILITY);
   const sampleGames = finite(hitRates.last10Games ?? prop.sampleGames ?? prop.games);
-  if (sampleGames != null && sampleGames < 10) probability = Math.min(probability, 60);
+  if (sampleGames != null && sampleGames < 10) probability = Math.min(probability, 66);
   if (validationFlags.projectionRiskAggressive || validationFlags.outlierDetected) {
-    probability = Math.min(probability, 70);
+    probability = Math.min(probability, 72);
   }
+  probability = applyProbabilityDistributionSpread(probability, prePenaltyProbability, prop, metrics);
   probability = Math.round(probability);
   const probabilityTier = resolveProbabilityTier(probability);
 

@@ -62,7 +62,7 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
   const confidenceLabel = confidenceValue != null ? `${confidenceValue}%` : "—";
   const probabilityValue = resolveNormalizedProbability(enriched);
   const probLabel = probabilityValue != null ? `${probabilityValue}%` : "—";
-  const tierLabel = resolveTierDisplayLabel(enriched);
+  const tierLabel = enriched.playCategoryLabel || resolveTierDisplayLabel(enriched);
   const riskLevel = String(enriched.riskLevel || "HIGH").toUpperCase();
   const edgeLabels = enriched.rawEdgeLabel
     ? { displayEdgeLabel: enriched.displayEdgeLabel }
