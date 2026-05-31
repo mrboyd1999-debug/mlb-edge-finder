@@ -500,8 +500,64 @@ export function classifyPropTier(prop = {}) {
   return "C";
 }
 
+/** Single source of truth — read stored tier on enriched props, compute otherwise. */
+export function resolveFinalTier(prop = {}) {
+  const stored = String(prop.finalTier || "")
+    .trim()
+    .toUpperCase()
+    .replace(/^TIER\s*/i, "");
+  if (["A", "B", "C"].includes(stored)) return stored;
+  return classifyPropTier(prop);
+}
+
+export function resolveFinalTierLabel(prop = {}) {
+  if (prop.finalTierLabel) return prop.finalTierLabel;
+  const tier = resolveFinalTier(prop);
+  return tier === TIER_REVIEW_NEEDED_LABEL ? TIER_REVIEW_NEEDED_LABEL : `Tier ${tier}`;
+}
+
+/** Attach finalTier and sync all legacy tier alias fields. */
+export function attachFinalTierFields(prop = {}) {
+  const finalTier = classifyPropTier(prop);
+  const finalTierLabel =
+    finalTier === TIER_REVIEW_NEEDED_LABEL ? TIER_REVIEW_NEEDED_LABEL : `Tier ${finalTier}`;
+  return {
+    ...prop,
+    finalTier,
+    finalTierLabel,
+    confidenceTier: finalTier,
+    confidenceTierLabel: finalTierLabel,
+    verifiedTier: finalTier,
+    verifiedTierLabel: finalTierLabel,
+  };
+}
+
+export function countFinalTierPool(pool = []) {
+  const counts = { tierA: 0, tierB: 0, tierC: 0 };
+  for (const prop of pool || []) {
+    const tier = resolveFinalTier(prop);
+    if (tier === "A") counts.tierA += 1;
+    else if (tier === "B") counts.tierB += 1;
+    else counts.tierC += 1;
+  }
+  return counts;
+}
+
+export function logFinalTierTable(pool = [], label = "Final tier audit") {
+  const rows = (pool || []).map((prop) => ({
+    player: prop.playerName || prop.player || "Unknown",
+    confidence: Math.round(resolvePropConfidence(prop)),
+    probability: Math.round(resolvePropProbability(prop)),
+    playability: Math.round(resolvePropPlayability(prop)),
+    finalTier: resolveFinalTier(prop),
+  }));
+  console.table(rows);
+  console.info(`[${label}]`, countFinalTierPool(pool));
+  return rows;
+}
+
 export function resolvePropTier(prop = {}) {
-  return prop.confidenceTier || classifyPropTier(prop);
+  return resolveFinalTier(prop);
 }
 
 export function passesBestPlayHardExclusions(prop = {}) {
@@ -534,13 +590,15 @@ export function resolveBestPlayThresholdMissReason(prop = {}) {
 
 export function buildTierPropAuditRow(prop = {}) {
   const audit = explainTierClassification(prop);
+  const finalTier = resolveFinalTier(prop);
   return {
     player: prop.playerName || prop.player || "Unknown",
     market: prop.statType || prop.market || prop.propType || "—",
     confidence: Math.round(resolvePropConfidence(prop)),
     probability: Math.round(resolvePropProbability(prop)),
     playability: Math.round(resolvePropPlayability(prop)),
-    tier: audit.tier,
+    tier: finalTier,
+    finalTier,
     tierReason: audit.reason,
     sortScore: computeSortScore(prop),
   };
@@ -596,20 +654,12 @@ export function buildBestPlayFilterDiagnostics(pool = []) {
     const audit = explainTierClassification(prop);
     const row = buildTierPropAuditRow(prop);
     counts.tierPropLog.push(row);
-    console.info("[Tier Filter Audit]", {
-      player: row.player,
-      confidence: row.confidence,
-      probability: row.probability,
-      playability: row.playability,
-      tier: row.tier,
-      tierReason: row.tierReason,
-    });
 
-    if (audit.tier === "A") {
+    if (row.finalTier === "A") {
       counts.tierA += 1;
       counts.tierAFullData += 1;
       counts.qualifiedStrict += 1;
-    } else if (audit.tier === "B") {
+    } else if (row.finalTier === "B") {
       counts.tierB += 1;
       counts.tierBFullData += 1;
       counts.qualifiedStrict += 1;
@@ -623,7 +673,7 @@ export function buildBestPlayFilterDiagnostics(pool = []) {
       counts.tierRejectionLog.push({
         player: row.player,
         market: row.market,
-        tier: audit.tier,
+        tier: row.finalTier,
         reason: audit.reason,
         confidence: row.confidence,
         probability: row.probability,
@@ -635,7 +685,7 @@ export function buildBestPlayFilterDiagnostics(pool = []) {
   }
 
   counts.top10ByScore = buildTop10ScoreDiagnostics(pool);
-  console.info("[Tier Filter Audit] Top 10 by score", counts.top10ByScore);
+  logFinalTierTable(pool, "Tier Filter Audit");
 
   return counts;
 }
@@ -650,9 +700,9 @@ export function compareBestPlaysRecoveryRank(a = {}, b = {}) {
 
 function buildBestPlaysTierPools(pool = []) {
   const eligible = (pool || []).filter((prop) => playerKey(prop) && marketKey(prop));
-  const tierA = eligible.filter(passesQualificationTierA);
-  const tierB = eligible.filter((prop) => passesQualificationTierB(prop) && !passesQualificationTierA(prop));
-  const tierC = eligible.filter((prop) => !passesQualificationTierB(prop));
+  const tierA = eligible.filter((prop) => resolveFinalTier(prop) === "A");
+  const tierB = eligible.filter((prop) => resolveFinalTier(prop) === "B");
+  const tierC = eligible.filter((prop) => resolveFinalTier(prop) === "C");
   return { eligible, tierA, tierB, tierC, fullData: eligible.filter(isFullDataProp) };
 }
 
@@ -717,8 +767,8 @@ function fillBestPlaysToLimit(
 
 function compareBestPlaysTierRank(a = {}, b = {}) {
   const tierOrder = { A: 0, B: 1, [TIER_REVIEW_NEEDED_LABEL]: 2, C: 3, D: 4 };
-  const tierA = tierOrder[classifyPropTier(a)] ?? 4;
-  const tierB = tierOrder[classifyPropTier(b)] ?? 4;
+  const tierA = tierOrder[resolveFinalTier(a)] ?? 4;
+  const tierB = tierOrder[resolveFinalTier(b)] ?? 4;
   return tierA - tierB;
 }
 
@@ -793,22 +843,22 @@ export function buildTopBestPlaysPicks(
   }
 
   diagnostics.activeTier = activeTier;
-  diagnostics.tierADisplayed = picks.filter((prop) => classifyPropTier(prop) === "A").length;
-  diagnostics.tierBDisplayed = picks.filter((prop) => classifyPropTier(prop) === "B").length;
-  diagnostics.tierCDisplayed = picks.filter((prop) => classifyPropTier(prop) === "C").length;
+  diagnostics.tierADisplayed = picks.filter((prop) => resolveFinalTier(prop) === "A").length;
+  diagnostics.tierBDisplayed = picks.filter((prop) => resolveFinalTier(prop) === "B").length;
+  diagnostics.tierCDisplayed = picks.filter((prop) => resolveFinalTier(prop) === "C").length;
 
   const annotatedPicks = picks.map((prop, index) => {
-    const propTier = classifyPropTier(prop);
+    const propTier = resolveFinalTier(prop);
     const tierAudit = explainTierClassification(prop);
     return annotateBestPlayRankingAudit(
-      {
+      attachFinalTierFields({
         ...prop,
         sortScore: computeSortScore(prop),
         fallbackRankingScore: computeSortScore(prop),
         bestPlayActiveTier: activeTier,
         bestPlayFilterReason: tierAudit.reason,
         bestPlayUsedFallback: usedFallback || propTier !== activeTier,
-      },
+      }),
       index + 1
     );
   });
@@ -1058,8 +1108,8 @@ export function attachBoardQualityFields(prop = {}) {
   const withIntegrityAudit = attachIntegrityAuditFields(withSeason);
   const withIntegrity = attachDataIntegrityFields(withIntegrityAudit);
   const dataQualityBadge = resolveBoardDataQualityBadge({ ...withIntegrity, isFullData: fullData, partialData: !fullData });
-  const propTier = classifyPropTier(prop);
-  return {
+  const propTier = classifyPropTier(withIntegrity);
+  return attachFinalTierFields({
     ...withIntegrity,
     ...edgeLabels,
     rawEdgeLabel: edgeLabels.rawEdgeLabel,
@@ -1069,14 +1119,11 @@ export function attachBoardQualityFields(prop = {}) {
     fullDataReason,
     isFullData: fullData,
     partialData: !fullData,
-    confidenceTier: propTier,
-    confidenceTierLabel:
-      propTier === TIER_REVIEW_NEEDED_LABEL ? TIER_REVIEW_NEEDED_LABEL : `Tier ${propTier}`,
     reviewNeeded: hasIntegrityReviewFlags(withIntegrityAudit) || propTier === TIER_REVIEW_NEEDED_LABEL,
     dataStatus: fullData ? "FULL_DATA" : "PARTIAL_DATA",
     dataQualityBadge,
     dataQualityLabel: dataQualityBadge.label,
-  };
+  });
 }
 
 export function resolveRecommendedSide(prop = {}) {

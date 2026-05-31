@@ -4,7 +4,7 @@
 
 import { readHistory, writeHistory } from "./pickStore.js";
 import { gradeOutcome, autoGradePendingOutcomes, pickStatus, normalizeOutcomeStatus } from "./outcomeTracking.js";
-import { resolveRecommendedSide, classifyConfidenceTier } from "../utils/boardQuality.js";
+import { resolveRecommendedSide, resolveFinalTier, classifyConfidenceTier } from "../utils/boardQuality.js";
 import { normalizeSource } from "../utils/normalizeSource.js";
 
 export const BEST_PLAYS_TRACKING = {
@@ -52,7 +52,7 @@ function platformBucket(row = {}) {
 }
 
 function tierBucket(row = {}) {
-  const tier = String(row.confidenceTier || classifyConfidenceTier(row.confidenceScore ?? row.confidence) || "")
+  const tier = String(row.finalTier || row.confidenceTier || classifyConfidenceTier(row.confidenceScore ?? row.confidence) || "")
     .toUpperCase()
     .replace(/^TIER\s*/i, "");
   if (["A", "B", "C", "D"].includes(tier)) return tier;
@@ -79,6 +79,7 @@ export function toBestPlayOutcomeRecord(prop = {}, sectionId = BEST_PLAYS_TRACKI
   const timestamp = prop.generatedAt || new Date().toISOString();
   const slateDate = prop.slateDate || dateKey(new Date(prop.startTime || timestamp));
   const confidence = Number(prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence ?? 0);
+  const finalTier = resolveFinalTier(prop);
   const recommendedSide = resolveRecommendedSide(prop);
   const uniqueKey = bestPlayOutcomeIdentity({ ...prop, slateDate }, sectionId);
   const resultStatus = pickStatus(prop);
@@ -113,7 +114,9 @@ export function toBestPlayOutcomeRecord(prop = {}, sectionId = BEST_PLAYS_TRACKI
     projection: prop.projection ?? prop.projectedValue ?? null,
     confidence,
     confidenceScore: confidence,
-    confidenceTier: prop.confidenceTier || classifyConfidenceTier(confidence),
+    finalTier,
+    finalTierLabel: prop.finalTierLabel || (finalTier ? `Tier ${finalTier}` : null),
+    confidenceTier: finalTier,
     probabilityScore: prop.probabilityScore ?? prop.verifiedProbability ?? null,
     playabilityScore: prop.playabilityScore ?? null,
     recommendedSide,

@@ -40,7 +40,7 @@ import {
   attachBoardQualityFields,
   resolveBoardDataQualityBadge,
   resolveBoardDataQualityLabel,
-  classifyPropTier,
+  resolveFinalTierLabel,
 } from "../utils/boardQuality.js";
 import { buildHitRateSnapshot } from "../utils/modelValidation.js";
 import { resolveSeasonHitRateBundle, formatSeasonHitRateSource } from "../utils/seasonHitRate.js";
@@ -141,7 +141,7 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
     seasonBundle.gamesCount ??
     (seasonBundle.gamesLabelKey === "sample" ? seasonBundle.sampleGames : seasonBundle.seasonGames);
   const seasonRateSourceLabel = formatSeasonHitRateSource(seasonBundle.seasonHitRateSource);
-  const tierBadgeLabel = prop.confidenceTierLabel || `Tier ${classifyPropTier(prop)}`;
+  const tierBadgeLabel = resolveFinalTierLabel(prop);
   const boardDataLabel = resolveBoardDataQualityLabel(prop);
   const badge = manualProp
     ? prop.dataQualityBadge || { label: prop.scoringModeLabel || "Offline scoring mode", tone: "info" }

@@ -8,6 +8,7 @@ import {
   resolvePropConfidence,
   resolvePropPlayability,
   resolvePropEdge,
+  resolveFinalTier,
 } from "./boardQuality.js";
 import { computeMlbConfidenceBreakdown, qualifiesEliteRecentFormCap } from "./mlbPlayConfidence.js";
 
@@ -23,7 +24,7 @@ export function buildConfidenceAuditLog(prop = {}, projection = null, options = 
     breakdown.penalties?.find((row) => row.key === "partialMatchup")?.amount ?? breakdown.matchupPenalty ?? 0;
   const integrityPenalty = breakdown.integrityPenalty ?? 0;
   const sanityPenalty = options.sanityPenalty ?? prop.confidenceSanityPenalty ?? 0;
-  const tier = options.tier || classifyPropTier({ ...prop, displayConfidenceScore: options.finalConfidence ?? breakdown.final });
+  const tier = options.tier || resolveFinalTier({ ...prop, displayConfidenceScore: options.finalConfidence ?? breakdown.final });
 
   return {
     player: prop.playerName || prop.player || "Unknown",
@@ -69,7 +70,7 @@ export function logConfidenceSuppressionBatch(pool = []) {
 export function buildTierAuditEntry(prop = {}, options = {}) {
   const confidenceAudit =
     options.confidenceAudit || buildConfidenceAuditLog(prop, options.projection ?? prop.projection, options);
-  const currentTier = classifyPropTier({
+  const currentTier = resolveFinalTier({
     ...prop,
     displayConfidenceScore: confidenceAudit.final_confidence ?? resolvePropConfidence(prop),
     playabilityScore: options.playability ?? prop.playabilityScore,
@@ -137,6 +138,8 @@ export function buildTierAuditEntry(prop = {}, options = {}) {
     market: prop.statType || prop.market || prop.propType || "—",
     currentTier,
     expectedTier,
+    finalTier: currentTier,
+    finalTierLabel: currentTier ? `Tier ${currentTier}` : null,
     downgradeReasons,
     reasonForDowngrade:
       downgradeReasons.length > 0

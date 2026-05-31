@@ -10,7 +10,6 @@ import {
   resolveBestPlayInvalidReason,
   resolveBestPlayStatSpecificProjection,
   classifyBestPlayTier,
-  classifyVerifiedTier,
   sanitizeProjectionValue,
 } from "./bestPlaysPipelineDebug.js";
 import { computeMlbPlayConfidence, computeMlbConfidenceBreakdown, applyConfidenceDisplayFloor, qualifiesEliteRecentFormCap } from "./mlbPlayConfidence.js";
@@ -37,7 +36,7 @@ import { enrichPickDirectionFields, resolveProjectionLeanDisplay } from "./pickD
 import { isPitcherStrikeoutMarket } from "./topMlbPlaysRanking.js";
 import { isMlbPitcherMarket } from "../modules/mlbPitcherData.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
-import { resolveProjectionConfidenceLevel, classifyPropTier, attachBoardQualityFields, resolvePropEdge, TIER_A_MIN_CONFIDENCE, TIER_A_MIN_PLAYABILITY, TIER_A_MIN_EDGE } from "./boardQuality.js";
+import { resolveProjectionConfidenceLevel, classifyPropTier, attachBoardQualityFields, attachFinalTierFields, resolvePropEdge, TIER_A_MIN_CONFIDENCE, TIER_A_MIN_PLAYABILITY, TIER_A_MIN_EDGE } from "./boardQuality.js";
 import { computeCalibratedProbability } from "./probabilityCalibration.js";
 import { attachMarketProjectionValidation } from "./marketProjectionValidation.js";
 import {
@@ -326,14 +325,16 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     displayConfidenceScore: displayConfidence,
     pickTierLabel: playability.pickTierLabel,
   });
-  const verifiedTier = classifyVerifiedTier({
+  const tierSnapshot = attachFinalTierFields({
     ...prop,
     projection,
+    projectedValue: projection,
     probabilityScore: verifiedProbability,
     displayConfidenceScore: displayConfidence,
     playabilityScore,
     projectionSanityAudit: sanityAudit,
   });
+  const verifiedTier = tierSnapshot.finalTier;
   const edge = metrics.edge ?? (projection != null && line > 0 ? computeStandardEdge(projection, line) : null);
   const edgePercent =
     metrics.edgePercent ?? (edge != null && line > 0 ? computeStandardEdgePercent(edge, line) : null);
@@ -469,10 +470,6 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
   ranked.weightedBestPlayScore = ranked.bestPlayRankingScore ?? ranked.topPickScore;
   ranked.verifiedRankingScore = ranked.bestPlayRankingScore ?? ranked.topPickScore;
   ranked.projectionConfidenceLevel = resolveProjectionConfidenceLevel(ranked);
-  ranked.confidenceTier = classifyPropTier(ranked);
-  ranked.confidenceTierLabel = ranked.confidenceTier ? `Tier ${ranked.confidenceTier}` : null;
-  ranked.verifiedTier = ranked.confidenceTier;
-  ranked.verifiedTierLabel = ranked.confidenceTierLabel;
   const finalized = attachBoardQualityFields(
     attachModelValidationFields(
       attachProjectionSanityAudit(ranked, {
@@ -494,11 +491,7 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     ...(finalized.playabilityBreakdown || playabilityBreakdown),
     finalPlayability: playabilityScore,
   };
-  finalized.confidenceTier = classifyPropTier(finalized);
-  finalized.confidenceTierLabel = finalized.confidenceTier ? `Tier ${finalized.confidenceTier}` : null;
-  finalized.verifiedTier = finalized.confidenceTier;
-  finalized.verifiedTierLabel = finalized.confidenceTierLabel;
-  return finalized;
+  return attachFinalTierFields(finalized);
 }
 
 export function passesBestPlaysFilter(prop = {}) {

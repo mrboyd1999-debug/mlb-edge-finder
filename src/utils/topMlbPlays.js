@@ -64,6 +64,8 @@ import {
   selectOverallPlay,
   buildOverallPlayExplanation,
   buildTopBestPlaysPicks,
+  resolveFinalTier,
+  logFinalTierTable,
 } from "./boardQuality.js";
 import { buildTierAuditBatch, logConfidenceSuppressionBatch } from "./tierAudit.js";
 import {
@@ -304,14 +306,14 @@ export function resolveTopMlbPlays(displayProps = [], rawProps = [], parsedUnder
 function annotateHighestProbabilityPlay(prop, rank) {
   if (!prop) return null;
   const label =
-    prop.verifiedTier === "A" && prop.isHighestProbabilityPick
+    resolveFinalTier(prop) === "A" && prop.isHighestProbabilityPick
       ? "Highest Probability Pick"
       : highestProbabilityLabel(prop);
   return withPlayerImageUrl({
     ...prop,
     topMlbPlayRank: rank,
     highestProbabilityLabel: label,
-    isHighestProbabilityPick: prop.verifiedTier === "A" && Boolean(prop.isHighestProbabilityPick),
+    isHighestProbabilityPick: resolveFinalTier(prop) === "A" && Boolean(prop.isHighestProbabilityPick),
     qualifyReason: prop.rankingReason || buildHighestProbabilityQualifyReason(prop),
     reason: prop.rankingReason || buildHighestProbabilityQualifyReason(prop),
     bettingLabel: label,
@@ -466,6 +468,7 @@ export function resolveTopMlbPlaySections(
   filterDiagnostics.tierAuditBatch = buildTierAuditBatch(boardQualityPool);
   filterDiagnostics.confidenceSuppressionLog = logConfidenceSuppressionBatch(boardQualityPool);
   filterDiagnostics.tierAProbabilityAudit = auditTierAProbabilityPool(boardQualityPool);
+  logFinalTierTable(topBestPlayPicks, "Best Plays shown");
 
   const overallPlayCandidate = selectOverallPlay(boardQualityPool);
   const overallPlay = overallPlayCandidate

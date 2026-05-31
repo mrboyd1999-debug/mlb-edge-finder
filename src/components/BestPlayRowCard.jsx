@@ -17,7 +17,7 @@ import {
   formatHitRatePercent,
   validatePickDirectionBeforeRender,
 } from "../utils/pickDirectionAudit.js";
-import { resolveRecommendedSide } from "../utils/boardQuality.js";
+import { resolveRecommendedSide, resolveFinalTierLabel } from "../utils/boardQuality.js";
 import { resolveSeasonHitRateBundle } from "../utils/seasonHitRate.js";
 import ProjectionSanityAuditPanel from "./ProjectionSanityAuditPanel.jsx";
 import DataSourceTag from "./DataSourceTag.jsx";
@@ -63,7 +63,7 @@ function BestPlayRowCard({
       : recommendedSide;
   const probability = enriched.probabilityScore ?? enriched.verifiedProbability ?? 0;
   const probLabel = Number.isFinite(Number(probability)) ? `${Math.round(Number(probability))}%` : "—";
-  const confidenceTier = enriched.confidenceTierLabel || (enriched.confidenceTier ? `Tier ${enriched.confidenceTier}` : "—");
+  const tierLabel = resolveFinalTierLabel(enriched);
   const displayConfidenceScore = enriched.displayConfidenceScore ?? enriched.confidenceScore ?? enriched.confidence;
   const confidenceLabel = Number.isFinite(Number(displayConfidenceScore))
     ? `${Math.round(Number(displayConfidenceScore))}%`
@@ -71,8 +71,6 @@ function BestPlayRowCard({
   const edgeLabels = enriched.rawEdgeLabel
     ? { rawEdgeLabel: enriched.rawEdgeLabel, displayEdgeLabel: enriched.displayEdgeLabel }
     : formatEdgeDisplay(enriched);
-  const statusLabel = enriched.pickTierLabel || enriched.bettingLabel || "Research Candidate";
-  const tierLabel = enriched.verifiedTier ? `Tier ${enriched.verifiedTier}` : statusLabel;
   const rankingScore =
     enriched.bestPlayRankingScore ??
     enriched.topPickScore ??
@@ -203,7 +201,7 @@ function BestPlayRowCard({
               Probability <strong>{probLabel}</strong>
             </span>
             <span>
-              Tier <strong>{confidenceTier}</strong>
+              Tier <strong>{tierLabel}</strong>
             </span>
           </div>
           {isValueUnder && reason ? (

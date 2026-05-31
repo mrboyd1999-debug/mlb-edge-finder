@@ -2,7 +2,7 @@
  * Canonical projection-vs-line lean and pick direction validation.
  */
 
-import { classifyVerifiedTier } from "./verifiedTierSystem.js";
+import { resolveFinalTier, resolveFinalTierLabel } from "./boardQuality.js";
 
 const LEAN_PASS_TOLERANCE = 0.01;
 
@@ -56,7 +56,7 @@ export function leanMatchesProjection(prop = {}, leanValue = "") {
 }
 
 export function isVerifiedHighestProbabilityPick(prop = {}) {
-  return prop.verifiedTier === "A";
+  return resolveFinalTier(prop) === "A";
 }
 
 export function validatePickDirectionBeforeRender(prop = {}, context = "card") {
@@ -137,16 +137,14 @@ export function formatHitRatePercent(value) {
 }
 
 export function resolveBreakdownTitle(prop = {}) {
-  const verifiedTierA = prop.verifiedTier === "A" || classifyVerifiedTier(prop) === "A";
+  const tier = resolveFinalTier(prop);
 
-  if (verifiedTierA && prop.isHighestProbabilityPick) {
+  if (tier === "A" && prop.isHighestProbabilityPick) {
     return "Highest Probability Pick Breakdown";
   }
-  if (verifiedTierA) return "Verified Play Breakdown · Tier A";
-  if (prop.verifiedTier === "B") return "Verified Play Breakdown · Tier B";
-  if (prop.verifiedTier === "C" || prop.pickTierLabel === "Verified Play") {
-    return "Verified Play Breakdown · Tier C";
-  }
+  if (tier === "A") return "Verified Play Breakdown · Tier A";
+  if (tier === "B") return "Verified Play Breakdown · Tier B";
+  if (tier === "C") return "Verified Play Breakdown · Tier C";
   if (
     prop.displayResearchOnly ||
     prop.pickTierLabel === "Research Candidate" ||
