@@ -9,6 +9,14 @@ export const TOP_SECTION_LIMIT = 5;
 export const MAX_DISPLAY_EDGE_PERCENT = 40;
 export const PARTIAL_DATA_CONFIDENCE_PENALTY = 10;
 export const TOP_FIVE_MIN_CONFIDENCE = 70;
+export const SAFEST_MIN_CONFIDENCE = 75;
+export const SAFEST_MIN_PLAYABILITY = 70;
+export const SAFEST_MIN_SANITY = 80;
+export const SAFEST_MIN_PROBABILITY = 70;
+export const VALUE_UNDER_MIN_CONFIDENCE = 65;
+export const VALUE_UNDER_MIN_PLAYABILITY = 60;
+export const SAFEST_FALLBACK_NOTICE =
+  "No full-data safest plays yet. Showing best available Tier A/B.";
 
 function finite(value, fallback = 0) {
   const num = Number(value);
@@ -161,14 +169,114 @@ export function classifyConfidenceTier(confidence) {
   return "D";
 }
 
+export function resolvePropConfidence(prop = {}) {
+  return finite(prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence, NaN);
+}
+
+export function resolvePropPlayability(prop = {}) {
+  return finite(prop.playabilityScore ?? prop.playabilityBreakdown?.finalPlayability, NaN);
+}
+
+export function resolvePropSanity(prop = {}) {
+  return finite(prop.projectionSanityScore ?? prop.projectionSanityAudit?.sanityScore, NaN);
+}
+
+export function resolvePropProbability(prop = {}) {
+  return finite(prop.probabilityScore ?? prop.verifiedProbability, NaN);
+}
+
+export function resolveProjectionGap(prop = {}) {
+  const line = finite(prop.line, NaN);
+  const projection = finite(prop.projection ?? prop.projectedValue, NaN);
+  if (!Number.isFinite(line) || !Number.isFinite(projection)) return 0;
+  return line - projection;
+}
+
 export function passesTopFiveBestPlayGate(prop = {}) {
-  const confidence = finite(
-    prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence,
-    NaN
-  );
+  const confidence = resolvePropConfidence(prop);
   const tier = classifyConfidenceTier(confidence);
   if (tier === "C" || tier === "D") return false;
   return passesFullDataBestPlayRequirements(prop);
+}
+
+export function passesSafestPlayGate(prop = {}) {
+  if (!passesFullDataBestPlayRequirements(prop)) return false;
+  const confidence = resolvePropConfidence(prop);
+  const tier = classifyConfidenceTier(confidence);
+  if (tier === "C" || tier === "D") return false;
+  if (confidence < SAFEST_MIN_CONFIDENCE) return false;
+  if (resolvePropPlayability(prop) < SAFEST_MIN_PLAYABILITY) return false;
+  if (resolvePropSanity(prop) < SAFEST_MIN_SANITY) return false;
+  if (resolvePropProbability(prop) < SAFEST_MIN_PROBABILITY) return false;
+  return true;
+}
+
+export function passesValueUnderGate(prop = {}) {
+  const lean = String(prop.lean || prop.pick || prop.side || "").toLowerCase();
+  const side = resolveRecommendedSide(prop);
+  const isUnder = side === "UNDER" || /under|less|lower/.test(lean);
+  if (!isUnder) return false;
+  const line = finite(prop.line, NaN);
+  const projection = finite(prop.projection ?? prop.projectedValue, NaN);
+  if (!Number.isFinite(line) || !Number.isFinite(projection) || projection >= line) return false;
+  if (resolvePropConfidence(prop) < VALUE_UNDER_MIN_CONFIDENCE) return false;
+  if (resolvePropPlayability(prop) < VALUE_UNDER_MIN_PLAYABILITY) return false;
+  return true;
+}
+
+function compareNumericDesc(a = {}, b = {}, resolver = () => 0) {
+  return resolver(b) - resolver(a);
+}
+
+export function compareSafestPlaysRank(a = {}, b = {}) {
+  return (
+    compareNumericDesc(a, b, resolvePropConfidence) ||
+    compareNumericDesc(a, b, resolvePropProbability) ||
+    compareNumericDesc(a, b, resolvePropPlayability) ||
+    compareNumericDesc(a, b, resolvePropSanity) ||
+    compareHighestEdgePlays(a, b)
+  );
+}
+
+export function compareValueUndersRank(a = {}, b = {}) {
+  return (
+    compareNumericDesc(a, b, resolvePropConfidence) ||
+    compareNumericDesc(a, b, resolveProjectionGap) ||
+    compareNumericDesc(a, b, resolvePropProbability) ||
+    compareNumericDesc(a, b, resolvePropPlayability)
+  );
+}
+
+export function buildSafestPlaysSection(pool = [], { limit = TOP_SECTION_LIMIT } = {}) {
+  const strictPool = dedupeByPlayerMarketBestScore(pool);
+  const strictPicks = buildTopSectionPicks(strictPool, {
+    compareFn: compareSafestPlaysRank,
+    limit,
+    filterFn: passesSafestPlayGate,
+  });
+  if (strictPicks.length >= limit) {
+    return { picks: strictPicks, fallbackNotice: "", usedFallback: false };
+  }
+  const fallbackPicks = buildTopSectionPicks(strictPool, {
+    compareFn: compareSafestPlaysRank,
+    limit,
+    filterFn: passesTopFiveBestPlayGate,
+  });
+  return {
+    picks: fallbackPicks,
+    usedFallback: strictPicks.length < limit,
+    fallbackNotice: strictPicks.length < limit ? SAFEST_FALLBACK_NOTICE : "",
+  };
+}
+
+export function buildValueUndersSection(pool = [], { limit = TOP_SECTION_LIMIT } = {}) {
+  const picks = buildTopSectionPicks(dedupeByPlayerMarketBestScore(pool), {
+    compareFn: compareValueUndersRank,
+    side: "UNDER",
+    limit,
+    filterFn: passesValueUnderGate,
+  });
+  return { picks, fallbackNotice: "", usedFallback: false };
 }
 
 export function resolveProjectionConfidenceLevel(prop = {}) {
@@ -221,15 +329,6 @@ export function resolveRecommendedSide(prop = {}) {
   return "PASS";
 }
 
-function compareSafestPlays(a = {}, b = {}) {
-  const probA = finite(a.probabilityScore ?? a.verifiedProbability, 0);
-  const probB = finite(b.probabilityScore ?? b.verifiedProbability, 0);
-  if (probB !== probA) return probB - probA;
-  const confA = finite(a.displayConfidenceScore ?? a.confidenceScore ?? a.confidence, 0);
-  const confB = finite(b.displayConfidenceScore ?? b.confidenceScore ?? b.confidence, 0);
-  return confB - confA;
-}
-
 function compareHighestEdgePlays(a = {}, b = {}) {
   const edgeA = Math.abs(computeValidatedEdgePercent(a) ?? 0);
   const edgeB = Math.abs(computeValidatedEdgePercent(b) ?? 0);
@@ -259,6 +358,5 @@ export function buildTopSectionPicks(
   });
 }
 
-export const compareSafestPlaysRank = compareSafestPlays;
 export const compareHighestEdgePlaysRank = compareHighestEdgePlays;
 export const compareValueSidePlaysRank = compareValueSidePlays;

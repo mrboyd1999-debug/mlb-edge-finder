@@ -15,6 +15,7 @@ function BestPlayHeroCard({ prop, onOpen, cacheStatus = "" }) {
   const side = resolvePickSide(enriched);
   const sidePalette = recommendationPalette(side);
   const playerName = enriched.playerName || enriched.player || "Unknown";
+  const teamLabel = enriched.team || enriched.teamAbbr || "";
   const propType = enriched.propType || enriched.statType || enriched.market || displayFullMarketLabel(enriched);
   const line = formatNumber(enriched.line);
   const projection = resolveProjectionValue(enriched);
@@ -67,6 +68,7 @@ function BestPlayHeroCard({ prop, onOpen, cacheStatus = "" }) {
         <PlayerImage prop={enriched} />
         <div>
           <h2 className="best-play-hero-card__player">{playerName}</h2>
+          {teamLabel ? <p className="best-play-hero-card__team">{teamLabel}</p> : null}
           <p className="best-play-hero-card__prop">
             {propType} · Line {line} · Proj {projectionLabel}
           </p>

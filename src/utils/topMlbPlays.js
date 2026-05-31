@@ -54,11 +54,12 @@ import {
   dedupeByPlayerMarketBestScore,
   applyPlayerDiversityFilter,
   buildTopSectionPicks,
-  compareSafestPlaysRank,
   compareHighestEdgePlaysRank,
   compareValueSidePlaysRank,
   TOP_SECTION_LIMIT,
   passesTopFiveBestPlayGate,
+  buildSafestPlaysSection,
+  buildValueUndersSection,
 } from "./boardQuality.js";
 import {
   selectStartupProjectionCandidates,
@@ -441,11 +442,10 @@ export function resolveTopMlbPlaySections(
     maxPerPlayer: MAX_PLAYER_APPEARANCES,
   }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
 
-  const topSafestPicks = buildTopSectionPicks(boardQualityPool, {
-    compareFn: compareSafestPlaysRank,
-    limit: TOP_SECTION_LIMIT,
-    filterFn: passesTopFiveBestPlayGate,
-  }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
+  const safestSectionResult = buildSafestPlaysSection(boardQualityPool, { limit: TOP_SECTION_LIMIT });
+  const topSafestPicks = safestSectionResult.picks.map((prop, idx) =>
+    annotateHighestProbabilityPlay(prop, idx + 1)
+  );
 
   const topHighestEdgePicks = buildTopSectionPicks(boardQualityPool, {
     compareFn: compareHighestEdgePlaysRank,
@@ -453,12 +453,10 @@ export function resolveTopMlbPlaySections(
     filterFn: passesTopFiveBestPlayGate,
   }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
 
-  const topValueUnders = buildTopSectionPicks(boardQualityPool, {
-    compareFn: compareValueSidePlaysRank,
-    side: "UNDER",
-    limit: TOP_SECTION_LIMIT,
-    filterFn: passesTopFiveBestPlayGate,
-  }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
+  const valueUndersResult = buildValueUndersSection(boardQualityPool, { limit: TOP_SECTION_LIMIT });
+  const topValueUnders = valueUndersResult.picks.map((prop, idx) =>
+    annotateHighestProbabilityPlay(prop, idx + 1)
+  );
 
   const topValueOvers = buildTopSectionPicks(boardQualityPool, {
     compareFn: compareValueSidePlaysRank,
@@ -492,16 +490,17 @@ export function resolveTopMlbPlaySections(
   const sections = [
     {
       id: "top-10-best-plays",
-      title: "Top 10 Best Plays",
-      eyebrow: "Sorted by probability, confidence, then projection edge · Max 2 props per player",
+      title: "Best Plays",
+      eyebrow: "Top 10 sorted by probability, confidence, then projection edge · Max 2 props per player",
       emptyMessage: topBestPlayPicks.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
       picks: topBestPlayPicks,
     },
     {
       id: "top-5-safest",
-      title: "Top 5 Safest Plays",
-      eyebrow: "Highest calibrated probability with strong confidence",
+      title: "Safest Plays",
+      eyebrow: "Full data only · Confidence 75+ · Playability 70+ · Sanity 80+ · Probability 70+",
       emptyMessage: topSafestPicks.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
+      fallbackNotice: safestSectionResult.fallbackNotice || "",
       picks: topSafestPicks,
     },
     {
@@ -513,10 +512,11 @@ export function resolveTopMlbPlaySections(
     },
     {
       id: "top-5-value-unders",
-      title: "Top 5 Value Unders",
-      eyebrow: "Best under recommendations by edge and probability",
+      title: "Value Unders",
+      eyebrow: "Projection below line · Confidence 65+ · Playability 60+",
       emptyMessage: topValueUnders.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
       picks: topValueUnders,
+      cardVariant: "valueUnder",
     },
     {
       id: "top-5-value-overs",

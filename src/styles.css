@@ -1594,6 +1594,79 @@ body,
   color: #fca5a5 !important;
 }
 
+.best-play-row-card--compact {
+  gap: 6px;
+}
+
+.best-play-row-team {
+  font-size: 10px;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.prop-card-core-metrics--mobile {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 480px) {
+  .prop-card-core-metrics--mobile {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 768px) {
+  .prop-card-core-metrics--mobile {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+.best-play-row-reason {
+  color: #cbd5e1 !important;
+}
+
+.performance-tracker__grid {
+  display: grid;
+  gap: 10px;
+}
+
+@media (min-width: 768px) {
+  .performance-tracker__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.performance-tracker__window {
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 10px;
+  background: #0f172a;
+}
+
+.performance-tracker__window h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #e2e8f0;
+}
+
+.performance-tracker__metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+}
+
+.performance-tracker__metrics span {
+  display: block;
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.performance-tracker__metrics strong {
+  display: block;
+  font-size: 14px;
+  color: #f8fafc;
+  margin-top: 2px;
+}
+
 .best-play-tier-badge {
   color: #bfdbfe !important;
   font-size: 10px;

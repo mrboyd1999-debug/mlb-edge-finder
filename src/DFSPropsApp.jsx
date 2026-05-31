@@ -146,6 +146,10 @@ import {
   scheduleOutcomeGrading,
 } from "./services/outcomeTracking.js";
 import {
+  persistBestPlaysBoardOutcomes,
+  buildPerformanceTrackerDashboard,
+} from "./services/bestPlaysOutcomeTracking.js";
+import {
   buildStatsMissingExplanation,
   computeStatConfidenceAdjustments,
   enrichPlayerProfile,
@@ -4567,6 +4571,10 @@ export default function DFSPropsApp() {
     [compactMode]
   );
   const dashboard = useMemo(() => buildOutcomeDashboard(visibleHistory), [visibleHistory]);
+  const performanceTrackerDashboard = useMemo(
+    () => buildPerformanceTrackerDashboard(visibleHistory),
+    [visibleHistory]
+  );
   const quickParlayPicks = useMemo(() => {
     let primary = [];
     if (isSafeModeEnabled()) {
@@ -4672,9 +4680,11 @@ export default function DFSPropsApp() {
   ]);
   const lastUpdatedMs = lastUpdated ? new Date(lastUpdated).getTime() : NaN;
   const staleDataWarning =
-    Number.isFinite(lastUpdatedMs) && Date.now() - lastUpdatedMs > DFS_CACHE_TTL_MS
-      ? "Stale data warning: refresh today's picks before using these lines."
-      : "";
+    Number(providerCoverageAuditDisplay?.liveProviderCount ?? 0) > 0
+      ? ""
+      : Number.isFinite(lastUpdatedMs) && Date.now() - lastUpdatedMs > DFS_CACHE_TTL_MS
+        ? "Stale data warning: refresh today's picks before using these lines."
+        : "";
   const historyResultByKey = useMemo(() => {
     const map = new Map();
     visibleHistory.forEach((pick) => {
@@ -4746,6 +4756,7 @@ export default function DFSPropsApp() {
         },
         readHistory()
       );
+      updatedHistory = persistBestPlaysBoardOutcomes(topMlbPlayBoard, updatedHistory);
       if (generatedPicks.length) {
         updatedHistory = saveGeneratedCategoryPicks(generatedPicks, updatedHistory);
       }
@@ -4788,6 +4799,7 @@ export default function DFSPropsApp() {
     streakFinderProps,
     goblinPropsForTracking,
     demonPropsForTracking,
+    topMlbPlayBoard,
   ]);
 
   function updatePickResult(id, resultStatus, actualStatResult = null) {
@@ -5071,7 +5083,7 @@ export default function DFSPropsApp() {
       cacheStatus={cacheStatus}
       boardCacheTimestamp={lastUpdated}
       liveBoardPipelineTrace={debugInfo?.liveBoardPipelineTrace || null}
-      renderSourceAudit={providerCoverageAuditDisplay}
+      performanceTracker={performanceTrackerDashboard}
     />
 
       {selectedEvaluation && (

@@ -2,6 +2,7 @@ import { memo, useMemo } from "react";
 import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import BestPlayHeroCard from "./BestPlayHeroCard.jsx";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
+import PerformanceTracker from "./PerformanceTracker.jsx";
 import { compareVerifiedPlaysRank, compareBestPlaysRank, passesHeroOverallPlayGate } from "../utils/bestPlayRankingScore.js";
 import {
   VERIFIED_DISPLAY_MAX,
@@ -29,6 +30,7 @@ function BestPlaysSection({ section, onOpen, cacheStatus = "", sortFn = null, li
       <div className="compact-section__head">
         <h2>{section.title}</h2>
         {section.eyebrow ? <p>{section.eyebrow}</p> : null}
+        {section.fallbackNotice ? <p className="compact-form-notice">{section.fallbackNotice}</p> : null}
       </div>
       {picks.length ? (
         <div className="compact-card-list">
@@ -42,6 +44,7 @@ function BestPlaysSection({ section, onOpen, cacheStatus = "", sortFn = null, li
                 rank={index + 1}
                 onOpen={onOpen}
                 cacheStatus={cacheStatus}
+                cardVariant={section.cardVariant || "default"}
               />
             </SectionErrorBoundary>
           ))}
@@ -62,6 +65,7 @@ function BestPlaysTab({
   filterDiagnostics = null,
   renderSourceAudit = null,
   cacheStatus = "",
+  performanceTracker = null,
 }) {
   const topBestPlaysSection = useMemo(() => findSection(sections, "top-10-best-plays"), [sections]);
   const verifiedSection = useMemo(() => findSection(sections, "verified-plays"), [sections]);
@@ -85,6 +89,11 @@ function BestPlaysTab({
   }, [topBestPlays, verifiedPicks]);
   const failureReason = loadError || filterDiagnostics?.error || "";
   const blockStaleRender = shouldBlockVerifiedPlayRender(renderSourceAudit);
+  const liveProviderActive = Number(renderSourceAudit?.liveProviderCount ?? 0) > 0;
+  const showIntegrityWarning =
+    renderSourceAudit?.dataIntegrityMismatch &&
+    renderSourceAudit?.integrityWarning &&
+    !liveProviderActive;
 
   if (loading) {
     return (
@@ -99,7 +108,7 @@ function BestPlaysTab({
 
   return (
     <div className="compact-tab-panel">
-      {renderSourceAudit?.dataIntegrityMismatch && renderSourceAudit?.integrityWarning ? (
+      {showIntegrityWarning ? (
         <p className="compact-form-notice prop-pipeline-counters__failure" role="alert">
           {renderSourceAudit.integrityWarning}
         </p>
@@ -128,9 +137,11 @@ function BestPlaysTab({
           />
 
           <BestPlaysSection section={safestSection} onOpen={onOpen} cacheStatus={cacheStatus} limit={5} />
-          <BestPlaysSection section={highestEdgeSection} onOpen={onOpen} cacheStatus={cacheStatus} limit={5} />
           <BestPlaysSection section={valueUndersSection} onOpen={onOpen} cacheStatus={cacheStatus} limit={5} />
+          <BestPlaysSection section={highestEdgeSection} onOpen={onOpen} cacheStatus={cacheStatus} limit={5} />
           <BestPlaysSection section={valueOversSection} onOpen={onOpen} cacheStatus={cacheStatus} limit={5} />
+
+          <PerformanceTracker dashboard={performanceTracker} />
 
           <BestPlaysSection
             section={verifiedSection}

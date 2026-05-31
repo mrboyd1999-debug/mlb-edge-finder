@@ -11,7 +11,6 @@ import {
 } from "../utils/pickRecommendation.js";
 import { displayFullMarketLabel } from "../utils/propLabels.js";
 import { resolveProjectionValue } from "../utils/projectionQuality.js";
-import { formatHighestProbabilitySource } from "../utils/highestProbabilityPlays.js";
 import { formatEdgeDisplay } from "../utils/conservativeProjection.js";
 import { formatBestPlayProjectionSource } from "../utils/bestPlayExplanation.js";
 import {
@@ -23,14 +22,23 @@ import ProjectionSanityAuditPanel from "./ProjectionSanityAuditPanel.jsx";
 import DataSourceTag from "./DataSourceTag.jsx";
 import { safeArray, safeFixed } from "../utils/safeStats.js";
 
-function confidenceLevelClass(level = "") {
-  const normalized = String(level || "LOW").toUpperCase();
-  if (normalized === "HIGH") return "best-play-confidence--high";
-  if (normalized === "MEDIUM") return "best-play-confidence--medium";
-  return "best-play-confidence--low";
+function resolveLeanSideLabel(prop = {}, recommendedSide = "PASS") {
+  if (recommendedSide === "UNDER") return "Lower";
+  if (recommendedSide === "OVER") return "Higher";
+  const lean = String(prop.lean || "").toLowerCase();
+  if (/lower|less|under/.test(lean)) return "Lower";
+  if (/higher|more|over/.test(lean)) return "Higher";
+  return "Pass";
 }
 
-function BestPlayRowCard({ prop, onOpen, rank, grouped = false, cacheStatus = "" }) {
+function BestPlayRowCard({
+  prop,
+  onOpen,
+  rank,
+  grouped = false,
+  cacheStatus = "",
+  cardVariant = "default",
+}) {
   const [auditOpen, setAuditOpen] = useState(false);
   const enriched = withPlayerImageUrl(prop || {});
 
@@ -40,11 +48,12 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false, cacheStatus = ""
 
   const side = resolvePickSide(enriched);
   const sidePalette = recommendationPalette(side);
-  const platform = formatHighestProbabilitySource(enriched);
   const playerName = enriched.playerName || enriched.player || "Unknown";
+  const teamLabel = enriched.team || enriched.teamAbbr || "—";
   const propType = enriched.propType || enriched.statType || enriched.market || displayFullMarketLabel(enriched);
   const line = formatNumber(enriched.line);
   const recommendedSide = resolveRecommendedSide(enriched);
+  const leanSideLabel = resolveLeanSideLabel(enriched, recommendedSide);
   const sideLabel =
     recommendedSide === "PASS"
       ? side === "WATCH"
@@ -53,8 +62,7 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false, cacheStatus = ""
       : recommendedSide;
   const probability = enriched.probabilityScore ?? enriched.verifiedProbability ?? 0;
   const probLabel = Number.isFinite(Number(probability)) ? `${Math.round(Number(probability))}%` : "—";
-  const projectionConfidence = enriched.projectionConfidenceLevel || "LOW";
-  const confidenceTier = enriched.confidenceTierLabel || (enriched.confidenceTier ? `Tier ${enriched.confidenceTier}` : null);
+  const confidenceTier = enriched.confidenceTierLabel || (enriched.confidenceTier ? `Tier ${enriched.confidenceTier}` : "—");
   const displayConfidenceScore = enriched.displayConfidenceScore ?? enriched.confidenceScore ?? enriched.confidence;
   const confidenceLabel = Number.isFinite(Number(displayConfidenceScore))
     ? `${Math.round(Number(displayConfidenceScore))}%`
@@ -100,19 +108,25 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false, cacheStatus = ""
   const projectionSanityAudit = enriched.projectionSanityAudit;
   const projectionFormulaAudit = enriched.projectionFormulaAudit;
   const playabilityBreakdown = enriched.playabilityBreakdown ?? enriched.playabilityAudit;
-  const reason = explanation?.reason || enriched.qualifyReason || enriched.whyThisPick || "";
+  const reason =
+    explanation?.reason ||
+    enriched.qualifyReason ||
+    enriched.whyThisPick ||
+    enriched.marketContext ||
+    rankingReason ||
+    "";
   const hasAuditDetails = Boolean(
     probabilityAudit ||
       edgeValidation ||
       matchupAudit ||
       statsLine ||
       rankingReason ||
-      reason ||
       projectionSanityAudit?.supported ||
       projectionFormulaAudit ||
       playabilityBreakdown ||
       isVerifiedPlay
   );
+  const isValueUnder = cardVariant === "valueUnder";
 
   function openDetails(event) {
     event?.stopPropagation?.();
@@ -126,7 +140,9 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false, cacheStatus = ""
 
   return (
     <article
-      className={`best-play-row-card${grouped ? " best-play-row-card--grouped" : ""}`}
+      className={`best-play-row-card best-play-row-card--compact${grouped ? " best-play-row-card--grouped" : ""}${
+        isValueUnder ? " best-play-row-card--value-under" : ""
+      }`}
       style={styles.bestPlayRowCard}
       role="button"
       tabIndex={0}
@@ -144,21 +160,8 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false, cacheStatus = ""
           <div className="best-play-row-top-line">
             {rank != null ? <span style={styles.bestPlayRowRank}>#{rank}</span> : null}
             {!grouped ? <h3 style={styles.bestPlayRowPlayer}>{playerName}</h3> : null}
+            {!grouped ? <span className="best-play-row-team">{teamLabel}</span> : null}
             {!grouped ? <DataSourceTag prop={enriched} cacheStatus={cacheStatus} compact /> : null}
-            {!grouped ? (
-              <span
-                style={{
-                  ...styles.bestPlayPlatformBadge,
-                  border: "1px solid #334155",
-                  background: "#1e293b",
-                  color: "#cbd5e1",
-                }}
-              >
-                {platform}
-              </span>
-            ) : (
-              <p style={{ ...styles.bestPlayRowSubline, margin: 0, fontWeight: 700 }}>{propType}</p>
-            )}
           </div>
           {grouped ? (
             <p style={styles.bestPlayRowSubline}>Line {line}</p>
@@ -167,32 +170,28 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false, cacheStatus = ""
               {propType} · Line {line}
             </p>
           )}
-          <div className="prop-card-core-metrics prop-card-core-metrics--compact" style={{ marginTop: 4 }}>
+          <div className="prop-card-core-metrics prop-card-core-metrics--mobile" style={{ marginTop: 4 }}>
             <span>
               Projection <strong>{projectionLabel}</strong>
+            </span>
+            <span>
+              {isValueUnder ? "Side" : "Higher/Lower"} <strong>{leanSideLabel}</strong>
+            </span>
+            <span>
+              Confidence <strong>{confidenceLabel}</strong>
             </span>
             <span>
               Probability <strong>{probLabel}</strong>
             </span>
             <span>
-              Confidence <strong>{confidenceLabel}</strong>
-              {confidenceTier ? (
-                <>
-                  {" "}
-                  <strong className="best-play-tier-badge">{confidenceTier}</strong>
-                </>
-              ) : null}
-            </span>
-            <span>
-              Data{" "}
-              <strong className={`best-play-confidence ${confidenceLevelClass(projectionConfidence)}`}>
-                {projectionConfidence}
-              </strong>
-            </span>
-            <span>
-              Edge <strong>{edgeLabels?.displayEdgeLabel ?? "—"}</strong>
+              Tier <strong>{confidenceTier}</strong>
             </span>
           </div>
+          {isValueUnder && reason ? (
+            <p className="best-play-row-reason" style={{ ...styles.bestPlayRowSubline, marginTop: 4, fontSize: 11 }}>
+              Reason: <strong>{reason}</strong>
+            </p>
+          ) : null}
           {hasAuditDetails ? (
             <div className="best-play-audit-toggle-wrap">
               <button
@@ -201,13 +200,16 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false, cacheStatus = ""
                 aria-expanded={auditOpen}
                 onClick={toggleAudit}
               >
-                {auditOpen ? "Hide audit" : "Show audit"}
+                {auditOpen ? "Hide Audit" : "Show Audit"}
               </button>
             </div>
           ) : null}
           {auditOpen ? (
             <div className="best-play-audit-panel" onClick={(event) => event.stopPropagation()}>
               <div className="prop-card-core-metrics prop-card-core-metrics--audit">
+                <span>
+                  Edge <strong>{edgeLabels?.displayEdgeLabel ?? "—"}</strong>
+                </span>
                 <span>
                   Lean <strong>{lean}</strong>
                 </span>
@@ -278,10 +280,10 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false, cacheStatus = ""
                   </p>
                   {probabilityAudit.finalProbability != null ? (
                     <p style={{ ...styles.bestPlayRowSubline, color: "#e2e8f0", marginTop: 2, fontSize: 11 }}>
-                      {safeArray(probabilityAudit.explanationLines).map((line, index) => (
-                        <span key={line}>
+                      {safeArray(probabilityAudit.explanationLines).map((lineText, index) => (
+                        <span key={lineText}>
                           {index ? " · " : ""}
-                          {line}
+                          {lineText}
                         </span>
                       ))}
                     </p>
@@ -305,14 +307,9 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false, cacheStatus = ""
                   {statsLine}
                 </p>
               ) : null}
-              {rankingReason ? (
+              {!isValueUnder && rankingReason ? (
                 <p style={{ ...styles.bestPlayRowSubline, color: "#e2e8f0", marginTop: 4, fontSize: 11 }}>
                   {rankingReason}
-                </p>
-              ) : null}
-              {reason && reason !== rankingReason ? (
-                <p style={{ ...styles.bestPlayRowSubline, color: "#e2e8f0", marginTop: 4, fontSize: 11 }}>
-                  Reason: {reason}
                 </p>
               ) : null}
             </div>
@@ -329,10 +326,10 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false, cacheStatus = ""
             color: sidePalette.bannerText,
           }}
         >
-          {sideLabel}
+          {isValueUnder ? leanSideLabel : sideLabel}
         </div>
         <button type="button" className="prop-card-why-link" style={styles.whyLink} onClick={openDetails}>
-          View Details
+          Details
         </button>
       </div>
     </article>

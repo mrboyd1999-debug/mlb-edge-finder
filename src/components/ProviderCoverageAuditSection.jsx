@@ -33,7 +33,7 @@ function ProviderCoverageAuditSection({ audit = null, loading = false }) {
         <MetricRow label="Projected Props" value={audit?.projected} />
         <MetricRow label="Verified Props" value={audit?.verifiedPlaysCount ?? audit?.verified ?? audit?.verifiedProps} />
       </div>
-      {audit?.dataIntegrityMismatch && audit?.integrityWarning ? (
+      {audit?.dataIntegrityMismatch && audit?.integrityWarning && Number(audit?.liveProviderCount ?? 0) === 0 ? (
         <p className="provider-coverage-audit-section__bottleneck" role="alert">
           {audit.integrityWarning}
         </p>

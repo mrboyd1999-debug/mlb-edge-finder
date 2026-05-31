@@ -64,6 +64,7 @@ function DfsAnalyzerLayout({
   cacheStatus = "",
   boardCacheTimestamp = "",
   liveBoardPipelineTrace = null,
+  performanceTracker = null,
 }) {
   const [connectionReport, setConnectionReport] = useState(() => {
     const meta = readSettingsMeta();
@@ -116,13 +117,14 @@ function DfsAnalyzerLayout({
         pipelineProjectionStats={pipelineRenderCounts?.projectionStats ?? null}
       />
 
-      <ProviderCoverageAuditSection audit={providerCoverageAudit} loading={loading} />
-
-      <LiveFeedDiagnosticsPanel audit={providerCoverageAudit} />
-
-      <LiveFeedTestPanel />
-
-      <RenderingSourceDiagnosticsPanel audit={renderSourceAudit} />
+      {debugPanelsVisible ? (
+        <>
+          <ProviderCoverageAuditSection audit={providerCoverageAudit} loading={loading} />
+          <LiveFeedDiagnosticsPanel audit={providerCoverageAudit} />
+          <LiveFeedTestPanel />
+          <RenderingSourceDiagnosticsPanel audit={renderSourceAudit} />
+        </>
+      ) : null}
 
       <HistoricalCoverageBanner audit={statsAttachmentAudit} loading={loading} />
 
@@ -152,6 +154,7 @@ function DfsAnalyzerLayout({
             filterDiagnostics={topMlbPlayBoard?.filterDiagnostics}
             renderSourceAudit={renderSourceAudit}
             cacheStatus={cacheStatus}
+            performanceTracker={performanceTracker}
           />
         </SectionErrorBoundary>
       ) : null}

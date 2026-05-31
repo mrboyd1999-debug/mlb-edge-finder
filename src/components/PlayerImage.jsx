@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { styles } from "../theme/styles.js";
 import { playerInitials } from "../utils/propLabels.js";
+import { resolvePlayerImageUrl } from "../utils/playerImageFields.js";
 import { hasCachedPlayerImage, preloadPlayerImage, rememberPlayerImage } from "../utils/playerImageCache.js";
 
 function initialsBadgeColor(name = "") {
@@ -20,7 +21,7 @@ function initialsBadgeColor(name = "") {
 
 function buildHeadshotCandidates(prop = {}) {
   const candidates = [];
-  const direct = prop.playerImageUrl || prop.playerImage || prop.headshot || prop.imageUrl || prop.photo || "";
+  const direct = resolvePlayerImageUrl(prop);
   if (direct) candidates.push(direct);
 
   const sport = String(prop.sport || prop.league || "").toUpperCase();

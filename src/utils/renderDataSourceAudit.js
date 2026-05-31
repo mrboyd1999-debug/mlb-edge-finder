@@ -245,13 +245,13 @@ export function buildRenderSourceAudit({
   const fetchCombined = finiteCount(providerFetchAudit?.combinedProps ?? providerFetchAudit?.combinedUsable);
   const fetchVerified = finiteCount(providerFetchAudit?.verified ?? providerFetchAudit?.verifiedProps);
 
-  if (providerFetchAudit && combinedProps > 0 && fetchCombined === 0) {
+  if (providerFetchAudit && combinedProps > 0 && fetchCombined === 0 && finiteCount(audit.liveProviderCount) === 0) {
     audit.dataIntegrityMismatch = true;
     audit.integrityWarning = `Data integrity mismatch: fetch audit combined=${fetchCombined} but rendered combined=${combinedProps}`;
-  } else if (providerFetchAudit && verifiedProps > 0 && fetchVerified === 0) {
+  } else if (providerFetchAudit && verifiedProps > 0 && fetchVerified === 0 && finiteCount(audit.liveProviderCount) === 0) {
     audit.dataIntegrityMismatch = true;
     audit.integrityWarning = `Data integrity mismatch: fetch audit verified=${fetchVerified} but rendered verified=${verifiedProps}`;
-  } else if (providerFetchAudit && fetchVerified > 0 && verifiedProps === 0) {
+  } else if (providerFetchAudit && fetchVerified > 0 && verifiedProps === 0 && finiteCount(audit.liveProviderCount) === 0) {
     audit.dataIntegrityMismatch = true;
     audit.integrityWarning = `Data integrity mismatch: fetch audit verified=${fetchVerified} but rendered verified=${verifiedProps}`;
   }
