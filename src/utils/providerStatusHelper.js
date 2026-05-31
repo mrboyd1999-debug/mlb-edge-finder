@@ -2,6 +2,8 @@
  * Strict provider status — green only when live + usable; yellow for cached/fallback; red for failed.
  */
 
+import { getOddsApiKey, getSportsDataApiKey } from "../services/runtimeSettings.js";
+
 export const PROVIDER_STATUS = {
   CONNECTED: "connected",
   WARNING: "warning",
@@ -231,4 +233,106 @@ export function buildProviderRefreshAudit({
 
 export function logBoardRefreshAudit(payload = {}) {
   console.info("[Board Refresh Audit]", payload);
+}
+
+/** User-facing line feed label — failed feeds read as temporarily unavailable, not broken. */
+export function resolveUserFacingLineFeedStatus(feed = {}) {
+  const resolved = resolveStrictLineFeedStatus(feed);
+  if (resolved.status === "Connected") {
+    return { ...resolved, status: "Live" };
+  }
+  if (resolved.status === "Connected (Cached)") {
+    return { ...resolved, status: "Cached" };
+  }
+  if (/not configured/i.test(String(resolved.status || ""))) {
+    return { ...resolved, status: "Not configured" };
+  }
+  if (resolved.status === "Failed" || resolved.strictTier === PROVIDER_STATUS.FAILED) {
+    return {
+      status: "Temporarily unavailable",
+      detail: resolved.detail,
+      sourceMode: resolved.sourceMode,
+      strictTier: PROVIDER_STATUS.WARNING,
+    };
+  }
+  return resolved;
+}
+
+export function resolveUserFacingOddsStatus(row, keyConfigured, tested) {
+  const resolved = resolveStrictOddsStatus(row, keyConfigured, tested);
+  if (resolved.status === "Connected") return resolved;
+  if (/not configured|not tested/i.test(resolved.status)) return resolved;
+  return { ...resolved, status: "Temporarily unavailable" };
+}
+
+export function resolveUserFacingSportsDataStatus(row, keyConfigured, tested) {
+  const resolved = resolveStrictSportsDataStatus(row, keyConfigured, tested);
+  if (resolved.status === "Connected") return resolved;
+  if (/not configured|not tested/i.test(resolved.status)) return resolved;
+  return { ...resolved, status: "Temporarily unavailable" };
+}
+
+/** True when core MLB data paths are usable even if PrizePicks is down. */
+export function resolveCoreLiveDataAvailable({
+  apiHealth = {},
+  connectionReport = null,
+  audit = null,
+  renderSourceAudit = null,
+} = {}) {
+  const meta = connectionReport || {};
+  const rows = meta.results || [];
+  const find = (name) =>
+    rows.find((row) => String(row.provider || "").toLowerCase().includes(name.toLowerCase())) || null;
+  const oddsRow = find("odds");
+  const sdRow = find("sportsdata");
+  const ud = resolveUserFacingLineFeedStatus(apiHealth?.Underdog || {});
+  const odds = resolveUserFacingOddsStatus(oddsRow, Boolean(getOddsApiKey()), Boolean(meta.testedAt));
+  const sd = resolveUserFacingSportsDataStatus(sdRow, Boolean(getSportsDataApiKey()), Boolean(meta.testedAt));
+
+  const underdogOk = ud.status === "Live" || ud.status === "Cached";
+  const oddsOk = odds.status === "Connected";
+  const sportsDataOk = sd.status === "Connected";
+  const liveProviderCount = Number(
+    renderSourceAudit?.liveProviderCount ?? audit?.liveProviderCount ?? 0
+  );
+
+  return underdogOk || oddsOk || sportsDataOk || liveProviderCount > 0;
+}
+
+export function buildUserFacingProviderStatusRows({
+  apiHealth = {},
+  connectionReport = null,
+} = {}) {
+  const meta = connectionReport || {};
+  const rows = meta.results || [];
+  const testedAt = meta.testedAt || "";
+  const find = (name) =>
+    rows.find((row) => String(row.provider || "").toLowerCase().includes(name.toLowerCase())) || null;
+  const oddsRow = find("odds");
+  const sdRow = find("sportsdata");
+
+  let oddsKeyConfigured = false;
+  let sdKeyConfigured = false;
+  try {
+    oddsKeyConfigured = Boolean(getOddsApiKey());
+    sdKeyConfigured = Boolean(getSportsDataApiKey());
+  } catch {
+    // ignore in non-browser contexts
+  }
+
+  const pp = resolveUserFacingLineFeedStatus(apiHealth?.PrizePicks || {});
+  const ud = resolveUserFacingLineFeedStatus(apiHealth?.Underdog || {});
+  const odds = resolveUserFacingOddsStatus(oddsRow, oddsKeyConfigured, Boolean(testedAt));
+  const sd = resolveUserFacingSportsDataStatus(sdRow, sdKeyConfigured, Boolean(testedAt));
+
+  return [
+    { provider: "PrizePicks", status: pp.status, detail: pp.detail },
+    {
+      provider: "Underdog",
+      status: ud.status === "Live" ? "Live" : ud.status === "Cached" ? "Cached" : ud.status,
+      detail: ud.detail,
+    },
+    { provider: "SportsDataIO", status: sd.status, detail: sd.detail },
+    { provider: "Odds API", status: odds.status, detail: odds.detail },
+  ];
 }

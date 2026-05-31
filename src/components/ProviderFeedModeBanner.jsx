@@ -1,43 +1,59 @@
 import { memo } from "react";
-import { formatDateTime } from "../utils/formatters.js";
 import { healthStateStyle } from "../services/sourceHealth.js";
+import {
+  buildUserFacingProviderStatusRows,
+  resolveCoreLiveDataAvailable,
+} from "../utils/providerStatusHelper.js";
+
+function providerStatusStyle(status = "") {
+  const key = String(status || "").toLowerCase();
+  if (key === "live" || key === "connected") return healthStateStyle("Connected");
+  if (key === "cached") return healthStateStyle("Warning");
+  if (key === "temporarily unavailable" || key === "not configured" || key === "not tested") {
+    return healthStateStyle("Warning");
+  }
+  return healthStateStyle("Failed");
+}
 
 function ProviderFeedModeBanner({
+  apiHealth = {},
+  connectionReport = null,
   audit = null,
   renderSourceAudit = null,
   loading = false,
-  cacheStatus = "",
-  boardCacheTimestamp = "",
 }) {
-  const boardIsCached = /cached|stale|expired/i.test(String(cacheStatus || ""));
-  const auditSaysLive = audit?.feedMode === "LIVE";
-  const liveProviderCount = Number(
-    renderSourceAudit?.liveProviderCount ?? audit?.liveProviderCount ?? 0
-  );
-  const isLive =
-    liveProviderCount > 0 || (auditSaysLive && !audit?.boardCacheActive && !boardIsCached);
-  const label = isLive ? "LIVE DATA" : "CACHE DATA";
-  const statusLabel = isLive ? "Live" : "Cached";
-
-  const cacheLabel = boardCacheTimestamp ? formatDateTime(boardCacheTimestamp) : "";
-  const cacheMessage = isLive
-    ? "Provider feeds loaded live on last refresh."
-    : cacheLabel
-      ? `Running on cached board from ${cacheLabel}`
-      : audit?.cacheBoardMessage || "Live provider fetch did not populate a full board — showing cached data.";
+  const liveAvailable = resolveCoreLiveDataAvailable({
+    apiHealth,
+    connectionReport,
+    audit,
+    renderSourceAudit,
+  });
+  const providerRows = buildUserFacingProviderStatusRows({ apiHealth, connectionReport });
+  const headline = loading ? "Loading feeds…" : liveAvailable ? "Live Data Available" : "Cached Data";
+  const headlineStyle = loading
+    ? healthStateStyle("Refreshing")
+    : liveAvailable
+      ? healthStateStyle("Connected")
+      : healthStateStyle("Warning");
 
   return (
     <section
-      className={`provider-feed-mode-banner provider-feed-mode-banner--${isLive ? "live" : "cache"}`}
+      className={`provider-feed-mode-banner provider-feed-mode-banner--${liveAvailable && !loading ? "live" : "cache"}`}
       aria-label="Provider data mode"
     >
       <div className="provider-feed-mode-banner__head">
-        <strong className="provider-feed-mode-banner__title">{loading ? "Loading feeds…" : label}</strong>
-        {!loading ? <span style={healthStateStyle(isLive ? "Connected" : "Warning")}>{statusLabel}</span> : null}
+        <strong className="provider-feed-mode-banner__title">{headline}</strong>
+        {!loading ? <span style={headlineStyle}>{liveAvailable ? "Live" : "Cached"}</span> : null}
       </div>
-      {!loading ? <p className="provider-feed-mode-banner__detail">{cacheMessage}</p> : null}
-      {!loading && !isLive && audit?.cacheFallbackStage ? (
-        <p className="provider-feed-mode-banner__stage">Fallback stage: {audit.cacheFallbackStage}</p>
+      {!loading ? (
+        <ul className="provider-feed-mode-banner__providers">
+          {providerRows.map((row) => (
+            <li key={row.provider}>
+              <span className="provider-feed-mode-banner__provider-name">{row.provider}</span>
+              <span style={providerStatusStyle(row.status)}>{row.status}</span>
+            </li>
+          ))}
+        </ul>
       ) : null}
     </section>
   );

@@ -1053,6 +1053,27 @@ body,
   font-size: 12px;
 }
 
+.provider-feed-mode-banner__providers {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.provider-feed-mode-banner__providers li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.provider-feed-mode-banner__provider-name {
+  color: #94a3b8;
+}
+
 .live-board-pipeline-banner__metrics {
   display: flex;
   flex-wrap: wrap;
@@ -1596,6 +1617,7 @@ body,
 
 .best-play-row-card--compact {
   gap: 6px;
+  padding: 8px 10px;
 }
 
 .best-play-row-team {
@@ -2939,6 +2961,9 @@ body,
   border: 1px solid #1e293b;
   border-radius: 10px;
   background: #0b1220;
+  max-height: 40vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 @media (max-width: 768px) {
@@ -2950,7 +2975,7 @@ body,
   .pick-detail-modal {
     width: 100%;
     max-width: 100%;
-    max-height: 90vh;
+    max-height: 85vh;
     margin: 0;
     border-radius: 14px 14px 0 0;
   }

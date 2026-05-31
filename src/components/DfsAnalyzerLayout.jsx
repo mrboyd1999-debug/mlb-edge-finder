@@ -88,59 +88,12 @@ function DfsAnalyzerLayout({
         refreshBlocked={refreshBlocked}
         refreshCountdownSec={refreshCountdownSec}
         onRefresh={onRefresh}
-        showDebugPanels={debugPanelsVisible}
+        showDebugPanels={showDebugPanels}
         onToggleDebugPanels={onShowDebugPanelsChange ? () => onShowDebugPanelsChange(!showDebugPanels) : undefined}
         lastUpdated={lastUpdatedLabel}
       />
 
-      <ProviderFeedModeBanner
-        audit={providerCoverageAudit}
-        renderSourceAudit={renderSourceAudit}
-        loading={loading}
-        cacheStatus={cacheStatus}
-        boardCacheTimestamp={boardCacheTimestamp}
-      />
-
-      <LiveBoardPipelineBanner
-        trace={liveBoardPipelineTrace}
-        renderSourceAudit={renderSourceAudit}
-        loading={loading}
-      />
-
       <CompactAppTabs activeTab={appView} onChange={setAppView} />
-
-      <ProviderFailureReasons audit={providerCoverageAudit} />
-
-      <SystemStatusCard
-        apiHealth={apiHealth}
-        mlbPipelineStatus={mlbPipelineStatus}
-        connectionReport={connectionReport}
-        onConnectionReportChange={handleConnectionReportChange}
-        feedHealthContext={feedHealthContext}
-        pipelineProjectionStats={pipelineRenderCounts?.projectionStats ?? null}
-      />
-
-      {debugPanelsVisible ? (
-        <>
-          <ProviderCoverageAuditSection audit={providerCoverageAudit} loading={loading} />
-          <LiveFeedDiagnosticsPanel audit={providerCoverageAudit} />
-          <LiveFeedTestPanel />
-          <RenderingSourceDiagnosticsPanel audit={renderSourceAudit} />
-        </>
-      ) : null}
-
-      <HistoricalCoverageBanner audit={statsAttachmentAudit} loading={loading} />
-
-      {debugPanelsVisible ? (
-        <VerificationFailureBreakdown
-          filterDiagnostics={verificationFilterDiagnostics || topMlbPlayBoard?.filterDiagnostics}
-          heavyAuditEnabled
-        />
-      ) : null}
-
-      <ApiSetupBanner onOpenSettings={() => setAppView("settings")} />
-
-      <ProjectionProviderWarning status={debugInfo?.projectionProvider} />
 
       {learningSaveNotice ? <p className="compact-form-notice">{learningSaveNotice}</p> : null}
 
@@ -202,6 +155,47 @@ function DfsAnalyzerLayout({
           />
         </SectionErrorBoundary>
       ) : null}
+
+      <ProviderFeedModeBanner
+        apiHealth={apiHealth}
+        connectionReport={connectionReport}
+        audit={providerCoverageAudit}
+        renderSourceAudit={renderSourceAudit}
+        loading={loading}
+      />
+
+      {debugPanelsVisible ? (
+        <>
+          <LiveBoardPipelineBanner
+            trace={liveBoardPipelineTrace}
+            renderSourceAudit={renderSourceAudit}
+            loading={loading}
+          />
+          <ProviderFailureReasons audit={providerCoverageAudit} />
+          <SystemStatusCard
+            apiHealth={apiHealth}
+            mlbPipelineStatus={mlbPipelineStatus}
+            connectionReport={connectionReport}
+            onConnectionReportChange={handleConnectionReportChange}
+            feedHealthContext={feedHealthContext}
+            pipelineProjectionStats={pipelineRenderCounts?.projectionStats ?? null}
+          />
+          <ProviderCoverageAuditSection audit={providerCoverageAudit} loading={loading} />
+          <LiveFeedDiagnosticsPanel audit={providerCoverageAudit} />
+          <LiveFeedTestPanel />
+          <RenderingSourceDiagnosticsPanel audit={renderSourceAudit} />
+          <VerificationFailureBreakdown
+            filterDiagnostics={verificationFilterDiagnostics || topMlbPlayBoard?.filterDiagnostics}
+            heavyAuditEnabled
+          />
+        </>
+      ) : null}
+
+      <HistoricalCoverageBanner audit={statsAttachmentAudit} loading={loading} />
+
+      <ApiSetupBanner onOpenSettings={() => setAppView("settings")} />
+
+      <ProjectionProviderWarning status={debugInfo?.projectionProvider} />
 
       <SettingsPanel
         onSaved={onSettingsSaved}

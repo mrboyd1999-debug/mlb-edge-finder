@@ -1,5 +1,4 @@
-import { memo, useEffect, useState } from "react";
-import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
+import { memo, useEffect } from "react";
 import PlayerImage from "./PlayerImage.jsx";
 import { styles } from "../theme/styles.js";
 import { formatNumber } from "../utils/formatters.js";
@@ -12,16 +11,8 @@ import {
 import { displayFullMarketLabel } from "../utils/propLabels.js";
 import { resolveProjectionValue } from "../utils/projectionQuality.js";
 import { formatEdgeDisplay } from "../utils/conservativeProjection.js";
-import { formatBestPlayProjectionSource } from "../utils/bestPlayExplanation.js";
-import {
-  formatHitRatePercent,
-  validatePickDirectionBeforeRender,
-} from "../utils/pickDirectionAudit.js";
-import { resolveRecommendedSide, resolveFinalTierLabel } from "../utils/boardQuality.js";
-import { resolveSeasonHitRateBundle } from "../utils/seasonHitRate.js";
-import ProjectionSanityAuditPanel from "./ProjectionSanityAuditPanel.jsx";
-import DataSourceTag from "./DataSourceTag.jsx";
-import { safeArray, safeFixed } from "../utils/safeStats.js";
+import { validatePickDirectionBeforeRender } from "../utils/pickDirectionAudit.js";
+import { resolveRecommendedSide, resolveFinalTier } from "../utils/boardQuality.js";
 
 function resolveLeanSideLabel(prop = {}, recommendedSide = "PASS") {
   if (recommendedSide === "UNDER") return "Lower";
@@ -37,10 +28,8 @@ function BestPlayRowCard({
   onOpen,
   rank,
   grouped = false,
-  cacheStatus = "",
   cardVariant = "default",
 }) {
-  const [auditOpen, setAuditOpen] = useState(false);
   const enriched = withPlayerImageUrl(prop || {});
 
   useEffect(() => {
@@ -50,7 +39,6 @@ function BestPlayRowCard({
   const side = resolvePickSide(enriched);
   const sidePalette = recommendationPalette(side);
   const playerName = enriched.playerName || enriched.player || "Unknown";
-  const teamLabel = enriched.team || enriched.teamAbbr || "—";
   const propType = enriched.propType || enriched.statType || enriched.market || displayFullMarketLabel(enriched);
   const line = formatNumber(enriched.line);
   const recommendedSide = resolveRecommendedSide(enriched);
@@ -63,7 +51,7 @@ function BestPlayRowCard({
       : recommendedSide;
   const probability = enriched.probabilityScore ?? enriched.verifiedProbability ?? 0;
   const probLabel = Number.isFinite(Number(probability)) ? `${Math.round(Number(probability))}%` : "—";
-  const tierLabel = resolveFinalTierLabel(enriched);
+  const tierLabel = `Tier ${resolveFinalTier(enriched)}`;
   const displayConfidenceScore = enriched.displayConfidenceScore ?? enriched.confidenceScore ?? enriched.confidence;
   const confidenceLabel = Number.isFinite(Number(displayConfidenceScore))
     ? `${Math.round(Number(displayConfidenceScore))}%`
@@ -71,93 +59,13 @@ function BestPlayRowCard({
   const edgeLabels = enriched.rawEdgeLabel
     ? { rawEdgeLabel: enriched.rawEdgeLabel, displayEdgeLabel: enriched.displayEdgeLabel }
     : formatEdgeDisplay(enriched);
-  const rankingScore =
-    enriched.bestPlayRankingScore ??
-    enriched.topPickScore ??
-    enriched.verifiedRankingScore ??
-    enriched.weightedBestPlayScore;
-  const rankingLabel = Number.isFinite(Number(rankingScore)) ? safeFixed(rankingScore, 1) : "—";
-  const rankingPenalties = enriched.rankingPenalties;
-  const finalRankReason = enriched.finalRankReason || enriched.rankingReason || enriched.topPickRankingReason || "";
-  const playabilityLabel = Number.isFinite(Number(enriched.playabilityScore))
-    ? `${Math.round(Number(enriched.playabilityScore))}`
-    : "—";
-  const rankingReason = finalRankReason;
   const projection = resolveProjectionValue(enriched);
   const projectionLabel = projection != null && projection > 0 ? formatNumber(projection) : "—";
-  const lean = enriched.lean || "Pass";
-  const explanation = enriched.verifiedPlayExplanation;
-  const hitRates = enriched.hitRateSnapshot || prop.hitRateSnapshot;
-  const last5HitRate = hitRates?.last5Label && hitRates.last5Label !== "—" ? hitRates.last5Label : "—";
-  const last10HitRate =
-    hitRates?.last10Label && hitRates.last10Label !== "—"
-      ? hitRates.last10Label
-      : formatHitRatePercent(enriched.last10HitRate ?? enriched.recentHitRate ?? null);
-  const seasonBundle = resolveSeasonHitRateBundle(enriched);
-  const seasonHitRate = seasonBundle.displayLabel;
-  const isVerifiedPlay = Boolean(
-    enriched.verified ||
-      enriched.tier === "A" ||
-      enriched.tier === "B" ||
-      enriched.verifiedTier === "A" ||
-      enriched.verifiedTier === "B" ||
-      enriched.pickTierLabel === "Verified Play"
-  );
-  const probabilityAudit = enriched.probabilityAudit || explanation?.probabilityAudit;
-  const edgeValidation = enriched.edgeValidation;
-  const matchupAudit = enriched.matchupAudit;
-  const projectionSource =
-    explanation?.projectionSource ||
-    enriched.projectionSourceLabel ||
-    formatBestPlayProjectionSource(enriched);
-  const statsLine = explanation?.statsLine || "";
-  const projectionSanityAudit = enriched.projectionSanityAudit;
-  const projectionFormulaAudit = enriched.projectionFormulaAudit;
-  const playabilityBreakdown = enriched.playabilityBreakdown ?? enriched.playabilityAudit;
-  const projectionValidation =
-    enriched.projectionValidation || enriched.projectionSanityAudit?.marketValidation || null;
-  const projectionOutlierWarning =
-    enriched.projectionOutlierWarning ||
-    projectionValidation?.outlierWarning ||
-    enriched.projectionSanityAudit?.outlierWarning ||
-    "";
-  const projectionValidationConfidence =
-    enriched.projectionValidationConfidence ||
-    projectionValidation?.projectionConfidence ||
-    enriched.projectionSanityAudit?.projectionValidationConfidence;
-  const projectionRisk =
-    enriched.projectionRisk ||
-    projectionValidation?.projectionRisk ||
-    enriched.projectionSanityAudit?.projectionRisk;
-  const filterReason = enriched.bestPlayFilterReason || enriched.bestPlayExclusionReason || "";
-  const reason =
-    explanation?.reason ||
-    enriched.qualifyReason ||
-    enriched.whyThisPick ||
-    enriched.marketContext ||
-    rankingReason ||
-    "";
-  const hasAuditDetails = Boolean(
-    probabilityAudit ||
-      edgeValidation ||
-      matchupAudit ||
-      statsLine ||
-      rankingReason ||
-      projectionSanityAudit?.supported ||
-      projectionFormulaAudit ||
-      playabilityBreakdown ||
-      isVerifiedPlay
-  );
   const isValueUnder = cardVariant === "valueUnder";
 
   function openDetails(event) {
     event?.stopPropagation?.();
     onOpen?.(enriched);
-  }
-
-  function toggleAudit(event) {
-    event?.stopPropagation?.();
-    setAuditOpen((open) => !open);
   }
 
   return (
@@ -182,8 +90,6 @@ function BestPlayRowCard({
           <div className="best-play-row-top-line">
             {rank != null ? <span style={styles.bestPlayRowRank}>#{rank}</span> : null}
             {!grouped ? <h3 style={styles.bestPlayRowPlayer}>{playerName}</h3> : null}
-            {!grouped ? <span className="best-play-row-team">{teamLabel}</span> : null}
-            {!grouped ? <DataSourceTag prop={enriched} cacheStatus={cacheStatus} compact /> : null}
           </div>
           {grouped ? (
             <p style={styles.bestPlayRowSubline}>Line {line}</p>
@@ -194,191 +100,24 @@ function BestPlayRowCard({
           )}
           <div className="prop-card-core-metrics prop-card-core-metrics--mobile" style={{ marginTop: 4 }}>
             <span>
+              Tier <strong>{tierLabel}</strong>
+            </span>
+            <span>
+              {isValueUnder ? "Side" : "Side"} <strong>{isValueUnder ? leanSideLabel : sideLabel}</strong>
+            </span>
+            <span>
               Projection <strong>{projectionLabel}</strong>
             </span>
             <span>
-              {isValueUnder ? "Side" : "Higher/Lower"} <strong>{leanSideLabel}</strong>
-            </span>
-            <span>
-              Confidence <strong>{confidenceLabel}</strong>
+              Edge <strong>{edgeLabels?.displayEdgeLabel ?? "—"}</strong>
             </span>
             <span>
               Probability <strong>{probLabel}</strong>
             </span>
             <span>
-              Tier <strong>{tierLabel}</strong>
+              Confidence <strong>{confidenceLabel}</strong>
             </span>
           </div>
-          {isValueUnder && reason ? (
-            <p className="best-play-row-reason" style={{ ...styles.bestPlayRowSubline, marginTop: 4, fontSize: 11 }}>
-              Reason: <strong>{reason}</strong>
-            </p>
-          ) : null}
-          {filterReason ? (
-            <p className="best-play-row-filter-reason" style={{ ...styles.bestPlayRowSubline, marginTop: 4, fontSize: 11 }}>
-              {filterReason}
-            </p>
-          ) : null}
-          {projectionOutlierWarning ? (
-            <p
-              className="best-play-row-outlier-warning"
-              style={{ ...styles.bestPlayRowSubline, marginTop: 4, fontSize: 11, color: "#fbbf24" }}
-            >
-              {projectionOutlierWarning}
-              {projectionValidationConfidence ? ` · Confidence ${projectionValidationConfidence}` : ""}
-              {projectionRisk ? ` · Risk ${projectionRisk}` : ""}
-            </p>
-          ) : null}
-          {hasAuditDetails ? (
-            <div className="best-play-audit-toggle-wrap">
-              <button
-                type="button"
-                className="best-play-audit-toggle"
-                aria-expanded={auditOpen}
-                onClick={toggleAudit}
-              >
-                {auditOpen ? "Hide Audit" : "Show Audit"}
-              </button>
-            </div>
-          ) : null}
-          {auditOpen ? (
-            <div className="best-play-audit-panel" onClick={(event) => event.stopPropagation()}>
-              <div className="prop-card-core-metrics prop-card-core-metrics--audit">
-                <span>
-                  Edge <strong>{edgeLabels?.displayEdgeLabel ?? "—"}</strong>
-                </span>
-                <span>
-                  Lean <strong>{lean}</strong>
-                </span>
-                <span>
-                  Play <strong>{playabilityLabel}</strong>
-                </span>
-                <span>
-                  Score <strong>{rankingLabel}</strong>
-                </span>
-                <span>
-                  Status <strong>{tierLabel}</strong>
-                </span>
-              </div>
-              <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 11 }}>
-                Projection Source: <strong>{projectionSource}</strong>
-              </p>
-              {projectionSanityAudit?.supported ? (
-                <SectionErrorBoundary name="Projection Sanity">
-                  <ProjectionSanityAuditPanel audit={projectionSanityAudit} compact />
-                </SectionErrorBoundary>
-              ) : null}
-              {projectionFormulaAudit ? (
-                <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 10 }}>
-                  Formula: {projectionFormulaAudit.formulaPath || projectionFormulaAudit.formula || "—"}
-                  {projectionFormulaAudit.projectionFormulaErrorReason
-                    ? ` · ${projectionFormulaAudit.projectionFormulaErrorReason}`
-                    : ""}
-                </p>
-              ) : null}
-              {playabilityBreakdown ? (
-                <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 10 }}>
-                  Playability {playabilityLabel} · Confidence {playabilityBreakdown.confidence ?? "—"} · Reliability{" "}
-                  {playabilityBreakdown.reliabilityComponent ?? playabilityBreakdown.projectionComponent ?? "—"} ·
-                  Completeness {playabilityBreakdown.completenessComponent ?? playabilityBreakdown.historicalComponent ?? "—"}
-                </p>
-              ) : null}
-              {isVerifiedPlay && !projectionSanityAudit?.supported ? (
-                <div className="hit-rate-viz" aria-label="Hit rate snapshot">
-                  <span>
-                    Last 5: <strong>{last5HitRate}</strong>
-                  </span>
-                  <span>
-                    Last 10: <strong>{last10HitRate}</strong>
-                  </span>
-                  <span>
-                    Season: <strong>{seasonHitRate}</strong>
-                  </span>
-                </div>
-              ) : null}
-              {probabilityAudit ? (
-                <div className="probability-audit" aria-label="Probability breakdown">
-                  <p className="probability-audit__title">Probability Breakdown</p>
-                  {probabilityAudit.historicalDataWarning ? (
-                    <p className="probability-audit__warning">{probabilityAudit.historicalDataWarning}</p>
-                  ) : null}
-                  <p style={{ ...styles.bestPlayRowSubline, color: "#cbd5e1", marginTop: 2, fontSize: 11 }}>
-                    Recent: <strong>{probabilityAudit.recentHitRate ?? probabilityAudit.last10HitRate ?? hitRates?.last10Label ?? last10HitRate}</strong>
-                    {" · "}
-                    Season: <strong>{seasonHitRate !== "0%" ? seasonHitRate : hitRates?.seasonLabel ?? seasonHitRate}</strong>
-                    {" · "}
-                    Edge: <strong>{probabilityAudit.projectionEdge ?? probabilityAudit.edgeContribution ?? "—"}</strong>
-                    {" · "}
-                    Confidence: <strong>{probabilityAudit.confidence ?? confidenceLabel}</strong>
-                    {" · "}
-                    Playability: <strong>{probabilityAudit.playability ?? playabilityLabel}</strong>
-                  </p>
-                  {probabilityAudit.rawProbability != null || probabilityAudit.calibratedProbability != null ? (
-                    <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 2, fontSize: 10 }}>
-                      Raw: <strong>{probabilityAudit.rawProbability != null ? `${probabilityAudit.rawProbability}%` : "—"}</strong>
-                      {" · "}
-                      Calibrated:{" "}
-                      <strong>
-                        {probabilityAudit.calibratedProbability != null
-                          ? `${probabilityAudit.calibratedProbability}%`
-                          : probabilityAudit.finalProbability != null
-                            ? `${Math.round(Number(probabilityAudit.finalProbability))}%`
-                            : "—"}
-                      </strong>
-                      {probabilityAudit.probabilityTier ? (
-                        <>
-                          {" · "}
-                          Tier: <strong>{probabilityAudit.probabilityTier}</strong>
-                        </>
-                      ) : null}
-                    </p>
-                  ) : null}
-                  {probabilityAudit.finalProbability != null ? (
-                    <p style={{ ...styles.bestPlayRowSubline, color: "#e2e8f0", marginTop: 2, fontSize: 11 }}>
-                      Final Probability: <strong>{Math.round(Number(probabilityAudit.finalProbability))}%</strong>
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
-              {edgeValidation ? (
-                <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 10 }}>
-                  {edgeValidation.formula} → {edgeValidation.substitution}
-                  {edgeValidation.unusuallyLarge ? " · Large edge — verify line scale." : ""}
-                </p>
-              ) : null}
-              {matchupAudit ? (
-                <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 10 }}>
-                  Matchup: {matchupAudit.team} vs {matchupAudit.opponent} · Pitcher {matchupAudit.pitcher} · WHIP{" "}
-                  {matchupAudit.whip || "N/A"} · Venue {matchupAudit.venue} · Score {matchupAudit.matchupScore ?? "—"}
-                </p>
-              ) : null}
-              {statsLine ? (
-                <p style={{ ...styles.bestPlayRowSubline, color: "#cbd5e1", marginTop: 4, fontSize: 11 }}>
-                  {statsLine}
-                </p>
-              ) : null}
-              {!isValueUnder && rankingReason ? (
-                <p style={{ ...styles.bestPlayRowSubline, color: "#e2e8f0", marginTop: 4, fontSize: 11 }}>
-                  {rankingReason}
-                </p>
-              ) : null}
-              {rankingPenalties ? (
-                <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 10 }}>
-                  Ranking score <strong>{rankingLabel}</strong>
-                  {rankingPenalties.outlierPenalty ? ` · Outlier -${rankingPenalties.outlierPenalty}` : ""}
-                  {rankingPenalties.aggressiveRiskPenalty
-                    ? ` · Aggressive -${rankingPenalties.aggressiveRiskPenalty}`
-                    : ""}
-                  {rankingPenalties.missingSeasonPenalty
-                    ? ` · Season -${rankingPenalties.missingSeasonPenalty}`
-                    : ""}
-                  {rankingPenalties.sampleSizePenalty
-                    ? ` · Sample -${rankingPenalties.sampleSizePenalty}`
-                    : ""}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
         </div>
       </div>
 

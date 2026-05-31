@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { buildPickExplanation, propPayoutLabel } from "../services/projectionEngine.js";
-import { isReadyToBet, READY_MIN_CONFIDENCE, READY_MIN_DATA_QUALITY, PROJECTION_CONFIDENCE_THRESHOLDS } from "../services/pickScoring.js";
 import { readManualStatsForProp } from "../services/pickStore.js";
-import DataQualityBadge from "./DataQualityBadge.jsx";
 import PlayerImage from "./PlayerImage.jsx";
 import ProjectionSanityAuditPanel from "./ProjectionSanityAuditPanel.jsx";
 import ConfidenceComponentsPanel from "./ConfidenceComponentsPanel.jsx";
@@ -11,9 +9,7 @@ import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import {
   formatHitRatePercent,
   resolveBreakdownTitle,
-  resolveProjectionLean,
   resolveProjectionLeanDisplay,
-  resolveProjectionValues,
   validatePickDirectionBeforeRender,
   isVerifiedHighestProbabilityPick,
 } from "../utils/pickDirectionAudit.js";
@@ -43,7 +39,7 @@ import {
   resolveBoardDataQualityBadge,
   resolveBoardDataQualityLabel,
   resolveFinalTier,
-  resolveFinalTierLabel,
+  resolveRecommendedSide,
 } from "../utils/boardQuality.js";
 import { buildHitRateSnapshot } from "../utils/modelValidation.js";
 import { resolveSeasonHitRateBundle, formatSeasonHitRateSource } from "../utils/seasonHitRate.js";
@@ -113,19 +109,6 @@ function formatModalMatchup(prop = {}) {
   return team || opponent || "";
 }
 
-function buildRecommendationSummary(prop = {}) {
-  const lean = resolveProjectionLean(prop);
-  const { projection, line } = resolveProjectionValues(prop);
-  if (lean === "PASS" || projection == null || line == null) return null;
-  const delta = Math.round((projection - line) * 10) / 10;
-  const signedDelta = delta > 0 ? `+${delta}` : `${delta}`;
-  const direction = lean === "HIGHER" ? "above" : "below";
-  return {
-    recommended: lean,
-    reason: `Projection ${formatNumber(projection)} is ${direction} line ${formatNumber(line)} by ${signedDelta}`,
-  };
-}
-
 function buildProbabilityAuditRows(prop = {}, hitRateSnapshot = {}, seasonHitRate = "") {
   const audit = prop.probabilityAudit || {};
   const sampleSizeAdjustment =
@@ -192,9 +175,7 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
         : pickSide === "under"
           ? "Under"
           : formatLeanSide(prop.bestPick || prop.side || "Watch");
-  const ready = prop.isDisplayPlayable !== false && (Boolean(prop.isQualificationAccepted) || isReadyToBet(prop));
-  const tierBadgeLabel = resolveFinalTierLabel(prop);
-  const bandLabel = breakdownMode ? prop.cardPlayLabel || tierBadgeLabel : tierBadgeLabel;
+  const tierBadgeLabel = `Tier ${resolveFinalTier(prop)}`;
   const breakdownTitle = breakdownMode ? resolveBreakdownTitle(prop) : null;
   const projectionSourceLabel = formatBestPlayProjectionSource(prop);
   const last10HitRate = formatHitRatePercent(
@@ -281,7 +262,16 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
   const finalTier = resolveFinalTier(prop);
   const matchupLine = formatModalMatchup(prop);
   const sportLabel = displaySport(prop);
-  const recommendation = buildRecommendationSummary(prop);
+  const recommendedSideLabel = breakdownMode
+    ? (() => {
+        const side = resolveRecommendedSide(prop);
+        if (side === "OVER") return "Higher";
+        if (side === "UNDER") return "Lower";
+        if (lean) return String(lean);
+        return null;
+      })()
+    : lean;
+  const propLabel = prop.statType || prop.propType || prop.market || null;
   const probabilityAuditRows = buildProbabilityAuditRows(prop, hitRateSnapshot, seasonHitRate);
   const probabilityLabel = prop.probabilityScore != null
     ? `${Math.round(Number(prop.probabilityScore))}%`
@@ -346,9 +336,9 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
                 <p className="pick-detail-modal-sport">{sportLabel}</p>
                 <h2 style={{ ...styles.modalTitle, fontSize: "16px", margin: 0 }}>{prop.playerName}</h2>
                 {matchupLine ? <p className="pick-detail-modal-matchup">{matchupLine}</p> : null}
-                <div className="pick-detail-modal-badges">
-                  {manualProp ? (
-                    noVerifiedPlay ? (
+                {manualProp ? (
+                  <div className="pick-detail-modal-badges">
+                    {noVerifiedPlay ? (
                       <>
                         <span style={{ ...styles.scoreBadge, border: "1px solid #475569", background: "#1e293b", color: "#94a3b8", fontSize: "9px", padding: "2px 6px" }}>
                           {prop.displayStatus || NO_VERIFIED_PLAY_STATUS}
@@ -368,16 +358,9 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
                           {payoutLabel}
                         </span>
                       </>
-                    )
-                  ) : (
-                    <>
-                      <span style={styles.segmentActive}>{tierBadgeLabel}</span>
-                      {lean ? <span style={styles.valueTag}>{String(lean).toUpperCase()}</span> : null}
-                      <span style={ready ? styles.segmentActive : styles.segment}>{bandLabel}</span>
-                      <DataQualityBadge badge={badge} />
-                    </>
-                  )}
-                </div>
+                    )}
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
@@ -386,14 +369,7 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
 
         <div className="pick-detail-modal-body">
           {!manualProp && finalTier === "C" ? (
-            <p className="pick-detail-modal-tier-warning">Research Candidate — not a locked play</p>
-          ) : null}
-
-          {!manualProp && recommendation ? (
-            <div className="pick-detail-modal-recommendation">
-              <strong>Recommended: {recommendation.recommended}</strong>
-              <p>Reason: {recommendation.reason}</p>
-            </div>
+            <p className="pick-detail-modal-tier-warning">Tier C — research only, not a locked play</p>
           ) : null}
 
           <div className="pick-detail-modal-summary">
@@ -406,12 +382,14 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
               </>
             ) : (
               <>
+                {breakdownMode ? <SummaryMetric label="Prop" value={propLabel} /> : null}
+                <SummaryMetric label="Recommended side" value={recommendedSideLabel} strong />
                 <SummaryMetric label="Line" value={formatNumber(prop.line)} strong />
                 <SummaryMetric label="Projection" value={projectionLabel} strong />
                 <SummaryMetric label="Edge" value={edgeLabel} strong />
                 <SummaryMetric label="Probability" value={probabilityLabel} strong />
                 <SummaryMetric label="Confidence" value={confidenceLabel} strong />
-                {breakdownMode ? <SummaryMetric label="Prop" value={prop.statType} /> : null}
+                {breakdownMode ? <SummaryMetric label="Tier" value={tierBadgeLabel} strong /> : null}
               </>
             )}
           </div>
@@ -434,13 +412,6 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
               </>
             )}
           </div>
-
-          {!manualProp ? (
-            <>
-              <FlagRow flags={prop.positiveFlags || prop.smartFlags?.positive} tone="positive" />
-              <FlagRow flags={prop.negativeFlags || prop.smartFlags?.negative} tone="negative" />
-            </>
-          ) : null}
 
           {breakdownMode && prop.probabilityAudit ? (
             <>
@@ -484,6 +455,13 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
 
           {showAdvancedDetails ? (
             <div className="pick-detail-modal-audit">
+              {!manualProp ? (
+                <>
+                  <FlagRow flags={prop.positiveFlags || prop.smartFlags?.positive} tone="positive" />
+                  <FlagRow flags={prop.negativeFlags || prop.smartFlags?.negative} tone="negative" />
+                </>
+              ) : null}
+
               {breakdownMode && prop.edgeValidation ? (
                 <div className="pick-detail-modal-section">
                   <strong>Edge validation</strong>

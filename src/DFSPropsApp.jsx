@@ -4163,7 +4163,7 @@ export default function DFSPropsApp() {
 
   const devEnvironment = isDevEnvironment();
   const debugModeEnabled = isDebugModeEnabled();
-  const debugPanelsVisible = debugModeEnabled && showDebugPanels;
+  const debugPanelsVisible = showDebugPanels;
 
   const scoredDisplayProps = useMemo(() => allDisplayProps, [allDisplayProps]);
 
@@ -5159,8 +5159,6 @@ export default function DFSPropsApp() {
       refreshCountdownSec={refreshCountdownSec}
       onRefresh={() => loadProps({ force: true })}
       lastUpdatedLabel={lastUpdatedLabel}
-      showDebugPanels={debugPanelsVisible}
-      onToggleDebugPanels={() => setShowDebugPanels((value) => !value)}
       learningSaveNotice={learningSaveNotice}
       manualAnalyzerProps={manualAnalyzerProps}
       onAnalyzeManualProp={handleAnalyzeManualProp}
