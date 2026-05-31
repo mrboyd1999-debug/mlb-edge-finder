@@ -58,6 +58,7 @@ import {
   compareValueSidePlaysRank,
   TOP_SECTION_LIMIT,
   passesTopFiveBestPlayGate,
+  passesTopFiveEdgeGate,
   buildSafestPlaysSection,
   buildValueUndersSection,
   selectOverallPlay,
@@ -480,7 +481,7 @@ export function resolveTopMlbPlaySections(
   const topHighestEdgePicks = buildTopSectionPicks(boardQualityPool, {
     compareFn: compareHighestEdgePlaysRank,
     limit: TOP_SECTION_LIMIT,
-    filterFn: passesTopFiveBestPlayGate,
+    filterFn: passesTopFiveEdgeGate,
   }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
 
   const valueUndersResult = buildValueUndersSection(boardQualityPool, { limit: TOP_SECTION_LIMIT });
@@ -521,7 +522,7 @@ export function resolveTopMlbPlaySections(
     {
       id: "top-10-best-plays",
       title: "Best Plays",
-      eyebrow: "Top 10 · Tier A/B · Full data · Max 2/player · Max 3/market · Mixed markets",
+      eyebrow: "Top 10 · Tier A → B → Review Needed · Full data · Sort score ranked",
       emptyMessage:
         topBestPlayPicks.length || (bestPlaysResult.diagnostics?.fullData ?? 0) > 0
           ? ""
@@ -532,7 +533,7 @@ export function resolveTopMlbPlaySections(
     {
       id: "top-5-safest",
       title: "Safest Plays",
-      eyebrow: "Tier A/B · Full data · Confidence 75+ · Playability 70+ · Sanity 80+ · Probability 70+",
+      eyebrow: "Tier A only · Full data · Sort score ranked",
       emptyMessage: topSafestPicks.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
       fallbackNotice: safestSectionResult.fallbackNotice || "",
       picks: topSafestPicks,
@@ -540,14 +541,14 @@ export function resolveTopMlbPlaySections(
     {
       id: "top-5-highest-edge",
       title: "Top 5 Highest Edge Plays",
-      eyebrow: "Largest validated projection edge vs line",
+      eyebrow: "Highest validated edge vs line · Any tier · Full data",
       emptyMessage: topHighestEdgePicks.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
       picks: topHighestEdgePicks,
     },
     {
       id: "top-5-value-unders",
       title: "Value Unders",
-      eyebrow: "Projection below line · Confidence 65+ · Playability 60+",
+      eyebrow: "Tier A + B · Projection below line",
       emptyMessage: topValueUnders.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
       picks: topValueUnders,
       cardVariant: "valueUnder",
@@ -555,7 +556,7 @@ export function resolveTopMlbPlaySections(
     {
       id: "top-5-value-overs",
       title: "Top 5 Value Overs",
-      eyebrow: "Best over recommendations by edge and probability",
+      eyebrow: "Tier A + B · Best over recommendations by sort score and edge",
       emptyMessage: topValueOvers.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
       picks: topValueOvers,
     },

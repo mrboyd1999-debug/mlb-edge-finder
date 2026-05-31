@@ -29,7 +29,7 @@ function resolvePitcherIntegrityForRank(prop = {}) {
 }
 
 function isReviewNeededForRank(prop = {}) {
-  return classifyPropTier(prop) === "Review Needed" || Boolean(prop.reviewNeeded && prop.confidenceTier === "Review Needed");
+  return hasIntegrityReviewFlags(prop);
 }
 
 function enforceReviewNeededRankFloor(sorted = [], minRank = 2) {
@@ -189,6 +189,7 @@ import {
   clampValidatedEdgePercent,
   isFullDataProp,
   classifyPropTier,
+  hasIntegrityReviewFlags,
 } from "./boardQuality.js";
 
 const TIER_SORT_ORDER = { A: 0, B: 1, "Review Needed": 2, C: 3, D: 4 };
