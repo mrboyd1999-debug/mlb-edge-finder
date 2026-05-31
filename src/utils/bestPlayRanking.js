@@ -3,12 +3,7 @@
  */
 
 import { resolveProjectionValue, computeAbsoluteProjectionEdge } from "./projectionQuality.js";
-import {
-  computeDisplayPropMetrics,
-  evaluateMlbPlayability,
-  formatEdgeDisplay,
-  isVerifiedPlay,
-} from "./conservativeProjection.js";
+import { formatValidatedEdgeDisplay } from "./boardQuality.js";
 import { computeStandardEdge, computeStandardEdgePercent } from "./standardPropMetrics.js";
 import {
   passesMinimalBestPlaysFilter,
@@ -39,6 +34,12 @@ import { enrichPickDirectionFields, resolveProjectionLeanDisplay } from "./pickD
 import { isPitcherStrikeoutMarket } from "./topMlbPlaysRanking.js";
 import { isMlbPitcherMarket } from "../modules/mlbPitcherData.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
+import { resolveProjectionConfidenceLevel } from "./boardQuality.js";
+import {
+  computeDisplayPropMetrics,
+  evaluateMlbPlayability,
+  isVerifiedPlay,
+} from "./conservativeProjection.js";
 
 export const BEST_PLAYS_MIN_EDGE = 0.015;
 export const BEST_PLAYS_MIN_GAMES = 5;
@@ -280,7 +281,7 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     metrics.edgePercent ?? (edge != null && line > 0 ? computeStandardEdgePercent(edge, line) : null);
   const edgeMagnitude = Number.isFinite(Number(edge)) ? Math.abs(Number(edge)) : resolveEdgeMagnitude(prop);
   const edgeScore = edgeMagnitude;
-  const edgeLabels = playability.edgeDisplay ?? formatEdgeDisplay({ ...prop, edge, edgePercent, line });
+  const edgeLabels = playability.edgeDisplay ?? formatValidatedEdgeDisplay({ ...prop, edge, edgePercent, line });
   const direction =
     leanDirection && leanDirection !== "PASS"
       ? leanDirection
@@ -377,6 +378,7 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
   ranked.rankScore = computeTopPickScore(ranked);
   ranked.weightedBestPlayScore = ranked.topPickScore;
   ranked.verifiedRankingScore = ranked.topPickScore;
+  ranked.projectionConfidenceLevel = resolveProjectionConfidenceLevel(ranked);
   return attachModelValidationFields(
     attachProjectionSanityAudit(ranked, {
       audit: sanityAudit,

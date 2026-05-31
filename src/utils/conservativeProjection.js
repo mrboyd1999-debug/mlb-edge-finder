@@ -5,6 +5,7 @@ import { computeMlbPlayConfidence } from "./mlbPlayConfidence.js";
 import { classifyVerifiedTier } from "./verifiedTierSystem.js";
 import { resolveProjectionLeanDisplay, resolveProjectionLean } from "./pickDirectionAudit.js";
 import { computeCalibratedProbability } from "./probabilityCalibration.js";
+import { formatValidatedEdgeDisplay } from "./boardQuality.js";
 
 export const PICK_TIER_VERIFIED = "Verified Play";
 export const PICK_TIER_RESEARCH = "Research Candidate";
@@ -157,25 +158,7 @@ export function resolveDisplayConfidence(prop = {}, tier = PICK_TIER_RESEARCH, a
 }
 
 export function formatEdgeDisplay(prop = {}) {
-  const line = finiteOr(prop.line, NaN);
-  const raw = finiteOr(prop.edge, NaN);
-  if (!Number.isFinite(raw) || !Number.isFinite(line) || line <= 0) {
-    return { rawEdgeLabel: "—", displayEdgeLabel: "—", relativeEdgeLabel: "—", edgeCapped: false };
-  }
-  const relativePct =
-    finiteOr(prop.relativeEdgePercent, NaN) ||
-    finiteOr(prop.edgePercent, NaN) ||
-    computeRelativeEdgePercent(raw, line);
-  const rawEdgeLabel = `${raw > 0 ? "+" : ""}${round1(raw)}`;
-  const displayEdgeLabel = Number.isFinite(relativePct)
-    ? `${relativePct > 0 ? "+" : ""}${Math.round(relativePct)}%`
-    : "—";
-  return {
-    rawEdgeLabel,
-    displayEdgeLabel,
-    relativeEdgeLabel: displayEdgeLabel,
-    edgeCapped: false,
-  };
+  return formatValidatedEdgeDisplay(prop);
 }
 
 export function resolveResearchReasons(prop = {}) {

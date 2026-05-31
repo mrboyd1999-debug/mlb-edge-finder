@@ -23,8 +23,8 @@ export const CALIBRATION_HISTOGRAM_BUCKETS = [
 ];
 
 const BLEND_WEIGHTS = {
-  recent: 0.4,
-  season: 0.3,
+  recent: 0.35,
+  season: 0.35,
   edge: 0.2,
   matchup: 0.1,
 };

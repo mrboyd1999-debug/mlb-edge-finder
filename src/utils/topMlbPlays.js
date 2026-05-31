@@ -49,7 +49,16 @@ import {
 } from "../services/mlb/projectionMergePipeline.js";
 import { enrichBestPlayRankingFields } from "./bestPlayRanking.js";
 import { resolveBestPlayProjection, PROJECTION_JOIN_DEBUG, passesVerifiedBestPlaysFilter } from "./bestPlaysPipelineDebug.js";
-import { compareBestPlaysRank, computeTopPickScore } from "./bestPlayRankingScore.js";
+import { compareBestPlaysRank } from "./bestPlayRankingScore.js";
+import {
+  dedupeByPlayerMarketBestScore,
+  applyPlayerDiversityFilter,
+  buildTopSectionPicks,
+  compareSafestPlaysRank,
+  compareHighestEdgePlaysRank,
+  compareValueSidePlaysRank,
+  TOP_SECTION_LIMIT,
+} from "./boardQuality.js";
 import {
   selectStartupProjectionCandidates,
   STARTUP_PROJECTION_CANDIDATE_LIMIT,
@@ -240,26 +249,9 @@ function statKey(prop = {}) {
     .toLowerCase();
 }
 
-function buildPlayerMarketKey(prop = {}) {
-  return `${playerKey(prop)}|${statKey(prop)}`;
-}
+export { dedupeByPlayerMarketBestScore } from "./boardQuality.js";
 
-/** Keep highest-scoring prop per player+market (removes duplicate Juan Soto lines). */
-export function dedupeByPlayerMarketBestScore(props = [], scoreFn = computeTopPickScore) {
-  const best = new Map();
-  for (const prop of props || []) {
-    const key = buildPlayerMarketKey(prop);
-    if (!key || key === "|") continue;
-    const score = Number(scoreFn(prop)) || 0;
-    const prev = best.get(key);
-    if (!prev || score > (Number(scoreFn(prev)) || 0)) {
-      best.set(key, prop);
-    }
-  }
-  return [...best.values()];
-}
-
-export function buildRankableParlayPicks(ranked = [], limit = SECTION_PARLAY) {
+export function buildRankableParlayPicks(ranked = [], limit = SECTION_BEST_PLAYS) {
   const selected = [];
   const usedPlayers = new Set();
   const usedStats = new Set();
@@ -439,12 +431,36 @@ export function resolveTopMlbPlaySections(
   verifiedPicks = dedupeByPlayerMarketBestScore(verifiedPicks);
   highestPicks = dedupeByPlayerMarketBestScore(highestPicks);
 
-  const topBestPlayPicks = dedupeByPlayerMarketBestScore(
+  const boardQualityPool = dedupeByPlayerMarketBestScore(
     historicalPool.filter(passesVerifiedBestPlaysFilter).map((prop) => enrichBestPlayRankingFields(prop))
-  )
-    .sort(compareBestPlaysRank)
-    .slice(0, TOP_BEST_PLAYS_LIMIT)
-    .map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
+  );
+
+  const topBestPlayPicks = applyPlayerDiversityFilter([...boardQualityPool].sort(compareBestPlaysRank), {
+    limit: TOP_BEST_PLAYS_LIMIT,
+    maxPerPlayer: MAX_PLAYER_APPEARANCES,
+  }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
+
+  const topSafestPicks = buildTopSectionPicks(boardQualityPool, {
+    compareFn: compareSafestPlaysRank,
+    limit: TOP_SECTION_LIMIT,
+  }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
+
+  const topHighestEdgePicks = buildTopSectionPicks(boardQualityPool, {
+    compareFn: compareHighestEdgePlaysRank,
+    limit: TOP_SECTION_LIMIT,
+  }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
+
+  const topValueUnders = buildTopSectionPicks(boardQualityPool, {
+    compareFn: compareValueSidePlaysRank,
+    side: "UNDER",
+    limit: TOP_SECTION_LIMIT,
+  }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
+
+  const topValueOvers = buildTopSectionPicks(boardQualityPool, {
+    compareFn: compareValueSidePlaysRank,
+    side: "OVER",
+    limit: TOP_SECTION_LIMIT,
+  }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
 
   filterDiagnostics.selected = highestPicks.length;
   filterDiagnostics.eligible = strictEligible;
@@ -472,9 +488,37 @@ export function resolveTopMlbPlaySections(
     {
       id: "top-10-best-plays",
       title: "Top 10 Best Plays",
-      eyebrow: "Sorted by probability, confidence, then projection edge",
+      eyebrow: "Sorted by probability, confidence, then projection edge · Max 2 props per player",
       emptyMessage: topBestPlayPicks.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
       picks: topBestPlayPicks,
+    },
+    {
+      id: "top-5-safest",
+      title: "Top 5 Safest Plays",
+      eyebrow: "Highest calibrated probability with strong confidence",
+      emptyMessage: topSafestPicks.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
+      picks: topSafestPicks,
+    },
+    {
+      id: "top-5-highest-edge",
+      title: "Top 5 Highest Edge Plays",
+      eyebrow: "Largest validated projection edge vs line",
+      emptyMessage: topHighestEdgePicks.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
+      picks: topHighestEdgePicks,
+    },
+    {
+      id: "top-5-value-unders",
+      title: "Top 5 Value Unders",
+      eyebrow: "Best under recommendations by edge and probability",
+      emptyMessage: topValueUnders.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
+      picks: topValueUnders,
+    },
+    {
+      id: "top-5-value-overs",
+      title: "Top 5 Value Overs",
+      eyebrow: "Best over recommendations by edge and probability",
+      emptyMessage: topValueOvers.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
+      picks: topValueOvers,
     },
     {
       id: "verified-plays",

@@ -1564,6 +1564,61 @@ body,
   }
 }
 
+.prop-card-core-metrics--compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 640px) {
+  .prop-card-core-metrics--compact {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.prop-card-core-metrics--audit {
+  margin-top: 8px;
+}
+
+.best-play-confidence {
+  letter-spacing: 0.04em;
+}
+
+.best-play-confidence--high {
+  color: #86efac !important;
+}
+
+.best-play-confidence--medium {
+  color: #fde68a !important;
+}
+
+.best-play-confidence--low {
+  color: #fca5a5 !important;
+}
+
+.best-play-audit-toggle-wrap {
+  margin-top: 6px;
+}
+
+.best-play-audit-toggle {
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #94a3b8;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.best-play-audit-toggle:hover {
+  border-color: #475569;
+  color: #cbd5e1;
+}
+
+.best-play-audit-panel {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #334155;
+}
+
 .player-prop-group-list {
   display: grid;
   gap: 12px;

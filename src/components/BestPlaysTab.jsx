@@ -15,6 +15,44 @@ function findSection(sections, id) {
   return (sections || []).find((row) => row.id === id) || null;
 }
 
+function BestPlaysSection({ section, onOpen, cacheStatus = "", sortFn = null, limit = null }) {
+  const picks = useMemo(() => {
+    const rows = safeArray(section?.picks);
+    const sorted = sortFn ? [...rows].sort(sortFn) : rows;
+    return limit != null ? sorted.slice(0, limit) : sorted;
+  }, [section, sortFn, limit]);
+
+  if (!section) return null;
+
+  return (
+    <section className="compact-section">
+      <div className="compact-section__head">
+        <h2>{section.title}</h2>
+        {section.eyebrow ? <p>{section.eyebrow}</p> : null}
+      </div>
+      {picks.length ? (
+        <div className="compact-card-list">
+          {picks.map((prop, index) => (
+            <SectionErrorBoundary
+              key={prop?.id || `${prop?.playerName}-${prop?.statType}-${prop?.line}-${index}`}
+              name={`${section.title} #${index + 1}`}
+            >
+              <BestPlayRowCard
+                prop={prop}
+                rank={index + 1}
+                onOpen={onOpen}
+                cacheStatus={cacheStatus}
+              />
+            </SectionErrorBoundary>
+          ))}
+        </div>
+      ) : (
+        <p className="compact-empty">{section.emptyMessage || NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE}</p>
+      )}
+    </section>
+  );
+}
+
 function BestPlaysTab({
   sections = [],
   loading = false,
@@ -27,6 +65,10 @@ function BestPlaysTab({
 }) {
   const topBestPlaysSection = useMemo(() => findSection(sections, "top-10-best-plays"), [sections]);
   const verifiedSection = useMemo(() => findSection(sections, "verified-plays"), [sections]);
+  const safestSection = useMemo(() => findSection(sections, "top-5-safest"), [sections]);
+  const highestEdgeSection = useMemo(() => findSection(sections, "top-5-highest-edge"), [sections]);
+  const valueUndersSection = useMemo(() => findSection(sections, "top-5-value-unders"), [sections]);
+  const valueOversSection = useMemo(() => findSection(sections, "top-5-value-overs"), [sections]);
 
   const topBestPlays = useMemo(() => {
     return safeArray(topBestPlaysSection?.picks).sort(compareBestPlaysRank).slice(0, 10);
@@ -67,77 +109,36 @@ function BestPlaysTab({
         <p className="compact-empty">{NO_LIVE_VERIFIED_PROPS_MESSAGE}</p>
       ) : (
         <>
-      {failureReason && !verifiedPicks.length && !topBestPlays.length ? (
-        <p className="compact-form-notice">{failureReason}</p>
-      ) : null}
+          {failureReason && !verifiedPicks.length && !topBestPlays.length ? (
+            <p className="compact-form-notice">{failureReason}</p>
+          ) : null}
 
-      {heroPlay ? (
-        <SectionErrorBoundary name="Hero Card">
-          <BestPlayHeroCard prop={heroPlay} onOpen={onOpen} cacheStatus={cacheStatus} />
-        </SectionErrorBoundary>
-      ) : null}
+          {heroPlay ? (
+            <SectionErrorBoundary name="Hero Card">
+              <BestPlayHeroCard prop={heroPlay} onOpen={onOpen} cacheStatus={cacheStatus} />
+            </SectionErrorBoundary>
+          ) : null}
 
-      <section className="compact-section">
-        <div className="compact-section__head">
-          <h2>{topBestPlaysSection?.title || "Top 10 Best Plays"}</h2>
-          <p>
-            {topBestPlaysSection?.eyebrow ||
-              "Top 10 sorted by probability, confidence, then projection edge"}
-          </p>
-        </div>
-        {topBestPlays.length ? (
-          <div className="compact-card-list">
-            {topBestPlays.map((prop, index) => (
-              <SectionErrorBoundary
-                key={prop?.id || `${prop?.playerName}-${prop?.statType}-${prop?.line}-${index}`}
-                name={`Best Play #${index + 1}`}
-              >
-                <BestPlayRowCard
-                  prop={prop}
-                  rank={index + 1}
-                  onOpen={onOpen}
-                  cacheStatus={cacheStatus}
-                />
-              </SectionErrorBoundary>
-            ))}
-          </div>
-        ) : (
-          <p className="compact-empty">
-            {topBestPlaysSection?.emptyMessage || NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE}
-          </p>
-        )}
-      </section>
+          <BestPlaysSection
+            section={topBestPlaysSection}
+            onOpen={onOpen}
+            cacheStatus={cacheStatus}
+            sortFn={compareBestPlaysRank}
+            limit={10}
+          />
 
-      <section className="compact-section">
-        <div className="compact-section__head">
-          <h2>{verifiedSection?.title || "Top Verified Plays"}</h2>
-          <p>
-            {verifiedSection?.eyebrow ||
-              `Top ${VERIFIED_DISPLAY_MAX} sorted by playability, confidence, probability, then edge`}
-          </p>
-        </div>
-        {verifiedPicks.length ? (
-          <div className="compact-card-list">
-            {verifiedPicks.map((prop, index) => (
-              <SectionErrorBoundary
-                key={prop?.id || `${prop?.playerName}-${prop?.statType}-${prop?.line}-${index}`}
-                name={`Verified Play #${index + 1}`}
-              >
-                <BestPlayRowCard
-                  prop={prop}
-                  rank={index + 1}
-                  onOpen={onOpen}
-                  cacheStatus={cacheStatus}
-                />
-              </SectionErrorBoundary>
-            ))}
-          </div>
-        ) : (
-          <p className="compact-empty">
-            {verifiedSection?.emptyMessage || NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE}
-          </p>
-        )}
-      </section>
+          <BestPlaysSection section={safestSection} onOpen={onOpen} cacheStatus={cacheStatus} limit={5} />
+          <BestPlaysSection section={highestEdgeSection} onOpen={onOpen} cacheStatus={cacheStatus} limit={5} />
+          <BestPlaysSection section={valueUndersSection} onOpen={onOpen} cacheStatus={cacheStatus} limit={5} />
+          <BestPlaysSection section={valueOversSection} onOpen={onOpen} cacheStatus={cacheStatus} limit={5} />
+
+          <BestPlaysSection
+            section={verifiedSection}
+            onOpen={onOpen}
+            cacheStatus={cacheStatus}
+            sortFn={compareVerifiedPlaysRank}
+            limit={VERIFIED_DISPLAY_MAX}
+          />
         </>
       )}
     </div>
