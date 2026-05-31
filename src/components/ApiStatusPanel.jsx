@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { getApiHealthStatus, apiStatusStyle } from "../utils/apiHealth.js";
+import { getPrizePicksUsableCount, getUnderdogUsableCount } from "../utils/providerCounts.js";
 
 const STATUS_ROWS = [
   "Odds API",
@@ -48,10 +49,36 @@ function ApiStatusPanel({
       <ul className="api-status-panel__list">
         {STATUS_ROWS.map((provider) => {
           const row = rowByProvider.get(provider) || { provider, status: "—", color: "yellow" };
+          const usableCount =
+            provider === "PrizePicks"
+              ? getPrizePicksUsableCount({
+                  ppCounts: feedHealthContext?.prizepicksPropCounts,
+                  audit: feedHealthContext?.providerCoverageAudit,
+                  pipelinePropCountAudit: pipelinePropCountAudit,
+                  debugSources,
+                })
+              : provider === "Underdog"
+                ? getUnderdogUsableCount({
+                    udCounts: feedHealthContext?.underdogPropCounts,
+                    audit: feedHealthContext?.providerCoverageAudit,
+                    pipelinePropCountAudit: pipelinePropCountAudit,
+                    debugSources,
+                  })
+                : 0;
+          const detail =
+            usableCount > 0 && row.detail !== `${usableCount} props`
+              ? `${usableCount} props`
+              : row.detail;
+          const status =
+            usableCount > 0 && /unavailable|failed|0 props/i.test(String(row.status))
+              ? "Connected"
+              : row.status;
           return (
             <li key={provider} className="api-status-panel__row">
               <span className="api-status-panel__provider">{provider}</span>
-              <span style={apiStatusStyle(row.color)}>{row.status}</span>
+              <span style={apiStatusStyle(row.color)}>
+                {detail ? `${status} — ${detail}` : status}
+              </span>
             </li>
           );
         })}

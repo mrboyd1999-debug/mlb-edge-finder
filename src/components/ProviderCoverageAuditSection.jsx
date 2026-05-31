@@ -11,6 +11,11 @@ function MetricRow({ label, value }) {
 }
 
 function ProviderCoverageAuditSection({ audit = null, loading = false }) {
+  const ppUsable = Number(audit?.prizepicksUsable ?? 0);
+  const udUsable = Number(audit?.underdogUsable ?? 0);
+  const ppRaw = Number(audit?.prizepicksFetched ?? 0);
+  const ppParsed = Number(audit?.prizepicksParsed ?? 0);
+
   return (
     <section className="provider-coverage-audit-section" aria-label="Provider coverage audit">
       <div className="provider-coverage-audit-section__head">
@@ -20,6 +25,21 @@ function ProviderCoverageAuditSection({ audit = null, loading = false }) {
         ) : null}
       </div>
       {loading && !audit ? <p className="provider-coverage-audit-section__note">Loading provider counts…</p> : null}
+      {ppUsable > 0 ? (
+        <p className="provider-coverage-audit-section__note">
+          PrizePicks Status: {audit?.prizepicksLiveStatus || "Connected"} — {ppUsable} props
+          {audit?.prizepicksStatusNote
+            ? ` (${audit.prizepicksStatusNote})`
+            : ppRaw === 0 && ppParsed > 0
+              ? " (Connected from parsed payload)"
+              : ""}
+        </p>
+      ) : null}
+      {udUsable > 0 ? (
+        <p className="provider-coverage-audit-section__note">
+          Underdog Status: {audit?.underdogLiveStatus || "Connected"} — {udUsable} props
+        </p>
+      ) : null}
       <div className="provider-coverage-audit-section__grid">
         <MetricRow label="PrizePicks Raw" value={audit?.prizepicksFetched} />
         <MetricRow label="PrizePicks Parsed" value={audit?.prizepicksParsed} />
@@ -38,12 +58,12 @@ function ProviderCoverageAuditSection({ audit = null, loading = false }) {
           {audit.integrityWarning}
         </p>
       ) : null}
-      {audit?.prizepicksFailurePoint && !(Number(audit?.prizepicksUsable) > 0) ? (
+      {audit?.prizepicksFailurePoint && !(ppUsable > 0) ? (
         <p className="provider-coverage-audit-section__note">
           PrizePicks root cause: {audit.prizepicksExactFailure || audit.prizepicksFailurePoint}
         </p>
       ) : null}
-      {audit?.underdogFailurePoint && !(Number(audit?.underdogUsable) > 0) ? (
+      {audit?.underdogFailurePoint && !(udUsable > 0) ? (
         <p className="provider-coverage-audit-section__note">
           Underdog root cause: {audit.underdogExactFailure || audit.underdogFailurePoint}
         </p>

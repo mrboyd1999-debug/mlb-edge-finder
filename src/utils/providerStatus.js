@@ -3,6 +3,27 @@
  */
 
 import { getPrizePicksDiagnostics } from "./prizepicksDiagnostics.js";
+import {
+  getPrizePicksUsableCount,
+  getUnderdogUsableCount,
+  getPrizePicksRawCount,
+  getPrizePicksParsedCount,
+  getUnderdogRawCount,
+  getUnderdogParsedCount,
+  resolvePrizePicksConnectionStatus,
+  resolveUnderdogConnectionStatus,
+} from "./providerCounts.js";
+
+export {
+  getPrizePicksUsableCount,
+  getUnderdogUsableCount,
+  getPrizePicksRawCount,
+  getPrizePicksParsedCount,
+  getUnderdogRawCount,
+  getUnderdogParsedCount,
+  resolvePrizePicksConnectionStatus,
+  resolveUnderdogConnectionStatus,
+} from "./providerCounts.js";
 
 export const PROVIDER_STATUS_COLOR = {
   GREEN: "green",
@@ -60,7 +81,7 @@ export function resolvePrizePicksPropCounts({
     finite(prizePicksResult?.debug?.normalizedCount)
   );
   const parsedPrizePicksProps = Math.max(
-    finite(feed.parsedCount ?? feed.propsAfterParsing),
+    finite(feed.parsed ?? feed.parsedCount ?? feed.propsAfterParsing),
     finite(contextFeed.parsedCount ?? contextFeed.propsAfterParsing),
     finite(sourceRow.propsAfterParsing ?? sourceRow.parsedCount),
     finite(audit.parsedPrizePicks),
@@ -82,94 +103,38 @@ export function resolvePrizePicksPropCounts({
   return { rawPrizePicksProps, normalizedPrizePicksProps, parsedPrizePicksProps, usablePrizePicksProps };
 }
 
-/** Usable PP count — parsed/normalized/props beat raw-only failure checks. */
+/** @deprecated use getPrizePicksUsableCount */
 export function resolvePrizePicksUsableCount(counts = {}, prizePicksProps = 0) {
-  const propsCount = finite(prizePicksProps);
-  return Math.max(
-    finite(counts.parsedPrizePicksProps),
-    finite(counts.normalizedPrizePicksProps),
-    propsCount,
-    finite(counts.usablePrizePicksProps),
-    finite(counts.rawPrizePicksProps)
-  );
+  return getPrizePicksUsableCount({
+    ppCounts: counts,
+    prizePicksProps,
+    audit: { prizepicksParsed: prizePicksProps, prizepicksUsable: prizePicksProps },
+  });
 }
 
-/** Usable Underdog count — prefer parsed/usable over raw-only checks. */
+/** @deprecated use getUnderdogUsableCount */
 export function resolveUnderdogUsableCount(counts = {}, underdogProps = 0) {
-  const propsCount = finite(underdogProps);
-  return Math.max(
-    finite(counts.usableUnderdogProps),
-    finite(counts.parsedUnderdogProps),
-    finite(counts.normalizedUnderdogProps),
-    propsCount,
-    finite(counts.rawUnderdogProps)
-  );
+  return getUnderdogUsableCount({
+    udCounts: counts,
+    underdogProps,
+    audit: { underdogParsed: underdogProps, underdogUsable: underdogProps },
+  });
 }
 
-export function resolvePrizePicksLiveFeedStatus(
-  counts = {},
-  { evidence = {}, liveRow = {}, audit = null, usedCache = false } = {}
-) {
-  const usable = resolvePrizePicksUsableCount(
-    counts,
-    audit?.prizepicksParsed ?? audit?.prizepicksUsable ?? 0
-  );
-  if (usable > 0) {
-    const cached = Boolean(usedCache || audit?.prizepicksUsedCache);
-    return {
-      status: cached ? "Connected via cache" : "Connected",
-      failed: false,
-      usable,
-      reason: "",
-      detail: `${usable} props`,
-    };
-  }
-
-  const httpStatus = Number(evidence?.httpStatus ?? liveRow?.httpStatus);
-  const errorText = String(
-    evidence?.error || liveRow?.lastError || audit?.prizepicksFailureReason || ""
-  );
-  let reason = "0 props";
-  if (/timeout/i.test(errorText) || liveRow?.timedOut || audit?.prizepicksTimedOut) reason = "timeout";
-  else if (httpStatus === 403) reason = "403";
-  else if (httpStatus === 404) reason = "404";
-  else if (evidence?.responseSize === 0 || evidence?.emptyPayload) reason = "empty payload";
-  else if (!evidence?.fetchSuccess) reason = "fetch failed";
-
-  return {
-    status: "Failed",
-    failed: true,
-    usable: 0,
-    reason,
-    detail: reason,
-  };
+export function resolvePrizePicksLiveFeedStatus(counts = {}, options = {}) {
+  return resolvePrizePicksConnectionStatus({
+    ppCounts: counts,
+    ...options,
+    audit: options.audit,
+  });
 }
 
-export function resolveUnderdogLiveFeedStatus(
-  counts = {},
-  { audit = null, usedCache = false } = {}
-) {
-  const usable = resolveUnderdogUsableCount(
-    counts,
-    audit?.underdogUsable ?? audit?.underdogParsed ?? 0
-  );
-  if (usable > 0) {
-    const cached = Boolean(usedCache || audit?.underdogUsedCache);
-    return {
-      status: cached ? "Connected via cache" : "Connected",
-      failed: false,
-      usable,
-      reason: "",
-      detail: `${usable} props`,
-    };
-  }
-  return {
-    status: "Failed",
-    failed: true,
-    usable: 0,
-    reason: audit?.underdogFailureReason || "0 props",
-    detail: audit?.underdogFailureReason || "0 props",
-  };
+export function resolveUnderdogLiveFeedStatus(counts = {}, options = {}) {
+  return resolveUnderdogConnectionStatus({
+    udCounts: counts,
+    ...options,
+    audit: options.audit,
+  });
 }
 
 /** Resolve Underdog prop counts from the same cross-source audit fields. */
@@ -208,7 +173,7 @@ export function resolveUnderdogPropCounts({
     finite(underdogResult?.debug?.normalizedCount)
   );
   const parsedUnderdogProps = Math.max(
-    finite(feed.parsedCount ?? feed.propsAfterParsing),
+    finite(feed.parsed ?? feed.parsedCount ?? feed.propsAfterParsing),
     finite(contextFeed.parsedCount ?? contextFeed.propsAfterParsing),
     finite(sourceRow.propsAfterParsing ?? sourceRow.parsedCount),
     finite(audit.parsedUnderdog),
@@ -278,12 +243,12 @@ export function resolvePrizePicksProviderHealth(
     debugSources,
     prizePicksDiagnostics,
   });
-  const propsReturned = Math.max(
-    counts.usablePrizePicksProps,
-    counts.parsedPrizePicksProps,
-    counts.normalizedPrizePicksProps,
-    counts.rawPrizePicksProps
-  );
+  const propsReturned = getPrizePicksUsableCount({
+    ppCounts: counts,
+    feed,
+    debugSources,
+    audit: feedHealthContext,
+  });
   const debug = {
     endpointTested: feed.endpoint || "/prizepicks/props",
     responseCode: feed.httpStatus ?? null,
@@ -295,7 +260,7 @@ export function resolvePrizePicksProviderHealth(
     ...counts,
   };
 
-  if (prizePicksFeedIsConnected(counts)) {
+  if (propsReturned > 0 || prizePicksFeedIsConnected(counts)) {
     return {
       status: "Connected",
       color: PROVIDER_STATUS_COLOR.GREEN,
@@ -309,6 +274,7 @@ export function resolvePrizePicksProviderHealth(
   if (
     alternatePropSourcesAvailable &&
     liveFetchFailed &&
+    propsReturned === 0 &&
     !prizePicksFeedIsConnected(counts)
   ) {
     return {

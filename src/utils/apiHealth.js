@@ -5,6 +5,7 @@
 import { getOddsApiKey, getSportsDataApiKey } from "../services/runtimeSettings.js";
 import { formatDateTime } from "./formatters.js";
 import { resolvePrizePicksProviderHealth, resolveUnderdogPropCounts, underdogFeedIsConnected } from "./providerStatus.js";
+import { getUnderdogUsableCount } from "./providerCounts.js";
 
 export const API_STATUS_COLOR = {
   GREEN: "green",
@@ -234,12 +235,15 @@ function resolveUnderdogHealth(
     underdogProps,
     debugInfo,
   });
-  const propsReturned = Math.max(
-    counts.usableUnderdogProps,
-    counts.parsedUnderdogProps,
-    counts.rawUnderdogProps
-  );
-  const hasProps = underdogFeedIsConnected(counts) || propsReturned > 0;
+  const propsReturned = getUnderdogUsableCount({
+    udCounts: counts,
+    feed,
+    debugSources,
+    debugInfo,
+    audit: feedHealthContext?.providerCoverageAudit,
+    pipelinePropCountAudit,
+  });
+  const hasProps = propsReturned > 0 || underdogFeedIsConnected(counts);
   const live = Boolean(feed.liveHttpOk && !feed.cached && !feed.fallback && hasProps);
   const cacheAgeMs = resolveCacheAgeMs(feed);
   const cacheFresh =
