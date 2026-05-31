@@ -281,6 +281,7 @@ import {
   countHistoricalAttachment,
 } from "./utils/pipelinePropCountAudit.js";
 import { buildProviderCoverageAudit, logProviderCoverageSummary } from "./utils/providerCoverageAudit.js";
+import { buildAndLogPrizePicksPipelineAudit } from "./utils/prizePicksPipelineAudit.js";
 import {
   buildLiveProviderPipelineAudit,
   logLiveProviderPipelineTrace,
@@ -3376,6 +3377,18 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     debugInfo.liveProviderPipelineAudit
   );
   logProviderCoverageSummary(debugInfo.providerCoverageAudit);
+  debugInfo.prizePicksPipelineAudit = buildAndLogPrizePicksPipelineAudit({
+    prizePicksResult,
+    parseProps: resolveProviderResultProps(prizePicksResult),
+    normalizedProps: pipelineTraceNormalizedPool,
+    allDisplayProps,
+    acceptedPropsForRender,
+    pipelinePropCountAudit: debugInfo.pipelinePropCountAudit,
+    debugInfo,
+    allowFallbackRender: Boolean(
+      pipelineFallback && /sportsdata/i.test(String(debugInfo.ingestionFallback || ""))
+    ),
+  });
   logTotalPropsAvailable(debugInfo.providerCoverageAudit.combinedUsable ?? 0, {
     feedMode: debugInfo.providerCoverageAudit.feedMode,
     projectionCandidates: debugInfo.providerCoverageAudit.projectionCandidates,

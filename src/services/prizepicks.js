@@ -141,6 +141,12 @@ export async function fetchPrizePicksProps({ sport = "all", statType = "all", si
   );
 }
 
+function summarizePrizePicksParseDropReason(audit = {}) {
+  const entries = Object.entries(audit.filterReasons || {}).filter(([, count]) => Number(count) > 0);
+  if (!entries.length) return "parser/filter drop";
+  return entries.map(([reason, count]) => `${reason} (${count})`).join(" · ");
+}
+
 function applyPrizePicksAttemptDiagnostics(attempt = {}, parsed = {}, extra = {}) {
   const captchaDetected = Boolean(attempt.captchaDetected);
   const blockedPayloadDetected = Boolean(attempt.blockedPayloadDetected || parsed.blockPayload);
@@ -405,6 +411,22 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
 
       const badgeForParse = isFallback ? "CACHED" : "LIVE";
       const { props: normalizedProps, audit } = normalizePrizePicksPayload(parsed.payload, sport, statType, badgeForParse);
+      const fetchRawCount = Number(audit.fetched ?? rawPrizePicksRecordCount(parsed.payload) ?? 0);
+      console.log("[PP_FETCH]", {
+        input: 0,
+        output: fetchRawCount,
+        dropped: 0,
+        dropReason: fetchRawCount > 0 ? "none" : "empty payload",
+      });
+      console.log("[PP_PARSE]", {
+        input: fetchRawCount,
+        output: normalizedProps.length,
+        dropped: Math.max(0, fetchRawCount - normalizedProps.length),
+        dropReason:
+          fetchRawCount > normalizedProps.length
+            ? summarizePrizePicksParseDropReason(audit)
+            : "none",
+      });
       const usableCount = countUsableProps(normalizedProps);
       const usableMlbCount = MLB_ONLY_MODE
         ? normalizedProps.filter((prop) => String(prop.sport || "").toUpperCase() === "MLB").length
