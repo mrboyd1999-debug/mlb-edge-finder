@@ -52,18 +52,16 @@ import { resolveBestPlayProjection, PROJECTION_JOIN_DEBUG, passesVerifiedBestPla
 import { compareBestPlaysRank } from "./bestPlayRankingScore.js";
 import {
   dedupeByPlayerMarketBestScore,
-  applyBestPlaysDiversityFilter,
   buildTopSectionPicks,
   compareHighestEdgePlaysRank,
   compareValueSidePlaysRank,
   TOP_SECTION_LIMIT,
   passesTopFiveBestPlayGate,
-  passesBestPlayGate,
   buildSafestPlaysSection,
   buildValueUndersSection,
   selectOverallPlay,
   buildOverallPlayExplanation,
-  MIN_UNIQUE_PLAYERS_TOP_10,
+  buildTopBestPlaysPicks,
 } from "./boardQuality.js";
 import {
   selectStartupProjectionCandidates,
@@ -441,12 +439,28 @@ export function resolveTopMlbPlaySections(
     historicalPool.filter(passesVerifiedBestPlaysFilter).map((prop) => enrichBestPlayRankingFields(prop))
   );
 
-  const bestPlaysEligible = boardQualityPool.filter(passesBestPlayGate);
-  const topBestPlayPicks = applyBestPlaysDiversityFilter([...bestPlaysEligible].sort(compareBestPlaysRank), {
+  const projectedCount =
+    engineProjectedPool.length ||
+    Number(selection.pipelineCounts?.withProjections ?? selection.pipelineCounts?.engineProjectedCount ?? 0) ||
+    boardQualityPool.filter((prop) => {
+      const projection = Number(prop.projection ?? prop.projectedValue);
+      return Number.isFinite(projection) && projection > 0;
+    }).length;
+
+  const bestPlaysResult = buildTopBestPlaysPicks(boardQualityPool, {
     limit: TOP_BEST_PLAYS_LIMIT,
+    projectedCount,
     maxPerPlayer: MAX_PLAYER_APPEARANCES,
-    minUniquePlayers: MIN_UNIQUE_PLAYERS_TOP_10,
-  }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
+  });
+  const topBestPlayPicks = bestPlaysResult.picks.map((prop, idx) =>
+    annotateHighestProbabilityPlay(prop, idx + 1)
+  );
+
+  filterDiagnostics.bestPlayFilterAudit = bestPlaysResult.diagnostics;
+  filterDiagnostics.bestPlayRejectionSamples = bestPlaysResult.rejectionSamples;
+  filterDiagnostics.bestPlayQualifiedStrict = bestPlaysResult.qualifiedStrict;
+  filterDiagnostics.bestPlayProjectedCount = projectedCount;
+  filterDiagnostics.bestPlayUsedFallback = bestPlaysResult.usedFallback;
 
   const overallPlayCandidate = selectOverallPlay(boardQualityPool);
   const overallPlay = overallPlayCandidate
@@ -505,8 +519,9 @@ export function resolveTopMlbPlaySections(
     {
       id: "top-10-best-plays",
       title: "Best Plays",
-      eyebrow: "Top 10 · Tier A/B only · Full data · Confidence 70+ · Max 2 props per player",
+      eyebrow: "Top 10 · Tier A/B · Full data · Confidence 65+ · Max 2 props per player",
       emptyMessage: topBestPlayPicks.length ? "" : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
+      fallbackNotice: bestPlaysResult.fallbackNotice || "",
       picks: topBestPlayPicks,
     },
     {

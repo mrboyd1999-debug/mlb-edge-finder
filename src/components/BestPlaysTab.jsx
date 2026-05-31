@@ -3,6 +3,7 @@ import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import BestPlayHeroCard from "./BestPlayHeroCard.jsx";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
 import PerformanceTracker from "./PerformanceTracker.jsx";
+import BestPlayFilterDiagnostics from "./BestPlayFilterDiagnostics.jsx";
 import { compareVerifiedPlaysRank, compareBestPlaysRank } from "../utils/bestPlayRankingScore.js";
 import {
   VERIFIED_DISPLAY_MAX,
@@ -126,6 +127,8 @@ function BestPlaysTab({
               <BestPlayHeroCard prop={heroPlay} onOpen={onOpen} cacheStatus={cacheStatus} />
             </SectionErrorBoundary>
           ) : null}
+
+          <BestPlayFilterDiagnostics filterDiagnostics={filterDiagnostics} />
 
           <BestPlaysSection
             section={topBestPlaysSection}

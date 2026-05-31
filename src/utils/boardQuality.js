@@ -13,15 +13,19 @@ export const SAFEST_MIN_CONFIDENCE = 75;
 export const SAFEST_MIN_PLAYABILITY = 70;
 export const SAFEST_MIN_SANITY = 80;
 export const SAFEST_MIN_PROBABILITY = 70;
-export const VALUE_UNDER_MIN_CONFIDENCE = 65;
+export const VALUE_UNDER_MIN_CONFIDENCE = 60;
 export const VALUE_UNDER_MIN_PLAYABILITY = 60;
 export const SAFEST_FALLBACK_NOTICE =
   "No full-data safest plays yet. Showing best available Tier A/B.";
-export const BEST_PLAY_MIN_CONFIDENCE = 70;
-export const BEST_PLAY_MIN_PROBABILITY = 70;
-export const BEST_PLAY_MIN_PLAYABILITY = 70;
+export const BEST_PLAY_FALLBACK_NOTICE =
+  "Filled remaining Best Plays slots from Tier A/B full-data pool.";
+export const BEST_PLAY_MIN_CONFIDENCE = 65;
+export const BEST_PLAY_MIN_PROBABILITY = 60;
+export const BEST_PLAY_MIN_PLAYABILITY = 60;
 export const BEST_PLAY_MIN_SANITY = 80;
 export const MIN_UNIQUE_PLAYERS_TOP_10 = 5;
+export const MIN_PROJECTED_PROPS_FOR_BEST_PLAYS = 20;
+export const TOP_BEST_PLAYS_TARGET = 10;
 export const CONFIDENCE_CALIBRATION_MIN = 50;
 export const CONFIDENCE_CALIBRATION_MAX = 95;
 
@@ -212,18 +216,200 @@ export function passesFullDataBestPlayRequirements(prop = {}) {
   return true;
 }
 
-export function passesBestPlayGate(prop = {}) {
+export function hasMissingProjection(prop = {}) {
+  const projection = finite(prop.projection ?? prop.projectedValue, NaN);
+  return !Number.isFinite(projection) || projection <= 0;
+}
+
+export function hasMissingStats(prop = {}) {
+  return !hasMlbStatsApiData(prop);
+}
+
+export function isFullDataProp(prop = {}) {
   if (hasPartialDataFlags(prop)) return false;
-  const confidence = resolvePropConfidence(prop);
-  const tier = classifyConfidenceTier(confidence);
+  if (hasMissingProjection(prop)) return false;
+  if (hasMissingStats(prop)) return false;
+  return true;
+}
+
+export function passesBestPlayHardExclusions(prop = {}) {
+  if (hasPartialDataFlags(prop)) return false;
+  if (hasMissingProjection(prop)) return false;
+  if (hasMissingStats(prop)) return false;
+  const tier = classifyConfidenceTier(resolvePropConfidence(prop));
   if (tier === "C" || tier === "D") return false;
-  if (confidence < BEST_PLAY_MIN_CONFIDENCE) return false;
+  return true;
+}
+
+export function passesTierABFullData(prop = {}) {
+  if (!isFullDataProp(prop)) return false;
+  const tier = classifyConfidenceTier(resolvePropConfidence(prop));
+  return tier === "A" || tier === "B";
+}
+
+export function passesBestPlayThresholds(prop = {}) {
+  if (resolvePropConfidence(prop) < BEST_PLAY_MIN_CONFIDENCE) return false;
   if (resolvePropProbability(prop) < BEST_PLAY_MIN_PROBABILITY) return false;
   if (resolvePropPlayability(prop) < BEST_PLAY_MIN_PLAYABILITY) return false;
-  if (resolvePropSanity(prop) < BEST_PLAY_MIN_SANITY) return false;
-  const projection = finite(prop.projection ?? prop.projectedValue, NaN);
-  if (!Number.isFinite(projection) || projection <= 0) return false;
   return true;
+}
+
+export function passesBestPlayGate(prop = {}) {
+  if (!passesBestPlayHardExclusions(prop)) return false;
+  return passesBestPlayThresholds(prop);
+}
+
+export function resolveBestPlayExclusionReason(prop = {}) {
+  if (hasPartialDataFlags(prop)) return "Excluded: Partial Data";
+  if (hasMissingProjection(prop)) return "Excluded: Missing projection";
+  if (hasMissingStats(prop)) return "Excluded: Missing stats";
+  const confidence = resolvePropConfidence(prop);
+  const tier = classifyConfidenceTier(confidence);
+  if (tier === "C") return "Excluded: Tier C";
+  if (tier === "D") return "Excluded: Tier D";
+  if (confidence < BEST_PLAY_MIN_CONFIDENCE) return "Excluded: Confidence below threshold";
+  if (resolvePropProbability(prop) < BEST_PLAY_MIN_PROBABILITY) return "Excluded: Probability below threshold";
+  if (resolvePropPlayability(prop) < BEST_PLAY_MIN_PLAYABILITY) return "Excluded: Playability below threshold";
+  return "";
+}
+
+export function resolveBestPlayThresholdMissReason(prop = {}) {
+  if (!passesTierABFullData(prop)) return resolveBestPlayExclusionReason(prop);
+  const misses = [];
+  if (resolvePropConfidence(prop) < BEST_PLAY_MIN_CONFIDENCE) misses.push("Confidence below threshold");
+  if (resolvePropProbability(prop) < BEST_PLAY_MIN_PROBABILITY) misses.push("Probability below threshold");
+  if (resolvePropPlayability(prop) < BEST_PLAY_MIN_PLAYABILITY) misses.push("Playability below threshold");
+  if (!misses.length) return "";
+  return `Excluded: ${misses.join(", ")}`;
+}
+
+export function buildBestPlayFilterDiagnostics(pool = []) {
+  const counts = {
+    tierAFullData: 0,
+    tierBFullData: 0,
+    tierCFullData: 0,
+    partialData: 0,
+    rejectedByConfidence: 0,
+    rejectedByProbability: 0,
+    rejectedByPlayability: 0,
+    qualifiedStrict: 0,
+    missingProjection: 0,
+    missingStats: 0,
+  };
+
+  for (const prop of pool || []) {
+    if (hasPartialDataFlags(prop)) {
+      counts.partialData += 1;
+      continue;
+    }
+    if (hasMissingProjection(prop)) {
+      counts.missingProjection += 1;
+      continue;
+    }
+    if (hasMissingStats(prop)) {
+      counts.missingStats += 1;
+      continue;
+    }
+
+    const confidence = resolvePropConfidence(prop);
+    const tier = classifyConfidenceTier(confidence);
+    if (tier === "A") counts.tierAFullData += 1;
+    else if (tier === "B") counts.tierBFullData += 1;
+    else if (tier === "C") counts.tierCFullData += 1;
+
+    if (tier === "C" || tier === "D") continue;
+
+    if (confidence < BEST_PLAY_MIN_CONFIDENCE) counts.rejectedByConfidence += 1;
+    if (resolvePropProbability(prop) < BEST_PLAY_MIN_PROBABILITY) counts.rejectedByProbability += 1;
+    if (resolvePropPlayability(prop) < BEST_PLAY_MIN_PLAYABILITY) counts.rejectedByPlayability += 1;
+    if (passesBestPlayGate(prop)) counts.qualifiedStrict += 1;
+  }
+
+  return counts;
+}
+
+export function buildBestPlayRejectionSamples(pool = [], limit = 12) {
+  return [...(pool || [])]
+    .map((prop) => ({
+      player: prop.playerName || prop.player || "Unknown",
+      market: prop.statType || prop.market || prop.propType || "—",
+      reason: resolveBestPlayExclusionReason(prop) || resolveBestPlayThresholdMissReason(prop),
+      confidence: Math.round(resolvePropConfidence(prop)),
+      probability: Math.round(resolvePropProbability(prop)),
+    }))
+    .filter((row) => row.reason && row.reason.startsWith("Excluded"))
+    .slice(0, limit);
+}
+
+export function compareBestPlaysRecoveryRank(a = {}, b = {}) {
+  return (
+    compareNumericDesc(a, b, resolvePropConfidence) ||
+    compareNumericDesc(a, b, resolvePropProbability) ||
+    compareNumericDesc(a, b, resolvePropPlayability) ||
+    compareHighestEdgePlays(a, b)
+  );
+}
+
+export function buildTopBestPlaysPicks(
+  pool = [],
+  { limit = TOP_BEST_PLAYS_TARGET, projectedCount = 0, maxPerPlayer = MAX_PLAYER_PROPS_IN_TOP_LIST } = {}
+) {
+  const diagnostics = buildBestPlayFilterDiagnostics(pool);
+  const rejectionSamples = buildBestPlayRejectionSamples(pool);
+  const strictEligible = (pool || []).filter(passesBestPlayGate);
+  const strictSorted = [...strictEligible].sort(compareBestPlaysRecoveryRank);
+  let picks = applyBestPlaysDiversityFilter(strictSorted, {
+    limit,
+    maxPerPlayer,
+    minUniquePlayers: MIN_UNIQUE_PLAYERS_TOP_10,
+  });
+
+  const shouldFill =
+    Number(projectedCount) >= MIN_PROJECTED_PROPS_FOR_BEST_PLAYS && picks.length < limit;
+  let usedFallback = false;
+
+  if (shouldFill) {
+    const fallbackPool = [...(pool || [])].filter(passesTierABFullData).sort(compareBestPlaysRecoveryRank);
+    const pickedKeys = new Set(picks.map((prop) => buildPlayerMarketKey(prop)));
+    const playerCounts = new Map();
+    for (const prop of picks) {
+      const key = playerKey(prop);
+      if (key) playerCounts.set(key, (playerCounts.get(key) || 0) + 1);
+    }
+
+    for (const prop of fallbackPool) {
+      if (picks.length >= limit) break;
+      const marketKeyValue = buildPlayerMarketKey(prop);
+      if (pickedKeys.has(marketKeyValue)) continue;
+      const playerKeyValue = playerKey(prop);
+      const used = playerCounts.get(playerKeyValue) || 0;
+      if (used >= maxPerPlayer) continue;
+      picks.push(prop);
+      pickedKeys.add(marketKeyValue);
+      if (playerKeyValue) playerCounts.set(playerKeyValue, used + 1);
+      usedFallback = true;
+    }
+  }
+
+  const annotatedPicks = picks.map((prop) => {
+    const strictPass = passesBestPlayGate(prop);
+    return {
+      ...prop,
+      bestPlayFilterReason: strictPass
+        ? ""
+        : resolveBestPlayThresholdMissReason(prop) || "Included via Tier A/B fallback",
+      bestPlayUsedFallback: !strictPass,
+    };
+  });
+
+  return {
+    picks: annotatedPicks,
+    usedFallback,
+    fallbackNotice: usedFallback ? BEST_PLAY_FALLBACK_NOTICE : "",
+    diagnostics,
+    rejectionSamples,
+    qualifiedStrict: strictEligible.length,
+  };
 }
 
 export function classifyConfidenceTier(confidence) {
@@ -263,11 +449,18 @@ export function passesTopFiveBestPlayGate(prop = {}) {
 }
 
 export function passesSafestPlayGate(prop = {}) {
-  if (!passesBestPlayGate(prop)) return false;
-  return resolvePropConfidence(prop) >= SAFEST_MIN_CONFIDENCE;
+  if (!passesBestPlayHardExclusions(prop)) return false;
+  if (resolvePropConfidence(prop) < SAFEST_MIN_CONFIDENCE) return false;
+  if (resolvePropProbability(prop) < SAFEST_MIN_PROBABILITY) return false;
+  if (resolvePropPlayability(prop) < SAFEST_MIN_PLAYABILITY) return false;
+  if (resolvePropSanity(prop) < SAFEST_MIN_SANITY) return false;
+  return true;
 }
 
 export function passesValueUnderGate(prop = {}) {
+  if (hasPartialDataFlags(prop)) return false;
+  const tier = classifyConfidenceTier(resolvePropConfidence(prop));
+  if (tier === "C" || tier === "D") return false;
   const lean = String(prop.lean || prop.pick || prop.side || "").toLowerCase();
   const side = resolveRecommendedSide(prop);
   const isUnder = side === "UNDER" || /under|less|lower/.test(lean);
@@ -295,12 +488,16 @@ export function compareOverallPlayRank(a = {}, b = {}) {
 }
 
 export function selectOverallPlay(pool = []) {
-  return (
-    [...pool]
-      .filter(passesBestPlayGate)
-      .filter((prop) => classifyConfidenceTier(resolvePropConfidence(prop)) === "A")
-      .sort(compareOverallPlayRank)[0] || null
-  );
+  const eligible = (pool || []).filter(passesTierABFullData);
+  const tierA = eligible
+    .filter((prop) => classifyConfidenceTier(resolvePropConfidence(prop)) === "A")
+    .sort(compareOverallPlayRank);
+  if (tierA[0]) return tierA[0];
+
+  const tierB = eligible
+    .filter((prop) => classifyConfidenceTier(resolvePropConfidence(prop)) === "B")
+    .sort(compareOverallPlayRank);
+  return tierB[0] || null;
 }
 
 export function buildOverallPlayExplanation(prop = {}) {
@@ -356,7 +553,7 @@ export function buildSafestPlaysSection(pool = [], { limit = TOP_SECTION_LIMIT }
   const fallbackPicks = buildTopSectionPicks(strictPool, {
     compareFn: compareSafestPlaysRank,
     limit,
-    filterFn: passesBestPlayGate,
+    filterFn: passesTierABFullData,
   });
   return {
     picks: fallbackPicks,

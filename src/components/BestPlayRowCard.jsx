@@ -108,6 +108,7 @@ function BestPlayRowCard({
   const projectionSanityAudit = enriched.projectionSanityAudit;
   const projectionFormulaAudit = enriched.projectionFormulaAudit;
   const playabilityBreakdown = enriched.playabilityBreakdown ?? enriched.playabilityAudit;
+  const filterReason = enriched.bestPlayFilterReason || enriched.bestPlayExclusionReason || "";
   const reason =
     explanation?.reason ||
     enriched.qualifyReason ||
@@ -190,6 +191,11 @@ function BestPlayRowCard({
           {isValueUnder && reason ? (
             <p className="best-play-row-reason" style={{ ...styles.bestPlayRowSubline, marginTop: 4, fontSize: 11 }}>
               Reason: <strong>{reason}</strong>
+            </p>
+          ) : null}
+          {filterReason ? (
+            <p className="best-play-row-filter-reason" style={{ ...styles.bestPlayRowSubline, marginTop: 4, fontSize: 11 }}>
+              {filterReason}
             </p>
           ) : null}
           {hasAuditDetails ? (

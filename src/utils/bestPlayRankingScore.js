@@ -23,7 +23,7 @@ export const HERO_MIN_SANITY = 65;
 import {
   computeValidatedEdgePercent,
   clampValidatedEdgePercent,
-  passesBestPlayGate,
+  passesTierABFullData,
   classifyConfidenceTier,
 } from "./boardQuality.js";
 
@@ -107,7 +107,7 @@ export function passesTopVerifiedPlaysGate(prop = {}) {
 }
 
 export function passesHeroOverallPlayGate(prop = {}) {
-  if (!passesBestPlayGate(prop)) return false;
+  if (!passesTierABFullData(prop)) return false;
   const confidence = finite(
     prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence,
     NaN
