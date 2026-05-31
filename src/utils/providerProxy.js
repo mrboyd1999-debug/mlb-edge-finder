@@ -94,13 +94,12 @@ export function inspectPrizePicksProxyConfig() {
   };
 }
 
-/** Resolve PrizePicks fetch URLs — built-in /api route first when legacy :4000 proxy is configured. */
+/** Resolve PrizePicks fetch URLs — built-in /api route only when legacy :4000 proxy is configured. */
 export function resolvePrizePicksFetchEndpoints() {
   const proxyUrl = getProxyUrl("prizepicks");
   const builtin = [...PRIZEPICKS_BUILTIN_ENDPOINTS];
-  if (!proxyUrl) return builtin;
-  if (LEGACY_LOCAL_PRIZEPICKS_PROXY.test(proxyUrl)) {
-    return [...builtin, proxyUrl];
+  if (!proxyUrl || LEGACY_LOCAL_PRIZEPICKS_PROXY.test(proxyUrl)) {
+    return builtin;
   }
   return [proxyUrl, ...builtin];
 }

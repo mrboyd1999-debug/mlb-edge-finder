@@ -1802,10 +1802,10 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
   if (fetchUnderdogFlag && !udEntry.skipped) {
     underdogResult = udEntry.result?.error ? udEntry.result : udEntry.result;
-    if (underdogResult && !underdogResult.error) {
+    if (underdogResult && resolveProviderResultProps(underdogResult).length) {
       console.info("[DFS Source Audit] Underdog result", {
         status: underdogResult.status,
-        props: underdogResult.props?.length || 0,
+        props: underdogResult.props?.length || underdogResult.parsedProps?.length || 0,
         lineSourceBadge: underdogResult.lineSourceBadge,
         durationMs: udEntry.durationMs,
         timedOut: udEntry.timedOut,
@@ -1820,8 +1820,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         debugInfo,
       });
       applyUnderdogProviderToDebug(debugInfo, underdogResult);
-      if (underdogResult?.props?.length || underdogResult?.parsedProps?.length) {
-        const udSource = underdogResult.parsedProps || underdogResult.props || [];
+      const udSource = underdogResult.parsedProps || underdogResult.props || [];
+      if (udSource.length) {
         debugInfo.parsedUnderdogProps = normalizePropsWithSource(
           udSource.map((prop) =>
             normalizePropShape(
@@ -1833,7 +1833,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         debugInfo.underdogParser = underdogResult.debug?.underdogParser || underdogResult.pipelineAudit?.underdogParser || null;
         debugInfo.rawUnderdogSamples = underdogResult.debug?.rawUnderdogSamples || [];
         debugInfo.underdogResponseShape = underdogResult.debug?.responseShape || null;
-      } else if (underdogResult.debug?.underdogParser?.parserMismatch && !(underdogResult.parsedProps?.length || underdogResult.props?.length)) {
+      } else if (underdogResult.debug?.underdogParser?.parserMismatch) {
         sourceWarnings.push(buildUnderdogParserFailureMessage(underdogResult.debug));
       }
     } else {
@@ -1867,8 +1867,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
   if (wantsPrizePicks) {
     prizePicksResult = ppEntry.result;
+    const ppRecoveredProps = resolveProviderResultProps(prizePicksResult);
     if (
-      (!prizePicksResult?.props?.length || prizePicksResult?.error) &&
+      (!ppRecoveredProps.length || prizePicksResult?.error) &&
       (ppEntry.timedOut || ppEntry.error) &&
       !ppEntry.notConfigured &&
       !prizePicksResult?.notConfigured
@@ -1905,14 +1906,15 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         diagnostics: ppDiag,
         failureClass: ppDiag.failureClass || "MISSING_PROXY",
       };
-    } else if (prizePicksResult && !prizePicksResult.error && !prizePicksResult.notConfigured) {
+    } else if (resolveProviderResultProps(prizePicksResult).length) {
       console.info("[DFS Source Audit] PrizePicks result", {
         status: prizePicksResult.status,
-        props: prizePicksResult.props?.length || 0,
+        props: prizePicksResult.props?.length || prizePicksResult.parsedProps?.length || 0,
         lineSourceBadge: prizePicksResult.lineSourceBadge,
         rateLimited: prizePicksResult.rateLimited,
         durationMs: ppEntry.durationMs,
         timedOut: ppEntry.timedOut,
+        usedCache: Boolean(prizePicksResult.usedCacheFallback || prizePicksResult.cached),
       });
       applySourceResult({
         label: "PrizePicks",
@@ -1948,17 +1950,6 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         timedOut: Boolean(ppEntry.timedOut),
       };
       updatePrizePicksDiagnostics(failDiag);
-      if (prizePicksResult?.props?.length) {
-        applySourceResult({
-          label: "PrizePicks",
-          result: prizePicksResult,
-          sourceWarnings,
-          sourceFailures,
-          rawProps,
-          sourceStatus,
-          debugInfo,
-        });
-      }
       debugInfo.sources.PrizePicks = {
         ...debugInfo.sources.PrizePicks,
         status: notConfigured ? "Not configured" : "Failed",

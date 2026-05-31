@@ -17,11 +17,13 @@ export const PRIZEPICKS_RETRY_TIMEOUTS_MS = [PRIZEPICKS_FETCH_TIMEOUT_MS, PRIZEP
 export const UNDERDOG_RETRY_TIMEOUTS_MS = [500, 1_000, 2_000];
 export const PROVIDER_RETRY_DELAY_MS = 250;
 
+const PROVIDER_POST_PROCESSING_BUDGET_MS = 12_000;
+
 export function getProviderRetryAttemptBudgetMs(retryTimeouts = PRIZEPICKS_RETRY_TIMEOUTS_MS) {
   const attempts = Array.isArray(retryTimeouts) ? retryTimeouts : [retryTimeouts];
   const attemptMs = attempts.reduce((sum, ms) => sum + finiteRetryMs(ms), 0);
   const delayMs = Math.max(0, attempts.length - 1) * PROVIDER_RETRY_DELAY_MS;
-  return attemptMs + delayMs + 500;
+  return attemptMs + delayMs + 500 + PROVIDER_POST_PROCESSING_BUDGET_MS;
 }
 
 function finiteRetryMs(value) {

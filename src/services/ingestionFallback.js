@@ -7,7 +7,7 @@ import { enrichDisplayPropsPipeline } from "../utils/displayPropScoring.js";
 import { normalizePropsWithSource } from "../utils/normalizeSource.js";
 import { generateMlbPropsFromSportsData } from "./propSportsDataEnrichment.js";
 import { readLastGoodBoard, boardFromLastGood } from "./lastGoodBoardCache.js";
-import { mergeProviderRawProps } from "./providerOrchestration.js";
+import { mergeProviderRawProps, resolveProviderResultProps } from "./providerOrchestration.js";
 
 function normalizeRows(props = [], fetchSport = "MLB") {
   return normalizePropsWithSource(
@@ -36,8 +36,8 @@ export async function resolveIngestionFallback({
   }
 
   const merged = mergeProviderRawProps({
-    underdogProps: underdogResult?.parsedProps || underdogResult?.props || [],
-    prizePicksProps: prizePicksResult?.props || [],
+    underdogProps: resolveProviderResultProps(underdogResult),
+    prizePicksProps: resolveProviderResultProps(prizePicksResult),
   });
   if (merged.length) {
     const display = normalizeRows(merged, fetchSport);

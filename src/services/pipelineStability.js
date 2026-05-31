@@ -32,8 +32,17 @@ function isLiveProviderBoardProp(prop = {}) {
   const src = normalizeSource(prop);
   if (src !== "underdog" && src !== "prizepicks") return false;
   if (prop.fromCache || prop.cacheLayer) return false;
-  if (String(prop.lineSourceBadge || "").toUpperCase() === "CACHED") return false;
   return true;
+}
+
+function countProviderRawProps(board = {}) {
+  const debug = board.debugInfo || {};
+  return Number(
+    debug.providerFetchCounts?.merged ??
+      debug.pipelineProviderRaw?.combinedRaw ??
+      (Number(debug.providerFetchCounts?.prizepicks || 0) + Number(debug.providerFetchCounts?.underdog || 0)) ??
+      0
+  );
 }
 
 function countLiveProviderBoardProps(board = {}) {
@@ -46,8 +55,9 @@ export function mergeBoardRefreshResult(previous = {}, incoming = {}) {
   const prevCount = countBoardProps(previous);
   const nextCount = countBoardProps(incoming);
   const liveProviderCount = countLiveProviderBoardProps(incoming);
+  const providerRawCount = countProviderRawProps(incoming);
 
-  if (nextCount > 0 && liveProviderCount > 0) {
+  if (nextCount > 0 && (liveProviderCount > 0 || providerRawCount >= 50)) {
     return { board: incoming, replaced: true, keptPrevious: false };
   }
 

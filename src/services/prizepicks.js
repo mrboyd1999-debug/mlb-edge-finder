@@ -340,9 +340,17 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
       const timedOut = Boolean(parsed.timedOut || /timed out|abort/i.test(String(parsed.attempt?.error || "")));
       const hasPayload = parsed.ok && parsed.payload;
       const rawCount = hasPayload ? rawPrizePicksRecordCount(parsed.payload) : 0;
+      const parsedPreviewCount = hasPayload
+        ? parsePrizePicksProjections(unwrapProxyPayload(parsed.payload)).length
+        : 0;
 
-      if (hasPayload && rawCount > 0) {
-        console.info("[PrizePicks] recovery success", { retryIndex: retryIndex + 1, timeoutMs, rawCount });
+      if (hasPayload && (rawCount > 0 || parsedPreviewCount > 0)) {
+        console.info("[PrizePicks] recovery success", {
+          retryIndex: retryIndex + 1,
+          timeoutMs,
+          rawCount,
+          parsedPreviewCount,
+        });
         break;
       }
 
@@ -424,7 +432,8 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
       const lineSourceBadge = isFallback ? (hasUsable ? "CACHED" : "EMPTY") : hasUsable ? "LIVE" : "EMPTY";
 
       if (!isFallback && normalizedProps.length > 0) {
-        writeCachedPayload(sanitizePrizePicksPayloadForCache(parsed.payload));
+        const cachePayload = sanitizePrizePicksPayloadForCache(parsed.payload);
+        window.setTimeout(() => writeCachedPayload(cachePayload), 0);
         recordSourceSuccess(SOURCE_IDS.PRIZEPICKS);
       } else if (isFallback) {
         markSourceCached(SOURCE_IDS.PRIZEPICKS, parsed.payload.cachedAt || readCachedPayloadSavedAt());
@@ -475,7 +484,7 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
       recordProviderResponse("prizepicks", {
         url: isFallback ? "server-cache:prizepicks" : endpoint,
         status: isRateLimited ? 429 : parsed.attempt?.status ?? (hasUsable ? 200 : null),
-        payload: parsed.payload,
+        payload: isFallback ? parsed.payload : { propsCount: rawCount, parsedCount: normalizedProps.length },
         parsedCount: normalizedProps.length,
         normalizedCount: usableCount,
         errors: warnings,
@@ -543,6 +552,15 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
       });
 
       return {
+        source: "PrizePicks",
+        status: pipelineStatus,
+        props: normalizedProps,
+        pipelineAudit: audit,
+        warnings,
+        lineSourceBadge,
+        rateLimited: isRateLimited,
+        cached: isFallback,
+        fallback: isFallback,
         diagnostics: getPrizePicksDiagnostics(),
         lastSuccessfulFetchAt: isFallback
           ? parsed.payload.cachedAt || readCachedPayloadSavedAt()
@@ -1097,6 +1115,9 @@ function buildDebug(apiUrl, apiStatus, rawPropsLoaded, propsAfterParsing, messag
 }
 
 function rawPrizePicksRecordCount(payload) {
+  if (!payload || typeof payload !== "object") return 0;
+  if (Array.isArray(payload.props)) return payload.props.length;
+  if (Array.isArray(payload.data?.data)) return payload.data.data.length;
   const normalizedPayload = unwrapProxyPayload(payload);
   if (normalizedPayload?.blocked) return 0;
   return countPrizePicksRawRecords(normalizedPayload);
@@ -1187,7 +1208,7 @@ function unwrapProxyPayload(payload, depth = 0) {
     if (payload.data?.data && Array.isArray(payload.data.data)) {
       return normalizePrizePicksResponse({ data: payload.data.data, included: payload.data.included || [] });
     }
-    if (Array.isArray(payload.props) && payload.props[0]?.type === "projection") {
+    if (Array.isArray(payload.props) && payload.props.length) {
       return normalizePrizePicksResponse({ data: payload.props, included: payload.data?.included || [] });
     }
     if (payload.data && !Array.isArray(payload.data)) return unwrapProxyPayload(payload.data, depth + 1);

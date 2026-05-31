@@ -105,6 +105,7 @@ export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyRe
   let timedOut = false;
   let error = false;
   let timer = null;
+  let settled = false;
 
   console.log(`${logKey} START`);
   if (label === "PrizePicks") logPpFetchStart({ timeoutMs });
@@ -118,29 +119,30 @@ export async function fetchProviderIsolated({ label, timeoutMs, fetchFn, emptyRe
   };
 
   try {
-    const result = await Promise.race([
-      Promise.resolve().then(async () => {
-        const value = await fetchFn({ signal: controller.signal });
-        if (controller.signal.aborted) {
-          throw new DOMException("Aborted", "AbortError");
-        }
-        return value;
-      }),
-      new Promise((resolve) => {
-        timer = window.setTimeout(() => {
-          timedOut = true;
-          controller.abort();
-          if (lockSourceId) releaseSourceRequestLock(lockSourceId);
-          console.log(`${logKey} TIMEOUT`);
-          resolve({ __providerTimeout: true });
-        }, timeoutMs);
-      }),
-    ]);
+    const fetchPromise = (async () => {
+      const value = await fetchFn({ signal: controller.signal });
+      settled = true;
+      if (timer != null) window.clearTimeout(timer);
+      return value;
+    })();
+
+    const timeoutPromise = new Promise((resolve) => {
+      timer = window.setTimeout(() => {
+        if (settled) return;
+        timedOut = true;
+        controller.abort();
+        if (lockSourceId) releaseSourceRequestLock(lockSourceId);
+        console.log(`${logKey} TIMEOUT`);
+        resolve({ __providerTimeout: true });
+      }, timeoutMs);
+    });
+
+    const result = await Promise.race([fetchPromise, timeoutPromise]);
 
     if (timer != null) window.clearTimeout(timer);
     const durationMs = Date.now() - startedAt;
 
-    if (result?.__providerTimeout || timedOut) {
+    if ((result?.__providerTimeout || timedOut) && !settled) {
       console.log(`${logKey} FAILED`);
       console.log(`${logKey} TIME MS`, durationMs);
       const timeoutMessage = `Timed out after ${timeoutMs}ms`;
