@@ -1,4 +1,4 @@
-/** Normalize player image URL fields on prop objects. */
+/** Normalize player image URL fields on prop objects — SportsDataIO, provider feed, then MLB static. */
 
 function pickFirstUrl(...values) {
   for (const value of values) {
@@ -6,6 +6,12 @@ function pickFirstUrl(...values) {
     if (/^https?:\/\//i.test(text) || text.startsWith("//")) return text;
   }
   return "";
+}
+
+export function resolveMlbStaticPlayerImage(mlbId = null) {
+  const id = String(mlbId || "").trim();
+  if (!id || !/^\d+$/.test(id)) return "";
+  return `https://img.mlbstatic.com/mlb-photos/image/upload/w_213,q_100/v1/people/${id}/headshot/67/current`;
 }
 
 export function resolveSportsDataPlayerImage(prop = {}) {
@@ -23,6 +29,18 @@ export function resolveSportsDataPlayerImage(prop = {}) {
 }
 
 export function resolvePlayerImageUrl(prop = {}) {
+  const sportsDataPlayerId =
+    prop.sportsDataSeason?.PlayerID ||
+    prop.sportsDataPlayerId ||
+    prop.PlayerID ||
+    null;
+  const mlbId =
+    prop.mlbId ||
+    prop.mlbamId ||
+    prop.mlbPlayerId ||
+    sportsDataPlayerId ||
+    (String(prop.sport || "").toUpperCase() === "MLB" ? prop.playerId : null);
+
   return (
     resolveSportsDataPlayerImage(prop) ||
     prop.playerImageUrl ||
@@ -32,6 +50,7 @@ export function resolvePlayerImageUrl(prop = {}) {
     prop.image_url ||
     prop.player_image ||
     prop.photo ||
+    resolveMlbStaticPlayerImage(mlbId) ||
     ""
   );
 }

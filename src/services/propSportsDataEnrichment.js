@@ -131,7 +131,10 @@ export async function enrichPropsWithSportsData(props = []) {
       gameTime: prop.gameTime || prop.startTime || game?.DateTime || game?.Day || "",
     };
 
-    return attachSportsDataPitcherFields(base, { game, seasonRows });
+    return attachSportsDataPitcherFields(
+      { ...base, sportsDataSlateGames: games },
+      { game, seasonRows }
+    );
   });
 
   return { props: enriched, warnings, enrichedCount };

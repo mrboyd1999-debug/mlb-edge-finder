@@ -47,11 +47,13 @@ function ProviderFeedModeBanner({
         <strong className="provider-feed-mode-banner__title">{headline}</strong>
         {!loading ? <span style={headlineStyle}>{liveAvailable ? "Live Data Available" : "Limited"}</span> : null}
       </div>
+      {!loading && showProviderDetails ? (
+        <p className="provider-feed-mode-banner__stats">
+          Stats Verification: <strong>{health.statsVerification.status}</strong>
+        </p>
+      ) : null}
       {!loading ? (
         <>
-          <p className="provider-feed-mode-banner__stats">
-            Stats Verification: <strong>{health.statsVerification.status}</strong>
-          </p>
           {showProviderDetails ? (
             <ApiStatusPanel
               apiHealth={apiHealth}

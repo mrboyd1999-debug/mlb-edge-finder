@@ -57,11 +57,30 @@ export function mergeNormalizedProp(prop = {}) {
   return { ...prop, ...normalizeProp(prop) };
 }
 
-function resolveLineSourceLabel(prop = {}, { prizePicksLine, underdogLine } = {}) {
+function resolveMlbLineUsed(prop = {}, { prizePicksLine, underdogLine } = {}) {
+  const oddsLine = finiteOrNull(
+    prop.oddsApiLine ?? prop.sportsbookLine ?? prop.bestAvailableLine ?? prop.lineComparison?.oddsApiLine
+  );
+  if (prizePicksLine != null) {
+    return { lineUsed: prizePicksLine, lineSource: "PrizePicks" };
+  }
+  if (underdogLine != null) {
+    return { lineUsed: underdogLine, lineSource: "Underdog" };
+  }
+  if (oddsLine != null) {
+    return { lineUsed: oddsLine, lineSource: "Odds API" };
+  }
+  return {
+    lineUsed: finiteOrNull(prop.lineUsed ?? prop.line),
+    lineSource: null,
+  };
+}
+
+function resolveLineSourceLabel(prop = {}, { prizePicksLine, underdogLine, lineSource } = {}) {
+  if (lineSource) return lineSource;
   const raw = String(prop.lineSource || prop.lineSourceBadge || "").trim();
   if (raw && !/live_provider|cache_provider|null|undefined/i.test(raw)) return raw;
 
-  const src = normalizeSource(prop);
   const hasPp = prizePicksLine != null;
   const hasUd = underdogLine != null;
   const hasOdds = Boolean(
@@ -72,13 +91,10 @@ function resolveLineSourceLabel(prop = {}, { prizePicksLine, underdogLine } = {}
       /odds/i.test(String(prop.projectionSource || ""))
   );
 
-  if (hasPp && hasUd && hasOdds) return "PrizePicks + Underdog + Odds API";
-  if (hasPp && hasOdds) return "PrizePicks + Odds API";
-  if (hasUd && hasOdds) return "Underdog + Odds API";
+  if (hasPp) return "PrizePicks";
+  if (hasUd) return "Underdog";
   if (hasOdds) return "Odds API";
-  if (hasPp && hasUd) return "PrizePicks + Underdog";
-  if (hasPp || src === "prizepicks") return "PrizePicks";
-  if (hasUd || src === "underdog") return "Underdog";
+  if (hasPp && hasUd) return "PrizePicks";
   return null;
 }
 
@@ -87,8 +103,8 @@ export function attachLineSourceFields(prop = {}) {
   const comparison = prop.lineComparison || {};
   const prizePicksLine = finiteOrNull(comparison.prizePicksLine ?? prop.prizePicksLine ?? prop.ppLine);
   const underdogLine = finiteOrNull(comparison.underdogLine ?? prop.underdogLine ?? prop.udLine);
-  const lineUsed = finiteOrNull(prop.lineUsed ?? prop.line);
-  const lineSource = resolveLineSourceLabel(prop, { prizePicksLine, underdogLine });
+  const { lineUsed, lineSource: primarySource } = resolveMlbLineUsed(prop, { prizePicksLine, underdogLine });
+  const lineSource = resolveLineSourceLabel(prop, { prizePicksLine, underdogLine, lineSource: primarySource });
 
   return {
     ...prop,

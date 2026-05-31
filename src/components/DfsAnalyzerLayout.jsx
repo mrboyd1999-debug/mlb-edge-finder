@@ -13,9 +13,9 @@ import DeveloperDebugPanel from "./DeveloperDebugPanel.jsx";
 import ProjectionProviderWarning from "./ProjectionProviderWarning.jsx";
 import ApiSetupBanner from "./ApiSetupBanner.jsx";
 import HistoricalCoverageBanner from "./HistoricalCoverageBanner.jsx";
-import ProviderFeedModeBanner from "./ProviderFeedModeBanner.jsx";
 import ProviderFailureReasons from "./ProviderFailureReasons.jsx";
 import LiveDataCard from "./LiveDataCard.jsx";
+import BoardSummaryCard from "./BoardSummaryCard.jsx";
 import LiveBoardPipelineBanner from "./LiveBoardPipelineBanner.jsx";
 import LiveFeedDiagnosticsPanel from "./LiveFeedDiagnosticsPanel.jsx";
 import LivePropIngestionCountsPanel from "./LivePropIngestionCountsPanel.jsx";
@@ -63,6 +63,7 @@ function DfsAnalyzerLayout({
   renderSourceAudit = null,
   cacheStatus = "",
   liveBoardPipelineTrace = null,
+  boardSummary = null,
 }) {
   const [connectionReport, setConnectionReport] = useState(() => {
     const meta = readSettingsMeta();
@@ -104,6 +105,8 @@ function DfsAnalyzerLayout({
         loading={loading}
         showProviderDetails={debugPanelsVisible}
       />
+
+      {!debugPanelsVisible ? <BoardSummaryCard summary={boardSummary} /> : null}
 
       <CompactAppTabs activeTab={appView} onChange={setAppView} />
 

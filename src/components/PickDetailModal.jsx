@@ -41,6 +41,7 @@ import { attachBoardQualityFields,
   resolveRecommendedSide,
   resolveTierDisplayLabel,
 } from "../utils/boardQuality.js";
+import { withPlayerImageUrl } from "../utils/playerImageFields.js";
 import { resolveNormalizedConfidence, resolveNormalizedProbability, resolveProviderDisplayLabel, resolveProviderLineFields } from "../utils/propDisplayFields.js";
 import { resolveRiskExplanation } from "../utils/risk.js";
 import { resolveOpposingPitcherDisplayLabel } from "../utils/opponentStarter.js";
@@ -221,7 +222,7 @@ export default function PickDetailModal({
 }) {
   const manualProp = variant === "manual" && isManualAnalyzerProp(rawProp);
   const prop = useMemo(
-    () => (manualProp ? rawProp : attachBoardQualityFields(rawProp)),
+    () => (manualProp ? withPlayerImageUrl(rawProp) : withPlayerImageUrl(attachBoardQualityFields(rawProp))),
     [manualProp, rawProp]
   );
   const breakdownMode = !manualProp;
@@ -613,7 +614,7 @@ export default function PickDetailModal({
                 </div>
               ) : null}
 
-              {prop.projectionSanityAudit?.supported ? (
+              {showDebugPanels && prop.projectionSanityAudit?.supported ? (
                 <div className="pick-detail-modal-section">
                   <SectionErrorBoundary name="Projection Sanity">
                     <ProjectionSanityAuditPanel audit={prop.projectionSanityAudit} />

@@ -17,11 +17,12 @@ function isUnavailablePitcherLabel(value = "") {
   return /pitcher pending|starter pending|opponent pitcher unavailable/i.test(text);
 }
 
-/** User-facing opposing pitcher — never returns "Pitcher Pending" or unavailable when SportsData is connected. */
+/** User-facing opposing pitcher — never returns pending when a probable starter name exists. */
 export function resolveOpposingPitcherDisplayLabel(prop = {}) {
   const partial = resolvePartialPitcherName(prop);
+  if (partial) return partial;
+
   const resolved =
-    partial ||
     prop.pitcherMatchupAudit?.starterLookup?.resolvedStarter ||
     prop.pitcherMatchupAudit?.homePitcher ||
     prop.pitcherMatchupAudit?.awayPitcher ||
@@ -36,12 +37,6 @@ export function resolveOpposingPitcherDisplayLabel(prop = {}) {
   const text = String(resolved || "").trim();
   if (text && !isUnavailablePitcherLabel(text) && !/ vs /i.test(text)) {
     return text;
-  }
-  if (isSportsDataPitcherConnected() || prop.sportsDataEnriched) {
-    return PROBABLE_STARTER_PENDING_LABEL;
-  }
-  if (String(prop.team || "").trim() && String(prop.opponent || "").trim()) {
-    return PROBABLE_STARTER_PENDING_LABEL;
   }
   return PROBABLE_STARTER_PENDING_LABEL;
 }
@@ -239,12 +234,24 @@ export function normalizePropPitcherFields(prop = {}, probablePitchers = null) {
   };
 }
 
-export function resolveOpponentStarterDisplay({ team = "", opponent = "", probablePitchers = null } = {}) {
+export function resolveOpponentStarterDisplay({ team = "", opponent = "", probablePitchers = null, prop = null } = {}) {
+  const fromSportsData =
+    prop?.sportsDataProbablePitcher ||
+    prop?.opponentStarterFromSportsData ||
+    probablePitchers?.sportsDataStarter ||
+    null;
+  if (fromSportsData && !isUnavailablePitcherLabel(fromSportsData)) {
+    return String(fromSportsData).trim();
+  }
+
   const starter =
     probablePitchers?.opponentStarter ||
     resolveOpponentStarterFromGame(probablePitchers?.game || {}, team, opponent) ||
     null;
-  return starter || STARTER_PENDING_LABEL;
+  if (starter && !isUnavailablePitcherLabel(starter)) {
+    return String(starter).trim();
+  }
+  return STARTER_PENDING_LABEL;
 }
 
 export function normalizeLegacyStarterNote(note = "", team = "", opponent = "", probablePitchers = null) {
@@ -291,6 +298,16 @@ export function validatePitcherForMatchup(prop = {}) {
   }
 
   const resolved = normalizeLegacyStarterNote(rawPitcher, team, opponent, prop.probablePitchers);
+  const partial = resolvePartialPitcherName(prop);
+  if (partial) {
+    return {
+      pitcher: partial,
+      pitcherStatus: "PARTIAL",
+      pitcherValidated: false,
+      pitcherInvalid: false,
+      matchupPenalty: 2,
+    };
+  }
   if (!resolved || resolved === STARTER_PENDING_LABEL) {
     return {
       pitcher: STARTER_PENDING_LABEL,

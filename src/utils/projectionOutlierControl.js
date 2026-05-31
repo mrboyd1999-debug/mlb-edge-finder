@@ -50,7 +50,7 @@ export function applyProjectionOutlierControl(prop = {}) {
     }
   }
 
-  if (isHitterProp(prop) && projection > line * 1.75) {
+  if (isHitterProp(prop) && projection > line * 2) {
     outlierLabel = "Projection Outlier";
     if (!prop.projectionOutlierPenaltiesApplied) {
       confidencePenalty = 5;

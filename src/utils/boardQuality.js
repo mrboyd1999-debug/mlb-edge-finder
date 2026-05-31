@@ -22,7 +22,7 @@ import {
 } from "./integrityAudit.js";
 import { resolveVerifiedHitRateSnapshot } from "./verifiedHitRates.js";
 import { STARTER_PENDING_LABEL, normalizePropPitcherFields, PITCHER_VERIFICATION, resolvePitcherVerification, OPPONENT_PITCHER_UNAVAILABLE_LABEL, PROBABLE_STARTER_PENDING_LABEL, resolveOpposingPitcherDisplayLabel } from "./opponentStarter.js";
-import { attachSportsDataPitcherFields } from "./sportsDataPitcherLookup.js";
+import { attachSportsDataPitcherFields, findSportsDataGameForTeam } from "./sportsDataPitcherLookup.js";
 import { computePropIntegrityScore, isInflatedProbabilityProp } from "./probabilityIntegrity.js";
 import {
   allowFallbackVerification,
@@ -121,12 +121,12 @@ export const FALLBACK_RANK_WEIGHTS = {
   sanity: 0.1,
 };
 /** Production tier thresholds — probability + confidence + full MLB data. */
-export const TIER_A_MIN_CONFIDENCE = 70;
+export const TIER_A_MIN_CONFIDENCE = 75;
 export const TIER_A_MIN_PLAYABILITY = TIER_A_RULES.playability;
-export const TIER_A_MIN_PROBABILITY = 70;
-export const TIER_B_MIN_CONFIDENCE = 65;
+export const TIER_A_MIN_PROBABILITY = 72;
+export const TIER_B_MIN_CONFIDENCE = 70;
 export const TIER_B_MIN_PLAYABILITY = TIER_B_RULES.playability;
-export const TIER_B_MIN_PROBABILITY = 65;
+export const TIER_B_MIN_PROBABILITY = 67;
 /** Legacy edge gates — not used for A/B/C tier classification. */
 export const TIER_A_MIN_EDGE = 0.5;
 export const TIER_B_MIN_EDGE = 0.3;
@@ -147,7 +147,7 @@ export const MIN_PROJECTED_PROPS_FOR_BEST_PLAYS = 20;
 export const BEST_PLAYS_DISPLAY_LIMIT = 3;
 export const DEBUG_BEST_PLAYS_LIMIT = 10;
 export const TOP_BEST_PLAYS_TARGET = BEST_PLAYS_DISPLAY_LIMIT;
-export const CONFIDENCE_CALIBRATION_MIN = 50;
+export const CONFIDENCE_CALIBRATION_MIN = 60;
 export const CONFIDENCE_CALIBRATION_MAX = 95;
 
 function finite(value, fallback = 0) {
@@ -1431,9 +1431,18 @@ export function attachBoardQualityFields(prop = {}) {
       historicalStatus: prop.historicalStatus || "neutral",
     };
   }
-  const withSportsDataPitcher = prop.sportsDataGame
-    ? attachSportsDataPitcherFields(prop, { game: prop.sportsDataGame, seasonRows: prop.sportsDataSeasonRows || [] })
-    : prop;
+  const sportsDataGame =
+    prop.sportsDataGame ||
+    (Array.isArray(prop.sportsDataSlateGames) && prop.team
+      ? findSportsDataGameForTeam(prop.sportsDataSlateGames, prop.team)
+      : null);
+  const withSportsDataPitcher =
+    prop.team && sportsDataGame
+      ? attachSportsDataPitcherFields(
+          { ...prop, sportsDataGame },
+          { game: sportsDataGame, seasonRows: prop.sportsDataSeasonRows || [] }
+        )
+      : prop;
   const withPitcherPenalty = applyPitcherPendingConfidencePenalty(withSportsDataPitcher);
   const withPitcherNormalized = normalizePropPitcherFields(withPitcherPenalty);
   const edgeLabels = formatValidatedEdgeDisplay(withPitcherNormalized);

@@ -348,7 +348,7 @@ function computeWeightedConfidence(prop = {}, projection, line, edge) {
     confidence += clamp((enrichmentQuality - 50) * 0.08, -4, 3);
   }
 
-  confidence = clamp(Math.round(confidence), 45, 92);
+  confidence = clamp(Math.round(confidence), 60, 95);
 
   return { confidence, boostLabels, penaltyLabels };
 }

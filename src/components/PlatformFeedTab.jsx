@@ -1,6 +1,7 @@
 import { memo } from "react";
 import CompactPropCard from "./CompactPropCard.jsx";
 import { isPropSaved } from "../utils/savedPicksStorage.js";
+import { withPlayerImageUrl } from "../utils/playerImageFields.js";
 
 function PlatformFeedTab({
   platformLabel = "Feed",
@@ -25,7 +26,7 @@ function PlatformFeedTab({
         {picks.map((prop, index) => (
           <CompactPropCard
             key={prop.id || `${prop.playerName}-${prop.statType}-${prop.line}-${index}`}
-            prop={prop}
+            prop={withPlayerImageUrl(prop)}
             rank={index + 1}
             onOpen={onOpen}
             onSave={onSave}

@@ -2,6 +2,7 @@
  * Trace where rendered play cards originate — no projection/tier logic changes.
  */
 
+import { resolveLastRefreshTimestamp } from "./cache.js";
 import { countMergedProjections } from "./projectionCoverageAudit.js";
 import { normalizeSource } from "./normalizeSource.js";
 import { isFakeOrFallbackProp } from "./livePropRender.js";
@@ -205,6 +206,13 @@ export function buildRenderSourceAudit({
   const verifiedProps = verifiedPlays.length;
   const renderingSource = resolveDominantRenderingSource(sourceBreakdown);
 
+  const refreshTimestamp = resolveLastRefreshTimestamp({
+    lastUpdated,
+    feedMode: providerFetchAudit?.feedMode,
+    providerAudit: providerFetchAudit,
+    debugInfo,
+  });
+
   const audit = {
     ...(providerFetchAudit || {}),
     prizepicksFetched: providerFetchAudit?.prizepicksLiveFetched ?? providerFetchAudit?.prizepicksFetched,
@@ -232,7 +240,15 @@ export function buildRenderSourceAudit({
     renderingSource,
     heroPlaySource: heroPlay ? resolvePropDataSourceTag(heroPlay, context) : null,
     heroPlayPlayer: heroPlay?.playerName || heroPlay?.player || "",
-    boardCacheTimestamp: lastUpdated || providerFetchAudit?.boardCacheTimestamp || "",
+    boardCacheTimestamp:
+      renderingSource === DATA_SOURCE_TAGS.LIVE_PROVIDER
+        ? refreshTimestamp
+        : lastUpdated || providerFetchAudit?.boardCacheTimestamp || "",
+    lastSuccessfulFetchAt:
+      refreshTimestamp ||
+      providerFetchAudit?.lastSuccessfulFetchAt ||
+      providerFetchAudit?.ingestionTimestamp ||
+      "",
     boardCacheActive:
       renderingSource !== DATA_SOURCE_TAGS.LIVE_PROVIDER &&
       (sourceBreakdown.LOCAL_STORAGE > 0 || sourceBreakdown.CACHE > 0),

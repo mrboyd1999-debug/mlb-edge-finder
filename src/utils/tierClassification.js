@@ -9,11 +9,11 @@ import {
   VERIFICATION_STATUS,
 } from "./verificationStatus.js";
 
-export const TIER_A_METRICS = { confidence: 70, probability: 70 };
-export const ELITE_TIER_METRICS = { confidence: 70, probability: 70 };
-/** Playable tier — probability >= 65, confidence >= 65 */
-export const TIER_B_METRICS = { confidence: 65, probability: 65 };
-export const TIER_C_METRICS = { confidence: 60, probability: 55 };
+export const TIER_A_METRICS = { confidence: 75, probability: 72 };
+export const ELITE_TIER_METRICS = { confidence: 75, probability: 72 };
+/** Playable tier — probability >= 67, confidence >= 70 */
+export const TIER_B_METRICS = { confidence: 70, probability: 67 };
+export const TIER_C_METRICS = { confidence: 60, probability: 62 };
 export const RESEARCH_TIER_METRICS = { confidence: 65 };
 /** Best Plays board — same thresholds as Tier B; tier priority handles A vs B vs C */
 export const BEST_PLAYS_BOARD_MIN = { ...TIER_B_METRICS };

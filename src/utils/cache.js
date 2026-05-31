@@ -27,6 +27,30 @@ export function resolveBoardCacheAgeHours(timestamp = "") {
   return (Date.now() - ts) / 3_600_000;
 }
 
+export function resolveLastRefreshTimestamp({
+  lastUpdated = "",
+  feedMode = "",
+  providerAudit = null,
+  debugInfo = null,
+} = {}) {
+  const audit = providerAudit || debugInfo?.providerCoverageAudit || {};
+  const liveFeed = audit?.liveFeedDiagnostics || {};
+  const liveMode = String(feedMode || audit.feedMode || "").toUpperCase() === "LIVE";
+  const liveTs =
+    audit.lastSuccessfulFetchAt ||
+    liveFeed.lastSuccessfulFetchAt ||
+    audit.ingestionTimestamp ||
+    audit.renderedBoardTimestamp ||
+    audit.providerAuditTimestamp ||
+    "";
+
+  if (liveMode) {
+    return liveTs || lastUpdated || audit.boardCacheTimestamp || "";
+  }
+
+  return lastUpdated || liveTs || audit.boardCacheTimestamp || "";
+}
+
 /**
  * After a successful live refresh, clear stale cache flags and stamp fresh timestamps.
  */
@@ -61,6 +85,7 @@ export function clearStaleBoardCacheIfLiveFetchSucceeds({
     ingestionTimestamp: now,
     providerAuditTimestamp: now,
     renderedBoardTimestamp: now,
+    lastSuccessfulFetchAt: now,
     cacheStale: false,
   };
 }

@@ -1,6 +1,8 @@
 import { memo, useMemo, useState } from "react";
 import { formatNumber } from "../utils/formatters.js";
 import { resolveNormalizedConfidence, resolveNormalizedProbability, resolveProviderDisplayLabel, resolveProviderLineFields } from "../utils/propDisplayFields.js";
+import { withPlayerImageUrl } from "../utils/playerImageFields.js";
+import PlayerImage from "./PlayerImage.jsx";
 import { resolveRecommendedSide, resolveTierDisplayLabel } from "../utils/boardQuality.js";
 import { resolveProjectionValue } from "../utils/projectionQuality.js";
 import { formatEdgeDisplay } from "../utils/conservativeProjection.js";
@@ -101,27 +103,29 @@ function PlayerLookupPanel({ boardProps = [], loading = false, onOpenProp }) {
             </div>
             <div className="player-lookup-results">
               {props.map((prop, index) => {
-                const projection = resolveProjectionValue(prop);
-                const edge = formatEdgeDisplay(prop);
-                const probability = resolveNormalizedProbability(prop);
-                const confidence = resolveNormalizedConfidence(prop);
-                const providerLabel = resolveProviderDisplayLabel(prop);
-                const lineFields = resolveProviderLineFields(prop);
+                const enriched = withPlayerImageUrl(prop);
+                const projection = resolveProjectionValue(enriched);
+                const edge = formatEdgeDisplay(enriched);
+                const probability = resolveNormalizedProbability(enriched);
+                const confidence = resolveNormalizedConfidence(enriched);
+                const providerLabel = resolveProviderDisplayLabel(enriched);
+                const lineFields = resolveProviderLineFields(enriched);
                 return (
                   <button
-                    key={prop.id || `${playerName}-${index}`}
+                    key={enriched.id || `${playerName}-${index}`}
                     type="button"
                     className="player-lookup-row"
-                    onClick={() => onOpenProp?.(prop)}
+                    onClick={() => onOpenProp?.(enriched)}
                   >
+                    <PlayerImage prop={enriched} />
                     <div className="player-lookup-row__main">
-                      <strong>{prop.statType || prop.propType || displayFullMarketLabel(prop)}</strong>
+                      <strong>{enriched.statType || enriched.propType || displayFullMarketLabel(enriched)}</strong>
                       <span>
-                        Side {resolveSideLabel(prop)}
+                        Side {resolveSideLabel(enriched)}
                         {lineFields.prizePicksLineLabel ? ` · PrizePicks ${lineFields.prizePicksLineLabel}` : ""}
                         {lineFields.underdogLineLabel ? ` · Underdog ${lineFields.underdogLineLabel}` : ""}
                         {" · Line Used "}
-                        {lineFields.activeLineLabel ?? formatNumber(prop.line)} · Proj{" "}
+                        {lineFields.activeLineLabel ?? formatNumber(enriched.line)} · Proj{" "}
                         {projection != null ? formatNumber(projection) : "—"}
                       </span>
                     </div>
@@ -129,7 +133,7 @@ function PlayerLookupPanel({ boardProps = [], loading = false, onOpenProp }) {
                       <span>Edge {edge?.displayEdgeLabel ?? "—"}</span>
                       <span>Prob {Number.isFinite(Number(probability)) ? `${Math.round(Number(probability))}%` : "—"}</span>
                       <span>Conf {Number.isFinite(Number(confidence)) ? `${Math.round(Number(confidence))}%` : "—"}</span>
-                      <span>{resolveTierDisplayLabel(prop)}</span>
+                      <span>{resolveTierDisplayLabel(enriched)}</span>
                       {providerLabel ? <span>{providerLabel}</span> : null}
                     </div>
                   </button>

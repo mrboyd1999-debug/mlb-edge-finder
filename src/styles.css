@@ -952,6 +952,53 @@ body,
   gap: 8px;
 }
 
+.board-summary-card {
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #0b1220;
+}
+
+.board-summary-card__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px 12px;
+}
+
+.board-summary-card__metric {
+  display: grid;
+  gap: 2px;
+}
+
+.board-summary-card__label {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.board-summary-card__value {
+  font-size: 14px;
+  color: #e2e8f0;
+}
+
+.saved-pick-row__open {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+  text-align: left;
+}
+
+.saved-pick-row__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.player-lookup-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
 .system-status-card {
   border: 1px solid #334155;
   border-radius: 10px;

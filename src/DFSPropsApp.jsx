@@ -281,7 +281,8 @@ import {
   countHistoricalAttachment,
 } from "./utils/pipelinePropCountAudit.js";
 import { buildProviderCoverageAudit, logProviderCoverageSummary } from "./utils/providerCoverageAudit.js";
-import { clearStaleBoardCacheIfLiveFetchSucceeds } from "./utils/cache.js";
+import { clearStaleBoardCacheIfLiveFetchSucceeds, resolveLastRefreshTimestamp } from "./utils/cache.js";
+import { buildBoardSummary } from "./utils/boardSummary.js";
 import { buildAndLogPrizePicksPipelineAudit } from "./utils/prizePicksPipelineAudit.js";
 import {
   buildLiveProviderPipelineAudit,
@@ -3921,6 +3922,7 @@ export default function DFSPropsApp() {
             ingestionTimestamp: cacheRefresh.ingestionTimestamp || new Date().toISOString(),
             providerAuditTimestamp: cacheRefresh.providerAuditTimestamp,
             renderedBoardTimestamp: cacheRefresh.renderedBoardTimestamp,
+            lastSuccessfulFetchAt: cacheRefresh.lastSuccessfulFetchAt || cacheRefresh.boardCacheTimestamp,
             cacheStale: cacheRefresh.cacheStale,
           };
         }
@@ -4813,9 +4815,6 @@ export default function DFSPropsApp() {
     rateLimitNotice,
     refreshingFeeds,
   ]);
-  const lastUpdatedLabel = lastUpdated
-    ? `${formatDateTime(lastUpdated)}${/cached|stale|expired/i.test(String(cacheStatus || "")) ? " (cached)" : ""}`
-    : "Never";
   const providerCoverageAuditDisplay = useMemo(() => {
     const fetchAudit = debugInfo?.providerCoverageAudit;
     return buildRenderSourceAudit({
@@ -4836,6 +4835,30 @@ export default function DFSPropsApp() {
     cacheStatus,
     lastUpdated,
   ]);
+  const lastUpdatedLabel = useMemo(() => {
+    const ts = resolveLastRefreshTimestamp({
+      lastUpdated,
+      feedMode: providerCoverageAuditDisplay?.feedMode,
+      providerAudit: providerCoverageAuditDisplay,
+      debugInfo,
+    });
+    if (!ts) return "Never";
+    if (providerCoverageAuditDisplay?.feedMode === "LIVE") {
+      return formatDateTime(ts);
+    }
+    return `${formatDateTime(ts)}${/cached|stale|expired/i.test(String(cacheStatus || "")) ? " (cached)" : ""}`;
+  }, [lastUpdated, providerCoverageAuditDisplay, debugInfo, cacheStatus]);
+  const boardSummary = useMemo(
+    () =>
+      buildBoardSummary({
+        boardDisplayProps,
+        topMlbPlayBoard,
+        providerCoverageAudit: providerCoverageAuditDisplay,
+        lastUpdated,
+        debugInfo,
+      }),
+    [boardDisplayProps, topMlbPlayBoard, providerCoverageAuditDisplay, lastUpdated, debugInfo]
+  );
   const lastUpdatedMs = lastUpdated ? new Date(lastUpdated).getTime() : NaN;
   const staleDataWarning =
     Number(providerCoverageAuditDisplay?.liveProviderCount ?? 0) > 0
@@ -5241,6 +5264,7 @@ export default function DFSPropsApp() {
       cacheStatus={cacheStatus}
       boardCacheTimestamp={lastUpdated}
       liveBoardPipelineTrace={debugInfo?.liveBoardPipelineTrace || null}
+      boardSummary={boardSummary}
       performanceTracker={performanceTrackerDashboard}
     />
 

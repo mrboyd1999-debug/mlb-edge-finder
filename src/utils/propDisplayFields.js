@@ -22,8 +22,9 @@ function finite(value) {
 }
 
 export function applyConfidenceSanityCap(confidence, probability) {
-  if (!Number.isFinite(confidence) || !Number.isFinite(probability)) return confidence;
-  return Math.round(Math.min(confidence, probability + 10));
+  void probability;
+  if (!Number.isFinite(confidence)) return confidence;
+  return Math.round(Math.max(60, Math.min(95, confidence)));
 }
 
 export function resolveNormalizedConfidence(prop = {}) {
@@ -165,10 +166,11 @@ export function buildCardDescription(prop = {}) {
 }
 
 export function resolveProviderLineFields(prop = {}) {
-  const comparison = prop.lineComparison || {};
-  const prizePicksLine = finite(comparison.prizePicksLine ?? prop.prizePicksLine ?? prop.ppLine);
-  const underdogLine = finite(comparison.underdogLine ?? prop.underdogLine ?? prop.udLine);
-  const activeLine = finite(prop.line);
+  const withLines = attachLineSourceFields(prop);
+  const comparison = withLines.lineComparison || prop.lineComparison || {};
+  const prizePicksLine = finite(comparison.prizePicksLine ?? withLines.prizePicksLine ?? prop.prizePicksLine ?? prop.ppLine);
+  const underdogLine = finite(comparison.underdogLine ?? withLines.underdogLine ?? prop.underdogLine ?? prop.udLine);
+  const activeLine = finite(withLines.lineUsed ?? prop.lineUsed ?? prop.line);
   return {
     prizePicksLine,
     underdogLine,

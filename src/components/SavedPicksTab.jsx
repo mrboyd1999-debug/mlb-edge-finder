@@ -2,6 +2,8 @@ import { memo, useMemo, useState } from "react";
 import { formatDateTime, formatNumber } from "../utils/formatters.js";
 import { buildSavedPickSummary, formatSavedTierLabel } from "../utils/savedPicksStorage.js";
 import { resolveProviderLineFields } from "../utils/propDisplayFields.js";
+import { withPlayerImageUrl } from "../utils/playerImageFields.js";
+import PlayerImage from "./PlayerImage.jsx";
 
 const GRADE_OPTIONS = ["pending", "won", "lost", "push"];
 
@@ -15,12 +17,14 @@ function formatGradeLabel(value = "pending") {
 
 function SavedPickRow({ pick, onOpen, onDelete, onGrade }) {
   const [actualResult, setActualResult] = useState(pick.actualResult ?? "");
-  const snapshot = pick.propSnapshot || pick;
+  const snapshot = withPlayerImageUrl(pick.propSnapshot || pick);
   const lineFields = resolveProviderLineFields(snapshot);
 
   return (
     <article className="saved-pick-row">
-      <button type="button" className="saved-pick-row__open" onClick={() => onOpen?.(pick.propSnapshot || pick)}>
+      <button type="button" className="saved-pick-row__open" onClick={() => onOpen?.(snapshot)}>
+        <PlayerImage prop={snapshot} />
+        <div className="saved-pick-row__body">
         <div className="saved-pick-row__head">
           <strong>{pick.playerName}</strong>
           <span>Saved {formatDateTime(pick.savedAt) || "—"}</span>
@@ -44,6 +48,7 @@ function SavedPickRow({ pick, onOpen, onDelete, onGrade }) {
           <span className={`saved-pick-row__status saved-pick-row__status--${pick.resultStatus || "pending"}`}>
             {formatGradeLabel(pick.resultStatus)}
           </span>
+        </div>
         </div>
       </button>
 

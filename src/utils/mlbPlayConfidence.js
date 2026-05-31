@@ -20,9 +20,9 @@ export const CONFIDENCE_PENALTY_CAPS = {
   partialMatchup: 3,
 };
 
-export const CONFIDENCE_FLOOR_MIN = 65;
-export const CONFIDENCE_MIN = 45;
-export const CONFIDENCE_MAX = 92;
+export const CONFIDENCE_FLOOR_MIN = 60;
+export const CONFIDENCE_MIN = 60;
+export const CONFIDENCE_MAX = 95;
 
 function finite(value) {
   const num = Number(value);
