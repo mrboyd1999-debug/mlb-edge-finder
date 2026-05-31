@@ -28,6 +28,7 @@ function formatCheckedAt(value) {
 function statusTier(status) {
   const key = String(status || "").toLowerCase();
   if (key === "connected") return CONNECTION_TIERS.CONNECTED;
+  if (key.startsWith("connected (cached)")) return CONNECTION_TIERS.WARNING;
   if (key === "refreshing") return CONNECTION_TIERS.REFRESHING;
   if (key === "warning") return CONNECTION_TIERS.WARNING;
   if (key === "degraded" || key === "not configured" || key === "not tested" || key === "limited") {
@@ -39,6 +40,7 @@ function statusTier(status) {
 function indicatorTier(status) {
   const key = String(status || "").toLowerCase();
   if (key === "connected") return "ok";
+  if (key.startsWith("connected (cached)")) return "warn";
   if (key === "refreshing") return "info";
   if (key === "warning" || key === "degraded" || key === "not configured" || key === "not tested" || key === "limited") {
     return "warn";

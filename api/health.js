@@ -15,7 +15,7 @@ export default function handler(req, res) {
       underdog: "/api/underdog",
       odds: "/api/sportsbookOdds",
       sportsdataio: "/api/sportsdataio/mlb-status",
-      mlbStats: "/api/mlb/v1/people/search?names=Shohei%20Ohtani",
+      mlbStats: "/api/mlb/search?names=Shohei%20Ohtani",
       mlbStatsStats: "/api/mlb/v1/people/{id}/stats",
       mlbSchedule: "/api/mlb/v1/schedule?sportId=1",
       bestPlays: "/api/best-plays",

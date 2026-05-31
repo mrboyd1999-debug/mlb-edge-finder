@@ -3586,27 +3586,21 @@ export default function DFSPropsApp() {
     const health = buildApiHealthFromBoard(scopedBoard, cacheLayer);
     setApiHealth(health);
     try {
-      const tierCounts = { verifiedTierA: 0, verifiedTierB: 0, verifiedTierC: 0, researchCount: 0 };
+      const tierCounts = { tierACount: 0, tierBCount: 0, verifiedCount: 0, pitcherVerificationCount: 0 };
       for (const prop of boardProps) {
         const tier = String(prop.tier || prop.finalTier || "").toUpperCase();
-        if (tier === "A") tierCounts.verifiedTierA += 1;
-        else if (tier === "B") tierCounts.verifiedTierB += 1;
-        else if (tier === "C") tierCounts.verifiedTierC += 1;
-        else tierCounts.researchCount += 1;
+        if (tier === "A") tierCounts.tierACount += 1;
+        else if (tier === "B") tierCounts.tierBCount += 1;
+        if (tier === "A" || tier === "B") tierCounts.verifiedCount += 1;
+        const pitcherVerification = String(prop.pitcherVerification || prop.pitcherVerificationLevel || "").toUpperCase();
+        if (pitcherVerification === "VERIFIED" || pitcherVerification === "PARTIAL") {
+          tierCounts.pitcherVerificationCount += 1;
+        }
       }
       logBoardRefreshAudit(
         buildProviderRefreshAudit({
           apiHealth: health,
-          boardStats: {
-            rawProps:
-              Number(scopedBoard.debugInfo?.sources?.PrizePicks?.rawPropsLoaded || 0) +
-              Number(scopedBoard.debugInfo?.sources?.Underdog?.rawPropsLoaded || 0),
-            parsedProps: boardProps.length,
-            projectedProps: boardProps.filter((prop) => Number(prop.projection ?? prop.projectedValue) > 0).length,
-            ...tierCounts,
-            boardSource:
-              cacheLayer === "fresh" || cacheLayer === "live" ? "LIVE_PROVIDER" : String(cacheLayer || "CACHE").toUpperCase(),
-          },
+          boardStats: tierCounts,
         })
       );
     } catch (auditError) {

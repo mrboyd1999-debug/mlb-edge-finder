@@ -18,7 +18,7 @@ import {
   canSelectOverallPlayAtRank,
 } from "./integrityAudit.js";
 import { resolveVerifiedHitRateSnapshot } from "./verifiedHitRates.js";
-import { STARTER_PENDING_LABEL, normalizePropPitcherFields } from "./opponentStarter.js";
+import { STARTER_PENDING_LABEL, normalizePropPitcherFields, PITCHER_VERIFICATION, resolvePitcherVerification } from "./opponentStarter.js";
 import {
   DATA_STATUS,
   NO_VERIFIED_PLAYS_MESSAGE,
@@ -427,7 +427,12 @@ export function getTierAFailures(prop = {}) {
   const probability = resolvePropProbability(prop);
   const playability = resolvePropPlayability(prop);
   const projectionConfidence = resolveProjectionConfidenceLevel(prop);
+  const pitcherVerification =
+    prop.pitcherVerification || resolvePitcherVerification(prop).pitcherVerification;
 
+  if (pitcherVerification !== PITCHER_VERIFICATION.VERIFIED) {
+    failures.push(`pitcherVerification ${pitcherVerification || PITCHER_VERIFICATION.PENDING}`);
+  }
   if (!Number.isFinite(confidence) || confidence < TIER_A_MIN_CONFIDENCE) {
     failures.push(`confidence ${formatTierMetric(confidence)} < ${TIER_A_MIN_CONFIDENCE}`);
   }
@@ -452,7 +457,12 @@ export function getTierBFailures(prop = {}) {
   const confidence = resolvePropConfidence(prop);
   const probability = resolvePropProbability(prop);
   const playability = resolvePropPlayability(prop);
+  const pitcherVerification =
+    prop.pitcherVerification || resolvePitcherVerification(prop).pitcherVerification;
 
+  if (pitcherVerification === PITCHER_VERIFICATION.FAIL) {
+    failures.push("pitcherVerification FAIL");
+  }
   if (!Number.isFinite(confidence) || confidence < TIER_B_MIN_CONFIDENCE) {
     failures.push(`confidence ${formatTierMetric(confidence)} < ${TIER_B_MIN_CONFIDENCE}`);
   }

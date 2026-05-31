@@ -51,10 +51,10 @@ export function resolveStrictLineFeedStatus(feed = {}) {
     };
   }
 
-  if (active > 0 && cached) {
+  if (active > 0 && (cached || (!liveHttpOk && !fallback && !timedOut))) {
     return {
-      status: "Warning",
-      detail: `Cached — ${active} props in use${errorDetail ? ` (${errorDetail})` : ""}`,
+      status: "Connected (Cached)",
+      detail: `${active} props in use (cached)`,
       sourceMode: PROVIDER_SOURCE_MODE.CACHED,
       strictTier: PROVIDER_STATUS.WARNING,
     };
@@ -107,7 +107,7 @@ export function resolveStrictLineFeedStatus(feed = {}) {
 export function resolveStrictOddsStatus(row, keyConfigured, tested) {
   if (!keyConfigured) return { status: "Not configured", detail: "Add Odds API key in Settings" };
   if (!tested || !row) return { status: "Not tested", detail: "Save key and run Retest All" };
-  if (row.sportsListOk && normalizeStatusKey(row.settingsLine) === "connected") {
+  if (row.sportsListOk || normalizeStatusKey(row.settingsLine) === "connected" || row.ok) {
     return {
       status: "Connected",
       detail: row.debugLine || (row.sportsCount != null ? `${row.sportsCount} sports listed` : "Sports endpoint OK"),
@@ -197,27 +197,34 @@ export function buildProviderRefreshAudit({
 } = {}) {
   const rows = connectionReport?.results || [];
   const find = (name) => rows.find((row) => String(row.provider || "").toLowerCase().includes(name.toLowerCase())) || null;
-  const pp = find("prizepicks");
-  const ud = find("underdog");
   const odds = find("odds");
   const sd = find("sportsdata");
   const ppFeed = apiHealth?.PrizePicks || {};
   const udFeed = apiHealth?.Underdog || {};
 
+  const oddsConnected = Boolean(
+    odds?.sportsListOk || normalizeStatusKey(odds?.settingsLine) === "connected" || odds?.ok
+  );
+  const prizePicksConnected = Boolean(
+    ppFeed.liveHttpOk && finite(ppFeed.activeUsableCount ?? ppFeed.usableCount) > 0 && !ppFeed.cached
+  );
+  const underdogConnected = finite(udFeed.activeUsableCount ?? udFeed.usableCount) > 0;
+  const sportsDataConnected = Boolean(
+    sd?.endpointTests?.find((entry) => entry.id === "players")?.ok ||
+      normalizeStatusKey(sd?.settingsLine) === "connected"
+  );
+  const mlbStatsConnected = Boolean(mlbStatsTest?.connected || finite(mlbStatsTest?.playerCount) > 0);
+
   return {
-    oddsOk: Boolean(odds?.sportsListOk || normalizeStatusKey(odds?.settingsLine) === "connected"),
-    prizePicksOk: Boolean(ppFeed.liveHttpOk && finite(ppFeed.activeUsableCount ?? ppFeed.usableCount) > 0 && !ppFeed.cached),
-    underdogOk: Boolean(udFeed.liveHttpOk && finite(udFeed.activeUsableCount ?? udFeed.usableCount) > 0 && !udFeed.cached),
-    sportsDataOk: Boolean(sd?.endpointTests?.find((entry) => entry.id === "players")?.ok),
-    mlbStatsOk: Boolean(mlbStatsTest?.connected || mlbStatsTest?.playerCount > 0),
-    rawProps: finite(boardStats.rawProps),
-    parsedProps: finite(boardStats.parsedProps),
-    projectedProps: finite(boardStats.projectedProps),
-    verifiedTierA: finite(boardStats.verifiedTierA),
-    verifiedTierB: finite(boardStats.verifiedTierB),
-    verifiedTierC: finite(boardStats.verifiedTierC),
-    researchCount: finite(boardStats.researchCount),
-    boardSource: boardStats.boardSource || "unknown",
+    oddsConnected,
+    prizePicksConnected,
+    underdogConnected,
+    sportsDataConnected,
+    mlbStatsConnected,
+    pitcherVerificationCount: finite(boardStats.pitcherVerificationCount),
+    tierACount: finite(boardStats.tierACount ?? boardStats.verifiedTierA),
+    tierBCount: finite(boardStats.tierBCount ?? boardStats.verifiedTierB),
+    verifiedCount: finite(boardStats.verifiedCount),
     timestamp: new Date().toISOString(),
   };
 }

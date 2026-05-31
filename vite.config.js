@@ -86,6 +86,11 @@ function dfsApiProxy() {
             return;
           }
 
+          if (pathname === "/api/mlb/search" || pathname.startsWith("/api/mlb/search?")) {
+            await handleMlbSearch(req, res);
+            return;
+          }
+
           if (pathname.startsWith("/api/mlb")) {
             await proxyUpstream(req, res, "https://statsapi.mlb.com", rewriteMlbStatsPath, mlbStatsHeaders(), "MLB Stats");
             return;
@@ -505,6 +510,45 @@ function apiFootballHeaders() {
     accept: "application/json",
     ...(API_FOOTBALL_KEY ? { "x-apisports-key": API_FOOTBALL_KEY } : {}),
   };
+}
+
+async function handleMlbSearch(req, res) {
+  const parsed = new URL(req.url || "/api/mlb/search", "http://localhost");
+  const names = parsed.searchParams.get("names") || "Shohei Ohtani";
+  const upstreamUrl = new URL("https://statsapi.mlb.com/api/v1/people/search");
+  upstreamUrl.searchParams.set("names", names);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+  try {
+    const upstream = await fetch(upstreamUrl, { headers: mlbStatsHeaders(), signal: controller.signal });
+    const text = await upstream.text();
+    let payload = null;
+    try {
+      payload = text ? JSON.parse(text) : null;
+    } catch {
+      payload = null;
+    }
+    const people = Array.isArray(payload?.people) ? payload.people : [];
+    sendJson(res, upstream.status === 200 ? 200 : upstream.status, {
+      ok: upstream.status === 200 && people.length > 0,
+      source: "MLB Stats API",
+      status: upstream.status,
+      people,
+      playersReturned: people.length,
+      matchedPlayer: people[0]?.fullName || null,
+      playerId: people[0]?.id || null,
+      preview: text.slice(0, 300),
+    });
+  } catch (error) {
+    sendJson(res, 502, {
+      ok: false,
+      source: "MLB Stats API",
+      people: [],
+      error: error?.name === "AbortError" ? `Timed out after ${UPSTREAM_TIMEOUT_MS}ms` : error?.message || "Search failed",
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function handleSportsDataMlbStatus(req, res) {

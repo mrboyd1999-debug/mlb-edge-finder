@@ -286,6 +286,17 @@ async function testUnderdog() {
   };
 }
 
+function extractOddsSportsList(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+}
+
+function isOddsSportsListValid(response, payload) {
+  const data = extractOddsSportsList(payload);
+  return Boolean(response.ok && Array.isArray(data) && data.length > 0);
+}
+
 function formatResponseBody(text = "", payload = null, max = 400) {
   if (typeof payload === "string" && payload.trim()) {
     return payload.trim().slice(0, max);
@@ -345,7 +356,9 @@ async function probeOddsApiForTest() {
     const upstreamStatus = Number(payload?.upstreamStatus ?? payload?.responseCode ?? response.status ?? 0);
     const httpStatus = upstreamStatus || response.status;
     const responseBody = formatResponseBody(text, payload);
-    const sportsListOk = response.ok && Array.isArray(payload) && payload.length > 0;
+    const sportsList = extractOddsSportsList(payload);
+    const valid = isOddsSportsListValid(response, payload);
+    const sportsListOk = valid;
     const unauthorized = httpStatus === 401 || httpStatus === 403 || Boolean(payload?.error && /invalid|unauthorized|subscription/i.test(responseBody));
 
     console.info("[Odds API Test] Request URL:", redactOddsApiUrl(route));
@@ -363,8 +376,8 @@ async function probeOddsApiForTest() {
     });
 
     return {
-      ok: sportsListOk,
-      status: sportsListOk ? CONNECTION_STATUS.LIVE : CONNECTION_STATUS.FAILED,
+      ok: valid,
+      status: valid ? CONNECTION_STATUS.LIVE : CONNECTION_STATUS.FAILED,
       httpStatus,
       responseBody,
       keyLength,
@@ -374,7 +387,8 @@ async function probeOddsApiForTest() {
       route: "https://api.the-odds-api.com/v4/sports/?apiKey=[REDACTED]",
       durationMs: Date.now() - startedAt,
       payload,
-      sportsCount: sportsListOk ? payload.length : 0,
+      sportsCount: sportsList.length,
+      sportsListOk: valid,
       preview: responseBody,
     };
   } catch (error) {
@@ -419,7 +433,7 @@ async function testOddsApi() {
     };
   }
 
-  if (probe.ok) {
+  if (probe.ok || probe.sportsListOk) {
     clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
     return {
       provider: "Odds API",

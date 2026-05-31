@@ -5,6 +5,15 @@ const MLB_STATS_DIRECT_ORIGIN = "https://statsapi.mlb.com/api";
  * @param {string} pathWithLeadingSlash e.g. "/v1/people/search"
  * @param {Record<string, string|number|boolean|null|undefined>} [searchParams]
  */
+export function buildMlbStatsSearchUrl(playerName = "Shohei Ohtani") {
+  if (canUseMlbStatsProxy()) {
+    const url = new URL(`${getAppOrigin()}/api/mlb/search`);
+    url.searchParams.set("names", playerName);
+    return url;
+  }
+  return buildMlbStatsApiUrl("/v1/people/search", { names: playerName });
+}
+
 export function buildMlbStatsApiUrl(pathWithLeadingSlash = "", searchParams = {}) {
   const normalizedPath = String(pathWithLeadingSlash || "").startsWith("/")
     ? String(pathWithLeadingSlash)
@@ -36,6 +45,10 @@ function getAppOrigin() {
   } catch {
     return "http://localhost:5173";
   }
+}
+
+export function buildMlbStatsSearchTestUrl(playerName = "Shohei Ohtani") {
+  return buildMlbStatsSearchUrl(playerName);
 }
 
 export function mlbStatsApiPathLabel(url) {

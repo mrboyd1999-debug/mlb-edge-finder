@@ -1,14 +1,20 @@
 /**
- * Dedicated MLB Stats API connectivity probe — search + game logs canary.
+ * Dedicated MLB Stats API connectivity probe — uses server-side /api/mlb/search proxy.
  */
 
-import { buildMlbStatsApiUrl, logMlbStatsApiCall, mlbStatsApiPathLabel } from "./mlbStatsApiUrl.js";
+import { buildMlbStatsSearchTestUrl, logMlbStatsApiCall, mlbStatsApiPathLabel } from "./mlbStatsApiUrl.js";
 import { getMlbStatsFetchTimeoutMs } from "../utils/apiTimeout.js";
 import { recordMlbStatsFetch } from "./mlbPipelineStatus.js";
 
 const DEFAULT_CANARY_PLAYER = "Shohei Ohtani";
 
-async function probeUrl(url, { timeoutMs, label = "MLB Stats API" } = {}) {
+function extractPeopleFromPayload(payload) {
+  if (Array.isArray(payload?.people)) return payload.people;
+  if (Array.isArray(payload)) return payload;
+  return [];
+}
+
+async function probeSearchUrl(url, { timeoutMs, label = "MLB Stats API" } = {}) {
   const startedAt = Date.now();
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -33,6 +39,9 @@ async function probeUrl(url, { timeoutMs, label = "MLB Stats API" } = {}) {
       payload = null;
     }
 
+    const people = extractPeopleFromPayload(payload);
+    const connected = response.status === 200 && people.length > 0;
+
     logMlbStatsApiCall({
       stage: "test-response",
       url,
@@ -42,17 +51,24 @@ async function probeUrl(url, { timeoutMs, label = "MLB Stats API" } = {}) {
       durationMs,
       timeoutMs,
       endpoint,
+      playersReturned: people.length,
+      matchedPlayer: people[0]?.fullName || null,
     });
 
     return {
-      ok: response.ok && payload && !payload.error,
+      ok: connected,
+      connected,
       status: response.status,
       durationMs,
       endpoint,
       responseBody: preview,
       payload,
+      people,
+      playerCount: people.length,
+      matchedPlayer: people[0]?.fullName || null,
+      playerId: people[0]?.id || null,
       timedOut: false,
-      error: response.ok ? payload?.error || "" : payload?.error || `HTTP ${response.status}`,
+      error: connected ? "" : payload?.error || `HTTP ${response.status}`,
     };
   } catch (error) {
     const durationMs = Date.now() - startedAt;
@@ -71,11 +87,14 @@ async function probeUrl(url, { timeoutMs, label = "MLB Stats API" } = {}) {
 
     return {
       ok: false,
+      connected: false,
       status: timedOut ? "timeout" : "?",
       durationMs,
       endpoint,
       responseBody: "",
       payload: null,
+      people: [],
+      playerCount: 0,
       timedOut,
       error: message,
     };
@@ -84,78 +103,54 @@ async function probeUrl(url, { timeoutMs, label = "MLB Stats API" } = {}) {
   }
 }
 
-export async function testMlbStatsApiConnection({ playerName = DEFAULT_CANARY_PLAYER, retries = 2 } = {}) {
+export async function testMlbStatsApiConnection({ playerName = DEFAULT_CANARY_PLAYER, retries = 1 } = {}) {
   const timeoutMs = getMlbStatsFetchTimeoutMs();
   const testedAt = new Date().toISOString();
   const startedAt = Date.now();
+  const searchUrl = buildMlbStatsSearchTestUrl(playerName);
 
   let search = null;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
-    const searchUrl = buildMlbStatsApiUrl("/v1/people/search", { names: playerName });
-    search = await probeUrl(searchUrl, { timeoutMs, label: attempt ? `search-retry-${attempt}` : "search" });
-    if (search.ok) break;
-  }
-
-  const people = search.payload?.people || [];
-  const playerCount = people.length;
-  const matchedPlayer = people[0]?.fullName || null;
-  const playerId = people[0]?.id || null;
-
-  let gameLogCount = 0;
-  let logsProbe = null;
-
-  if (search.ok && playerId) {
-    const season = new Date().getFullYear();
-    const logsUrl = buildMlbStatsApiUrl(`/v1/people/${playerId}/stats`, {
-      stats: "gameLog",
-      group: "pitching,hitting",
-      season,
-    });
-    logsProbe = await probeUrl(logsUrl, { timeoutMs, label: "gameLog" });
-    if (logsProbe.ok && logsProbe.payload) {
-      gameLogCount = (logsProbe.payload.stats || []).reduce(
-        (sum, bucket) => sum + (bucket.splits?.length || 0),
-        0
-      );
+    search = await probeSearchUrl(searchUrl, { timeoutMs, label: attempt ? `search-retry-${attempt}` : "search" });
+    if (search.connected) break;
+    if (attempt < retries) {
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
     }
   }
 
-  const connected = search.ok && Number(search.status) === 200 && playerCount > 0;
+  const playerCount = search?.playerCount || 0;
+  const connected = search?.connected === true;
   const responseTimeMs = Date.now() - startedAt;
 
   recordMlbStatsFetch({
     ok: connected,
-    url: search.endpoint,
-    statusCode: Number(search.status) || null,
+    url: search?.endpoint || "/api/mlb/search",
+    statusCode: Number(search?.status) || null,
     playersReturned: playerCount,
-    matchedPlayer,
-    playerId,
-    error: connected ? "" : search.error || logsProbe?.error || "MLB Stats API test failed",
+    matchedPlayer: search?.matchedPlayer || null,
+    playerId: search?.playerId || null,
+    error: connected ? "" : search?.error || "MLB Stats API test failed",
   });
 
   const result = {
     provider: "MLB Stats API",
-    status: connected ? "Connected" : search.timedOut || logsProbe?.timedOut ? "Warning" : "Failed",
+    status: connected ? "Connected" : search?.timedOut ? "Warning" : "Failed",
     connected,
     responseTimeMs,
     playerCount,
-    gameLogCount,
-    matchedPlayer,
-    playerId,
+    gameLogCount: 0,
+    matchedPlayer: search?.matchedPlayer || null,
+    playerId: search?.playerId || null,
     canaryPlayer: playerName,
-    searchEndpoint: search.endpoint,
-    searchStatus: search.status,
-    searchDurationMs: search.durationMs,
-    searchResponseBody: search.responseBody,
-    logsEndpoint: logsProbe?.endpoint || "",
-    logsStatus: logsProbe?.status ?? null,
-    logsDurationMs: logsProbe?.durationMs ?? 0,
-    logsResponseBody: logsProbe?.responseBody || "",
+    searchEndpoint: search?.endpoint || "/api/mlb/search",
+    searchStatus: search?.status,
+    searchDurationMs: search?.durationMs ?? 0,
+    searchResponseBody: search?.responseBody || "",
     timeoutMs,
     testedAt,
     detail: connected
-      ? `${playerCount} players · ${gameLogCount} game logs · ${responseTimeMs}ms`
-      : search.error || logsProbe?.error || "MLB Stats API unavailable",
+      ? `HTTP 200 — ${playerCount} players matched · ${responseTimeMs}ms`
+      : search?.error || "Stats API unavailable",
   };
 
   console.info("[MLB Stats API Test]", result);

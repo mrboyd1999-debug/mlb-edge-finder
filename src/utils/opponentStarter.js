@@ -103,15 +103,90 @@ export function buildPitcherMatchupAudit(prop = {}, probablePitchers = null) {
   return audit;
 }
 
+export const PITCHER_VERIFICATION = {
+  VERIFIED: "VERIFIED",
+  PARTIAL: "PARTIAL",
+  PENDING: "PENDING",
+  FAIL: "FAIL",
+};
+
+function resolvePartialPitcherName(prop = {}) {
+  const probable = prop.probablePitchers || {};
+  const fromSchedule =
+    probable.opponentStarter ||
+    resolveOpponentStarterFromGame(probable.game || prop.game || {}, prop.team, prop.opponent) ||
+    probable.homePitcher ||
+    probable.awayPitcher ||
+    null;
+  const fromSportsData =
+    prop.sportsDataProbablePitcher ||
+    prop.opponentStarterFromSportsData ||
+    prop.probablePitchers?.sportsDataStarter ||
+    null;
+  const candidate = fromSchedule || fromSportsData;
+  if (!candidate || candidate === STARTER_PENDING_LABEL) return null;
+  return String(candidate).trim();
+}
+
+/** Full, partial (schedule/SportsData probable), pending, or fail. */
+export function resolvePitcherVerification(prop = {}) {
+  const validation = validatePitcherForMatchup(prop);
+  if (validation.pitcherValidated) {
+    return {
+      ...validation,
+      pitcherVerification: PITCHER_VERIFICATION.VERIFIED,
+      pitcherVerificationLevel: PITCHER_VERIFICATION.VERIFIED,
+    };
+  }
+
+  const partialPitcher = resolvePartialPitcherName(prop);
+  if (partialPitcher) {
+    return {
+      pitcher: partialPitcher,
+      opposingPitcher: partialPitcher,
+      pitcherStatus: "PARTIAL",
+      pitcherValidated: false,
+      pitcherInvalid: false,
+      pitcherVerification: PITCHER_VERIFICATION.PARTIAL,
+      pitcherVerificationLevel: PITCHER_VERIFICATION.PARTIAL,
+      matchupPenalty: Math.max(0, Number(validation.matchupPenalty || 0) - 2),
+    };
+  }
+
+  if (validation.pitcherInvalid) {
+    return {
+      ...validation,
+      pitcherVerification: PITCHER_VERIFICATION.FAIL,
+      pitcherVerificationLevel: PITCHER_VERIFICATION.FAIL,
+    };
+  }
+
+  return {
+    ...validation,
+    pitcherVerification: PITCHER_VERIFICATION.PENDING,
+    pitcherVerificationLevel: PITCHER_VERIFICATION.PENDING,
+  };
+}
+
 export function normalizePropPitcherFields(prop = {}, probablePitchers = null) {
   const audit = buildPitcherMatchupAudit(prop, probablePitchers);
-  const pitcher = audit.pitcherLookup.pitcher || STARTER_PENDING_LABEL;
+  const verification = resolvePitcherVerification({ ...prop, probablePitchers: probablePitchers || prop.probablePitchers, pitcherMatchupAudit: audit });
+  const pitcher = verification.pitcher || STARTER_PENDING_LABEL;
   return {
     ...prop,
     probablePitchers: probablePitchers || prop.probablePitchers || null,
     opposingPitcher: pitcher,
     opponentStarterNote: pitcher,
-    pitcherMatchupAudit: audit,
+    pitcherVerification: verification.pitcherVerification,
+    pitcherVerificationLevel: verification.pitcherVerificationLevel,
+    pitcherMatchupAudit: {
+      ...audit,
+      pitcherLookup: {
+        ...(audit.pitcherLookup || {}),
+        ...verification,
+        pitcherVerification: verification.pitcherVerification,
+      },
+    },
     gameId: audit.gameId ?? prop.gameId ?? null,
     teamId: audit.teamId ?? prop.teamId ?? null,
     opponentTeamId: audit.opponentTeamId ?? prop.opponentTeamId ?? null,

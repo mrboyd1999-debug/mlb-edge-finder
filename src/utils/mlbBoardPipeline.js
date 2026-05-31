@@ -2,7 +2,7 @@
  * MLB board pipeline — data status, research gating, probability caps, prop normalization.
  */
 
-import { STARTER_PENDING_LABEL } from "./opponentStarter.js";
+import { STARTER_PENDING_LABEL, PITCHER_VERIFICATION, resolvePitcherVerification } from "./opponentStarter.js";
 
 export const DATA_STATUS = {
   FULL_MLB_DATA: "FULL_MLB_DATA",
@@ -26,7 +26,7 @@ export const TIER_A_RULES = {
 export const TIER_B_RULES = {
   confidence: 60,
   probability: 60,
-  playability: 65,
+  playability: 70,
 };
 
 export const NO_VERIFIED_PLAYS_MESSAGE = "No verified plays. Check MLB Stats API / pitcher verification.";
@@ -101,11 +101,17 @@ export function hasFullMlbDataFields(prop = {}) {
     sampleGames != null &&
     sampleGames >= 10 &&
     hasTeamContext(prop) &&
-    (pitcherStatus === "verified" || pitcherStatus === "pending")
+    (pitcherStatus === "verified" || pitcherStatus === "partial" || pitcherStatus === "pending")
   );
 }
 
 export function resolvePitcherStatus(prop = {}) {
+  const verification =
+    prop.pitcherVerification ||
+    prop.pitcherVerificationLevel ||
+    resolvePitcherVerification(prop).pitcherVerification;
+  if (verification === PITCHER_VERIFICATION.VERIFIED) return "verified";
+  if (verification === PITCHER_VERIFICATION.PARTIAL) return "partial";
   const audit = prop.pitcherMatchupAudit?.pitcherLookup || prop.integrityAudit || {};
   if (audit.pitcherValidated === true || audit.pitcherStatus === "VERIFIED") return "verified";
   const pitcher = String(prop.opposingPitcher || prop.matchupAudit?.pitcher || prop.opponentStarterNote || "").trim();
@@ -124,14 +130,14 @@ export function isResearchCandidate(prop = {}) {
   const probability = resolvePropProbability(prop);
   const playability = resolvePropPlayability(prop);
   const dataStatus = resolveMlbDataStatus(prop);
+  const pitcherVerification =
+    prop.pitcherVerification || resolvePitcherVerification(prop).pitcherVerification;
 
+  if (pitcherVerification === PITCHER_VERIFICATION.FAIL) return true;
   if (dataStatus === DATA_STATUS.RESEARCH_ONLY) return true;
   if (dataStatus !== DATA_STATUS.FULL_MLB_DATA && dataStatus !== DATA_STATUS.REVIEW_NEEDED) return true;
   if (prop.reviewNeeded || prop.integrityAudit?.hitRateInvalid || prop.integrityAudit?.probabilityMismatch) return true;
   if (finite(confidence) != null && confidence < 50 && finite(probability) != null && probability < 50) return true;
-  if (finite(confidence) != null && confidence < BEST_PLAYS_MIN.confidence && finite(probability) != null && probability < BEST_PLAYS_MIN.probability) {
-    if (dataStatus !== DATA_STATUS.FULL_MLB_DATA) return true;
-  }
   if (prop.projectionSanityAudit?.sanityFail || prop.projectionOutlierDetected || prop.projectionRisk === "AGGRESSIVE") {
     return true;
   }
@@ -162,16 +168,17 @@ export function resolveMlbDataStatus(prop = {}) {
 export function passesBestPlayBoardGate(prop = {}) {
   if (isResearchCandidate(prop)) return false;
   const dataStatus = resolveMlbDataStatus(prop);
-  if (dataStatus !== DATA_STATUS.FULL_MLB_DATA) return false;
+  if (dataStatus !== DATA_STATUS.FULL_MLB_DATA && dataStatus !== DATA_STATUS.REVIEW_NEEDED) return false;
   const tier = String(prop.tier || prop.finalTier || "").toUpperCase();
   if (tier !== "A" && tier !== "B") return false;
   const confidence = resolvePropConfidence(prop);
   const probability = resolvePropProbability(prop);
   const playability = resolvePropPlayability(prop);
+  const mins = tier === "A" ? TIER_A_RULES : TIER_B_RULES;
   return (
-    finite(confidence) >= BEST_PLAYS_MIN.confidence &&
-    finite(probability) >= BEST_PLAYS_MIN.probability &&
-    finite(playability) >= BEST_PLAYS_MIN.playability
+    finite(confidence) >= mins.confidence &&
+    finite(probability) >= mins.probability &&
+    finite(playability) >= mins.playability
   );
 }
 
