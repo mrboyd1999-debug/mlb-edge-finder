@@ -3,6 +3,7 @@
  */
 
 import { attachSeasonHitRateFields, resolveSeasonHitRateBundle } from "./seasonHitRate.js";
+import { attachDataIntegrityFields } from "./dataIntegrity.js";
 
 export const MAX_PLAYER_PROPS_IN_TOP_LIST = 2;
 export const TOP_SECTION_LIMIT = 5;
@@ -672,14 +673,15 @@ export function attachBoardQualityFields(prop = {}) {
   const fullData = isFullDataProp(prop);
   const propTier = classifyPropTier(prop);
   const withSeason = attachSeasonHitRateFields(prop);
-  const dataQualityBadge = resolveBoardDataQualityBadge({ ...withSeason, isFullData: fullData, partialData: !fullData });
+  const withIntegrity = attachDataIntegrityFields(withSeason);
+  const dataQualityBadge = resolveBoardDataQualityBadge({ ...withIntegrity, isFullData: fullData, partialData: !fullData });
   return {
-    ...withSeason,
+    ...withIntegrity,
     ...edgeLabels,
     rawEdgeLabel: edgeLabels.rawEdgeLabel,
     displayEdgeLabel: edgeLabels.displayEdgeLabel,
     edgePercent: edgeLabels.edgePercent ?? prop.edgePercent,
-    projectionConfidenceLevel: resolveProjectionConfidenceLevel(withSeason),
+    projectionConfidenceLevel: resolveProjectionConfidenceLevel(withIntegrity),
     fullDataReason,
     isFullData: fullData,
     partialData: !fullData,

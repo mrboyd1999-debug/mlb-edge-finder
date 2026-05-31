@@ -11,6 +11,12 @@ import { computeCalibratedProbability } from "./probabilityCalibration.js";
 import { computeFormConfidenceScore } from "./matchupEnrichment.js";
 import { formatHitRatePercent } from "./pickDirectionAudit.js";
 import { resolveSeasonHitRateBundle } from "./seasonHitRate.js";
+import { resolveVerifiedHitRateSnapshot } from "./verifiedHitRates.js";
+import {
+  normalizeLegacyStarterNote,
+  STARTER_PENDING_LABEL,
+} from "./opponentStarter.js";
+import { formatWhip } from "./formatters.js";
 import {
   HISTORICAL_DATA_UNAVAILABLE_WARNING,
   resolveHistoricalDataPresent,
@@ -53,41 +59,7 @@ function estimateHitRateFromAverage(avg, line) {
 }
 
 export function buildHitRateSnapshot(prop = {}) {
-  const line = finite(prop.line);
-  const last5 =
-    resolveHitRatePercent(prop, "last5HitRate") ??
-    estimateHitRateFromAverage(prop.last5Average ?? prop.recentForm, line);
-  const last10 =
-    resolveHitRatePercent(prop, "last10HitRate") ??
-    resolveHitRatePercent(prop, "recentHitRate") ??
-    estimateHitRateFromAverage(prop.last10Average, line);
-  const seasonBundle = resolveSeasonHitRateBundle(prop);
-  const season =
-    seasonBundle.seasonRateValid && seasonBundle.seasonHitRate != null && seasonBundle.seasonHitRate > 0
-      ? seasonBundle.seasonHitRate
-      : resolveHitRatePercent(prop, "seasonHitRate") ??
-        resolveHitRatePercent(prop, "historicalHitRate") ??
-        estimateHitRateFromAverage(prop.seasonAverage, line);
-  const seasonLabel =
-    seasonBundle.displayLabel !== "—" && seasonBundle.displayLabel !== "0%"
-      ? seasonBundle.displayLabel
-      : last10 != null && last10 > 0
-        ? `${last10}%`
-        : season != null && season > 0
-          ? `${season}%`
-          : seasonBundle.displayLabel;
-
-  return {
-    last5: last5 ?? null,
-    last10: last10 ?? null,
-    season: seasonBundle.seasonHitRate ?? season ?? null,
-    last5Label: last5 != null ? `${last5}%` : "—",
-    last10Label: last10 != null ? `${last10}%` : "—",
-    seasonLabel,
-    seasonHitRateSource: seasonBundle.seasonHitRateSource,
-    seasonGames: seasonBundle.seasonGames,
-    seasonHits: seasonBundle.seasonHits,
-  };
+  return resolveVerifiedHitRateSnapshot(prop);
 }
 
 function resolveOpponentAdjustment(prop = {}) {
@@ -290,9 +262,16 @@ export function buildEdgeValidation(prop = {}, metrics = {}) {
 export function buildMatchupAudit(prop = {}) {
   const team = String(prop.team || "").trim().toUpperCase() || "—";
   const opponent = String(prop.opponent || "").trim().toUpperCase() || "—";
-  const pitcher =
-    String(prop.opposingPitcher || prop.pitcherName || prop.startingPitcher || "").trim() || "—";
+  const pitcherRaw = normalizeLegacyStarterNote(
+    prop.opposingPitcher || prop.opponentStarterNote || prop.pitcherName || prop.startingPitcher || "",
+    prop.team,
+    prop.opponent,
+    prop.probablePitchers
+  );
+  const pitcher = pitcherRaw || STARTER_PENDING_LABEL;
   const venue = String(prop.venue || prop.ballpark || prop.stadium || prop.homeBallpark || "").trim() || "—";
+  const whip = finite(prop.opponentPitcherWhip);
+  const whipLabel = formatWhip(whip);
   const matchupScore =
     finite(prop.matchupScore) ??
     finite(prop.formConfidenceScore) ??
@@ -302,7 +281,7 @@ export function buildMatchupAudit(prop = {}) {
     prop.matchupNote ||
       prop.handednessMatchup ||
       opponent !== "—" ||
-      pitcher !== "—" ||
+      (pitcher !== "—" && pitcher !== STARTER_PENDING_LABEL) ||
       prop.formBaseline != null
   );
 
@@ -310,6 +289,7 @@ export function buildMatchupAudit(prop = {}) {
     team,
     opponent,
     pitcher,
+    whip: whipLabel,
     venue,
     matchupScore: matchupScore != null ? Math.round(matchupScore) : null,
     matchupConfidence: prop.matchupConfidence || "—",
@@ -319,6 +299,8 @@ export function buildMatchupAudit(prop = {}) {
   };
 }
 
+import { attachDataIntegrityFields } from "./dataIntegrity.js";
+
 export function attachModelValidationFields(prop = {}, metrics = {}) {
   try {
     const probabilityAudit = buildProbabilityAudit(prop, metrics);
@@ -326,7 +308,7 @@ export function attachModelValidationFields(prop = {}, metrics = {}) {
     const matchupAudit = buildMatchupAudit(prop);
     const hitRates = probabilityAudit?.hitRates || buildHitRateSnapshot(prop);
 
-    return {
+    return attachDataIntegrityFields({
       ...prop,
       probabilityAudit,
       probabilityCalibration: probabilityAudit?.calibration || prop.probabilityCalibration || null,
@@ -335,7 +317,7 @@ export function attachModelValidationFields(prop = {}, metrics = {}) {
       hitRateSnapshot: hitRates,
       probabilityExplanation: probabilityAudit?.summary || "",
       hitRateLine: `L5 ${hitRates?.last5Label ?? "—"} · L10 ${hitRates?.last10Label ?? "—"} · Season ${hitRates?.seasonLabel ?? "—"}`,
-    };
+    });
   } catch (error) {
     console.error("[ModelValidation] attach failed", prop?.playerName || prop?.player, error);
     return {

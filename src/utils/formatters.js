@@ -48,6 +48,13 @@ export function formatPercent(value) {
   return `${Math.round(number * 100)}%`;
 }
 
+/** WHIP must never display as 0 — use N/A when unavailable. */
+export function formatWhip(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return "N/A";
+  return number.toFixed(2);
+}
+
 export function formatSignedPercent(value) {
   if (value == null || value === "") return "-";
   const number = Number(value);

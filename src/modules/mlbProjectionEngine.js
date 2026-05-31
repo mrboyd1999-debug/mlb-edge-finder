@@ -3,7 +3,7 @@ import {
   computeWeightedRollingProjection,
   buildRollingFormReason,
 } from "../utils/mlbRollingProjection.js";
-import { formatNumber } from "../utils/formatters.js";
+import { formatNumber, formatWhip } from "../utils/formatters.js";
 import {
   buildMlbPitcherDataPackage,
   computeOpponentKAdjustment,
@@ -490,7 +490,7 @@ function projectVerifiedHitterMarket(prop = {}, profile = {}, context = {}, mark
   const components = [
     { label: "Recent form (L10)", value: recent, weight: 0.35 },
     { label: "Season baseline", value: season, weight: 0.2 },
-    { label: "Pitcher matchup", value: matchupRate ?? recent, weight: 0.15, display: data.opponentPitcherWhip != null ? `WHIP ${formatNumber(data.opponentPitcherWhip)}` : undefined },
+    { label: "Pitcher matchup", value: matchupRate ?? recent, weight: 0.15, display: data.opponentPitcherWhip != null && data.opponentPitcherWhip > 0 ? `WHIP ${formatWhip(data.opponentPitcherWhip)}` : "WHIP N/A" },
     { label: "Handedness split", value: handednessRate ?? recent, weight: 0.1, display: data.handednessMatchup || undefined },
     { label: "Batting order", value: orderRate ?? recent, weight: 0.1, display: data.battingOrderNote || undefined },
     { label: "Park / weather", value: parkWeatherRate ?? recent, weight: 0.05, display: data.parkFactorNote || data.weatherNote || undefined },

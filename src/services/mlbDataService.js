@@ -6,6 +6,12 @@ import { canonicalMarketKey } from "../utils/marketNormalization.js";
 import { resolvePropSport } from "../utils/mlbOnlyMode.js";
 import { mlbTeamsMatch } from "../utils/mlbTeamMatch.js";
 import {
+  gameIncludesBothTeams,
+  resolveOpponentStarterFromGame,
+  resolveOpponentStarterDisplay,
+  STARTER_PENDING_LABEL,
+} from "../utils/opponentStarter.js";
+import {
   logIncomingProp,
   logFetchError,
   logFetchResponse,
@@ -448,20 +454,10 @@ export async function fetchMlbProbablePitchers({ date = new Date(), team = "", o
 
   const payload = await response.json();
   const games = payload.dates?.[0]?.games || [];
-  const teamNeedle = normalizeTeamKey(team);
-  const oppNeedle = normalizeTeamKey(opponent);
 
   let match = null;
   for (const game of games) {
-    const home = game.teams?.home?.team || {};
-    const away = game.teams?.away?.team || {};
-    const homeKey = normalizeTeamKey(home.abbreviation || home.teamCode || home.name);
-    const awayKey = normalizeTeamKey(away.abbreviation || away.teamCode || away.name);
-    const involvesTeam =
-      !teamNeedle || homeKey.includes(teamNeedle) || awayKey.includes(teamNeedle) || teamNeedle.includes(homeKey) || teamNeedle.includes(awayKey);
-    const involvesOpp =
-      !oppNeedle || homeKey.includes(oppNeedle) || awayKey.includes(oppNeedle) || oppNeedle.includes(homeKey) || oppNeedle.includes(awayKey);
-    if (involvesTeam || involvesOpp || (!teamNeedle && !oppNeedle)) {
+    if (gameIncludesBothTeams(game, team, opponent)) {
       match = game;
       break;
     }
@@ -469,18 +465,30 @@ export async function fetchMlbProbablePitchers({ date = new Date(), team = "", o
 
   if (!match) {
     logMlbData("probables.miss", { date: dateText, team, opponent });
-    return null;
+    return {
+      date: dateText,
+      matchedGame: false,
+      opponentStarter: null,
+      opponentStarterNote: STARTER_PENDING_LABEL,
+      starterPending: true,
+    };
   }
 
   const homePitcher = match.teams?.home?.probablePitcher?.fullName || null;
   const awayPitcher = match.teams?.away?.probablePitcher?.fullName || null;
+  const opponentStarter = resolveOpponentStarterFromGame(match, team, opponent);
   const result = {
     date: dateText,
+    matchedGame: true,
+    game: match,
     homeTeam: match.teams?.home?.team?.abbreviation || match.teams?.home?.team?.name || "",
     awayTeam: match.teams?.away?.team?.abbreviation || match.teams?.away?.team?.name || "",
     homePitcher,
     awayPitcher,
-    opponentStarterNote: homePitcher && awayPitcher ? `${awayPitcher} vs ${homePitcher}` : homePitcher || awayPitcher || null,
+    opponentStarter,
+    opponentStarterNote: opponentStarter || STARTER_PENDING_LABEL,
+    starterPending: !opponentStarter,
+    probableStarterConfirmed: Boolean(opponentStarter),
   };
   writeSmartCache("mlb-probables", cacheKey, result, { source: "mlb-stats-api" });
   logMlbData("probables.loaded", result);
@@ -536,7 +544,8 @@ export async function fetchMlbOpponentMatchup(opponentName = "") {
     const walks = finiteNumber(pitchSplit.baseOnBalls ?? pitchSplit.walks) || 0;
     const hitsPitch = finiteNumber(pitchSplit.hits) || 0;
     const innings = finiteNumber(pitchSplit.inningsPitched) || games * 5;
-    const whip = innings > 0 ? round((walks + hitsPitch) / innings, 2) : null;
+    const whipRaw = innings > 0 ? round((walks + hitsPitch) / innings, 2) : null;
+    const whip = whipRaw != null && whipRaw > 0 ? whipRaw : null;
 
     const context = {
       allowed: hitsPitch / games,
@@ -546,7 +555,7 @@ export async function fetchMlbOpponentMatchup(opponentName = "") {
       hitsAllowedPerGame: round(hitsPitch / games, 2),
       runsScoredPerGame: round((finiteNumber(hitSplit.runs) || 0) / games, 2),
       homeRunsAllowed: round((finiteNumber(pitchSplit.homeRuns) || 0) / games, 2),
-      note: `${team.abbreviation || team.name}: ${round((finiteNumber(hitSplit.runs) || 0) / games, 1)} R/G, ${round((strikeouts || 0) / games, 1)} K/G${whip != null ? `, WHIP ${whip}` : ""}`,
+      note: `${team.abbreviation || team.name}: ${round((finiteNumber(hitSplit.runs) || 0) / games, 1)} R/G, ${round((strikeouts || 0) / games, 1)} K/G${whip != null ? `, WHIP ${whip}` : ", WHIP N/A"}`,
     };
     writeSmartCache("mlb-opponent", needle, context, { source: "mlb-stats-api" });
     logMlbData("opponent.loaded", { opponent: opponentName, strikeoutsPerGame: context.strikeoutsPerGame, whip });
@@ -876,12 +885,29 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
     gradingRows: profile.gradingRows || relevantSplits,
     splits: profile.splits || relevantSplits,
     opponentContext: opponentContext || profile.opponentContext || null,
-    opponentPitcherWhip: opponentContext?.whip ?? profile.opponentPitcherWhip ?? null,
+    opponentPitcherWhip:
+      opponentContext?.whip != null && opponentContext.whip > 0
+        ? opponentContext.whip
+        : profile.opponentPitcherWhip != null && profile.opponentPitcherWhip > 0
+          ? profile.opponentPitcherWhip
+          : null,
     opponentAllowed: opponentContext?.allowed ?? profile.opponentAllowed ?? null,
     opponentRank: opponentContext?.rank ?? profile.opponentRank ?? null,
     matchupNote: opponentContext?.note ?? profile.matchupNote ?? null,
-    opponentStarterNote: probablePitchers?.opponentStarterNote || profile.opponentStarterNote || null,
-    probableStarterConfirmed: profile.probableStarterConfirmed ?? null,
+    opponentStarterNote: resolveOpponentStarterDisplay({
+      team: prop.team,
+      opponent: prop.opponent,
+      probablePitchers,
+    }),
+    opposingPitcher: resolveOpponentStarterDisplay({
+      team: prop.team,
+      opponent: prop.opponent,
+      probablePitchers,
+    }),
+    probableStarterConfirmed:
+      probablePitchers?.probableStarterConfirmed ??
+      profile.probableStarterConfirmed ??
+      Boolean(probablePitchers?.opponentStarter),
     hasMatchup: Boolean(opponentContext),
     weatherNote: weather?.note || profile.weatherNote || null,
     weatherData: weather || profile.weatherData || null,

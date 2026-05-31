@@ -40,8 +40,9 @@ import {
   resolveBoardDataQualityLabel,
   classifyPropTier,
 } from "../utils/boardQuality.js";
-import { resolveSeasonHitRateBundle } from "../utils/seasonHitRate.js";
 import { buildHitRateSnapshot } from "../utils/modelValidation.js";
+import { resolveSeasonHitRateBundle } from "../utils/seasonHitRate.js";
+import DataIntegrityPanel from "./DataIntegrityPanel.jsx";
 import { isManualAnalyzerProp } from "../utils/manualPropBuilder.js";
 import {
   AWAITING_PROJECTION_STATUS,
@@ -132,6 +133,7 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
   const seasonBundle = useMemo(() => resolveSeasonHitRateBundle(prop), [prop]);
   const hitRateSnapshot = useMemo(() => buildHitRateSnapshot(prop), [prop]);
   const seasonHitRate = seasonBundle.displayLabel;
+  const gamesCountLabel = seasonBundle.gamesLabel || prop.seasonGamesLabel || "Season Games";
   const tierBadgeLabel = prop.confidenceTierLabel || `Tier ${classifyPropTier(prop)}`;
   const boardDataLabel = resolveBoardDataQualityLabel(prop);
   const badge = manualProp
@@ -346,7 +348,7 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
             <MetricIf label="Season rate source" value={seasonBundle.seasonHitRateSource} />
           ) : null}
           {breakdownMode && seasonBundle.seasonGames != null ? (
-            <MetricIf label="Season games" value={seasonBundle.seasonGames} />
+            <MetricIf label={gamesCountLabel} value={seasonBundle.seasonGames} />
           ) : null}
           {breakdownMode && seasonBundle.seasonHits != null ? (
             <MetricIf label="Season hits" value={seasonBundle.seasonHits} />
@@ -434,7 +436,7 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
                 <MetricIf label="Season rate source" value={seasonBundle.seasonHitRateSource} />
               ) : null}
               {seasonBundle.seasonGames != null ? (
-                <MetricIf label="Season games" value={seasonBundle.seasonGames} />
+                <MetricIf label={gamesCountLabel} value={seasonBundle.seasonGames} />
               ) : null}
               {seasonBundle.seasonHits != null ? (
                 <MetricIf label="Season hits" value={seasonBundle.seasonHits} />
@@ -499,6 +501,7 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
               <MetricIf label="Team" value={prop.matchupAudit.team !== "—" ? prop.matchupAudit.team : null} />
               <MetricIf label="Opponent" value={prop.matchupAudit.opponent !== "—" ? prop.matchupAudit.opponent : null} />
               <MetricIf label="Pitcher" value={prop.matchupAudit.pitcher !== "—" ? prop.matchupAudit.pitcher : null} />
+              <MetricIf label="WHIP" value={prop.matchupAudit.whip && prop.matchupAudit.whip !== "—" ? prop.matchupAudit.whip : null} />
               <MetricIf label="Venue" value={prop.matchupAudit.venue !== "—" ? prop.matchupAudit.venue : null} />
               <MetricIf label="Matchup score" value={prop.matchupAudit.matchupScore != null ? `${prop.matchupAudit.matchupScore}/100` : null} strong />
               <MetricIf label="Matchup confidence" value={prop.matchupAudit.matchupConfidence !== "—" ? prop.matchupAudit.matchupConfidence : null} />
@@ -596,19 +599,23 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
           </details>
         ) : null}
 
-        {!manualProp && (historical.last10.sample > 0 || historical.last20.sample > 0) && (
-          <div style={{ ...styles.explanationBlock, marginTop: "8px" }}>
-            <strong>Historical tracking</strong>
+        {breakdownMode && hitRateSnapshot?.verified ? (
+          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
+            <strong style={{ fontSize: "11px" }}>Historical tracking</strong>
             <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "6px", marginTop: "6px" }}>
-              <MetricIf label="Last 5 hit" value={historical.last5.hitPct != null ? `${historical.last5.hitPct}%` : null} />
-              <MetricIf label="Last 10 hit" value={historical.last10.hitPct != null ? `${historical.last10.hitPct}%` : null} />
-              <MetricIf label="Last 20 hit" value={historical.last20.hitPct != null ? `${historical.last20.hitPct}%` : null} />
-              <MetricIf label="Avg edge (10)" value={historical.last10.avgEdge != null ? formatSignedNumber(historical.last10.avgEdge) : null} />
-              <MetricIf label="ROI sim (10)" value={historical.last10.roiPct != null ? `${historical.last10.roiPct}%` : null} />
-              <MetricIf label="Trend" value={historical.last10.streakTrend !== "flat" ? historical.last10.streakTrend : null} />
+              <MetricIf label="Last 5 hit" value={hitRateSnapshot.last5Label !== "—" ? hitRateSnapshot.last5Label : null} />
+              <MetricIf label="Last 10 hit" value={hitRateSnapshot.last10Label !== "—" ? hitRateSnapshot.last10Label : null} />
+              <MetricIf label="Last 20 hit" value={hitRateSnapshot.last20Label !== "—" ? hitRateSnapshot.last20Label : null} />
+              <MetricIf label="Season hit" value={hitRateSnapshot.seasonLabel !== "—" && hitRateSnapshot.seasonLabel !== "0%" ? hitRateSnapshot.seasonLabel : seasonHitRate !== "—" ? seasonHitRate : null} />
             </div>
           </div>
-        )}
+        ) : null}
+
+        {breakdownMode && prop.dataIntegrity ? (
+          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
+            <DataIntegrityPanel audit={prop.dataIntegrity} />
+          </div>
+        ) : null}
 
         {(prop.lineComparison || prop.sportsbookComparison) && !manualProp && (
           <div style={{ ...styles.comparisonBox, marginTop: "8px", padding: "6px 8px", fontSize: "11px" }}>

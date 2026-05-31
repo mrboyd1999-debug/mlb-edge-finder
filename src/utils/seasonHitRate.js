@@ -22,13 +22,26 @@ function toDisplayLabel(rate) {
   return `${Math.round(rate)}%`;
 }
 
+function resolveGamesLabel(source = "", games = null) {
+  if (/season game logs|prop\.seasonHitRate/i.test(String(source || ""))) {
+    return { gamesLabel: "Season Games", gamesLabelKey: "season" };
+  }
+  if (games != null && games > 0) {
+    return { gamesLabel: "Sample Games", gamesLabelKey: "sample" };
+  }
+  return { gamesLabel: "Games", gamesLabelKey: "unknown" };
+}
+
 function bundleFromRate(rate, { seasonGames = null, seasonHits = null, seasonHitRateSource = "" } = {}) {
   const normalized = normalizeHitRatePercent(rate);
+  const labels = resolveGamesLabel(seasonHitRateSource, seasonGames);
   return {
     seasonHitRate: normalized,
     seasonGames,
     seasonHits,
     seasonHitRateSource,
+    gamesLabel: labels.gamesLabel,
+    gamesLabelKey: labels.gamesLabelKey,
     displayLabel: toDisplayLabel(normalized),
     seasonRateValid: normalized != null && normalized > 0,
   };
@@ -113,6 +126,8 @@ export function resolveSeasonHitRateBundle(prop = {}) {
       seasonGames: 0,
       seasonHits: 0,
       seasonHitRateSource: "no mlb games",
+      gamesLabel: "Season Games",
+      gamesLabelKey: "season",
       displayLabel: "0%",
       seasonRateValid: false,
     };
@@ -123,6 +138,8 @@ export function resolveSeasonHitRateBundle(prop = {}) {
     seasonGames: seasonGames ?? null,
     seasonHits: null,
     seasonHitRateSource: "unavailable",
+    gamesLabel: "Games",
+    gamesLabelKey: "unknown",
     displayLabel: "—",
     seasonRateValid: false,
   };
@@ -137,6 +154,8 @@ export function attachSeasonHitRateFields(prop = {}) {
     seasonHits: bundle.seasonHits ?? prop.seasonHits,
     seasonHitRateSource: bundle.seasonHitRateSource,
     seasonHitRateDisplay: bundle.displayLabel,
+    seasonGamesLabel: bundle.gamesLabel,
+    seasonGamesLabelKey: bundle.gamesLabelKey,
     seasonRateValid: bundle.seasonRateValid,
   };
 }

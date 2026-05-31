@@ -148,6 +148,7 @@ export function buildMlbHitterDataPackage(prop = {}, profile = {}, context = {})
 
   const opponent = context.opponentContext || profile.opponentContext || {};
   const whip = finiteNumber(profile.opponentPitcherWhip) ?? finiteNumber(opponent.whip);
+  const safeWhip = whip != null && whip > 0 ? whip : null;
   const impliedGameTotal =
     finiteNumber(context.impliedGameTotal) ??
     finiteNumber(profile.impliedGameTotal) ??
@@ -172,7 +173,7 @@ export function buildMlbHitterDataPackage(prop = {}, profile = {}, context = {})
     sampleSize: finiteNumber(profile.sampleSize) ?? statValues.length,
     consistencyScore: computeConsistencyScore(statValues),
     opponentContext: opponent,
-    opponentPitcherWhip: whip,
+    opponentPitcherWhip: safeWhip,
     impliedGameTotal,
     weatherNote: profile.weatherNote || context.weatherNote || "",
     parkFactorNote: profile.parkFactorNote || "",
@@ -185,7 +186,7 @@ export function buildMlbHitterDataPackage(prop = {}, profile = {}, context = {})
     lineMovementNote: profile.lineMovementNote || context.lineMovementNote || "",
     hasGameLogs,
     hasCoreRates,
-    hasOpponent: whip != null || finiteNumber(profile.opponentAllowed) != null,
+    hasOpponent: safeWhip != null || finiteNumber(profile.opponentAllowed) != null,
     verifiedSource,
   };
 }

@@ -83,15 +83,12 @@ function BestPlayRowCard({
   const projectionLabel = projection != null && projection > 0 ? formatNumber(projection) : "—";
   const lean = enriched.lean || "Pass";
   const explanation = enriched.verifiedPlayExplanation;
-  const hitRates = enriched.hitRateSnapshot || explanation?.hitRates;
-  const last5HitRate = formatHitRatePercent(
-    hitRates?.last5 != null ? hitRates.last5 / 100 : enriched.last5HitRate ?? 0
-  );
-  const last10HitRate = formatHitRatePercent(
-    hitRates?.last10 != null
-      ? hitRates.last10 / 100
-      : enriched.last10HitRate ?? enriched.recentHitRate ?? 0
-  );
+  const hitRates = enriched.hitRateSnapshot || prop.hitRateSnapshot;
+  const last5HitRate = hitRates?.last5Label && hitRates.last5Label !== "—" ? hitRates.last5Label : "—";
+  const last10HitRate =
+    hitRates?.last10Label && hitRates.last10Label !== "—"
+      ? hitRates.last10Label
+      : formatHitRatePercent(enriched.last10HitRate ?? enriched.recentHitRate ?? null);
   const seasonBundle = resolveSeasonHitRateBundle(enriched);
   const seasonHitRate = seasonBundle.displayLabel;
   const isVerifiedPlay = Boolean(
@@ -342,8 +339,8 @@ function BestPlayRowCard({
               ) : null}
               {matchupAudit ? (
                 <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 10 }}>
-                  Matchup: {matchupAudit.team} vs {matchupAudit.opponent} · Pitcher {matchupAudit.pitcher} · Venue{" "}
-                  {matchupAudit.venue} · Score {matchupAudit.matchupScore ?? "—"}
+                  Matchup: {matchupAudit.team} vs {matchupAudit.opponent} · Pitcher {matchupAudit.pitcher} · WHIP{" "}
+                  {matchupAudit.whip || "N/A"} · Venue {matchupAudit.venue} · Score {matchupAudit.matchupScore ?? "—"}
                 </p>
               ) : null}
               {statsLine ? (

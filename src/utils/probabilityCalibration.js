@@ -3,6 +3,7 @@
  */
 
 import { resolveSeasonHitRateBundle } from "./seasonHitRate.js";
+import { resolveVerifiedHitRateSnapshot } from "./verifiedHitRates.js";
 
 export const CALIBRATION_MIN_PROBABILITY = 50;
 export const CALIBRATION_MAX_PROBABILITY = 88;
@@ -67,18 +68,14 @@ function estimateHitRateFromAverage(avg, line) {
 
 export function resolveCalibrationHitRates(prop = {}, line = null) {
   const ln = finite(line ?? prop.line);
-  const last5 =
-    normalizeHitRatePercent(prop.last5HitRate) ??
-    estimateHitRateFromAverage(prop.last5Average ?? prop.recentForm, ln);
-  const last10 =
-    normalizeHitRatePercent(prop.last10HitRate) ??
-    normalizeHitRatePercent(prop.recentHitRate) ??
-    estimateHitRateFromAverage(prop.last10Average, ln);
+  const snapshot = resolveVerifiedHitRateSnapshot(prop);
+  const last5 = snapshot.last5 ?? estimateHitRateFromAverage(prop.last5Average ?? prop.recentForm, ln);
+  const last10 = snapshot.last10 ?? estimateHitRateFromAverage(prop.last10Average, ln);
   const seasonBundle = resolveSeasonHitRateBundle(prop);
   const season =
     seasonBundle.seasonRateValid && seasonBundle.seasonHitRate != null
       ? seasonBundle.seasonHitRate
-      : normalizeHitRatePercent(prop.seasonHitRate) ??
+      : snapshot.season ?? normalizeHitRatePercent(prop.seasonHitRate) ??
         normalizeHitRatePercent(prop.historicalHitRate) ??
         estimateHitRateFromAverage(prop.seasonAverage, ln);
 
@@ -88,14 +85,16 @@ export function resolveCalibrationHitRates(prop = {}, line = null) {
     seasonHitRate: season,
     seasonRateValid: Boolean(seasonBundle.seasonRateValid && seasonBundle.seasonHitRate > 0),
     seasonHitRateSource: seasonBundle.seasonHitRateSource,
-    last5Label: last5 != null ? `${last5}%` : "—",
-    last10Label: last10 != null ? `${last10}%` : "—",
+    last5Label: snapshot.last5Label !== "—" ? snapshot.last5Label : last5 != null ? `${last5}%` : "—",
+    last10Label: snapshot.last10Label !== "—" ? snapshot.last10Label : last10 != null ? `${last10}%` : "—",
     seasonLabel:
-      seasonBundle.displayLabel !== "—"
-        ? seasonBundle.displayLabel
-        : season != null
-          ? `${season}%`
-          : "—",
+      snapshot.seasonLabel !== "—" && snapshot.seasonLabel !== "0%"
+        ? snapshot.seasonLabel
+        : seasonBundle.displayLabel !== "—"
+          ? seasonBundle.displayLabel
+          : season != null
+            ? `${season}%`
+            : "—",
   };
 }
 
