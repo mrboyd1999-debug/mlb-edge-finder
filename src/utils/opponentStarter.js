@@ -5,7 +5,38 @@
 import { mlbTeamsMatch, normalizeMlbTeamKey } from "./mlbTeamMatch.js";
 
 export const STARTER_PENDING_LABEL = "Pitcher Pending";
+export const OPPONENT_PITCHER_UNAVAILABLE_LABEL = "Opponent pitcher unavailable";
 export const PITCHER_STATUS_UNKNOWN = "UNKNOWN";
+
+function isUnavailablePitcherLabel(value = "") {
+  const text = String(value || "").trim();
+  if (!text || text === "—") return true;
+  if (text === STARTER_PENDING_LABEL) return true;
+  return /pitcher pending|starter pending|opponent pitcher unavailable/i.test(text);
+}
+
+/** User-facing opposing pitcher — never returns "Pitcher Pending". */
+export function resolveOpposingPitcherDisplayLabel(prop = {}) {
+  const partial = resolvePartialPitcherName(prop);
+  const resolved =
+    partial ||
+    prop.pitcherMatchupAudit?.starterLookup?.resolvedStarter ||
+    prop.pitcherMatchupAudit?.homePitcher ||
+    prop.pitcherMatchupAudit?.awayPitcher ||
+    resolveOpponentStarterFromGame(
+      prop.probablePitchers?.game || prop.game || {},
+      prop.team,
+      prop.opponent
+    ) ||
+    prop.opposingPitcher ||
+    prop.opponentStarterNote ||
+    "";
+  const text = String(resolved || "").trim();
+  if (isUnavailablePitcherLabel(text) || / vs /i.test(text)) {
+    return OPPONENT_PITCHER_UNAVAILABLE_LABEL;
+  }
+  return text;
+}
 
 function teamSideKey(game = {}, side = "home") {
   const team = game.teams?.[side]?.team || {};
@@ -171,12 +202,19 @@ export function resolvePitcherVerification(prop = {}) {
 export function normalizePropPitcherFields(prop = {}, probablePitchers = null) {
   const audit = buildPitcherMatchupAudit(prop, probablePitchers);
   const verification = resolvePitcherVerification({ ...prop, probablePitchers: probablePitchers || prop.probablePitchers, pitcherMatchupAudit: audit });
-  const pitcher = verification.pitcher || STARTER_PENDING_LABEL;
+  const displayPitcher = resolveOpposingPitcherDisplayLabel({
+    ...prop,
+    probablePitchers: probablePitchers || prop.probablePitchers,
+    pitcherMatchupAudit: audit,
+    opposingPitcher: verification.pitcher,
+    opponentStarterNote: verification.pitcher,
+  });
   return {
     ...prop,
     probablePitchers: probablePitchers || prop.probablePitchers || null,
-    opposingPitcher: pitcher,
-    opponentStarterNote: pitcher,
+    opposingPitcher: displayPitcher,
+    opposingPitcherDisplay: displayPitcher,
+    opponentStarterNote: displayPitcher,
     pitcherVerification: verification.pitcherVerification,
     pitcherVerificationLevel: verification.pitcherVerificationLevel,
     pitcherMatchupAudit: {

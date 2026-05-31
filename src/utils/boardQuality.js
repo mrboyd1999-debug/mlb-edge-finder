@@ -10,6 +10,8 @@ import {
   compareBestPlaysRank,
   annotateBestPlayRankingAudit,
   resolveBestPlayRankingFlags,
+  computeTopPlayFinalScore,
+  compareTopPlayFinalScore,
 } from "./bestPlayRankingScore.js";
 import {
   attachIntegrityAuditFields,
@@ -18,7 +20,7 @@ import {
   canSelectOverallPlayAtRank,
 } from "./integrityAudit.js";
 import { resolveVerifiedHitRateSnapshot } from "./verifiedHitRates.js";
-import { STARTER_PENDING_LABEL, normalizePropPitcherFields, PITCHER_VERIFICATION, resolvePitcherVerification } from "./opponentStarter.js";
+import { STARTER_PENDING_LABEL, normalizePropPitcherFields, PITCHER_VERIFICATION, resolvePitcherVerification, OPPONENT_PITCHER_UNAVAILABLE_LABEL, resolveOpposingPitcherDisplayLabel } from "./opponentStarter.js";
 import {
   allowFallbackVerification,
   attachVerificationStatusFields,
@@ -55,14 +57,15 @@ import {
 } from "./tierClassification.js";
 
 export const MAX_PLAYER_PROPS_IN_TOP_LIST = 2;
-export const MAX_MARKET_PROPS_IN_TOP_LIST = 3;
+export const MAX_MARKET_PROPS_IN_TOP_LIST = 2;
 export const BEST_PLAYS_DIVERSITY_MARKETS = [
-  "hrr",
-  "totalBases",
-  "hits",
   "strikeouts",
+  "hits",
+  "totalBases",
   "fantasyScore",
   "runs",
+  "walks",
+  "rbis",
 ];
 export const TOP_SECTION_LIMIT = 5;
 export const VALUE_SECTION_LIMIT = 10;
@@ -90,7 +93,7 @@ export const BEST_PLAY_FALLBACK_NOTICE =
 export const TIER_C_FALLBACK_NOTICE = NO_TIER_AB_RESEARCH_MESSAGE;
 export const REVIEW_NEEDED_FALLBACK_NOTICE = TIER_C_FALLBACK_NOTICE;
 export const PITCHER_PENDING_CONFIDENCE_PENALTY = 10;
-export const PITCHER_PENDING_TAG = "Pitcher Pending";
+export const PITCHER_PENDING_TAG = "Opponent pitcher unavailable";
 export const FALLBACK_RANK_WEIGHTS = {
   confidence: 0.35,
   probability: 0.35,
@@ -196,7 +199,7 @@ export function applyPlayerDiversityFilter(
   return out;
 }
 
-/** Prefer unique players and mixed markets; cap props per player and per market. */
+/** Preserve score order; cap props per player and per market (max 2 each by default). */
 export function applyBestPlaysDiversityFilter(
   props = [],
   {
@@ -204,52 +207,22 @@ export function applyBestPlaysDiversityFilter(
     maxPerPlayer = MAX_PLAYER_PROPS_IN_TOP_LIST,
     maxPerMarket = MAX_MARKET_PROPS_IN_TOP_LIST,
     minUniquePlayers = MIN_UNIQUE_PLAYERS_TOP_10,
-    priorityMarkets = BEST_PLAYS_DIVERSITY_MARKETS,
   } = {}
 ) {
-  const sorted = [...props];
   const playerCounts = new Map();
   const marketCounts = new Map();
   const out = [];
-  const seen = new Set();
 
-  const canAdd = (prop) => {
+  for (const prop of props || []) {
+    if (out.length >= limit) break;
     const player = playerKey(prop);
     const market = diversityMarketKey(prop);
-    if (!player || !market) return false;
-    if (seen.has(prop)) return false;
-    if ((playerCounts.get(player) || 0) >= maxPerPlayer) return false;
-    if ((marketCounts.get(market) || 0) >= maxPerMarket) return false;
-    return true;
-  };
-
-  const addProp = (prop) => {
-    const player = playerKey(prop);
-    const market = diversityMarketKey(prop);
+    if (!player || !market) continue;
+    if ((playerCounts.get(player) || 0) >= maxPerPlayer) continue;
+    if ((marketCounts.get(market) || 0) >= maxPerMarket) continue;
     out.push(prop);
-    seen.add(prop);
     playerCounts.set(player, (playerCounts.get(player) || 0) + 1);
     marketCounts.set(market, (marketCounts.get(market) || 0) + 1);
-  };
-
-  for (const targetMarket of priorityMarkets) {
-    if (out.length >= limit) break;
-    const candidate = sorted.find((prop) => diversityMarketKey(prop) === targetMarket && canAdd(prop));
-    if (candidate) addProp(candidate);
-  }
-
-  for (const prop of sorted) {
-    if (out.length >= limit) break;
-    const player = playerKey(prop);
-    if (!player || seen.has(prop) || playerCounts.has(player)) continue;
-    if (!canAdd(prop)) continue;
-    addProp(prop);
-  }
-
-  for (const prop of sorted) {
-    if (out.length >= limit) break;
-    if (seen.has(prop) || !canAdd(prop)) continue;
-    addProp(prop);
   }
 
   void minUniquePlayers;
@@ -400,25 +373,19 @@ export function hasIntegrityReviewFlags(prop = {}) {
 
 export function isPitcherPendingPlay(prop = {}) {
   if (resolvePitcherIntegrityScore(prop) === 0) return true;
-  const pitcher = String(prop.opposingPitcher || prop.matchupAudit?.pitcher || prop.opponentStarterNote || "").trim();
-  return (
-    !pitcher ||
-    pitcher === "—" ||
-    pitcher === STARTER_PENDING_LABEL ||
-    pitcher === PITCHER_PENDING_TAG ||
-    /pitcher pending|starter pending/i.test(pitcher)
-  );
+  const display = resolveOpposingPitcherDisplayLabel(prop);
+  return display === OPPONENT_PITCHER_UNAVAILABLE_LABEL;
 }
 
 export function applyPitcherPendingConfidencePenalty(prop = {}) {
   if (!isPitcherPendingPlay(prop)) return prop;
+  const displayPitcher = resolveOpposingPitcherDisplayLabel(prop);
   return {
     ...prop,
     pitcherPendingTag: PITCHER_PENDING_TAG,
-    opposingPitcher:
-      prop.opposingPitcher && prop.opposingPitcher !== "—"
-        ? prop.opposingPitcher
-        : STARTER_PENDING_LABEL,
+    opposingPitcher: displayPitcher,
+    opposingPitcherDisplay: displayPitcher,
+    opponentStarterNote: displayPitcher,
   };
 }
 
@@ -876,7 +843,7 @@ export function buildTopBestPlaysPicks(
   const { eligible, tierA, tierB } = tierPools;
   const { sourcePool, activeTier, usedFallback, fallbackNotice } = resolveBestPlaysSourcePool(tierPools);
   const strictEligible = [...tierA, ...tierB];
-  const rankedSource = applyBestPlayRankConstraints([...sourcePool].sort(compareBestPlaysDisplayRank));
+  const rankedSource = [...sourcePool].sort(compareTopPlayFinalScore);
   let picks = applyBestPlaysDiversityFilter(rankedSource, {
     limit,
     maxPerPlayer,
@@ -885,17 +852,17 @@ export function buildTopBestPlaysPicks(
   });
 
   if (picks.length < limit && sourcePool.length) {
-    picks = fillBestPlaysToLimit(picks, [...sourcePool].sort(compareBestPlaysDisplayRank), {
+    picks = fillBestPlaysToLimit(picks, rankedSource, {
       limit,
       maxPerPlayer,
       maxPerMarket,
     });
   }
 
-  picks = applyBestPlayRankConstraints(
-    picks.filter((prop) => passesVerifiedPlayShowThresholds(prop, activeTier)).slice(0, limit),
-    { limit }
-  );
+  picks = picks
+    .filter((prop) => passesVerifiedPlayShowThresholds(prop, activeTier))
+    .sort(compareTopPlayFinalScore)
+    .slice(0, limit);
 
   diagnostics.activeTier = activeTier;
   diagnostics.tierADisplayed = picks.filter((prop) => resolveFinalTier(prop) === "A").length;
@@ -908,8 +875,9 @@ export function buildTopBestPlaysPicks(
     return annotateBestPlayRankingAudit(
       attachFinalTierFields({
         ...prop,
-        sortScore: computeSortScore(prop),
-        fallbackRankingScore: computeSortScore(prop),
+        topPlayFinalScore: computeTopPlayFinalScore(prop),
+        sortScore: computeTopPlayFinalScore(prop),
+        fallbackRankingScore: computeTopPlayFinalScore(prop),
         bestPlayActiveTier: activeTier,
         bestPlayFilterReason: tierAudit.reason,
         bestPlayUsedFallback: usedFallback || propTier !== activeTier,

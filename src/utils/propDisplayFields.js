@@ -20,10 +20,17 @@ function finite(value) {
   return Number.isFinite(num) ? num : null;
 }
 
+export function applyConfidenceSanityCap(confidence, probability) {
+  if (!Number.isFinite(confidence) || !Number.isFinite(probability)) return confidence;
+  return Math.round(Math.min(confidence, probability + 10));
+}
+
 export function resolveNormalizedConfidence(prop = {}) {
-  const value = resolvePropConfidence(prop);
-  if (!Number.isFinite(value)) return null;
-  return Math.round(Math.max(0, Math.min(100, value)));
+  const raw = resolvePropConfidence(prop);
+  if (!Number.isFinite(raw)) return null;
+  const probability = resolvePropProbability(prop);
+  const capped = applyConfidenceSanityCap(raw, probability);
+  return Math.round(Math.max(0, Math.min(100, capped)));
 }
 
 export function resolveNormalizedProbability(prop = {}) {

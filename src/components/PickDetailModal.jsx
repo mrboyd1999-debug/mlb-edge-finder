@@ -43,6 +43,7 @@ import { attachBoardQualityFields,
 } from "../utils/boardQuality.js";
 import { resolveNormalizedConfidence, resolveNormalizedProbability } from "../utils/propDisplayFields.js";
 import { resolveRiskExplanation } from "../utils/risk.js";
+import { resolveOpposingPitcherDisplayLabel } from "../utils/opponentStarter.js";
 import ProviderLabel from "./ProviderLabel.jsx";
 import { resolveVerificationStatus } from "../utils/verificationStatus.js";
 import { buildHitRateSnapshot } from "../utils/modelValidation.js";
@@ -113,7 +114,30 @@ function formatModalMatchup(prop = {}) {
   return team || opponent || "";
 }
 
-function buildProbabilityAuditRows(prop = {}, hitRateSnapshot = {}, seasonHitRate = "") {
+function buildSimpleProbabilityAuditRows(prop = {}, hitRateSnapshot = {}) {
+  const audit = prop.probabilityAudit || {};
+  const confidence = resolveNormalizedConfidence(prop);
+  const probability = resolveNormalizedProbability(prop);
+  const last10 =
+    hitRateSnapshot?.last10Label ??
+    audit.last10HitRate ??
+    prop.last10HitRate ??
+    prop.recentHitRate ??
+    null;
+  const edge =
+    Number.isFinite(Number(prop.edge)) && Number(prop.edge) !== 0
+      ? formatSignedNumber(prop.edge)
+      : prop.displayEdgeLabel || null;
+
+  return [
+    { label: "Confidence", value: confidence != null ? `${confidence}%` : null, strong: true },
+    { label: "Probability", value: probability != null ? `${probability}%` : null, strong: true },
+    { label: "Last 10 Hit Rate", value: last10 },
+    { label: "Edge", value: edge, strong: true },
+  ].filter((row) => hasValue(row.value));
+}
+
+function buildAdvancedProbabilityAuditRows(prop = {}) {
   const audit = prop.probabilityAudit || {};
   const sampleSizeAdjustment =
     audit.calibration?.breakdown?.sampleSizeSmall || audit.probabilityPenalties?.sampleSizeSmall
@@ -134,7 +158,6 @@ function buildProbabilityAuditRows(prop = {}, hitRateSnapshot = {}, seasonHitRat
 
   return [
     { label: "Last 5 hit rate", value: audit.last5HitRate },
-    { label: "Last 10 hit rate", value: audit.last10HitRate },
     { label: "Recent form", value: audit.recentHitRate },
     { label: "Projection vs line", value: audit.projectionVsLine },
     { label: "Calibrated probability", value: calibratedProbability, strong: true },
@@ -287,7 +310,9 @@ export default function PickDetailModal({
     : lean;
   const propLabel = prop.statType || prop.propType || prop.market || null;
   const verificationLabel = prop.verificationStatus || resolveVerificationStatus(prop);
-  const probabilityAuditRows = buildProbabilityAuditRows(prop, hitRateSnapshot, seasonHitRate);
+  const probabilityAuditRows = buildSimpleProbabilityAuditRows(prop, hitRateSnapshot);
+  const advancedProbabilityAuditRows = buildAdvancedProbabilityAuditRows(prop);
+  const opposingPitcherLabel = resolveOpposingPitcherDisplayLabel(prop);
   const probabilityLabel = (() => {
     const normalized = resolveNormalizedProbability(prop);
     if (normalized != null) return `${normalized}%`;
@@ -410,6 +435,7 @@ export default function PickDetailModal({
                 <SummaryMetric label="Confidence" value={confidenceLabel} strong />
                 <SummaryMetric label="Risk" value={riskLevel} strong />
                 {breakdownMode ? <SummaryMetric label="Tier" value={tierBadgeLabel} strong /> : null}
+                {breakdownMode ? <SummaryMetric label="Opposing pitcher" value={opposingPitcherLabel} /> : null}
                 {breakdownMode ? <SummaryMetric label="Verification status" value={verificationLabel} /> : null}
                 {providerLabel ? <SummaryMetric label="Provider" value={providerLabel} /> : null}
               </>
@@ -456,10 +482,20 @@ export default function PickDetailModal({
                       <SummaryMetric key={row.label} label={row.label} value={row.value} strong={row.strong} />
                     ))}
                   </div>
-                  {prop.probabilityAudit.explanationLines?.length ? (
-                    <p style={{ ...styles.compactFlags, margin: "8px 0 0", fontSize: "11px", lineHeight: 1.45, color: "#cbd5e1" }}>
-                      {prop.probabilityAudit.explanationLines.join(" · ")}
-                    </p>
+                  {showDebugPanels && advancedProbabilityAuditRows.length ? (
+                    <>
+                      <strong style={{ display: "block", marginTop: "10px", fontSize: "11px" }}>Advanced calculations</strong>
+                      <div className="compact-prop-grid" style={{ marginTop: "8px" }}>
+                        {advancedProbabilityAuditRows.map((row) => (
+                          <SummaryMetric key={row.label} label={row.label} value={row.value} strong={row.strong} />
+                        ))}
+                      </div>
+                      {prop.probabilityAudit.explanationLines?.length ? (
+                        <p style={{ ...styles.compactFlags, margin: "8px 0 0", fontSize: "11px", lineHeight: 1.45, color: "#cbd5e1" }}>
+                          {prop.probabilityAudit.explanationLines.join(" · ")}
+                        </p>
+                      ) : null}
+                    </>
                   ) : null}
                 </div>
               ) : null}
@@ -499,7 +535,7 @@ export default function PickDetailModal({
                   <div className="compact-prop-grid" style={{ marginTop: "8px" }}>
                     <MetricIf label="Team" value={prop.matchupAudit.team !== "—" ? prop.matchupAudit.team : null} />
                     <MetricIf label="Opponent" value={prop.matchupAudit.opponent !== "—" ? prop.matchupAudit.opponent : null} />
-                    <MetricIf label="Pitcher" value={prop.matchupAudit.pitcher !== "—" ? prop.matchupAudit.pitcher : null} />
+                    <MetricIf label="Pitcher" value={opposingPitcherLabel !== "—" ? opposingPitcherLabel : null} />
                     <MetricIf label="Matchup score" value={prop.matchupAudit.matchupScore != null ? `${prop.matchupAudit.matchupScore}/100` : null} strong />
                   </div>
                 </div>

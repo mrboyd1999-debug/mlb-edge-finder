@@ -218,6 +218,43 @@ export function resolveNormalizedEdgeScore(prop = {}) {
   return Math.min(resolveRankingEdgePercent(prop), 100);
 }
 
+export function resolveRecentFormScore(prop = {}) {
+  const raw =
+    prop.last10HitRate ??
+    prop.recentHitRate ??
+    prop.hitRateSnapshot?.last10 ??
+    prop.hitRateSnapshot?.last10HitRate ??
+    prop.hitRateSnapshot?.last10Label;
+  if (raw == null || raw === "" || raw === "—") return 0;
+  if (typeof raw === "string" && raw.includes("%")) {
+    const num = Number(String(raw).replace("%", "").trim());
+    return Number.isFinite(num) ? Math.max(0, Math.min(100, num)) : 0;
+  }
+  const num = Number(raw);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, Math.min(100, num <= 1 ? num * 100 : num));
+}
+
+/** Top Play final score for Verified Plays ranking. */
+export function computeTopPlayFinalScore(prop = {}) {
+  const probability = finite(prop.probabilityScore ?? prop.verifiedProbability ?? prop.probabilityNormalized, 0);
+  const confidence = finite(
+    prop.displayConfidenceScore ?? prop.confidenceNormalized ?? prop.confidenceScore ?? prop.confidence,
+    0
+  );
+  const edgeScore = resolveNormalizedEdgeScore(prop);
+  const recentForm = resolveRecentFormScore(prop);
+  const score =
+    probability * 0.4 + edgeScore * 0.3 + confidence * 0.2 + recentForm * 0.1;
+  return Math.round(score * 100) / 100;
+}
+
+export function compareTopPlayFinalScore(a = {}, b = {}) {
+  const scoreDelta = computeTopPlayFinalScore(b) - computeTopPlayFinalScore(a);
+  if (scoreDelta !== 0) return scoreDelta;
+  return compareBestPlaysTierRank(a, b);
+}
+
 export function resolvePlayabilityScore(prop = {}) {
   const breakdown = prop.playabilityBreakdown ?? prop.playabilityAudit;
   if (breakdown?.weightedRaw != null && Number.isFinite(Number(breakdown.weightedRaw))) {
