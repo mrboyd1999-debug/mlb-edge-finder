@@ -27,6 +27,14 @@ import {
   classifyPropTier,
 } from "./boardQuality.js";
 
+const TIER_SORT_ORDER = { A: 0, B: 1, C: 2, D: 3 };
+
+function compareBestPlaysTierRank(a = {}, b = {}) {
+  const tierA = TIER_SORT_ORDER[classifyPropTier(a)] ?? 3;
+  const tierB = TIER_SORT_ORDER[classifyPropTier(b)] ?? 3;
+  return tierA - tierB;
+}
+
 export function resolveRankingEdgePercent(prop = {}) {
   const direct = finite(prop.edgePercent, NaN);
   const computed = Number.isFinite(direct)
@@ -140,8 +148,11 @@ export function compareVerifiedPlaysRank(a = {}, b = {}) {
   return String(a.playerName || a.player || "").localeCompare(String(b.playerName || b.player || ""));
 }
 
-/** Top 10 Best Plays: probability → confidence → projection edge */
+/** Top 10 Best Plays: Tier A → Tier B, then probability → confidence → edge */
 export function compareBestPlaysRank(a = {}, b = {}) {
+  const tierCmp = compareBestPlaysTierRank(a, b);
+  if (tierCmp !== 0) return tierCmp;
+
   const probA = finite(a.probabilityScore ?? a.verifiedProbability, 0);
   const probB = finite(b.probabilityScore ?? b.verifiedProbability, 0);
   if (probB !== probA) return probB - probA;

@@ -378,12 +378,21 @@ export function buildBestPlayRejectionSamples(pool = [], limit = 12) {
 }
 
 export function compareBestPlaysRecoveryRank(a = {}, b = {}) {
+  const tierCmp = compareBestPlaysTierRank(a, b);
+  if (tierCmp !== 0) return tierCmp;
+
   return (
-    compareNumericDesc(a, b, resolvePropConfidence) ||
     compareNumericDesc(a, b, resolvePropProbability) ||
-    compareNumericDesc(a, b, resolvePropPlayability) ||
+    compareNumericDesc(a, b, resolvePropConfidence) ||
     compareHighestEdgePlays(a, b)
   );
+}
+
+function compareBestPlaysTierRank(a = {}, b = {}) {
+  const tierOrder = { A: 0, B: 1, C: 2, D: 3 };
+  const tierA = tierOrder[classifyPropTier(a)] ?? 3;
+  const tierB = tierOrder[classifyPropTier(b)] ?? 3;
+  return tierA - tierB;
 }
 
 export function buildTopBestPlaysPicks(

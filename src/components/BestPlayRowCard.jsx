@@ -266,32 +266,25 @@ function BestPlayRowCard({
                 </div>
               ) : null}
               {probabilityAudit ? (
-                <div className="probability-audit" aria-label="Probability audit">
-                  <p className="probability-audit__title">Probability inputs</p>
+                <div className="probability-audit" aria-label="Probability breakdown">
+                  <p className="probability-audit__title">Probability Breakdown</p>
                   {probabilityAudit.historicalDataWarning ? (
                     <p className="probability-audit__warning">{probabilityAudit.historicalDataWarning}</p>
                   ) : null}
                   <p style={{ ...styles.bestPlayRowSubline, color: "#cbd5e1", marginTop: 2, fontSize: 11 }}>
-                    Last 5: <strong>{probabilityAudit.last5HitRate ?? hitRates?.last5Label ?? last5HitRate}</strong>
-                    {" · "}
-                    Last 10: <strong>{probabilityAudit.last10HitRate ?? hitRates?.last10Label ?? last10HitRate}</strong>
+                    Recent: <strong>{probabilityAudit.recentHitRate ?? probabilityAudit.last10HitRate ?? hitRates?.last10Label ?? last10HitRate}</strong>
                     {" · "}
                     Season: <strong>{probabilityAudit.seasonHitRate ?? hitRates?.seasonLabel ?? seasonHitRate}</strong>
                     {" · "}
-                    Proj vs Line: <strong>{probabilityAudit.projectionVsLine}</strong>
+                    Confidence: <strong>{probabilityAudit.confidence ?? confidenceLabel}</strong>
                     {" · "}
-                    Opponent: <strong>{probabilityAudit.opponentAdjustment}</strong>
+                    Playability: <strong>{probabilityAudit.playability ?? playabilityLabel}</strong>
                     {" · "}
-                    Park: <strong>{probabilityAudit.parkAdjustment}</strong>
+                    Edge Bonus: <strong>{probabilityAudit.edgeBonus ?? probabilityAudit.edgeContribution ?? "—"}</strong>
                   </p>
                   {probabilityAudit.finalProbability != null ? (
                     <p style={{ ...styles.bestPlayRowSubline, color: "#e2e8f0", marginTop: 2, fontSize: 11 }}>
-                      {safeArray(probabilityAudit.explanationLines).map((lineText, index) => (
-                        <span key={lineText}>
-                          {index ? " · " : ""}
-                          {lineText}
-                        </span>
-                      ))}
+                      Final Probability: <strong>{Math.round(Number(probabilityAudit.finalProbability))}%</strong>
                     </p>
                   ) : null}
                 </div>

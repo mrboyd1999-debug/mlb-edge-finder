@@ -35,6 +35,7 @@ import { isPitcherStrikeoutMarket } from "./topMlbPlaysRanking.js";
 import { isMlbPitcherMarket } from "../modules/mlbPitcherData.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
 import { resolveProjectionConfidenceLevel, classifyPropTier, attachBoardQualityFields } from "./boardQuality.js";
+import { computeCalibratedProbability } from "./probabilityCalibration.js";
 import {
   computeDisplayPropMetrics,
   evaluateMlbPlayability,
@@ -220,7 +221,7 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     },
     metrics
   );
-  const verifiedProbability = playability.probabilityScore ?? metrics.probabilityScore;
+  let verifiedProbability = playability.probabilityScore ?? metrics.probabilityScore;
   const modelConfidence =
     metrics.adjustedConfidence ??
     computeMlbPlayConfidence({ ...prop, projection }, projection) ??
@@ -280,6 +281,26 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
   const edgePercent =
     metrics.edgePercent ?? (edge != null && line > 0 ? computeStandardEdgePercent(edge, line) : null);
   const edgeMagnitude = Number.isFinite(Number(edge)) ? Math.abs(Number(edge)) : resolveEdgeMagnitude(prop);
+  const probabilityCalibration = computeCalibratedProbability(
+    {
+      ...prop,
+      projection,
+      projectedValue: projection,
+      displayConfidenceScore: displayConfidence,
+      playabilityScore,
+    },
+    {
+      edge,
+      edgePercent,
+      projection,
+      confidence: displayConfidence,
+      playability: playabilityScore,
+    },
+    { verified: true }
+  );
+  if (probabilityCalibration?.probability != null) {
+    verifiedProbability = probabilityCalibration.probability;
+  }
   const edgeScore = edgeMagnitude;
   const edgeLabels = playability.edgeDisplay ?? formatValidatedEdgeDisplay({ ...prop, edge, edgePercent, line });
   const direction =
@@ -345,6 +366,7 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     edgeScore,
     verifiedProbability,
     probabilityScore: verifiedProbability,
+    probabilityCalibration,
     displayConfidenceScore: displayConfidence,
     adjustedConfidence: playability.adjustedConfidence,
     confidence: displayConfidence ?? prop.confidenceScore ?? prop.confidence,
