@@ -1,6 +1,6 @@
 import { memo, useMemo, useState } from "react";
 import { formatNumber } from "../utils/formatters.js";
-import { resolveNormalizedConfidence, resolveNormalizedProbability, resolveProviderDisplayLabel } from "../utils/propDisplayFields.js";
+import { resolveNormalizedConfidence, resolveNormalizedProbability, resolveProviderDisplayLabel, resolveProviderLineFields } from "../utils/propDisplayFields.js";
 import { resolveRecommendedSide, resolveTierDisplayLabel } from "../utils/boardQuality.js";
 import { resolveProjectionValue } from "../utils/projectionQuality.js";
 import { formatEdgeDisplay } from "../utils/conservativeProjection.js";
@@ -106,6 +106,7 @@ function PlayerLookupPanel({ boardProps = [], loading = false, onOpenProp }) {
                 const probability = resolveNormalizedProbability(prop);
                 const confidence = resolveNormalizedConfidence(prop);
                 const providerLabel = resolveProviderDisplayLabel(prop);
+                const lineFields = resolveProviderLineFields(prop);
                 return (
                   <button
                     key={prop.id || `${playerName}-${index}`}
@@ -116,7 +117,11 @@ function PlayerLookupPanel({ boardProps = [], loading = false, onOpenProp }) {
                     <div className="player-lookup-row__main">
                       <strong>{prop.statType || prop.propType || displayFullMarketLabel(prop)}</strong>
                       <span>
-                        Side {resolveSideLabel(prop)} · Line {formatNumber(prop.line)} · Proj{" "}
+                        Side {resolveSideLabel(prop)}
+                        {lineFields.prizePicksLineLabel ? ` · PrizePicks ${lineFields.prizePicksLineLabel}` : ""}
+                        {lineFields.underdogLineLabel ? ` · Underdog ${lineFields.underdogLineLabel}` : ""}
+                        {" · Line Used "}
+                        {lineFields.activeLineLabel ?? formatNumber(prop.line)} · Proj{" "}
                         {projection != null ? formatNumber(projection) : "—"}
                       </span>
                     </div>

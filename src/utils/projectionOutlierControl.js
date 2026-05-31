@@ -59,6 +59,13 @@ export function applyProjectionOutlierControl(prop = {}) {
   }
 
   const next = { ...prop };
+  const largeEdgeWarning =
+    isHitterProp(prop) && projection > line * 2
+      ? "Large relative edge — verify projection source and line scale."
+      : null;
+  if (largeEdgeWarning) {
+    next.projectionLargeEdgeWarning = largeEdgeWarning;
+  }
   if (projection !== finite(prop.projection ?? prop.projectedValue)) {
     next.projection = projection;
     next.projectedValue = projection;
@@ -99,11 +106,12 @@ export function applyProjectionOutlierControl(prop = {}) {
     next.projectionOutlierPenaltiesApplied = true;
   }
 
-  if (capNote || outlierLabel) {
+  if (capNote || outlierLabel || next.projectionLargeEdgeWarning) {
     next.projectionOutlierAudit = {
       projectionCapped,
       capNote,
       outlierLabel,
+      largeEdgeWarning: next.projectionLargeEdgeWarning || null,
       confidencePenalty,
       probabilityPenalty,
       line,

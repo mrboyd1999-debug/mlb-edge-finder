@@ -3,6 +3,7 @@
  */
 
 import { normalizeSource } from "./normalizeSource.js";
+import { attachLineSourceFields } from "./normalizeProp.js";
 import {
   classifyPropTier,
   hasPositiveEdge,
@@ -98,12 +99,24 @@ function hasOddsApiLine(prop = {}) {
   );
 }
 
+function hasPrizePicksLine(prop = {}) {
+  const comparison = prop.lineComparison || {};
+  return finite(comparison.prizePicksLine ?? prop.prizePicksLine ?? prop.ppLine) != null;
+}
+
+function hasUnderdogLine(prop = {}) {
+  const comparison = prop.lineComparison || {};
+  return finite(comparison.underdogLine ?? prop.underdogLine ?? prop.udLine) != null;
+}
+
 export function resolveProviderDisplayLabel(prop = {}, context = {}) {
   const sportsDataConnected = Boolean(
     context.sportsDataConnected ??
       (hasSportsDataIoData(prop) || /sportsdata/i.test(String(prop.projectionSource || "")))
   );
   const oddsConnected = Boolean(context.oddsApiConnected ?? hasOddsApiLine(prop));
+  const hasPp = hasPrizePicksLine(prop);
+  const hasUd = hasUnderdogLine(prop);
   const src = normalizeSource(prop);
   const cached = Boolean(
     prop.fromCache ||
@@ -113,12 +126,20 @@ export function resolveProviderDisplayLabel(prop = {}, context = {}) {
       /cached/i.test(String(prop.statusLabel || ""))
   );
 
+  const lineParts = [];
+  if (hasPp || src === "prizepicks") lineParts.push("PrizePicks");
+  if (hasUd || src === "underdog") lineParts.push("Underdog");
+  if (oddsConnected) lineParts.push("Odds API");
+
+  if (lineParts.length >= 2) return `Verified via ${lineParts.join(" + ")}`;
+  if (oddsConnected) return "Line verified via Odds API";
+  if (hasPp || src === "prizepicks") return "Verified via PrizePicks";
+  if (hasUd || src === "underdog") {
+    return cached ? "Line from Underdog cache" : "Verified via Underdog";
+  }
+
   if (sportsDataConnected && oddsConnected) return "Verified via SportsDataIO + Odds API";
   if (sportsDataConnected) return "Verified via SportsDataIO";
-  if (oddsConnected) return "Line verified via Odds API";
-  if (src === "underdog" && cached) return "Line from Underdog cache";
-  if (src === "underdog") return "Line from Underdog";
-  if (src === "prizepicks") return null;
 
   const fallback = String(prop.providerLabel || prop.projectionSourceLabel || "").trim();
   if (/live_provider|cache_provider|fallback|null|undefined/i.test(fallback)) return null;
@@ -170,11 +191,12 @@ export function resolvePitcherCardLabel(prop = {}) {
 }
 
 export function attachPropDisplayFields(prop = {}, context = {}) {
-  const confidenceNormalized = resolveNormalizedConfidence(prop);
-  const probabilityNormalized = resolveNormalizedProbability(prop);
-  const riskLevel = computePropRiskLevel(prop);
-  const providerLabel = resolveProviderDisplayLabel(prop, context);
-  const lineFields = resolveProviderLineFields(prop);
+  const withLines = attachLineSourceFields(prop);
+  const confidenceNormalized = resolveNormalizedConfidence(withLines);
+  const probabilityNormalized = resolveNormalizedProbability(withLines);
+  const riskLevel = computePropRiskLevel(withLines);
+  const providerLabel = resolveProviderDisplayLabel(withLines, context);
+  const lineFields = resolveProviderLineFields(withLines);
   const cardDescription = buildCardDescription({
     ...prop,
     displayConfidenceScore: confidenceNormalized,
@@ -182,8 +204,10 @@ export function attachPropDisplayFields(prop = {}, context = {}) {
   });
 
   return {
-    ...prop,
+    ...withLines,
     ...lineFields,
+    lineUsed: withLines.lineUsed ?? lineFields.activeLine,
+    lineUsedLabel: lineFields.activeLineLabel,
     confidenceNormalized,
     confidence: confidenceNormalized,
     displayConfidenceScore: confidenceNormalized,

@@ -17,6 +17,7 @@ function ProviderFeedModeBanner({
   feedHealthContext = null,
   debugSources = null,
   loading = false,
+  showProviderDetails = false,
 }) {
   const health = getApiHealthStatus({
     apiHealth,
@@ -51,16 +52,18 @@ function ProviderFeedModeBanner({
           <p className="provider-feed-mode-banner__stats">
             Stats Verification: <strong>{health.statsVerification.status}</strong>
           </p>
-          <ApiStatusPanel
-            apiHealth={apiHealth}
-            connectionReport={connectionReport}
-            mlbPipelineStatus={mlbPipelineStatus}
-            pipelineProjectionStats={pipelineProjectionStats}
-            pipelinePropCountAudit={pipelinePropCountAudit}
-            feedHealthContext={feedHealthContext}
-            debugSources={debugSources}
-            className="provider-feed-mode-banner__providers api-status-panel"
-          />
+          {showProviderDetails ? (
+            <ApiStatusPanel
+              apiHealth={apiHealth}
+              connectionReport={connectionReport}
+              mlbPipelineStatus={mlbPipelineStatus}
+              pipelineProjectionStats={pipelineProjectionStats}
+              pipelinePropCountAudit={pipelinePropCountAudit}
+              feedHealthContext={feedHealthContext}
+              debugSources={debugSources}
+              className="provider-feed-mode-banner__providers api-status-panel"
+            />
+          ) : null}
         </>
       ) : null}
     </section>

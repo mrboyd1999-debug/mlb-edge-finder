@@ -41,7 +41,7 @@ import { attachBoardQualityFields,
   resolveRecommendedSide,
   resolveTierDisplayLabel,
 } from "../utils/boardQuality.js";
-import { resolveNormalizedConfidence, resolveNormalizedProbability } from "../utils/propDisplayFields.js";
+import { resolveNormalizedConfidence, resolveNormalizedProbability, resolveProviderDisplayLabel, resolveProviderLineFields } from "../utils/propDisplayFields.js";
 import { resolveRiskExplanation } from "../utils/risk.js";
 import { resolveOpposingPitcherDisplayLabel } from "../utils/opponentStarter.js";
 import { resolvePitcherCardLabel } from "../utils/propDisplayFields.js";
@@ -355,7 +355,13 @@ export default function PickDetailModal({
   })();
   const riskLevel = String(prop.riskLevel || "HIGH").toUpperCase();
   const riskDetail = prop.riskExplanation || resolveRiskExplanation(riskLevel);
-  const providerLabel = prop.providerLabel || null;
+  const providerLabel = prop.providerLabel || resolveProviderDisplayLabel(prop) || null;
+  const lineFields = resolveProviderLineFields(prop);
+  const projectionSafetyNotes = [
+    prop.projectionCapNote,
+    prop.projectionOutlierLabel,
+    prop.projectionLargeEdgeWarning,
+  ].filter(Boolean);
   const edgeLabel =
     Number.isFinite(Number(prop.edge)) && Number(prop.edge) !== 0
       ? formatSignedNumber(prop.edge)
@@ -455,7 +461,13 @@ export default function PickDetailModal({
               <>
                 {breakdownMode ? <SummaryMetric label="Prop" value={propLabel} /> : null}
                 <SummaryMetric label="Recommended side" value={recommendedSideLabel} strong />
-                <SummaryMetric label="Line" value={formatNumber(prop.line)} strong />
+                {lineFields.prizePicksLineLabel ? (
+                  <SummaryMetric label="PrizePicks Line" value={lineFields.prizePicksLineLabel} />
+                ) : null}
+                {lineFields.underdogLineLabel ? (
+                  <SummaryMetric label="Underdog Line" value={lineFields.underdogLineLabel} />
+                ) : null}
+                <SummaryMetric label="Line Used" value={lineFields.activeLineLabel ?? formatNumber(prop.line)} strong />
                 <SummaryMetric label="Projection" value={projectionLabel} strong />
                 <SummaryMetric label="Edge" value={edgeLabel} strong />
                 <SummaryMetric label="Probability" value={probabilityLabel} strong />
@@ -468,6 +480,16 @@ export default function PickDetailModal({
               </>
             )}
           </div>
+
+          {!manualProp && projectionSafetyNotes.length ? (
+            <div className="pick-detail-modal-section">
+              {projectionSafetyNotes.map((note) => (
+                <p key={note} className="pick-detail-modal-tier-warning">
+                  {note}
+                </p>
+              ))}
+            </div>
+          ) : null}
 
           <div className="pick-detail-modal-section">
             <strong>{breakdownMode ? "Why it qualifies" : manualProp ? "Grade summary" : "Why this pick"}</strong>

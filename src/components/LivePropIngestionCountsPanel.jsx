@@ -105,7 +105,7 @@ function LivePropIngestionCountsPanel({ audit = null, liveFeedDiagnostics = null
         ) : null}
       </div>
 
-      {ppLiveStatus.failed ? (
+      {ppLiveStatus.failed && prizePicksUsable === 0 ? (
         <p className="live-feed-diagnostics__warn" role="alert">
           PrizePicks LIVE FEED FAILED ({ppLiveStatus.reason})
         </p>
@@ -167,7 +167,7 @@ function LivePropIngestionCountsPanel({ audit = null, liveFeedDiagnostics = null
               )
             : "live fetch"}
         </p>
-        {audit?.boardCacheActive && boardCacheAgeHours ? (
+        {audit?.boardCacheActive && audit?.feedMode !== "LIVE" && boardCacheAgeHours ? (
           <p className="live-feed-diagnostics__warn" role="status">
             Board running on cached data ({boardCacheAgeHours} old) — live provider props may not be merged into the
             displayed board.

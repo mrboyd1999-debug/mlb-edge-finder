@@ -76,7 +76,7 @@ function ProviderCoverageAuditSection({ audit = null, loading = false }) {
       {audit?.cacheFallbackStage ? (
         <p className="provider-coverage-audit-section__note">Cache fallback: {audit.cacheFallbackStage}</p>
       ) : null}
-      {audit?.boardCacheTimestamp ? (
+      {audit?.boardCacheActive && audit?.feedMode !== "LIVE" && audit?.boardCacheTimestamp ? (
         <p className="provider-coverage-audit-section__note">
           Board cache timestamp: {formatDateTime(audit.boardCacheTimestamp)}
         </p>

@@ -29,11 +29,12 @@ function resolveHttpStatus(source = {}) {
 export function getPrizePicksUsableCount(source = {}) {
   const pp = source.prizePicks || source.prizepicks || {};
   const debug = source.debug || source.debugInfo || {};
+  const diagnostics = source.diagnostics || debug.diagnostics || source.audit?.prizepicksPropCounts || {};
   const counts = source.prizepicksPropCounts || source.ppCounts || {};
   const evidence = source.evidence || source.ppEvidence || {};
   const audit = source.audit || {};
   const live = source.liveRow || source.ppLive || source.feed || source.live?.prizepicks || {};
-  const pipeline = source.pipelinePropCountAudit || audit.pipelinePropCountAudit || {};
+  const pipeline = source.pipeline || source.pipelinePropCountAudit || audit.pipelinePropCountAudit || {};
 
   return maxCount(
     source.prizePicksProps,
@@ -50,6 +51,9 @@ export function getPrizePicksUsableCount(source = {}) {
     source.rawPrizePicksProps,
     audit.prizepicksFetched,
     pipeline.rawPrizePicks,
+    pipeline.rawPrizePicksProps,
+    pipeline.parsedPrizePicksProps,
+    pipeline.normalizedPrizePicksProps,
     arrayLen(pp.props),
     pp.parsed,
     pp.normalized,
@@ -65,6 +69,9 @@ export function getPrizePicksUsableCount(source = {}) {
     debug.parsedPrizePicksProps,
     debug.normalizedPrizePicksProps,
     debug.rawPrizePicksProps,
+    diagnostics.parsedPrizePicksProps,
+    diagnostics.normalizedPrizePicksProps,
+    diagnostics.rawPrizePicksProps,
     evidence?.counts?.parsed,
     evidence?.counts?.normalized,
     evidence?.counts?.usable,
@@ -114,11 +121,12 @@ export function getPrizePicksParsedCount(source = {}) {
 export function getUnderdogUsableCount(source = {}) {
   const ud = source.underdog || {};
   const debug = source.debug || source.debugInfo || {};
+  const diagnostics = source.diagnostics || debug.diagnostics || {};
   const counts = source.underdogPropCounts || source.udCounts || {};
   const evidence = source.evidence || source.udEvidence || {};
   const audit = source.audit || {};
   const live = source.liveRow || source.udLive || source.feed || source.live?.underdog || {};
-  const pipeline = source.pipelinePropCountAudit || audit.pipelinePropCountAudit || {};
+  const pipeline = source.pipeline || source.pipelinePropCountAudit || audit.pipelinePropCountAudit || {};
 
   return maxCount(
     source.underdogProps,
@@ -135,6 +143,9 @@ export function getUnderdogUsableCount(source = {}) {
     source.rawUnderdogProps,
     audit.underdogFetched,
     pipeline.rawUnderdog,
+    pipeline.rawUnderdogProps,
+    pipeline.parsedUnderdogProps,
+    pipeline.normalizedUnderdogProps,
     source.mergedPropsFromUnderdog,
     source.renderedUnderdogProps,
     audit?.underdogAudit?.usableProps,
@@ -152,6 +163,9 @@ export function getUnderdogUsableCount(source = {}) {
     debug.parsedUnderdogProps,
     debug.normalizedUnderdogProps,
     debug.rawUnderdogProps,
+    diagnostics.parsedUnderdogProps,
+    diagnostics.normalizedUnderdogProps,
+    diagnostics.rawUnderdogProps,
     evidence?.counts?.parsed,
     evidence?.counts?.normalized,
     evidence?.counts?.usable,
@@ -270,7 +284,7 @@ export function resolveUnderdogConnectionStatus(source = {}) {
       status: usedCache ? "Connected via cache" : "Connected",
       failed: false,
       usable,
-      detail: `${usable} props`,
+      detail: usedCache ? `${usable} cached props` : `${usable} props`,
       reason: "",
       note: "",
     };

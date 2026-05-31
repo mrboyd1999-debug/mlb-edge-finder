@@ -6,6 +6,7 @@ import TierAuditPanel from "./TierAuditPanel.jsx";
 import { NO_BEST_PLAYS_STANDARDS_MESSAGE } from "../utils/mlbBoardPipeline.js";
 import { safeArray } from "../utils/safeStats.js";
 import { liveBoardLoadingMessage } from "../utils/liveBoardLoading.js";
+import { getUniquePlayerTopPlays } from "../utils/ranking.js";
 
 function findSection(sections, id) {
   return (sections || []).find((row) => row.id === id) || null;
@@ -23,8 +24,14 @@ function BestPlaysTab({
   const topBestPlaysSection = useMemo(() => findSection(sections, "top-10-best-plays"), [sections]);
   const morePlaysSection = useMemo(() => findSection(sections, "more-plays"), [sections]);
 
-  const topBestPlays = useMemo(() => safeArray(topBestPlaysSection?.picks).slice(0, 3), [topBestPlaysSection]);
-  const morePlays = useMemo(() => safeArray(morePlaysSection?.picks), [morePlaysSection]);
+  const topBestPlays = useMemo(
+    () => getUniquePlayerTopPlays(safeArray(topBestPlaysSection?.picks), 3),
+    [topBestPlaysSection]
+  );
+  const morePlays = useMemo(
+    () => getUniquePlayerTopPlays(safeArray(morePlaysSection?.picks), 10),
+    [morePlaysSection]
+  );
 
   const fallbackNotice = topBestPlaysSection?.fallbackNotice || "";
   const tierDebug = filterDiagnostics?.bestPlayFilterAudit?.tierDebugSummary || filterDiagnostics?.tierDebugSummary;

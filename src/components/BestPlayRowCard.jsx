@@ -123,7 +123,7 @@ function BestPlayRowCard({ prop, onOpen, rank, rankLabel, compact = false }) {
             Recommended: <strong>{leanSideLabel !== "Pass" ? leanSideLabel : sideLabel}</strong>
             {ppLine ? <> · PrizePicks: <strong>{ppLine}</strong></> : null}
             {udLine ? <> · Underdog: <strong>{udLine}</strong></> : null}
-            <> · Line: <strong>{activeLine}</strong></>
+            <> · Line Used: <strong>{activeLine}</strong></>
           </p>
           <ProviderLabel prop={enriched} compact />
           <div className="prop-card-core-metrics prop-card-core-metrics--mobile" style={{ marginTop: 6 }}>

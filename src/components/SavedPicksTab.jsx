@@ -1,6 +1,7 @@
 import { memo, useMemo, useState } from "react";
 import { formatDateTime, formatNumber } from "../utils/formatters.js";
 import { buildSavedPickSummary, formatSavedTierLabel } from "../utils/savedPicksStorage.js";
+import { resolveProviderLineFields } from "../utils/propDisplayFields.js";
 
 const GRADE_OPTIONS = ["pending", "won", "lost", "push"];
 
@@ -14,6 +15,8 @@ function formatGradeLabel(value = "pending") {
 
 function SavedPickRow({ pick, onOpen, onDelete, onGrade }) {
   const [actualResult, setActualResult] = useState(pick.actualResult ?? "");
+  const snapshot = pick.propSnapshot || pick;
+  const lineFields = resolveProviderLineFields(snapshot);
 
   return (
     <article className="saved-pick-row">
@@ -24,7 +27,11 @@ function SavedPickRow({ pick, onOpen, onDelete, onGrade }) {
         </div>
         <p>{pick.matchup || `${pick.team || "—"} vs ${pick.opponent || "—"}`}</p>
         <p>
-          {pick.market} · {pick.recommendedSide} · Line {formatNumber(pick.line)} · Proj{" "}
+          {pick.market} · {pick.recommendedSide}
+          {lineFields.prizePicksLineLabel ? ` · PrizePicks ${lineFields.prizePicksLineLabel}` : ""}
+          {lineFields.underdogLineLabel ? ` · Underdog ${lineFields.underdogLineLabel}` : ""}
+          {" · Line Used "}
+          {lineFields.activeLineLabel ?? formatNumber(pick.line)} · Proj{" "}
           {pick.projection != null ? formatNumber(pick.projection) : "—"}
         </p>
         <div className="saved-pick-row__metrics">

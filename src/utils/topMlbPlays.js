@@ -81,6 +81,7 @@ import {
   classifyPropTier,
   countFinalTierPool,
 } from "./boardQuality.js";
+import { getUniquePlayerTopPlays } from "./ranking.js";
 import { countVerificationStatuses } from "./verificationStatus.js";
 import { buildTierAuditBatch, logConfidenceSuppressionBatch } from "./tierAudit.js";
 import {
@@ -487,11 +488,18 @@ export function resolveTopMlbPlaySections(
     projectedCount,
     maxPerPlayer: MAX_PLAYER_APPEARANCES,
   });
-  const topBestPlayPicks = bestPlaysResult.picks.map((prop, idx) =>
+  const uniqueBestPlays = getUniquePlayerTopPlays(
+    [...(bestPlaysResult.picks || []), ...(bestPlaysResult.morePlays || bestPlaysResult.topRankedUnique || [])],
+    10
+  );
+  const topBestPlayPicks = uniqueBestPlays.slice(0, TOP_BEST_PLAYS_LIMIT).map((prop, idx) =>
     annotateHighestProbabilityPlay(annotateBestPlayRankingAudit(prop, idx + 1), idx + 1)
   );
-  const morePlayPicks = (bestPlaysResult.morePlays || bestPlaysResult.topRankedUnique?.slice(TOP_BEST_PLAYS_LIMIT) || []).map(
-    (prop, idx) => annotateHighestProbabilityPlay(annotateBestPlayRankingAudit(prop, idx + TOP_BEST_PLAYS_LIMIT + 1), idx + TOP_BEST_PLAYS_LIMIT + 1)
+  const morePlayPicks = uniqueBestPlays.slice(TOP_BEST_PLAYS_LIMIT).map((prop, idx) =>
+    annotateHighestProbabilityPlay(
+      annotateBestPlayRankingAudit(prop, idx + TOP_BEST_PLAYS_LIMIT + 1),
+      idx + TOP_BEST_PLAYS_LIMIT + 1
+    )
   );
   filterDiagnostics.bestPlayDebugPlays = bestPlaysResult.debugPlays || [];
   filterDiagnostics.bestPlayFilterAudit = bestPlaysResult.diagnostics;

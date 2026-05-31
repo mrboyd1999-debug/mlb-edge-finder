@@ -56,3 +56,45 @@ export function isMinimalRenderableProp(prop = {}) {
 export function mergeNormalizedProp(prop = {}) {
   return { ...prop, ...normalizeProp(prop) };
 }
+
+function resolveLineSourceLabel(prop = {}, { prizePicksLine, underdogLine } = {}) {
+  const raw = String(prop.lineSource || prop.lineSourceBadge || "").trim();
+  if (raw && !/live_provider|cache_provider|null|undefined/i.test(raw)) return raw;
+
+  const src = normalizeSource(prop);
+  const hasPp = prizePicksLine != null;
+  const hasUd = underdogLine != null;
+  const hasOdds = Boolean(
+    prop.sportsbookLine != null ||
+      prop.bestAvailableLine != null ||
+      prop.oddsApiLine != null ||
+      Number(prop.sportsbookBooksCount) > 0 ||
+      /odds/i.test(String(prop.projectionSource || ""))
+  );
+
+  if (hasPp && hasUd && hasOdds) return "PrizePicks + Underdog + Odds API";
+  if (hasPp && hasOdds) return "PrizePicks + Odds API";
+  if (hasUd && hasOdds) return "Underdog + Odds API";
+  if (hasOdds) return "Odds API";
+  if (hasPp && hasUd) return "PrizePicks + Underdog";
+  if (hasPp || src === "prizepicks") return "PrizePicks";
+  if (hasUd || src === "underdog") return "Underdog";
+  return null;
+}
+
+/** Attach canonical line fields for cards and modals. */
+export function attachLineSourceFields(prop = {}) {
+  const comparison = prop.lineComparison || {};
+  const prizePicksLine = finiteOrNull(comparison.prizePicksLine ?? prop.prizePicksLine ?? prop.ppLine);
+  const underdogLine = finiteOrNull(comparison.underdogLine ?? prop.underdogLine ?? prop.udLine);
+  const lineUsed = finiteOrNull(prop.lineUsed ?? prop.line);
+  const lineSource = resolveLineSourceLabel(prop, { prizePicksLine, underdogLine });
+
+  return {
+    ...prop,
+    prizePicksLine,
+    underdogLine,
+    lineUsed,
+    lineSource,
+  };
+}

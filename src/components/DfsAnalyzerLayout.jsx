@@ -1,6 +1,6 @@
 import { memo, useState, useCallback } from "react";
 import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
-import CompactApiHeader from "./CompactApiHeader.jsx";
+import AppHeader from "./AppHeader.jsx";
 import CompactAppTabs from "./CompactAppTabs.jsx";
 import SystemStatusCard from "./SystemStatusCard.jsx";
 import VerificationFailureBreakdown from "./VerificationFailureBreakdown.jsx";
@@ -14,11 +14,12 @@ import ProjectionProviderWarning from "./ProjectionProviderWarning.jsx";
 import ApiSetupBanner from "./ApiSetupBanner.jsx";
 import HistoricalCoverageBanner from "./HistoricalCoverageBanner.jsx";
 import ProviderFeedModeBanner from "./ProviderFeedModeBanner.jsx";
-import LiveBoardPipelineBanner from "./LiveBoardPipelineBanner.jsx";
 import ProviderFailureReasons from "./ProviderFailureReasons.jsx";
-import ProviderCoverageAuditSection from "./ProviderCoverageAuditSection.jsx";
+import LiveDataCard from "./LiveDataCard.jsx";
+import LiveBoardPipelineBanner from "./LiveBoardPipelineBanner.jsx";
 import LiveFeedDiagnosticsPanel from "./LiveFeedDiagnosticsPanel.jsx";
 import LivePropIngestionCountsPanel from "./LivePropIngestionCountsPanel.jsx";
+import ProviderCoverageAuditSection from "./ProviderCoverageAuditSection.jsx";
 import LiveFeedTestPanel from "./LiveFeedTestPanel.jsx";
 import RenderingSourceDiagnosticsPanel from "./RenderingSourceDiagnosticsPanel.jsx";
 import { readSettingsMeta } from "../services/runtimeSettings.js";
@@ -79,7 +80,7 @@ function DfsAnalyzerLayout({
 
   return (
     <main className="dfs-app-page compact-dfs-app">
-      <CompactApiHeader
+      <AppHeader
         title="MLB Pick Finder"
         loading={loading}
         refreshBlocked={refreshBlocked}
@@ -90,7 +91,7 @@ function DfsAnalyzerLayout({
         lastUpdated={lastUpdatedLabel}
       />
 
-      <ProviderFeedModeBanner
+      <LiveDataCard
         apiHealth={apiHealth}
         connectionReport={connectionReport}
         audit={providerCoverageAudit}
@@ -101,6 +102,7 @@ function DfsAnalyzerLayout({
         feedHealthContext={feedHealthContext}
         debugSources={debugInfo?.sources}
         loading={loading}
+        showProviderDetails={debugPanelsVisible}
       />
 
       <CompactAppTabs activeTab={appView} onChange={setAppView} />

@@ -281,6 +281,7 @@ import {
   countHistoricalAttachment,
 } from "./utils/pipelinePropCountAudit.js";
 import { buildProviderCoverageAudit, logProviderCoverageSummary } from "./utils/providerCoverageAudit.js";
+import { clearStaleBoardCacheIfLiveFetchSucceeds } from "./utils/cache.js";
 import { buildAndLogPrizePicksPipelineAudit } from "./utils/prizePicksPipelineAudit.js";
 import {
   buildLiveProviderPipelineAudit,
@@ -3903,11 +3904,24 @@ export default function DFSPropsApp() {
               board.debugInfo.providerCoverageAudit.cacheFallbackStage || refreshCacheContext.reason,
           };
         } else if (board.debugInfo?.providerCoverageAudit && hasLiveBoard) {
+          const cacheRefresh = clearStaleBoardCacheIfLiveFetchSucceeds({
+            livePropsCount: liveBoardProps.length,
+            combinedUsable: board.debugInfo.providerCoverageAudit.combinedUsable,
+            feedMode: "LIVE",
+            boardCacheTimestamp: refreshCacheContext.timestamp || board.updatedAt,
+            debugInfo: board.debugInfo,
+          });
           board.debugInfo.providerCoverageAudit = {
             ...board.debugInfo.providerCoverageAudit,
-            boardCacheActive: false,
-            feedMode: "LIVE",
-            cacheFallbackStage: "",
+            boardCacheActive: cacheRefresh.boardCacheActive,
+            boardCacheTimestamp: cacheRefresh.boardCacheTimestamp,
+            feedMode: cacheRefresh.feedMode,
+            cacheFallbackStage: cacheRefresh.cacheFallbackStage || "",
+            cacheBoardMessage: cacheRefresh.cacheBoardMessage || "",
+            ingestionTimestamp: cacheRefresh.ingestionTimestamp || new Date().toISOString(),
+            providerAuditTimestamp: cacheRefresh.providerAuditTimestamp,
+            renderedBoardTimestamp: cacheRefresh.renderedBoardTimestamp,
+            cacheStale: cacheRefresh.cacheStale,
           };
         }
         applyBoardState(board, hasLiveBoard ? "fresh" : "cached");
