@@ -7,7 +7,7 @@ import { isSupportedMlbMarket } from "./mlbAllowedMarkets.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
 import { getPrizePicksDiagnostics } from "./prizepicksDiagnostics.js";
 import { PRIZEPICKS_PROVIDER_TIMEOUT_MS, UNDERDOG_PROVIDER_TIMEOUT_MS } from "./apiTimeout.js";
-import { resolvePrizePicksPropCounts, resolveUnderdogPropCounts } from "./providerStatus.js";
+import { resolvePrizePicksPropCounts, resolveUnderdogPropCounts, resolvePrizePicksUsableCount, resolveUnderdogUsableCount } from "./providerStatus.js";
 
 function finiteCount(value) {
   const num = Number(value);
@@ -74,7 +74,7 @@ function buildPrizePicksFailureReason({
   ppDiag = {},
   ppFetchDiag = {},
 } = {}) {
-  if (prizepicksUsable > 0 && !prizepicksUsedCache && !prizepicksTimedOut) return "";
+  if (prizepicksUsable > 0) return "";
   if (prizepicksTimedOut) {
     const ms =
       Number(ppFetchDiag.responseTimeMs ?? ppDiag.responseTimeMs ?? PRIZEPICKS_PROVIDER_TIMEOUT_MS) ||
@@ -103,7 +103,7 @@ function buildUnderdogFailureReason({
   const warnings = (underdogResult?.warnings || []).join(" ");
   const message = String(udSource.message || warnings || udFetchDiag.lastError || "").trim();
 
-  if (underdogUsable > 0 && !underdogUsedCache && !underdogTimedOut && !underdogParserMismatch) return "";
+  if (underdogUsable > 0) return "";
 
   if (/429|rate limit/i.test(message)) return "429 rate limited";
   if (underdogTimedOut) {
@@ -259,11 +259,15 @@ export function buildProviderCoverageAudit({
 
   const prizepicksFetched = finiteCount(ppCounts.rawPrizePicksProps);
   const prizepicksParsed = finiteCount(ppCounts.parsedPrizePicksProps);
-  const prizepicksUsable = finiteCount(ppCounts.usablePrizePicksProps);
+  const prizepicksUsable = finiteCount(
+    resolvePrizePicksUsableCount(ppCounts, prizePicksProps?.length ?? 0)
+  );
 
   const underdogFetched = finiteCount(udCounts.rawUnderdogProps);
   const underdogParsed = finiteCount(udCounts.parsedUnderdogProps);
-  const underdogUsable = finiteCount(udCounts.usableUnderdogProps);
+  const underdogUsable = finiteCount(
+    resolveUnderdogUsableCount(udCounts, underdogProps?.length ?? 0)
+  );
 
   const combinedUsable = finiteCount(
     pipeline.afterLineValidation ?? pipeline.normalizedProps ?? debugInfo.pipelineProviderRaw?.afterCacheMerge ?? 0
@@ -411,6 +415,10 @@ export function buildProviderCoverageAudit({
     underdogRaw: underdogFetched,
     prizepicksPropCounts: ppCounts,
     underdogPropCounts: udCounts,
+    prizepicksLiveStatus: prizepicksUsable > 0 ? (prizepicksUsedCache ? "Connected via cache" : "Connected") : "Failed",
+    prizepicksFailed: prizepicksUsable === 0,
+    underdogLiveStatus: underdogUsable > 0 ? (underdogUsedCache ? "Connected via cache" : "Connected") : "Failed",
+    underdogFailed: underdogUsable === 0,
     ingestionFallback: debugInfo.ingestionFallback || "",
     pipelinePropCountAudit: pipeline,
     updatedAt: new Date().toISOString(),

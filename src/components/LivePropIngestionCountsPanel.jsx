@@ -1,24 +1,18 @@
 import { memo } from "react";
 import { formatDateTime } from "../utils/formatters.js";
 import { getDebugFeedEvidence } from "../utils/feedHardEvidence.js";
-import { resolvePrizePicksPropCounts, resolveUnderdogPropCounts } from "../utils/providerStatus.js";
+import {
+  resolvePrizePicksPropCounts,
+  resolveUnderdogPropCounts,
+  resolvePrizePicksUsableCount,
+  resolveUnderdogUsableCount,
+  resolvePrizePicksLiveFeedStatus,
+  resolveUnderdogLiveFeedStatus,
+} from "../utils/providerStatus.js";
 
 function formatCacheAgeHours(ms) {
   if (ms == null || !Number.isFinite(ms)) return "—";
   return `${(ms / 3_600_000).toFixed(2)} hr`;
-}
-
-function resolvePrizePicksFailure({ evidence, liveRow, audit, ppCounts }) {
-  const httpStatus = Number(evidence?.httpStatus ?? liveRow?.httpStatus);
-  const rawCount = Number(ppCounts?.rawPrizePicksProps ?? evidence?.counts?.raw ?? liveRow?.fetched ?? audit?.prizepicksFetched ?? 0);
-  const errorText = String(evidence?.error || liveRow?.lastError || audit?.prizepicksFailureReason || "");
-  if (/timeout/i.test(errorText) || liveRow?.timedOut) return "timeout";
-  if (httpStatus === 403) return "403";
-  if (httpStatus === 404) return "404";
-  if (evidence?.responseSize === 0 || evidence?.emptyPayload) return "empty payload";
-  if (!evidence?.fetchSuccess && rawCount === 0) return "fetch failed";
-  if (rawCount === 0) return "0 props";
-  return "";
 }
 
 function LivePropIngestionCountsPanel({ audit = null, liveFeedDiagnostics = null }) {
@@ -50,10 +44,10 @@ function LivePropIngestionCountsPanel({ audit = null, liveFeedDiagnostics = null
     });
 
   const prizePicksProps = Number(
-    ppCounts.usablePrizePicksProps || ppCounts.parsedPrizePicksProps || ppCounts.rawPrizePicksProps || 0
+    resolvePrizePicksUsableCount(ppCounts, audit?.prizepicksParsed ?? audit?.prizepicksUsable ?? 0)
   );
   const underdogProps = Number(
-    udCounts.usableUnderdogProps || udCounts.parsedUnderdogProps || udCounts.rawUnderdogProps || 0
+    resolveUnderdogUsableCount(udCounts, audit?.underdogUsable ?? audit?.underdogParsed ?? 0)
   );
   const mergedProps = Number(
     pipeline.combinedRaw ??
@@ -62,7 +56,16 @@ function LivePropIngestionCountsPanel({ audit = null, liveFeedDiagnostics = null
       prizePicksProps + underdogProps
   );
 
-  const ppFailure = resolvePrizePicksFailure({ evidence: ppEvidence, liveRow: ppLive, audit, ppCounts });
+  const ppLiveStatus = resolvePrizePicksLiveFeedStatus(ppCounts, {
+    evidence: ppEvidence,
+    liveRow: ppLive,
+    audit,
+    usedCache: audit?.prizepicksUsedCache,
+  });
+  const udLiveStatus = resolveUnderdogLiveFeedStatus(udCounts, {
+    audit,
+    usedCache: audit?.underdogUsedCache,
+  });
   const underdogCacheOnly = Boolean(
     audit?.underdogUsedCache && !audit?.underdogTimedOut && underdogProps > 0
   );
@@ -80,9 +83,18 @@ function LivePropIngestionCountsPanel({ audit = null, liveFeedDiagnostics = null
         ) : null}
       </div>
 
-      {ppFailure ? (
+      {ppLiveStatus.failed ? (
         <p className="live-feed-diagnostics__warn" role="alert">
-          PrizePicks LIVE FEED FAILED ({ppFailure})
+          PrizePicks LIVE FEED FAILED ({ppLiveStatus.reason})
+        </p>
+      ) : ppLiveStatus.usable > 0 ? (
+        <p className="live-feed-diagnostics__ok" role="status">
+          PrizePicks Live {ppLiveStatus.status} — {ppLiveStatus.detail}
+        </p>
+      ) : null}
+      {!udLiveStatus.failed && udLiveStatus.usable > 0 ? (
+        <p className="live-feed-diagnostics__ok" role="status">
+          Underdog Live {udLiveStatus.status} — {udLiveStatus.detail}
         </p>
       ) : null}
 

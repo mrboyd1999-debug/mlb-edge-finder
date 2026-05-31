@@ -38,12 +38,12 @@ function ProviderCoverageAuditSection({ audit = null, loading = false }) {
           {audit.integrityWarning}
         </p>
       ) : null}
-      {audit?.prizepicksFailurePoint ? (
+      {audit?.prizepicksFailurePoint && !(Number(audit?.prizepicksUsable) > 0) ? (
         <p className="provider-coverage-audit-section__note">
           PrizePicks root cause: {audit.prizepicksExactFailure || audit.prizepicksFailurePoint}
         </p>
       ) : null}
-      {audit?.underdogFailurePoint ? (
+      {audit?.underdogFailurePoint && !(Number(audit?.underdogUsable) > 0) ? (
         <p className="provider-coverage-audit-section__note">
           Underdog root cause: {audit.underdogExactFailure || audit.underdogFailurePoint}
         </p>
