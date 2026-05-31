@@ -193,7 +193,7 @@ function projectMlbProp(prop = {}, profile = {}, injury = null, context = {}) {
       multiplier *= sigmoidScale((profile.pitchCountProjection - 90) / 20, 0, 2);
       reasoning.push(`Pitch count projection ~${round(profile.pitchCountProjection)}.`);
     }
-    if (Number.isFinite(profile.opponentPitcherWhip)) {
+    if (Number.isFinite(profile.opponentPitcherWhip) && profile.opponentPitcherWhip > 0) {
       multiplier *= sigmoidScale(profile.opponentPitcherWhip - 1.25, 0, 3);
       reasoning.push(`Opponent WHIP proxy ${round(profile.opponentPitcherWhip)}.`);
     }

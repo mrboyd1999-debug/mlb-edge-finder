@@ -18,6 +18,7 @@ import {
   canSelectOverallPlayAtRank,
 } from "./integrityAudit.js";
 import { resolveVerifiedHitRateSnapshot } from "./verifiedHitRates.js";
+import { STARTER_PENDING_LABEL } from "./opponentStarter.js";
 
 export const MAX_PLAYER_PROPS_IN_TOP_LIST = 2;
 export const MAX_MARKET_PROPS_IN_TOP_LIST = 3;
@@ -44,21 +45,32 @@ export const SAFEST_FALLBACK_NOTICE =
 export const TIER_REVIEW_NEEDED_LABEL = "Review Needed";
 export const OVERALL_PLAY_PENDING_MESSAGE = "Best available play — awaiting matchup verification.";
 export const BEST_PLAY_FALLBACK_NOTICE =
-  "Filled remaining Best Plays slots from Tier A/B full-data pool.";
-export const BEST_PLAY_MIN_CONFIDENCE = 65;
-export const BEST_PLAY_MIN_PROBABILITY = 60;
-export const BEST_PLAY_MIN_PLAYABILITY = 60;
-export const BEST_PLAY_MIN_SANITY = 80;
+  "No Tier A plays today — showing best Tier B and available full-data plays.";
+export const PITCHER_PENDING_CONFIDENCE_PENALTY = 10;
+export const FALLBACK_RANK_WEIGHTS = {
+  confidence: 0.35,
+  probability: 0.35,
+  playability: 0.2,
+  sanity: 0.1,
+};
+export const TIER_A_MIN_CONFIDENCE = 80;
+export const TIER_A_MIN_PROBABILITY = 65;
+export const TIER_A_MIN_PLAYABILITY = 80;
+export const TIER_A_MIN_SANITY = 90;
+export const TIER_A_MIN_PITCHER_INTEGRITY = 70;
+export const TIER_B_MIN_CONFIDENCE = 70;
+export const TIER_B_MIN_PROBABILITY = 55;
+export const TIER_B_MIN_PLAYABILITY = 75;
+export const TIER_B_MIN_SANITY = 85;
+export const BEST_PLAY_MIN_CONFIDENCE = TIER_B_MIN_CONFIDENCE;
+export const BEST_PLAY_MIN_PROBABILITY = TIER_B_MIN_PROBABILITY;
+export const BEST_PLAY_MIN_PLAYABILITY = TIER_B_MIN_PLAYABILITY;
+export const BEST_PLAY_MIN_SANITY = TIER_B_MIN_SANITY;
 export const MIN_UNIQUE_PLAYERS_TOP_10 = 5;
 export const MIN_PROJECTED_PROPS_FOR_BEST_PLAYS = 20;
 export const TOP_BEST_PLAYS_TARGET = 10;
 export const CONFIDENCE_CALIBRATION_MIN = 50;
 export const CONFIDENCE_CALIBRATION_MAX = 95;
-export const TIER_A_MIN_CONFIDENCE = 75;
-export const TIER_A_MIN_PLAYABILITY = 70;
-export const TIER_A_MIN_SANITY = 80;
-export const TIER_B_MIN_CONFIDENCE = 65;
-export const TIER_B_MIN_PLAYABILITY = 60;
 
 function finite(value, fallback = 0) {
   const num = Number(value);
@@ -311,60 +323,109 @@ export function hasMissingStats(prop = {}) {
   return !hasMlbStatsApiData(prop);
 }
 
+function round1(value) {
+  return Math.round(Number(value) * 10) / 10;
+}
+
+export function resolvePitcherIntegrityScore(prop = {}) {
+  const integrity = prop.integrityAudit || buildIntegrityAudit(prop);
+  return finite(integrity.pitcherIntegrity, 0);
+}
+
+export function isReviewNeededPlay(prop = {}) {
+  const integrity = prop.integrityAudit || buildIntegrityAudit(prop);
+  return Boolean(integrity.hitRateInvalid || integrity.probabilityMismatch || integrity.edgeMismatch);
+}
+
+export function isPitcherPendingPlay(prop = {}) {
+  const pitcher = String(prop.opposingPitcher || prop.matchupAudit?.pitcher || prop.opponentStarterNote || "").trim();
+  return (
+    !pitcher ||
+    pitcher === "—" ||
+    pitcher === STARTER_PENDING_LABEL ||
+    /pitcher pending|starter pending/i.test(pitcher)
+  );
+}
+
+export function applyPitcherPendingConfidencePenalty(prop = {}) {
+  if (!isPitcherPendingPlay(prop)) return prop;
+  const base = finite(
+    prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence,
+    NaN
+  );
+  if (!Number.isFinite(base)) return prop;
+  const adjusted = clamp(base - PITCHER_PENDING_CONFIDENCE_PENALTY, CONFIDENCE_CALIBRATION_MIN, CONFIDENCE_CALIBRATION_MAX);
+  return {
+    ...prop,
+    displayConfidenceScore: adjusted,
+    pitcherPendingPenaltyApplied: true,
+  };
+}
+
+export function passesStrictTierAMetrics(prop = {}) {
+  const integrity = prop.integrityAudit || buildIntegrityAudit(prop);
+  return (
+    resolvePropConfidence(prop) >= TIER_A_MIN_CONFIDENCE &&
+    resolvePropProbability(prop) >= TIER_A_MIN_PROBABILITY &&
+    resolvePropPlayability(prop) >= TIER_A_MIN_PLAYABILITY &&
+    resolvePropSanity(prop) >= TIER_A_MIN_SANITY &&
+    resolvePitcherIntegrityScore(prop) >= TIER_A_MIN_PITCHER_INTEGRITY
+  );
+}
+
+export function passesStrictTierBMetrics(prop = {}) {
+  return (
+    resolvePropConfidence(prop) >= TIER_B_MIN_CONFIDENCE &&
+    resolvePropProbability(prop) >= TIER_B_MIN_PROBABILITY &&
+    resolvePropPlayability(prop) >= TIER_B_MIN_PLAYABILITY &&
+    resolvePropSanity(prop) >= TIER_B_MIN_SANITY
+  );
+}
+
+export function computeFallbackRankingScore(prop = {}) {
+  const confidence = finite(resolvePropConfidence(prop), 0);
+  const probability = finite(resolvePropProbability(prop), 0);
+  const playability = finite(resolvePropPlayability(prop), 0);
+  const sanity = finite(resolvePropSanity(prop), 0);
+  return round1(
+    confidence * FALLBACK_RANK_WEIGHTS.confidence +
+      probability * FALLBACK_RANK_WEIGHTS.probability +
+      playability * FALLBACK_RANK_WEIGHTS.playability +
+      sanity * FALLBACK_RANK_WEIGHTS.sanity
+  );
+}
+
+export function compareFallbackRankingScore(a = {}, b = {}) {
+  const scoreDelta = computeFallbackRankingScore(b) - computeFallbackRankingScore(a);
+  if (scoreDelta !== 0) return scoreDelta;
+  return compareBestPlaysRank(a, b);
+}
+
 export function classifyPropTier(prop = {}) {
   const integrity = prop.integrityAudit || buildIntegrityAudit(prop);
   const confidence = resolvePropConfidence(prop);
   const playability = resolvePropPlayability(prop);
   const sanity = resolvePropSanity(prop);
-  const snapshot = resolveVerifiedHitRateSnapshot(prop);
-  const seasonAvailable =
-    Boolean(prop.seasonRateValid) ||
-    (integrity.seasonDataIntegrity >= 80 && snapshot.seasonLabel !== "—" && snapshot.seasonLabel !== "0%");
-  const recentAvailable = snapshot.last5Label !== "—" || snapshot.last10Label !== "—";
-  const projectionAvailable = finite(prop.projection ?? prop.projectedValue) != null;
-  const opponentAvailable = Boolean(String(prop.opponent || "").trim());
+  const probability = resolvePropProbability(prop);
 
-  if (
-    integrity.reviewNeeded ||
-    integrity.hitRateInvalid ||
-    integrity.probabilityMismatch ||
-    integrity.dataIntegrityWarning
-  ) {
+  if (isReviewNeededPlay({ ...prop, integrityAudit: integrity })) {
     return TIER_REVIEW_NEEDED_LABEL;
   }
 
-  let tier = "C";
-  if (confidence >= TIER_B_MIN_CONFIDENCE && playability >= TIER_B_MIN_PLAYABILITY) {
-    tier = "B";
+  if (passesStrictTierAMetrics({ ...prop, integrityAudit: integrity })) {
+    return "A";
   }
 
-  const qualifiesA =
-    confidence >= TIER_A_MIN_CONFIDENCE &&
-    playability >= TIER_A_MIN_PLAYABILITY &&
-    sanity >= TIER_A_MIN_SANITY &&
-    seasonAvailable &&
-    recentAvailable &&
-    projectionAvailable &&
-    opponentAvailable &&
-    integrity.tierAEligible &&
-    !integrity.maxTierB;
-
-  if (qualifiesA) {
-    tier = "A";
-  } else if (
-    confidence >= TIER_A_MIN_CONFIDENCE &&
-    playability >= TIER_A_MIN_PLAYABILITY &&
-    sanity >= TIER_A_MIN_SANITY &&
-    (!seasonAvailable || integrity.maxTierB)
+  if (
+    confidence >= TIER_B_MIN_CONFIDENCE &&
+    probability >= TIER_B_MIN_PROBABILITY &&
+    playability >= TIER_B_MIN_PLAYABILITY &&
+    sanity >= TIER_B_MIN_SANITY
   ) {
-    tier = "B";
+    return "B";
   }
 
-  if (integrity.maxTierB && tier === "A") {
-    tier = "B";
-  }
-
-  return tier;
+  return "C";
 }
 
 export function resolvePropTier(prop = {}) {
@@ -374,8 +435,7 @@ export function resolvePropTier(prop = {}) {
 export function passesBestPlayHardExclusions(prop = {}) {
   if (!isFullDataProp(prop)) return false;
   const tier = classifyPropTier(prop);
-  if (tier === "C" || tier === TIER_REVIEW_NEEDED_LABEL) return false;
-  return true;
+  return tier === "A" || tier === "B" || tier === TIER_REVIEW_NEEDED_LABEL;
 }
 
 export function passesTierABFullData(prop = {}) {
@@ -388,6 +448,7 @@ export function passesBestPlayThresholds(prop = {}) {
   if (resolvePropConfidence(prop) < BEST_PLAY_MIN_CONFIDENCE) return false;
   if (resolvePropProbability(prop) < BEST_PLAY_MIN_PROBABILITY) return false;
   if (resolvePropPlayability(prop) < BEST_PLAY_MIN_PLAYABILITY) return false;
+  if (resolvePropSanity(prop) < BEST_PLAY_MIN_SANITY) return false;
   return true;
 }
 
@@ -403,6 +464,7 @@ export function resolveBestPlayExclusionReason(prop = {}) {
   }
   const tier = classifyPropTier(prop);
   if (tier === "C") return "Excluded: Tier C";
+  if (tier === TIER_REVIEW_NEEDED_LABEL) return "";
   const confidence = resolvePropConfidence(prop);
   if (confidence < BEST_PLAY_MIN_CONFIDENCE) return "Excluded: Confidence below threshold";
   if (resolvePropProbability(prop) < BEST_PLAY_MIN_PROBABILITY) return "Excluded: Probability below threshold";
@@ -416,6 +478,7 @@ export function resolveBestPlayThresholdMissReason(prop = {}) {
   if (resolvePropConfidence(prop) < BEST_PLAY_MIN_CONFIDENCE) misses.push("Confidence below threshold");
   if (resolvePropProbability(prop) < BEST_PLAY_MIN_PROBABILITY) misses.push("Probability below threshold");
   if (resolvePropPlayability(prop) < BEST_PLAY_MIN_PLAYABILITY) misses.push("Playability below threshold");
+  if (resolvePropSanity(prop) < BEST_PLAY_MIN_SANITY) misses.push("Sanity below threshold");
   if (!misses.length) return "";
   return `Excluded: ${misses.join(", ")}`;
 }
@@ -427,10 +490,12 @@ export function buildBestPlayFilterDiagnostics(pool = []) {
     partialData: 0,
     tierA: 0,
     tierB: 0,
+    tierReviewNeeded: 0,
     tierC: 0,
     rejectedByConfidence: 0,
     rejectedByProbability: 0,
     rejectedByPlayability: 0,
+    rejectedBySanity: 0,
     rejectedByTierC: 0,
     qualifiedStrict: 0,
     // legacy aliases for existing UI
@@ -457,6 +522,8 @@ export function buildBestPlayFilterDiagnostics(pool = []) {
     } else if (tier === "B") {
       counts.tierB += 1;
       counts.tierBFullData += 1;
+    } else if (tier === TIER_REVIEW_NEEDED_LABEL) {
+      counts.tierReviewNeeded += 1;
     } else {
       counts.tierC += 1;
       counts.tierCFullData += 1;
@@ -465,6 +532,7 @@ export function buildBestPlayFilterDiagnostics(pool = []) {
 
     if (tier === "C") continue;
 
+    if (resolvePropSanity(prop) < BEST_PLAY_MIN_SANITY) counts.rejectedBySanity = (counts.rejectedBySanity || 0) + 1;
     if (resolvePropConfidence(prop) < BEST_PLAY_MIN_CONFIDENCE) counts.rejectedByConfidence += 1;
     if (resolvePropProbability(prop) < BEST_PLAY_MIN_PROBABILITY) counts.rejectedByProbability += 1;
     if (resolvePropPlayability(prop) < BEST_PLAY_MIN_PLAYABILITY) counts.rejectedByPlayability += 1;
@@ -489,7 +557,59 @@ export function buildBestPlayRejectionSamples(pool = [], limit = 12) {
 }
 
 export function compareBestPlaysRecoveryRank(a = {}, b = {}) {
-  return compareBestPlaysRank(a, b);
+  return compareFallbackRankingScore(a, b);
+}
+
+function buildBestPlaysOrderedPool(pool = []) {
+  const fullData = (pool || []).filter(isFullDataProp);
+  const tierA = fullData.filter((prop) => passesStrictTierAMetrics(prop) && !isReviewNeededPlay(prop));
+  const tierB = fullData.filter(
+    (prop) => passesStrictTierBMetrics(prop) && !passesStrictTierAMetrics(prop) && !isReviewNeededPlay(prop)
+  );
+  const review = fullData.filter(isReviewNeededPlay);
+  const remainder = fullData.filter((prop) => !passesStrictTierBMetrics(prop) && !isReviewNeededPlay(prop));
+  const sortFn = compareFallbackRankingScore;
+  const ordered = [
+    ...tierA.sort(sortFn),
+    ...tierB.sort(sortFn),
+    ...review.sort(sortFn),
+    ...remainder.sort(sortFn),
+  ];
+  return { fullData, tierA, tierB, review, remainder, ordered };
+}
+
+function fillBestPlaysToLimit(
+  picks = [],
+  source = [],
+  { limit, maxPerPlayer, maxPerMarket } = {}
+) {
+  const pickedKeys = new Set(picks.map((prop) => buildPlayerMarketKey(prop)));
+  const playerCounts = new Map();
+  const marketCounts = new Map();
+  for (const prop of picks) {
+    const playerKeyValue = playerKey(prop);
+    const marketKeyValue = diversityMarketKey(prop);
+    if (playerKeyValue) playerCounts.set(playerKeyValue, (playerCounts.get(playerKeyValue) || 0) + 1);
+    if (marketKeyValue) marketCounts.set(marketKeyValue, (marketCounts.get(marketKeyValue) || 0) + 1);
+  }
+
+  for (const prop of source) {
+    if (picks.length >= limit) break;
+    const marketKeyValue = buildPlayerMarketKey(prop);
+    if (pickedKeys.has(marketKeyValue)) continue;
+    const playerKeyValue = playerKey(prop);
+    const marketBucket = diversityMarketKey(prop);
+    const usedPlayer = playerCounts.get(playerKeyValue) || 0;
+    const usedMarket = marketCounts.get(marketBucket) || 0;
+    if (usedPlayer >= maxPerPlayer) continue;
+    if (usedMarket >= maxPerMarket) continue;
+    picks.push(prop);
+    pickedKeys.add(marketKeyValue);
+    if (playerKeyValue) playerCounts.set(playerKeyValue, usedPlayer + 1);
+    if (marketBucket) marketCounts.set(marketBucket, usedMarket + 1);
+  }
+
+  return picks;
 }
 
 function compareBestPlaysTierRank(a = {}, b = {}) {
@@ -510,10 +630,9 @@ export function buildTopBestPlaysPicks(
 ) {
   const diagnostics = buildBestPlayFilterDiagnostics(pool);
   const rejectionSamples = buildBestPlayRejectionSamples(pool);
-  const strictEligible = (pool || []).filter(passesBestPlayGate);
-  const strictSorted = applyBestPlayRankConstraints(
-    [...strictEligible].sort(compareBestPlaysRecoveryRank)
-  );
+  const { fullData, tierA, tierB, ordered } = buildBestPlaysOrderedPool(pool);
+  const strictEligible = [...tierA, ...tierB];
+  const strictSorted = applyBestPlayRankConstraints([...ordered].sort(compareFallbackRankingScore));
   let picks = applyBestPlaysDiversityFilter(strictSorted, {
     limit,
     maxPerPlayer,
@@ -522,61 +641,38 @@ export function buildTopBestPlaysPicks(
   });
   picks = applyBestPlayRankConstraints(picks, { limit });
 
-  const shouldFill =
-    picks.length < limit &&
-    (Number(projectedCount) >= MIN_PROJECTED_PROPS_FOR_BEST_PLAYS || diagnostics.fullData > 0);
-  let usedFallback = false;
+  let usedFallback = tierA.length === 0;
 
-  if (shouldFill) {
-    const fallbackPool = [...(pool || [])].filter(passesTierABFullData).sort(compareBestPlaysRecoveryRank);
-    const pickedKeys = new Set(picks.map((prop) => buildPlayerMarketKey(prop)));
-    const playerCounts = new Map();
-    const marketCounts = new Map();
-    for (const prop of picks) {
-      const playerKeyValue = playerKey(prop);
-      const marketKeyValue = diversityMarketKey(prop);
-      if (playerKeyValue) playerCounts.set(playerKeyValue, (playerCounts.get(playerKeyValue) || 0) + 1);
-      if (marketKeyValue) marketCounts.set(marketKeyValue, (marketCounts.get(marketKeyValue) || 0) + 1);
-    }
-
-    for (const prop of fallbackPool) {
-      if (picks.length >= limit) break;
-      const marketKeyValue = buildPlayerMarketKey(prop);
-      if (pickedKeys.has(marketKeyValue)) continue;
-      const playerKeyValue = playerKey(prop);
-      const marketBucket = diversityMarketKey(prop);
-      const usedPlayer = playerCounts.get(playerKeyValue) || 0;
-      const usedMarket = marketCounts.get(marketBucket) || 0;
-      if (usedPlayer >= maxPerPlayer) continue;
-      if (usedMarket >= maxPerMarket) continue;
-      picks.push(prop);
-      pickedKeys.add(marketKeyValue);
-      if (playerKeyValue) playerCounts.set(playerKeyValue, usedPlayer + 1);
-      if (marketBucket) marketCounts.set(marketBucket, usedMarket + 1);
-      usedFallback = true;
-    }
+  if (picks.length < limit && fullData.length > 0) {
+    const fillSource = [...fullData].sort(compareFallbackRankingScore);
+    const before = picks.length;
+    picks = fillBestPlaysToLimit(picks, fillSource, { limit, maxPerPlayer, maxPerMarket });
+    usedFallback = usedFallback || before < picks.length;
   }
 
-  if (diagnostics.fullData > 0 && picks.length === 0) {
-    const rescuePool = [...(pool || [])].filter(passesTierABFullData).sort(compareBestPlaysRecoveryRank);
-    picks = applyBestPlaysDiversityFilter(rescuePool, {
+  if (fullData.length > 0 && picks.length === 0) {
+    picks = applyBestPlaysDiversityFilter([...fullData].sort(compareFallbackRankingScore), {
       limit,
       maxPerPlayer,
       maxPerMarket,
       minUniquePlayers: MIN_UNIQUE_PLAYERS_TOP_10,
     });
-    usedFallback = rescuePool.length > 0;
+    usedFallback = true;
   }
 
+  picks = applyBestPlayRankConstraints(picks.slice(0, limit), { limit });
+
   const annotatedPicks = picks.map((prop, index) => {
-    const strictPass = passesBestPlayGate(prop);
+    const strictPass = passesStrictTierAMetrics(prop) || passesStrictTierBMetrics(prop);
     return annotateBestPlayRankingAudit(
       {
         ...prop,
+        fallbackRankingScore: computeFallbackRankingScore(prop),
         bestPlayFilterReason: strictPass
           ? ""
-          : resolveBestPlayThresholdMissReason(prop) || "Included via Tier A/B fallback",
-        bestPlayUsedFallback: !strictPass,
+          : resolveBestPlayThresholdMissReason(prop) ||
+            (isReviewNeededPlay(prop) ? "Included: Review Needed" : "Included via fallback ranking"),
+        bestPlayUsedFallback: !strictPass || usedFallback,
       },
       index + 1
     );
@@ -628,6 +724,7 @@ export function passesTopFiveBestPlayGate(prop = {}) {
 }
 
 export function passesSafestPlayGate(prop = {}) {
+  if (isReviewNeededPlay(prop)) return false;
   if (!passesBestPlayHardExclusions(prop)) return false;
   if (resolvePropConfidence(prop) < SAFEST_MIN_CONFIDENCE) return false;
   if (resolvePropProbability(prop) < SAFEST_MIN_PROBABILITY) return false;
@@ -775,18 +872,10 @@ export function buildSafestPlaysSection(pool = [], { limit = TOP_SECTION_LIMIT }
     limit,
     filterFn: passesSafestPlayGate,
   });
-  if (strictPicks.length >= limit) {
-    return { picks: strictPicks, fallbackNotice: "", usedFallback: false };
-  }
-  const fallbackPicks = buildTopSectionPicks(strictPool, {
-    compareFn: compareSafestPlaysRank,
-    limit,
-    filterFn: passesTierABFullData,
-  });
   return {
-    picks: fallbackPicks,
-    usedFallback: strictPicks.length < limit,
-    fallbackNotice: strictPicks.length < limit ? SAFEST_FALLBACK_NOTICE : "",
+    picks: strictPicks,
+    usedFallback: false,
+    fallbackNotice: strictPicks.length ? "" : SAFEST_FALLBACK_NOTICE,
   };
 }
 
@@ -827,10 +916,11 @@ export function resolveProjectionConfidenceLevel(prop = {}) {
 }
 
 export function attachBoardQualityFields(prop = {}) {
-  const edgeLabels = formatValidatedEdgeDisplay(prop);
-  const fullDataReason = resolveFullDataReason(prop);
-  const fullData = isFullDataProp(prop);
-  const withSeason = attachSeasonHitRateFields(prop);
+  const withPitcherPenalty = applyPitcherPendingConfidencePenalty(prop);
+  const edgeLabels = formatValidatedEdgeDisplay(withPitcherPenalty);
+  const fullDataReason = resolveFullDataReason(withPitcherPenalty);
+  const fullData = isFullDataProp(withPitcherPenalty);
+  const withSeason = attachSeasonHitRateFields(withPitcherPenalty);
   const withIntegrityAudit = attachIntegrityAuditFields(withSeason);
   const propTier = classifyPropTier(withIntegrityAudit);
   const withIntegrity = attachDataIntegrityFields(withIntegrityAudit);
@@ -840,7 +930,7 @@ export function attachBoardQualityFields(prop = {}) {
     ...edgeLabels,
     rawEdgeLabel: edgeLabels.rawEdgeLabel,
     displayEdgeLabel: edgeLabels.displayEdgeLabel,
-    edgePercent: edgeLabels.edgePercent ?? prop.edgePercent,
+    edgePercent: edgeLabels.edgePercent ?? withPitcherPenalty.edgePercent,
     projectionConfidenceLevel: resolveProjectionConfidenceLevel(withIntegrity),
     fullDataReason,
     isFullData: fullData,

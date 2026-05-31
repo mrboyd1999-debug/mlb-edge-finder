@@ -4,7 +4,7 @@
 
 import { mlbTeamsMatch, normalizeMlbTeamKey } from "./mlbTeamMatch.js";
 
-export const STARTER_PENDING_LABEL = "Starter Pending";
+export const STARTER_PENDING_LABEL = "Pitcher Pending";
 export const PITCHER_STATUS_UNKNOWN = "UNKNOWN";
 
 function teamSideKey(game = {}, side = "home") {
@@ -61,7 +61,7 @@ export function resolveOpponentStarterDisplay({ team = "", opponent = "", probab
 
 export function normalizeLegacyStarterNote(note = "", team = "", opponent = "", probablePitchers = null) {
   const text = String(note || "").trim();
-  if (!text || /starter pending/i.test(text)) {
+  if (!text || /pitcher pending|starter pending/i.test(text)) {
     return resolveOpponentStarterDisplay({ team, opponent, probablePitchers });
   }
   if (/ vs /i.test(text)) {

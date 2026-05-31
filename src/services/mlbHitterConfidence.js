@@ -69,7 +69,7 @@ function scoreSinglesMarket({ profile, line, side, formBoost, seasonBoost, match
   else if (Number.isFinite(recentHits) && side.toLowerCase() === "more" && recentHits >= line * 0.85) form += 2;
 
   const whip = Number(profile.opponentPitcherWhip);
-  if (Number.isFinite(whip)) {
+  if (Number.isFinite(whip) && whip > 0) {
     if (side.toLowerCase() === "more" && whip >= 1.35) matchup += 5;
     else if (side.toLowerCase() === "more" && whip >= 1.2) matchup += 2;
     else if (side.toLowerCase() === "less" && whip <= 1.05) matchup += 4;

@@ -28,6 +28,21 @@ function resolvePitcherIntegrityForRank(prop = {}) {
   return Number.isFinite(Number(value)) ? Number(value) : null;
 }
 
+function isReviewNeededForRank(prop = {}) {
+  return classifyPropTier(prop) === "Review Needed" || Boolean(prop.reviewNeeded && prop.confidenceTier === "Review Needed");
+}
+
+function enforceReviewNeededRankFloor(sorted = [], minRank = 2) {
+  if (!sorted.length || minRank <= 1) return sorted;
+
+  const reservedSlots = minRank - 1;
+  const eligible = sorted.filter((prop) => !isReviewNeededForRank(prop));
+  const head = eligible.slice(0, reservedSlots);
+  const headSet = new Set(head);
+  const tail = sorted.filter((prop) => !headSet.has(prop));
+  return [...head, ...tail];
+}
+
 function enforcePitcherZeroRankFloor(sorted = [], maxRank = PITCHER_ZERO_MAX_RANK) {
   if (!sorted.length || maxRank <= 1) return sorted;
 
@@ -369,7 +384,10 @@ export function applyBestPlayRankConstraints(sorted = [], { limit = null } = {})
     result.push(prop);
   }
 
-  return enforcePitcherZeroRankFloor(result.slice(0, target));
+  return enforcePitcherZeroRankFloor(
+    enforceReviewNeededRankFloor(result.slice(0, target), 2),
+    PITCHER_ZERO_MAX_RANK
+  );
 }
 
 export const compareVerifiedRankingPlays = compareVerifiedPlaysRank;

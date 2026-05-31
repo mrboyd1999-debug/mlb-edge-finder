@@ -238,8 +238,9 @@ export function projectMlbHitterProp(prop = {}, profile = {}, context = {}) {
   }
 
   const opponent = context.opponentContext || {};
-  if (finiteNumber(opponent.whip) != null || finiteNumber(profile.opponentPitcherWhip) != null) {
-    const whip = finiteNumber(profile.opponentPitcherWhip) ?? finiteNumber(opponent.whip);
+  const whipRaw = finiteNumber(profile.opponentPitcherWhip) ?? finiteNumber(opponent.whip);
+  const whip = whipRaw != null && whipRaw > 0 ? whipRaw : null;
+  if (whip != null) {
     const pitcherAdj = round((1.35 - whip) * 0.18, 2);
     breakdown.push(buildBreakdownRow("Opposing Pitcher", whip, 0.1, pitcherAdj, `WHIP ${formatNumber(whip)}`));
     projection += pitcherAdj;
