@@ -96,7 +96,12 @@ function BestPlayRowCard({
   const seasonBundle = resolveSeasonHitRateBundle(enriched);
   const seasonHitRate = seasonBundle.displayLabel;
   const isVerifiedPlay = Boolean(
-    enriched.verified || enriched.verifiedTier || enriched.pickTierLabel === "Verified Play"
+    enriched.verified ||
+      enriched.tier === "A" ||
+      enriched.tier === "B" ||
+      enriched.verifiedTier === "A" ||
+      enriched.verifiedTier === "B" ||
+      enriched.pickTierLabel === "Verified Play"
   );
   const probabilityAudit = enriched.probabilityAudit || explanation?.probabilityAudit;
   const edgeValidation = enriched.edgeValidation;

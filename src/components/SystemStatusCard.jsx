@@ -6,7 +6,12 @@ import { isPrizePicksFeedNotConfigured, PRIZEPICKS_NOT_CONFIGURED_DETAIL } from 
 import { testAllApiConnections } from "../services/apiConnectionTest.js";
 import { testMlbStatsApiConnection } from "../services/mlbStatsApiTest.js";
 import { resolveProjectionEngineStatus } from "../utils/projectionPipelineStatus.js";
-import { formatMlbStatsAttachmentDetail } from "../services/mlbPipelineStatus.js";
+import {
+  resolveStrictLineFeedStatus,
+  resolveStrictOddsStatus,
+  resolveStrictSportsDataStatus,
+  resolveStrictMlbStatsStatus,
+} from "../utils/providerStatusHelper.js";
 
 function findProviderRow(results = [], name) {
   return results.find((row) => String(row.provider || "").toLowerCase().includes(name.toLowerCase())) || null;
@@ -42,113 +47,21 @@ function indicatorTier(status) {
 }
 
 function resolveOddsStatus(row, keyConfigured, tested) {
-  if (!keyConfigured) return { status: "Not configured", detail: "Add Odds API key in Settings" };
-  if (!tested || !row) return { status: "Not tested", detail: "Save key and run Retest All" };
-  const label = String(row.settingsLine || row.statusLabel || row.displayStatus || "").trim();
-  if (/^connected$/i.test(label) || row.sportsListOk) {
-    const extra = row.debugLine || (row.sportsCount != null ? `${row.sportsCount} sports listed` : "Sports endpoint OK");
-    return { status: "Connected", detail: extra };
-  }
-  if (/invalid/i.test(label) || row.unauthorized) {
-    return { status: "Invalid key", detail: row.responseBody || row.message || row.lastError || "Key rejected by Odds API" };
-  }
-  if (/rate/i.test(label) || row.rateLimited) {
-    return { status: "Limited", detail: row.message || "Rate limited" };
-  }
-  return {
-    status: "Failed",
-    detail: row.responseBody || row.message || row.lastError || label || `HTTP ${row.httpStatus ?? "?"}`,
-  };
+  return resolveStrictOddsStatus(row, keyConfigured, tested);
 }
 
 function resolveKeyProviderStatus(row, keyConfigured, tested) {
-  if (!keyConfigured) return { status: "Not configured", detail: "API key not saved" };
-  if (!tested || !row) return { status: "Not tested", detail: "Run Retest All after saving key" };
-  const label = String(row.settingsLine || row.statusLabel || "").trim();
-  if (/^connected$/i.test(label)) {
-    return { status: "Connected", detail: row.debugLine || row.message || "Key valid" };
-  }
-  if (/not configured/i.test(label)) return { status: "Not configured", detail: row.message || "" };
-  if (/invalid|unauthorized/i.test(label) || row.unauthorized) {
-    return { status: "Invalid key", detail: row.responseBody || row.message || label };
-  }
-  if (/rate/i.test(label) || row.rateLimited) {
-    return { status: "Limited", detail: row.message || "Rate limited" };
-  }
-  return { status: "Failed", detail: row.message || row.lastError || label || "Connection failed" };
+  return resolveStrictSportsDataStatus(row, keyConfigured, tested);
 }
 
 function resolveLineFeedStatus(feed = {}) {
-  const statusLabel = String(feed.statusLabel || feed.lastError || "").trim();
-  const tier = String(feed.connectionTier || feed.status || "");
-  const active = Number(feed.activeUsableCount ?? feed.usableCount) || 0;
-  const parsed = Number(feed.parsedCount) || 0;
-  const cached = Boolean(feed.cached || /cached/i.test(statusLabel) || tier === CONNECTION_TIERS.WARNING);
-  const timedOut =
-    /timed?\s*out/i.test(statusLabel) || /timed?\s*out/i.test(feed.lastError || "") || tier === CONNECTION_TIERS.DEGRADED;
-
-  if (active > 0 && parsed > 0 && !cached) {
-    return { status: "Connected", detail: `Live connected — ${active} props` };
-  }
-
-  if (active > 0 && cached) {
-    return {
-      status: "Warning",
-      detail: `Using cached feed — live fetch failed (${active} props)`,
-    };
-  }
-
-  if (active > 0) {
-    if (tier === CONNECTION_TIERS.CONNECTED) {
-      return { status: "Connected", detail: `${active} props in use (live refresh)` };
-    }
-    if (tier === CONNECTION_TIERS.REFRESHING) {
-      return { status: "Refreshing", detail: `${active} props in use while refresh runs` };
-    }
-    if (tier === CONNECTION_TIERS.WARNING) {
-      return {
-        status: "Warning",
-        detail: timedOut
-          ? `Refresh timed out — ${active} cached props in use`
-          : `${active} props in use (cached)`,
-      };
-    }
-    return {
-      status: "Degraded",
-      detail: timedOut
-        ? `Refresh timed out — ${active} cached props in use`
-        : `${active} props in use (cached)`,
-    };
-  }
-
-  if (tier === CONNECTION_TIERS.CONNECTED) {
-    return { status: "Connected", detail: statusLabel || "Feed OK" };
-  }
-
-  if (Number(feed.rawCount) > 0 && Number(feed.parsedCount) > 0 && active === 0) {
-    return { status: "Degraded", detail: "API returned data but 0 usable MLB props after filters" };
-  }
-
-  if (Number(feed.rawCount) > 0 && active === 0) {
-    return { status: "Degraded", detail: "API returned data but parser produced 0 usable props" };
-  }
-
-  if (timedOut) {
-    return { status: "Failed", detail: statusLabel || feed.lastError || "Timed out — no cached props" };
-  }
-
-  if (tier === CONNECTION_TIERS.FAILED || /failed|unavailable/i.test(statusLabel)) {
-    return { status: "Failed", detail: statusLabel || feed.lastError || "Feed fetch failed" };
-  }
-
-  if (/not configured/i.test(String(feed.status || ""))) {
-    return { status: "Not configured", detail: PRIZEPICKS_NOT_CONFIGURED_DETAIL };
-  }
-
-  return { status: "Failed", detail: statusLabel || feed.lastError || "No usable props" };
+  return resolveStrictLineFeedStatus(feed);
 }
 
-function resolveMlbStatsStatus(stats = {}, attachmentAudit = null) {
+function resolveMlbStatsStatus(stats = {}, attachmentAudit = null, testResult = null) {
+  if (testResult) {
+    return resolveStrictMlbStatsStatus({ testResult });
+  }
   const coverage = Math.max(
     Number(stats.historicalCoveragePercent) || 0,
     Number(attachmentAudit?.historicalCoveragePercent) || 0
@@ -161,46 +74,30 @@ function resolveMlbStatsStatus(stats = {}, attachmentAudit = null) {
     Number(stats.gameLogsAttached) || 0,
     Number(attachmentAudit?.gameLogsAttached) || 0
   );
-  const last5Last10Attached = Math.max(
-    Number(stats.last5Last10Attached) || 0,
-    Number(attachmentAudit?.historicalAttached) || 0
-  );
   const usingCache = Boolean(stats.usingCache);
   const hasAttachment =
     stats.attachmentConfirmed ||
     coverage > 0 ||
     profilesMatched > 0 ||
     gameLogsAttached > 0 ||
-    last5Last10Attached > 0 ||
     Number(attachmentAudit?.historicalAttached) > 0;
 
-  const detail = formatMlbStatsAttachmentDetail({
-    ...stats,
-    historicalCoveragePercent: coverage,
-    profilesMatched,
-    gameLogsAttached,
-    last5Last10Attached,
-    usingCache,
+  if (hasAttachment) {
+    return resolveStrictMlbStatsStatus({
+      pipelineStats: {
+        ...stats,
+        usingCache,
+        profilesMatched,
+        gameLogsAttached,
+      },
+      attachmentAudit,
+    });
+  }
+
+  return resolveStrictMlbStatsStatus({
+    pipelineStats: stats,
+    attachmentAudit,
   });
-
-  if (hasAttachment && !usingCache) {
-    return { status: "Connected", detail: "Connected — player logs available" };
-  }
-
-  if (hasAttachment && usingCache) {
-    return { status: "Warning", detail: "Using cached MLB logs" };
-  }
-
-  if (stats.status === "Connected") {
-    return { status: "Connected", detail: stats.lastError ? `${detail} · ${stats.lastError}` : detail || "Game logs OK" };
-  }
-  if (stats.status === "Refreshing") {
-    return { status: "Refreshing", detail: "Refreshing MLB player profiles" };
-  }
-  if (stats.status === "Warning") {
-    return { status: "Warning", detail: stats.lastError || detail || "Using cached MLB player profiles" };
-  }
-  return { status: "Failed", detail: stats.lastError || stats.failureReason || "Stats API unavailable" };
 }
 
 function resolveProjectionStatus(projection = {}, pipelineStats = {}) {
@@ -278,8 +175,14 @@ function SystemStatusCard({
 
   const handleRetestAll = useCallback(async () => {
     setRetesting(true);
+    setMlbStatsTest(null);
+    onConnectionReportChange?.(null);
     try {
-      const report = await testAllApiConnections({ feedContext: feedHealthContext });
+      const [report, mlbResult] = await Promise.all([
+        testAllApiConnections({ feedContext: feedHealthContext, includeMlbStats: true }),
+        testMlbStatsApiConnection(),
+      ]);
+      setMlbStatsTest(mlbResult);
       writeSettingsMeta({
         ...readSettingsMeta(),
         lastTestedAt: report.testedAt,
@@ -304,20 +207,7 @@ function SystemStatusCard({
 
   const stats = mlbPipelineStatus?.mlbStatsApi || {};
   const projection = mlbPipelineStatus?.projectionApi || {};
-  const statsResolved =
-    mlbStatsTest &&
-    !stats.attachmentConfirmed &&
-    !(stats.historicalCoveragePercent > 0) &&
-    !(feedHealthContext?.statsAttachmentAudit?.historicalAttached > 0) &&
-    !(feedHealthContext?.statsAttachmentAudit?.profilesFound > 0)
-      ? {
-          status: mlbStatsTest.status === "Failed" ? "Warning" : mlbStatsTest.status,
-          detail: mlbStatsTest.connected
-            ? `Connected · ${mlbStatsTest.responseTimeMs}ms · ${mlbStatsTest.playerCount} players · ${mlbStatsTest.gameLogCount} game logs`
-            : mlbStatsTest.detail,
-          checkedAt: mlbStatsTest.testedAt,
-        }
-      : resolveMlbStatsStatus(stats, feedHealthContext?.statsAttachmentAudit);
+  const statsResolved = resolveMlbStatsStatus(stats, feedHealthContext?.statsAttachmentAudit, mlbStatsTest);
   const projectionResolved = resolveProjectionStatus(projection, pipelineProjectionStats || {});
 
   const rows = [

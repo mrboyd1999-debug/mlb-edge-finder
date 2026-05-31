@@ -34,7 +34,7 @@ function CompactApiHeader({
         </button>
         {onToggleDebugPanels ? (
           <button type="button" className="compact-app-header__refresh" onClick={onToggleDebugPanels}>
-            {showDebugPanels ? "Hide Debug" : "Show Debug"}
+            {showDebugPanels ? "Hide Debug Diagnostics" : "Show Debug Diagnostics"}
           </button>
         ) : null}
       </div>

@@ -12,12 +12,16 @@ import {
   getApiTimeoutMs,
   isAbortOrTimeoutError,
   isTimeoutPreview,
+  PRIZEPICKS_FETCH_TIMEOUT_MS,
+  PRIZEPICKS_RETRY_DELAY_MS,
+  PRIZEPICKS_MAX_RETRIES,
 } from "../utils/apiTimeout.js";
 import { getOddsKeyLengthWarning, cleanApiKey } from "../utils/cleanApiKey.js";
 import { runSportsDataMultiEndpointTest, SPORTSDATA_STATUS_LABELS } from "./sportsDataAuthTest.js";
 import { clearSourceAuthBlock, getSourceState, isSourceInCooldown, SOURCE_IDS } from "./sourceRateLimit.js";
 import { readCachedBoard, readVerifiedCacheBoard } from "./pickStore.js";
 import { buildFeedHealthContext, mergeConnectionReportWithFeeds } from "./providerHealth.js";
+import { testMlbStatsApiConnection } from "./mlbStatsApiTest.js";
 
 export const CONNECTION_STATUS = {
   LIVE: "LIVE",
@@ -37,9 +41,9 @@ export const CONNECTION_MESSAGES = {
   FAILED: "Connection failed",
 };
 
-async function probeFetch(url, { method = "GET", headers = {} } = {}) {
+async function probeFetch(url, { method = "GET", headers = {}, timeoutMs = getApiTimeoutMs({ enrichment: true }) } = {}) {
   const startedAt = Date.now();
-  const probeTimeoutMs = getApiTimeoutMs({ enrichment: true });
+  const probeTimeoutMs = timeoutMs;
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), probeTimeoutMs);
   try {
@@ -143,6 +147,7 @@ function classifyLineSourceProbe(result, { requiresKey = false, keyConfigured = 
     return {
       status: CONNECTION_STATUS.CACHED,
       message: CONNECTION_MESSAGES.RATE_LIMITED,
+      settingsLine: "Cached",
     };
   }
   if (result.unauthorized) {
@@ -153,22 +158,34 @@ function classifyLineSourceProbe(result, { requiresKey = false, keyConfigured = 
       unauthorized: true,
     };
   }
-  if (result.ok) {
-    const hasData =
-      (Array.isArray(result.payload?.props) && result.payload.props.length > 0) ||
-      (Array.isArray(result.payload?.data) && result.payload.data.length > 0) ||
-      (Array.isArray(result.payload) && result.payload.length > 0) ||
-      result.payload?.ok === true ||
-      (result.payload && !result.payload.error);
+  const parsedCount = Array.isArray(result.payload?.props) ? result.payload.props.length : 0;
+  const fromCache = Boolean(result.payload?.cached || result.payload?.fromCache || result.payload?.cacheLayer === "CACHED");
+  if (fromCache && parsedCount > 0) {
     return {
-      status: hasData || result.payload?.ok !== false ? CONNECTION_STATUS.LIVE : CONNECTION_STATUS.DEGRADED,
-      message: hasData ? CONNECTION_MESSAGES.CONNECTED : CONNECTION_MESSAGES.DEGRADED,
+      status: CONNECTION_STATUS.CACHED,
+      message: "Cached props available",
+      settingsLine: "Cached",
+    };
+  }
+  if (result.ok && Number(result.status) === 200 && parsedCount > 0 && !fromCache) {
+    return {
+      status: CONNECTION_STATUS.LIVE,
+      message: CONNECTION_MESSAGES.CONNECTED,
+      settingsLine: "Connected",
     };
   }
   if (result.payload?.cached || result.payload?.fromCache) {
     return {
       status: CONNECTION_STATUS.CACHED,
       message: CONNECTION_MESSAGES.RATE_LIMITED,
+      settingsLine: "Cached",
+    };
+  }
+  if (result.ok) {
+    return {
+      status: CONNECTION_STATUS.DEGRADED,
+      message: CONNECTION_MESSAGES.DEGRADED,
+      settingsLine: "Failed",
     };
   }
   if (result.timedOut || isTimeoutPreview(result.preview)) {
@@ -210,7 +227,15 @@ async function testPrizePicks() {
 
   const route = proxyUrl;
   console.info("[API Health] PrizePicks probe", { requestUrl: route });
-  const lastResult = await probeFetch(route);
+  let lastResult = null;
+  for (let attempt = 0; attempt <= PRIZEPICKS_MAX_RETRIES; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((resolve) => window.setTimeout(resolve, PRIZEPICKS_RETRY_DELAY_MS));
+    }
+    lastResult = await probeFetch(route, { timeoutMs: PRIZEPICKS_FETCH_TIMEOUT_MS });
+    const parsedCount = Array.isArray(lastResult.payload?.props) ? lastResult.payload.props.length : 0;
+    if (lastResult.ok && Number(lastResult.status) === 200 && parsedCount > 0) break;
+  }
   const classified = classifyLineSourceProbe(lastResult, { sourceId: SOURCE_IDS.PRIZEPICKS });
   const rawCount = Array.isArray(lastResult.payload?.data) ? lastResult.payload.data.length : 0;
   const parsedCount = Array.isArray(lastResult.payload?.props) ? lastResult.payload.props.length : 0;
@@ -478,10 +503,11 @@ async function testSportsDataProvider() {
   const state = getSourceState(SOURCE_IDS.SPORTSDATA);
   const primary = multi.primaryFailure || multi.endpointTests?.[0] || {};
   const playersTest = multi.endpointTests?.find((row) => row.id === "players") || primary;
-  const detailMessage =
-    multi.ok
-      ? `All endpoints reachable — Players: ${playersTest.recordCount ?? "?"} records`
-      : [multi.statusLabel, primary.message].filter(Boolean).join(" — ");
+  const playersOk = playersTest?.ok === true || Number(playersTest?.httpStatus) === 200;
+  const connected = multi.ok && playersOk;
+  const detailMessage = connected
+    ? `Players endpoint OK — ${playersTest.recordCount ?? "?"} records`
+    : [multi.statusLabel, primary.message].filter(Boolean).join(" — ");
 
   return {
     provider: "SportsDataIO",
@@ -490,12 +516,12 @@ async function testSportsDataProvider() {
     keyLength: multi.keyLength,
     httpStatus: primary.httpStatus ?? 0,
     responseBody: primary.responseBody || primary.message || "",
-    settingsLine: multi.settingsLine,
-    settingsStatus: multi.settingsLine,
-    statusLabel: multi.statusLabel,
-    showError: multi.showError,
+    settingsLine: connected ? "Connected" : multi.settingsLine || "Failed",
+    settingsStatus: connected ? "Connected" : multi.settingsLine || "Failed",
+    statusLabel: connected ? SPORTSDATA_STATUS_LABELS.CONNECTED : multi.statusLabel,
+    showError: !connected && multi.showError,
     debugLine: detailMessage,
-    status: multi.ok ? CONNECTION_STATUS.LIVE : CONNECTION_STATUS.FAILED,
+    status: connected ? CONNECTION_STATUS.LIVE : CONNECTION_STATUS.FAILED,
     message: detailMessage,
     proxied: true,
     ok: multi.ok,
@@ -616,18 +642,35 @@ function testVerifiedCache() {
 /** Test all configured providers without throwing when keys are missing. */
 export async function testAllApiConnections(options = {}) {
   const startedAt = Date.now();
-  const results = await Promise.all([
+  const includeMlbStats = options.includeMlbStats !== false;
+  const [pp, ud, odds, sd, statmuse, mlbStats, verifiedCache] = await Promise.all([
     testPrizePicks(),
     testUnderdog(),
     testOddsApi(),
     testSportsDataProvider(),
     testStatmuseProvider(),
+    includeMlbStats ? testMlbStatsApiConnection() : Promise.resolve(null),
+    testVerifiedCache(),
   ]);
-  results.push(testVerifiedCache());
+  const normalizedResults = [pp, ud, odds, sd, statmuse, mlbStats, verifiedCache].filter(Boolean).map((row) => {
+    if (row.provider === "MLB Stats API") {
+      return {
+        provider: "MLB Stats API",
+        status: row.connected ? CONNECTION_STATUS.LIVE : CONNECTION_STATUS.FAILED,
+        settingsLine: row.connected ? "Connected" : "Failed",
+        message: row.detail,
+        playerCount: row.playerCount,
+        gameLogCount: row.gameLogCount,
+        responseTimeMs: row.responseTimeMs,
+        testedAt: row.testedAt,
+      };
+    }
+    return row;
+  });
   const report = {
     testedAt: new Date().toISOString(),
     durationMs: Date.now() - startedAt,
-    results,
+    results: normalizedResults,
   };
   const feedContext =
     options.feedContext ||

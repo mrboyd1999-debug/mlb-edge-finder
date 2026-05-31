@@ -385,6 +385,7 @@ import {
   isPrizePicksProxyNotConfigured,
   PRIZEPICKS_NOT_CONFIGURED_DETAIL,
 } from "./utils/providerProxy.js";
+import { buildProviderRefreshAudit, logBoardRefreshAudit } from "./utils/providerStatusHelper.js";
 import { getPrizePicksDiagnostics, updatePrizePicksDiagnostics } from "./utils/prizepicksDiagnostics.js";
 import { buildContextFromProp, resolveIngestionSport } from "./utils/ingestionFilter.js";
 import { isParserMergeComboBug } from "./utils/comboMarkets.js";
@@ -967,11 +968,17 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
         row.diagnostics?.httpExecuted === false ||
         row.diagnostics?.failureClass === "MISSING_PROXY" ||
         /MISSING_PROXY|NO_HTTP_REQUEST/i.test(String(row.diagnostics?.failureClass || "")));
+    const cached =
+      Boolean(row.cached) ||
+      /cached/i.test(String(status || row.status || row.lineSourceBadge || "")) ||
+      Boolean(row.fallback);
+    const fallback = Boolean(row.fallback);
     const fetchFailed =
       !ppNotConfigured && /failed|unavailable|offline/i.test(String(status || row.status || ""));
     const timedOut =
       !ppNotConfigured && /timed?\s*out/i.test(String(row.message || row.lastError || status || ""));
-    const cached = /cached/i.test(String(status || row.status || row.lineSourceBadge || "")) || activeUsableCount > counts.usableCount;
+    const liveHttpOk = Boolean(row.liveHttpOk) && !cached && !fallback;
+    const httpStatus = Number(row.httpStatus) || (liveHttpOk ? 200 : 0);
     if (ppNotConfigured) {
       const detail = PRIZEPICKS_NOT_CONFIGURED_DETAIL;
       const ncMetrics = formatIngestionMetrics({ ...counts, lineSourceBadge: HEALTH_STATES.NOT_CONFIGURED });
@@ -1005,8 +1012,10 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
       parsedCount: counts.parsedCount,
       usableCount: effectiveUsable,
       lastError: row.message || row.lastError || "",
-      fallback: Boolean(row.fallback),
+      fallback,
       partial: counts.rawCount > 0 && effectiveUsable === 0 && counts.parsedCount > 0,
+      liveHttpOk,
+      httpStatus,
     });
     const connection = resolveProviderConnectionStatus({
       usableCount: counts.usableCount,
@@ -1015,9 +1024,11 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
       rawCount: counts.rawCount,
       cachedCount: counts.cachedCount,
       cached,
-      fallback: Boolean(row.fallback),
+      fallback,
       fetchFailed,
       timedOut,
+      liveHttpOk,
+      httpStatus,
     });
     const metrics = formatIngestionMetrics({ ...counts, lineSourceBadge: health.badge });
     const statusLabel = formatLiveProviderLabel({
@@ -1041,6 +1052,12 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
       lineSourceBadge: health.badge,
       statusLabel,
       connectionTier: connection.tier,
+      liveHttpOk,
+      httpStatus,
+      cached,
+      fallback,
+      fetchFailed,
+      timedOut,
     };
   };
   const ppRow = buildRow(pp, board?.sourceStatus?.PrizePicks, "prizepicks");
@@ -1080,6 +1097,12 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
       requestCount: sourceSnapshot.PrizePicks?.requestCount || 0,
       sessionRequestCount: sourceSnapshot.PrizePicks?.sessionRequestCount || 0,
       lastError: sourceSnapshot.PrizePicks?.lastError || pp.message || "",
+      liveHttpOk: ppRow.liveHttpOk,
+      httpStatus: ppRow.httpStatus,
+      cached: ppRow.cached,
+      fallback: ppRow.fallback,
+      fetchFailed: ppRow.fetchFailed,
+      timedOut: ppRow.timedOut,
     },
     Underdog: {
       status: udRow.connectionTier || CONNECTION_TIERS.PENDING,
@@ -1106,6 +1129,12 @@ function buildApiHealthFromBoard(board, cacheLayer = "") {
               board?.props || [],
               board?.sourceStatus || {}
             ).join(" | "),
+      liveHttpOk: udRow.liveHttpOk,
+      httpStatus: udRow.httpStatus,
+      cached: udRow.cached,
+      fallback: udRow.fallback,
+      fetchFailed: udRow.fetchFailed,
+      timedOut: udRow.timedOut,
     },
     OddsAPI: {
       status: sourceSnapshot[SOURCE_IDS.ODDS_API]?.status || odds.status || board?.sourceStatus?.["The Odds API"] || "Pending",
@@ -1197,7 +1226,9 @@ function applySourceResult({
   logLiveFetchResult(label, result);
   const rateLimited = Boolean(result.rateLimited || result.cached);
   const cached = result.status === "Cached" || rateLimited || Boolean(result.fallback);
+  const fallback = Boolean(result.fallback);
   const timedOut = /timed?\s*out/i.test(String(result.debug?.message || result.warnings?.join(" ") || ""));
+  const httpStatus = Number(result.debug?.httpStatus ?? result.httpStatus ?? (result.error ? 0 : 200)) || 0;
   const fetchFailed =
     (result.status === "Failed" || result.status === "Unavailable") &&
     usableCount === 0 &&
@@ -1205,6 +1236,15 @@ function applySourceResult({
     props.length === 0 &&
     !cached;
   const failed = fetchFailed;
+  const liveHttpOk =
+    !cached &&
+    !fallback &&
+    !failed &&
+    !timedOut &&
+    !result.error &&
+    usableCount > 0 &&
+    parsedCount > 0 &&
+    (httpStatus === 200 || httpStatus === 0);
   const health = resolveFetchHealthBadge({
     ok: !failed,
     failed,
@@ -1215,8 +1255,10 @@ function applySourceResult({
     parsedCount,
     usableCount,
     lastError: result.debug?.message || result.warnings?.join(" | ") || "",
-    fallback: Boolean(result.fallback),
+    fallback,
     partial: rawCount > 0 && usableCount === 0 && parsedCount > 0,
+    liveHttpOk,
+    httpStatus: liveHttpOk ? 200 : httpStatus,
   });
   const connectionTier = health.connectionTier || CONNECTION_TIERS.PENDING;
 
@@ -1349,6 +1391,12 @@ function applySourceResult({
     lastSuccessfulFetchAt: result.lastSuccessfulFetchAt || "",
     lineSourceBadge: health.badge,
     statusLabel: health.message,
+    liveHttpOk,
+    httpStatus: liveHttpOk ? 200 : httpStatus,
+    cached,
+    fallback,
+    fetchFailed: failed,
+    timedOut,
     underdogParser: result.debug?.underdogParser || null,
     rawUnderdogSamples: result.debug?.rawUnderdogSamples || [],
     ...(ppDiagnostics ? { diagnostics: ppDiagnostics, failureClass: ppDiagnostics.failureClass } : {}),
@@ -3535,7 +3583,35 @@ export default function DFSPropsApp() {
           {},
       })
     );
-    setApiHealth(buildApiHealthFromBoard(scopedBoard, cacheLayer));
+    const health = buildApiHealthFromBoard(scopedBoard, cacheLayer);
+    setApiHealth(health);
+    try {
+      const tierCounts = { verifiedTierA: 0, verifiedTierB: 0, verifiedTierC: 0, researchCount: 0 };
+      for (const prop of boardProps) {
+        const tier = String(prop.tier || prop.finalTier || "").toUpperCase();
+        if (tier === "A") tierCounts.verifiedTierA += 1;
+        else if (tier === "B") tierCounts.verifiedTierB += 1;
+        else if (tier === "C") tierCounts.verifiedTierC += 1;
+        else tierCounts.researchCount += 1;
+      }
+      logBoardRefreshAudit(
+        buildProviderRefreshAudit({
+          apiHealth: health,
+          boardStats: {
+            rawProps:
+              Number(scopedBoard.debugInfo?.sources?.PrizePicks?.rawPropsLoaded || 0) +
+              Number(scopedBoard.debugInfo?.sources?.Underdog?.rawPropsLoaded || 0),
+            parsedProps: boardProps.length,
+            projectedProps: boardProps.filter((prop) => Number(prop.projection ?? prop.projectedValue) > 0).length,
+            ...tierCounts,
+            boardSource:
+              cacheLayer === "fresh" || cacheLayer === "live" ? "LIVE_PROVIDER" : String(cacheLayer || "CACHE").toUpperCase(),
+          },
+        })
+      );
+    } catch (auditError) {
+      console.warn("[Board Refresh Audit] logging failed", auditError);
+    }
   }, [platform]);
 
   const loadProps = useCallback(async ({ force = false, autoRefresh = false } = {}) => {
@@ -4690,7 +4766,9 @@ export default function DFSPropsApp() {
     rateLimitNotice,
     refreshingFeeds,
   ]);
-  const lastUpdatedLabel = lastUpdated ? `${formatDateTime(lastUpdated)}${cacheStatus === "cached" ? " (cached)" : ""}` : "Never";
+  const lastUpdatedLabel = lastUpdated
+    ? `${formatDateTime(lastUpdated)}${/cached|stale|expired/i.test(String(cacheStatus || "")) ? " (cached)" : ""}`
+    : "Never";
   const providerCoverageAuditDisplay = useMemo(() => {
     const fetchAudit = debugInfo?.providerCoverageAudit;
     return buildRenderSourceAudit({

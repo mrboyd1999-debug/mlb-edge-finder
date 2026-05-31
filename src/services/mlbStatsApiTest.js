@@ -120,7 +120,7 @@ export async function testMlbStatsApiConnection({ playerName = DEFAULT_CANARY_PL
     }
   }
 
-  const connected = search.ok && playerCount > 0;
+  const connected = search.ok && Number(search.status) === 200 && playerCount > 0;
   const responseTimeMs = Date.now() - startedAt;
 
   recordMlbStatsFetch({

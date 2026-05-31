@@ -302,8 +302,9 @@ export function isFullDataProp(prop = {}) {
 export function resolveBoardDataQualityLabel(prop = {}) {
   const status = resolveMlbDataStatus(prop);
   if (status === DATA_STATUS.FULL_MLB_DATA) return "Full MLB Data";
+  if (status === DATA_STATUS.REVIEW_NEEDED) return "Review Needed";
   if (status === DATA_STATUS.RESEARCH_ONLY) return "Research Only";
-  return "Partial Data";
+  return "Partial MLB Data";
 }
 
 export function resolveBoardDataQualityBadge(prop = {}) {
@@ -425,6 +426,7 @@ export function getTierAFailures(prop = {}) {
   const confidence = resolvePropConfidence(prop);
   const probability = resolvePropProbability(prop);
   const playability = resolvePropPlayability(prop);
+  const projectionConfidence = resolveProjectionConfidenceLevel(prop);
 
   if (!Number.isFinite(confidence) || confidence < TIER_A_MIN_CONFIDENCE) {
     failures.push(`confidence ${formatTierMetric(confidence)} < ${TIER_A_MIN_CONFIDENCE}`);
@@ -435,13 +437,18 @@ export function getTierAFailures(prop = {}) {
   if (!Number.isFinite(playability) || playability < TIER_A_MIN_PLAYABILITY) {
     failures.push(`playability ${formatTierMetric(playability)} < ${TIER_A_MIN_PLAYABILITY}`);
   }
+  if (projectionConfidence === "LOW") failures.push("projectionConfidence LOW");
+  if (hasIntegrityReviewFlags(prop)) failures.push("major data integrity failure");
   return failures;
 }
 
 export function getTierBFailures(prop = {}) {
   const failures = [];
   if (isResearchCandidate(prop)) failures.push("research candidate");
-  if (resolveMlbDataStatus(prop) !== DATA_STATUS.FULL_MLB_DATA) failures.push("dataStatus not FULL_MLB_DATA");
+  const dataStatus = resolveMlbDataStatus(prop);
+  if (dataStatus !== DATA_STATUS.FULL_MLB_DATA && dataStatus !== DATA_STATUS.REVIEW_NEEDED) {
+    failures.push("dataStatus not FULL_MLB_DATA or REVIEW_NEEDED");
+  }
   const confidence = resolvePropConfidence(prop);
   const probability = resolvePropProbability(prop);
   const playability = resolvePropPlayability(prop);
@@ -461,16 +468,16 @@ export function getTierBFailures(prop = {}) {
 export function explainTierClassification(prop = {}) {
   const tierAFailures = getTierAFailures(prop);
   const tierBFailures = getTierBFailures(prop);
-  const tier = passesQualificationTierA(prop) ? "A" : passesQualificationTierB(prop) ? "B" : "C";
+  const tier = classifyPropTier(prop);
   let reason = "";
   if (tier === "A") {
     reason = "Qualified Tier A";
   } else if (tier === "B") {
     reason = `Tier A failed: ${tierAFailures.join("; ") || "unknown"}`;
+  } else if (tier === "C") {
+    reason = `Tier B failed: ${tierBFailures.join("; ") || "unknown"}`;
   } else {
-    reason = `Tier A failed: ${tierAFailures.join("; ") || "unknown"}; Tier B failed: ${
-      tierBFailures.join("; ") || "unknown"
-    }`;
+    reason = `Below Tier C or missing major data: ${tierBFailures.join("; ") || tierAFailures.join("; ") || "unknown"}`;
   }
   return { tier, tierAFailures, tierBFailures, reason };
 }
@@ -533,48 +540,56 @@ export { NO_VERIFIED_PLAYS_MESSAGE, passesBestPlayBoardGate, isResearchCandidate
 export function classifyPropTier(prop = {}) {
   if (passesQualificationTierA(prop)) return "A";
   if (passesQualificationTierB(prop)) return "B";
-  return "C";
+  const confidence = resolvePropConfidence(prop);
+  const probability = resolvePropProbability(prop);
+  if ((Number.isFinite(confidence) && confidence >= 50) || (Number.isFinite(probability) && probability >= 50)) {
+    return "C";
+  }
+  return "RESEARCH";
 }
 
 /** Single source of truth — read stored tier on enriched props, compute otherwise. */
 export function resolveFinalTier(prop = {}) {
-  const stored = String(prop.finalTier || "")
+  const stored = String(prop.tier || prop.finalTier || "")
     .trim()
     .toUpperCase()
     .replace(/^TIER\s*/i, "");
-  if (["A", "B", "C"].includes(stored)) return stored;
+  if (["A", "B", "C", "RESEARCH"].includes(stored)) return stored;
   return classifyPropTier(prop);
 }
 
 export function resolveFinalTierLabel(prop = {}) {
-  if (prop.finalTierLabel) return prop.finalTierLabel;
+  if (prop.finalTierLabel && prop.tier === prop.finalTier) return prop.finalTierLabel;
   const tier = resolveFinalTier(prop);
+  if (tier === "RESEARCH") return "Research";
   return tier === TIER_REVIEW_NEEDED_LABEL ? TIER_REVIEW_NEEDED_LABEL : `Tier ${tier}`;
 }
 
-/** Attach finalTier and sync all legacy tier alias fields. */
+/** Attach tier and sync all legacy tier alias fields. */
 export function attachFinalTierFields(prop = {}) {
-  const finalTier = classifyPropTier(prop);
-  const finalTierLabel =
-    finalTier === TIER_REVIEW_NEEDED_LABEL ? TIER_REVIEW_NEEDED_LABEL : `Tier ${finalTier}`;
+  const tier = classifyPropTier(prop);
+  const finalTier = tier;
+  const finalTierLabel = tier === "RESEARCH" ? "Research" : `Tier ${tier}`;
   return {
     ...prop,
+    tier,
     finalTier,
     finalTierLabel,
-    confidenceTier: finalTier,
+    confidenceTier: tier,
     confidenceTierLabel: finalTierLabel,
-    verifiedTier: finalTier,
+    verifiedTier: tier,
     verifiedTierLabel: finalTierLabel,
   };
 }
 
 export function countFinalTierPool(pool = []) {
-  const counts = { tierA: 0, tierB: 0, tierC: 0 };
+  const counts = { tierA: 0, tierB: 0, tierC: 0, research: 0 };
   for (const prop of pool || []) {
     const tier = resolveFinalTier(prop);
     if (tier === "A") counts.tierA += 1;
     else if (tier === "B") counts.tierB += 1;
-    else counts.tierC += 1;
+    else if (tier === "C") counts.tierC += 1;
+    else counts.research += 1;
   }
   return counts;
 }
@@ -743,12 +758,20 @@ function buildBestPlaysTierPools(pool = []) {
 }
 
 function resolveBestPlaysSourcePool({ tierA, tierB }) {
-  if (tierA.length) {
+  if (tierA.length >= TOP_BEST_PLAYS_TARGET) {
     return {
       sourcePool: tierA,
       activeTier: "A",
       usedFallback: false,
       fallbackNotice: "",
+    };
+  }
+  if (tierA.length > 0) {
+    return {
+      sourcePool: [...tierA, ...tierB],
+      activeTier: "A",
+      usedFallback: tierB.length > 0,
+      fallbackNotice: tierB.length ? BEST_PLAY_FALLBACK_NOTICE : "",
     };
   }
   if (tierB.length) {
@@ -802,7 +825,7 @@ function fillBestPlaysToLimit(
 }
 
 function compareBestPlaysTierRank(a = {}, b = {}) {
-  const tierOrder = { A: 0, B: 1, [TIER_REVIEW_NEEDED_LABEL]: 2, C: 3, D: 4 };
+  const tierOrder = { A: 0, B: 1, C: 2, RESEARCH: 3, [TIER_REVIEW_NEEDED_LABEL]: 2, D: 4 };
   const tierA = tierOrder[resolveFinalTier(a)] ?? 4;
   const tierB = tierOrder[resolveFinalTier(b)] ?? 4;
   return tierA - tierB;

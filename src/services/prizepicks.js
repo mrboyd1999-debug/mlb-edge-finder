@@ -4,6 +4,7 @@ import {
   LINE_FEED_MAX_RETRIES,
   LINE_FEED_RETRY_DELAY_MS,
   PRIZEPICKS_PROVIDER_TIMEOUT_MS,
+  PRIZEPICKS_RETRY_DELAY_MS,
   PRIZEPICKS_RETRY_TIMEOUTS_MS,
   PROVIDER_RETRY_DELAY_MS,
 } from "../utils/apiTimeout.js";
@@ -353,7 +354,7 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
       }
 
       if (retryIndex < PRIZEPICKS_RETRY_TIMEOUTS_MS.length - 1) {
-        const retryDelayMs = PROVIDER_RETRY_DELAY_MS;
+        const retryDelayMs = PRIZEPICKS_RETRY_DELAY_MS;
         await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
         continue;
       }

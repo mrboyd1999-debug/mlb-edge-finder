@@ -10,7 +10,10 @@ export const SPORTSDATA_TIMEOUT_MS = 8_000;
 export const MLB_STATS_FETCH_TIMEOUT_MS = 8_000;
 /** Per-provider caps — independent; do not use global mobile/desktop caps. */
 /** Progressive per-attempt timeouts before declaring fetch failure. */
-export const PRIZEPICKS_RETRY_TIMEOUTS_MS = [500, 1_000, 2_000];
+export const PRIZEPICKS_FETCH_TIMEOUT_MS = 8_000;
+export const PRIZEPICKS_RETRY_DELAY_MS = 1_000;
+export const PRIZEPICKS_MAX_RETRIES = 1;
+export const PRIZEPICKS_RETRY_TIMEOUTS_MS = [PRIZEPICKS_FETCH_TIMEOUT_MS, PRIZEPICKS_FETCH_TIMEOUT_MS];
 export const UNDERDOG_RETRY_TIMEOUTS_MS = [500, 1_000, 2_000];
 export const PROVIDER_RETRY_DELAY_MS = 250;
 

@@ -1,5 +1,5 @@
 /**
- * Unified provider status — connected | warning | failed with live/cached/none source mode.
+ * Strict provider status — green only when live + usable; yellow for cached/fallback; red for failed.
  */
 
 export const PROVIDER_STATUS = {
@@ -11,25 +11,8 @@ export const PROVIDER_STATUS = {
 export const PROVIDER_SOURCE_MODE = {
   LIVE: "live",
   CACHED: "cached",
+  FALLBACK: "fallback",
   NONE: "none",
-};
-
-const STATUS_LABELS = {
-  PrizePicks: {
-    connected: (count) => `Live connected — ${count} props`,
-    warning: (count) => `Using cached PrizePicks — live fetch failed (${count} props)`,
-    failed: () => "Unavailable — no usable PrizePicks props",
-  },
-  Underdog: {
-    connected: (count) => `Live connected — ${count} props`,
-    warning: (count) => `Using cached Underdog — live fetch failed (${count} props)`,
-    failed: () => "Unavailable — no usable Underdog props",
-  },
-  "MLB Stats API": {
-    connected: () => "Connected — player logs available",
-    warning: () => "Using cached MLB logs",
-    failed: () => "Stats API unavailable",
-  },
 };
 
 function finite(value) {
@@ -37,89 +20,208 @@ function finite(value) {
   return Number.isFinite(num) ? num : 0;
 }
 
-export function resolveProviderFeedStatus({
-  provider = "",
-  liveSuccess = false,
-  cachedUsableCount = 0,
-  liveUsableCount = 0,
-  parsedCount = 0,
-  lastChecked = "",
-  details = "",
-} = {}) {
-  const liveCount = finite(liveUsableCount);
-  const cachedCount = finite(cachedUsableCount);
-  const parsed = finite(parsedCount);
-  const usable = Math.max(liveCount, cachedCount, parsed);
+function normalizeStatusKey(status = "") {
+  return String(status || "").trim().toLowerCase();
+}
 
-  let status = PROVIDER_STATUS.FAILED;
-  let sourceMode = PROVIDER_SOURCE_MODE.NONE;
+/** Line feeds: PrizePicks / Underdog — green only on live HTTP 200 with usable props. */
+export function resolveStrictLineFeedStatus(feed = {}) {
+  const active = finite(feed.activeUsableCount ?? feed.usableCount);
+  const parsed = finite(feed.parsedCount);
+  const cached = Boolean(
+    feed.cached ||
+      feed.fallback ||
+      feed.fromCache ||
+      /cached|fallback|degraded/i.test(String(feed.lineSourceBadge || feed.statusLabel || feed.status || ""))
+  );
+  const fallback = Boolean(feed.fallback || /fallback/i.test(String(feed.statusLabel || feed.status || "")));
+  const timedOut = Boolean(
+    feed.timedOut || /timed?\s*out/i.test(String(feed.statusLabel || feed.lastError || ""))
+  );
+  const liveHttpOk = Boolean(feed.liveHttpOk) && Number(feed.httpStatus) === 200;
+  const fetchFailed = Boolean(feed.fetchFailed) || normalizeStatusKey(feed.connectionTier) === "failed";
+  const errorDetail = String(feed.lastError || feed.statusLabel || feed.message || "").trim();
 
-  if (liveSuccess && liveCount > 0) {
-    status = PROVIDER_STATUS.CONNECTED;
-    sourceMode = PROVIDER_SOURCE_MODE.LIVE;
-  } else if (cachedCount > 0 || (!liveSuccess && usable > 0)) {
-    status = PROVIDER_STATUS.WARNING;
-    sourceMode = PROVIDER_SOURCE_MODE.CACHED;
-  } else if (liveSuccess && parsed > 0) {
-    status = PROVIDER_STATUS.CONNECTED;
-    sourceMode = PROVIDER_SOURCE_MODE.LIVE;
+  if (liveHttpOk && !cached && !fallback && active > 0 && parsed > 0) {
+    return {
+      status: "Connected",
+      detail: `${active} live props`,
+      sourceMode: PROVIDER_SOURCE_MODE.LIVE,
+      strictTier: PROVIDER_STATUS.CONNECTED,
+    };
   }
 
-  const labelFn = STATUS_LABELS[provider] || STATUS_LABELS.PrizePicks;
-  const detail =
-    status === PROVIDER_STATUS.CONNECTED
-      ? labelFn.connected(usable)
-      : status === PROVIDER_STATUS.WARNING
-        ? labelFn.warning(usable)
-        : labelFn.failed();
+  if (active > 0 && cached) {
+    return {
+      status: "Warning",
+      detail: `Cached — ${active} props in use${errorDetail ? ` (${errorDetail})` : ""}`,
+      sourceMode: PROVIDER_SOURCE_MODE.CACHED,
+      strictTier: PROVIDER_STATUS.WARNING,
+    };
+  }
+
+  if (active > 0 && fallback) {
+    return {
+      status: "Warning",
+      detail: `Fallback — ${active} props in use`,
+      sourceMode: PROVIDER_SOURCE_MODE.FALLBACK,
+      strictTier: PROVIDER_STATUS.WARNING,
+    };
+  }
+
+  if (timedOut) {
+    return {
+      status: "Failed",
+      detail: errorDetail || "Timed out — no usable props",
+      sourceMode: PROVIDER_SOURCE_MODE.NONE,
+      strictTier: PROVIDER_STATUS.FAILED,
+    };
+  }
+
+  if (fetchFailed || active === 0) {
+    return {
+      status: "Failed",
+      detail: errorDetail || "Feed fetch failed",
+      sourceMode: PROVIDER_SOURCE_MODE.NONE,
+      strictTier: PROVIDER_STATUS.FAILED,
+    };
+  }
+
+  if (/not configured/i.test(String(feed.status || feed.statusLabel || ""))) {
+    return {
+      status: "Not configured",
+      detail: errorDetail || "Provider not configured",
+      sourceMode: PROVIDER_SOURCE_MODE.NONE,
+      strictTier: PROVIDER_STATUS.FAILED,
+    };
+  }
 
   return {
-    provider,
-    status,
-    sourceMode,
-    propsCount: usable,
-    lastChecked,
-    details: details || detail,
-    displayStatus:
-      status === PROVIDER_STATUS.CONNECTED ? "Connected" : status === PROVIDER_STATUS.WARNING ? "Warning" : "Failed",
-    displayDetail: detail,
+    status: "Failed",
+    detail: errorDetail || "No usable props",
+    sourceMode: PROVIDER_SOURCE_MODE.NONE,
+    strictTier: PROVIDER_STATUS.FAILED,
   };
 }
 
-export function resolveMlbStatsProviderStatus({
-  liveOk = false,
-  usingCache = false,
-  profilesMatched = 0,
-  gameLogsAttached = 0,
-  lastChecked = "",
-  error = "",
-} = {}) {
-  const hasLogs = finite(profilesMatched) > 0 || finite(gameLogsAttached) > 0;
-  if (liveOk && hasLogs) {
-    return resolveProviderFeedStatus({
-      provider: "MLB Stats API",
-      liveSuccess: true,
-      liveUsableCount: Math.max(profilesMatched, gameLogsAttached, 1),
-      lastChecked,
-      details: resolveProviderFeedStatus({ provider: "MLB Stats API", liveSuccess: true, liveUsableCount: 1 }).details,
-    });
+export function resolveStrictOddsStatus(row, keyConfigured, tested) {
+  if (!keyConfigured) return { status: "Not configured", detail: "Add Odds API key in Settings" };
+  if (!tested || !row) return { status: "Not tested", detail: "Save key and run Retest All" };
+  if (row.sportsListOk && normalizeStatusKey(row.settingsLine) === "connected") {
+    return {
+      status: "Connected",
+      detail: row.debugLine || (row.sportsCount != null ? `${row.sportsCount} sports listed` : "Sports endpoint OK"),
+    };
   }
-  if (hasLogs && usingCache) {
-    return resolveProviderFeedStatus({
-      provider: "MLB Stats API",
-      liveSuccess: false,
-      cachedUsableCount: Math.max(profilesMatched, gameLogsAttached, 1),
-      lastChecked,
-    });
+  if (/invalid/i.test(String(row.settingsLine || "")) || row.unauthorized) {
+    return { status: "Invalid key", detail: row.responseBody || row.message || row.lastError || "Key rejected" };
+  }
+  if (/rate/i.test(String(row.settingsLine || "")) || row.rateLimited) {
+    return { status: "Limited", detail: row.message || "Rate limited" };
   }
   return {
-    provider: "MLB Stats API",
-    status: PROVIDER_STATUS.FAILED,
-    sourceMode: PROVIDER_SOURCE_MODE.NONE,
-    propsCount: 0,
-    lastChecked,
-    details: error || "Stats API unavailable",
-    displayStatus: "Failed",
-    displayDetail: error || "Stats API unavailable",
+    status: "Failed",
+    detail: row.responseBody || row.message || row.lastError || `HTTP ${row.httpStatus ?? "?"}`,
   };
+}
+
+export function resolveStrictSportsDataStatus(row, keyConfigured, tested) {
+  if (!keyConfigured) return { status: "Not configured", detail: "API key not saved" };
+  if (!tested || !row) return { status: "Not tested", detail: "Run Retest All after saving key" };
+  const playersTest = row.endpointTests?.find((entry) => entry.id === "players");
+  const playersOk = playersTest?.ok === true || (Number(playersTest?.httpStatus) === 200 && Number(playersTest?.recordCount) >= 0);
+  if (normalizeStatusKey(row.settingsLine) === "connected" && playersOk) {
+    return {
+      status: "Connected",
+      detail: row.debugLine || playersTest?.message || "Player endpoint OK",
+    };
+  }
+  if (/invalid|unauthorized/i.test(String(row.settingsLine || "")) || row.unauthorized) {
+    return { status: "Invalid key", detail: row.responseBody || row.message || "Key rejected" };
+  }
+  return {
+    status: "Failed",
+    detail: playersTest?.message || row.message || row.lastError || "Player endpoint failed",
+  };
+}
+
+export function resolveStrictMlbStatsStatus({
+  testResult = null,
+  pipelineStats = {},
+  attachmentAudit = null,
+} = {}) {
+  if (testResult) {
+    const connected = testResult.connected === true && finite(testResult.playerCount) > 0;
+    if (connected) {
+      return {
+        status: "Connected",
+        detail: `HTTP 200 — ${testResult.playerCount} players matched (${testResult.canaryPlayer || "canary"})`,
+        checkedAt: testResult.testedAt,
+      };
+    }
+    return {
+      status: "Failed",
+      detail: testResult.detail || testResult.error || "MLB Stats API search failed",
+      checkedAt: testResult.testedAt,
+    };
+  }
+
+  const usingCache = Boolean(pipelineStats.usingCache);
+  const profilesMatched = Math.max(
+    finite(pipelineStats.profilesMatched ?? pipelineStats.playersReturned),
+    finite(attachmentAudit?.profilesFound)
+  );
+  const gameLogsAttached = Math.max(
+    finite(pipelineStats.gameLogsAttached),
+    finite(attachmentAudit?.gameLogsAttached)
+  );
+  const hasAttachment = profilesMatched > 0 || gameLogsAttached > 0;
+
+  if (hasAttachment && !usingCache) {
+    return { status: "Connected", detail: "Connected — player logs available" };
+  }
+  if (hasAttachment && usingCache) {
+    return { status: "Warning", detail: "Cached — MLB logs in use" };
+  }
+  return {
+    status: "Failed",
+    detail: pipelineStats.lastError || pipelineStats.failureReason || "Stats API unavailable",
+  };
+}
+
+export function buildProviderRefreshAudit({
+  connectionReport = null,
+  mlbStatsTest = null,
+  apiHealth = {},
+  boardStats = {},
+} = {}) {
+  const rows = connectionReport?.results || [];
+  const find = (name) => rows.find((row) => String(row.provider || "").toLowerCase().includes(name.toLowerCase())) || null;
+  const pp = find("prizepicks");
+  const ud = find("underdog");
+  const odds = find("odds");
+  const sd = find("sportsdata");
+  const ppFeed = apiHealth?.PrizePicks || {};
+  const udFeed = apiHealth?.Underdog || {};
+
+  return {
+    oddsOk: Boolean(odds?.sportsListOk || normalizeStatusKey(odds?.settingsLine) === "connected"),
+    prizePicksOk: Boolean(ppFeed.liveHttpOk && finite(ppFeed.activeUsableCount ?? ppFeed.usableCount) > 0 && !ppFeed.cached),
+    underdogOk: Boolean(udFeed.liveHttpOk && finite(udFeed.activeUsableCount ?? udFeed.usableCount) > 0 && !udFeed.cached),
+    sportsDataOk: Boolean(sd?.endpointTests?.find((entry) => entry.id === "players")?.ok),
+    mlbStatsOk: Boolean(mlbStatsTest?.connected || mlbStatsTest?.playerCount > 0),
+    rawProps: finite(boardStats.rawProps),
+    parsedProps: finite(boardStats.parsedProps),
+    projectedProps: finite(boardStats.projectedProps),
+    verifiedTierA: finite(boardStats.verifiedTierA),
+    verifiedTierB: finite(boardStats.verifiedTierB),
+    verifiedTierC: finite(boardStats.verifiedTierC),
+    researchCount: finite(boardStats.researchCount),
+    boardSource: boardStats.boardSource || "unknown",
+    timestamp: new Date().toISOString(),
+  };
+}
+
+export function logBoardRefreshAudit(payload = {}) {
+  console.info("[Board Refresh Audit]", payload);
 }

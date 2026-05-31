@@ -120,14 +120,8 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
           ? "Under"
           : formatLeanSide(prop.bestPick || prop.side || "Watch");
   const ready = prop.isDisplayPlayable !== false && (Boolean(prop.isQualificationAccepted) || isReadyToBet(prop));
-  const verifiedPick = isVerifiedHighestProbabilityPick(prop);
-  const bandLabel = breakdownMode
-    ? verifiedPick
-      ? prop.verifiedTierLabel || prop.pickTierLabel || "Verified Play"
-      : prop.pickTierLabel === "Research Candidate" || prop.displayResearchOnly
-        ? "Research Candidate"
-        : confidenceBandDisplay(resolveBandScore(prop))
-    : confidenceBandDisplay(resolveBandScore(prop));
+  const tierBadgeLabel = resolveFinalTierLabel(prop);
+  const bandLabel = breakdownMode ? prop.cardPlayLabel || tierBadgeLabel : tierBadgeLabel;
   const breakdownTitle = breakdownMode ? resolveBreakdownTitle(prop) : null;
   const projectionSourceLabel = formatBestPlayProjectionSource(prop);
   const last10HitRate = formatHitRatePercent(
@@ -141,7 +135,6 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
     seasonBundle.gamesCount ??
     (seasonBundle.gamesLabelKey === "sample" ? seasonBundle.sampleGames : seasonBundle.seasonGames);
   const seasonRateSourceLabel = formatSeasonHitRateSource(seasonBundle.seasonHitRateSource);
-  const tierBadgeLabel = resolveFinalTierLabel(prop);
   const boardDataLabel = resolveBoardDataQualityLabel(prop);
   const badge = manualProp
     ? prop.dataQualityBadge || { label: prop.scoringModeLabel || "Offline scoring mode", tone: "info" }

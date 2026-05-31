@@ -116,38 +116,41 @@ export function resolveProviderConnectionStatus({
   partial = false,
   fetchFailed = false,
   timedOut = false,
+  liveHttpOk = false,
+  httpStatus = 0,
 } = {}) {
   const usable = finiteCount(usableCount);
   const active = finiteCount(activeUsableCount) || usable;
   const parsed = finiteCount(parsedCount);
   const raw = finiteCount(rawCount);
   const cachedProps = finiteCount(cachedCount);
-  const hasCached = cached || cachedProps > 0;
+  const hasCached = cached || cachedProps > 0 || fallback;
   const hasActive = active > 0;
   const hasRefreshData = usable > 0 || parsed > 0;
   const refreshDegraded = timedOut || fetchFailed || fallback || partial;
+  const statusCode = finiteCount(httpStatus);
+  const liveConnected =
+    liveHttpOk &&
+    statusCode === 200 &&
+    active > 0 &&
+    parsed > 0 &&
+    !hasCached &&
+    !fetchFailed &&
+    !timedOut;
+
+  if (liveConnected) {
+    return {
+      tier: CONNECTION_TIERS.CONNECTED,
+      badge: HEALTH_STATES.LIVE,
+      connected: true,
+      degraded: false,
+    };
+  }
 
   if (hasActive) {
-    const liveSuccess = usable > 0 && parsed > 0 && !hasCached && !fetchFailed && !timedOut;
-    if (liveSuccess) {
-      return {
-        tier: CONNECTION_TIERS.CONNECTED,
-        badge: HEALTH_STATES.LIVE,
-        connected: true,
-        degraded: false,
-      };
-    }
-    if (usable > 0 && parsed > 0 && !hasCached) {
-      return {
-        tier: CONNECTION_TIERS.CONNECTED,
-        badge: HEALTH_STATES.LIVE,
-        connected: true,
-        degraded: false,
-      };
-    }
     return {
       tier: CONNECTION_TIERS.WARNING,
-      badge: hasCached ? HEALTH_STATES.CACHED : HEALTH_STATES.DEGRADED,
+      badge: hasCached || fallback ? HEALTH_STATES.CACHED : HEALTH_STATES.DEGRADED,
       connected: true,
       degraded: true,
     };
@@ -236,6 +239,8 @@ export function resolveFetchHealthBadge({
   lastError = "",
   fallback = false,
   partial = false,
+  liveHttpOk = false,
+  httpStatus = 0,
 } = {}) {
   const connection = resolveProviderConnectionStatus({
     usableCount,
@@ -246,6 +251,8 @@ export function resolveFetchHealthBadge({
     partial,
     fetchFailed: failed || ok === false,
     timedOut,
+    liveHttpOk,
+    httpStatus,
   });
 
   const statusLabel = formatProviderStatusLabel({
