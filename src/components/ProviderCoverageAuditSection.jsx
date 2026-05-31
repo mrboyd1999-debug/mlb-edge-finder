@@ -21,10 +21,10 @@ function ProviderCoverageAuditSection({ audit = null, loading = false }) {
       </div>
       {loading && !audit ? <p className="provider-coverage-audit-section__note">Loading provider counts…</p> : null}
       <div className="provider-coverage-audit-section__grid">
-        <MetricRow label="PrizePicks Raw" value={audit?.prizepicksLiveFetched ?? audit?.prizepicksFetched} />
+        <MetricRow label="PrizePicks Raw" value={audit?.prizepicksFetched} />
         <MetricRow label="PrizePicks Parsed" value={audit?.prizepicksParsed} />
         <MetricRow label="PrizePicks Usable" value={audit?.prizepicksUsable} />
-        <MetricRow label="Underdog Raw" value={audit?.underdogLiveFetched ?? audit?.underdogFetched} />
+        <MetricRow label="Underdog Raw" value={audit?.underdogFetched} />
         <MetricRow label="Underdog Parsed" value={audit?.underdogParsed} />
         <MetricRow label="Underdog Usable" value={audit?.underdogUsable} />
         <MetricRow label="Cached Props Loaded" value={audit?.cacheUsable} />

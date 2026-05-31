@@ -15,6 +15,14 @@ function finite(value) {
   return Number.isFinite(num) ? num : 0;
 }
 
+function countUsableFromProps(props = []) {
+  return (props || []).filter((prop) => {
+    const player = String(prop?.playerName || prop?.player || "").trim();
+    const line = Number(prop?.line);
+    return player && Number.isFinite(line) && line > 0;
+  }).length;
+}
+
 /** Resolve PrizePicks prop counts from feed, pipeline audit, and diagnostics. */
 export function resolvePrizePicksPropCounts({
   feed = {},
@@ -22,41 +30,129 @@ export function resolvePrizePicksPropCounts({
   feedHealthContext = null,
   debugSources = null,
   prizePicksDiagnostics = null,
+  prizePicksResult = null,
+  prizePicksProps = null,
+  debugInfo = null,
 } = {}) {
   const contextFeed = feedHealthContext?.PrizePicks || {};
-  const sourceRow = debugSources?.PrizePicks || {};
-  const audit = pipelinePropCountAudit || feedHealthContext?.pipelinePropCountAudit || {};
-  const diag = prizePicksDiagnostics || feed.diagnostics || getPrizePicksDiagnostics();
+  const sourceRow = debugSources?.PrizePicks || debugInfo?.sources?.PrizePicks || {};
+  const audit = pipelinePropCountAudit || feedHealthContext?.pipelinePropCountAudit || debugInfo?.pipelinePropCountAudit || {};
+  const diag = prizePicksDiagnostics || feed.diagnostics || sourceRow.diagnostics || getPrizePicksDiagnostics();
+  const propsList = Array.isArray(prizePicksProps) ? prizePicksProps : [];
+  const propsLen = propsList.length;
+  const usableFromProps = countUsableFromProps(propsList);
 
   const rawPrizePicksProps = Math.max(
     finite(feed.rawCount ?? feed.rawPropsLoaded),
     finite(contextFeed.rawCount ?? contextFeed.rawPropsLoaded),
     finite(sourceRow.rawPropsLoaded ?? sourceRow.rawCount),
     finite(audit.rawPrizePicks),
-    finite(diag.rawPropCount)
+    finite(diag.rawPropCount),
+    finite(prizePicksResult?.debug?.rawPropsLoaded),
+    propsLen
   );
   const normalizedPrizePicksProps = Math.max(
     finite(feed.normalizedCount ?? feed.normalizedProps),
-    finite(contextFeed.normalizedCount),
+    finite(contextFeed.normalizedCount ?? contextFeed.normalizedProps),
     finite(sourceRow.normalizedCount),
-    finite(diag.normalizedCount)
+    finite(audit.normalizedPrizePicks),
+    finite(diag.normalizedCount),
+    finite(prizePicksResult?.debug?.normalizedCount)
   );
   const parsedPrizePicksProps = Math.max(
     finite(feed.parsedCount ?? feed.propsAfterParsing),
     finite(contextFeed.parsedCount ?? contextFeed.propsAfterParsing),
     finite(sourceRow.propsAfterParsing ?? sourceRow.parsedCount),
+    finite(audit.parsedPrizePicks),
     finite(diag.parsedPropsCount),
-    finite(diag.finalPropsCount)
+    finite(diag.finalPropsCount),
+    finite(prizePicksResult?.debug?.propsAfterParsing),
+    propsLen
+  );
+  const usablePrizePicksProps = Math.max(
+    finite(sourceRow.usablePropsCount),
+    finite(diag.validationCount),
+    finite(diag.finalPropsCount),
+    finite(prizePicksResult?.debug?.usablePropsCount),
+    parsedPrizePicksProps,
+    usableFromProps,
+    propsLen
   );
 
-  return { rawPrizePicksProps, normalizedPrizePicksProps, parsedPrizePicksProps };
+  return { rawPrizePicksProps, normalizedPrizePicksProps, parsedPrizePicksProps, usablePrizePicksProps };
+}
+
+/** Resolve Underdog prop counts from the same cross-source audit fields. */
+export function resolveUnderdogPropCounts({
+  feed = {},
+  pipelinePropCountAudit = null,
+  feedHealthContext = null,
+  debugSources = null,
+  underdogResult = null,
+  underdogProps = null,
+  debugInfo = null,
+} = {}) {
+  const contextFeed = feedHealthContext?.Underdog || {};
+  const sourceRow = debugSources?.Underdog || debugInfo?.sources?.Underdog || {};
+  const audit = pipelinePropCountAudit || feedHealthContext?.pipelinePropCountAudit || debugInfo?.pipelinePropCountAudit || {};
+  const udParser = sourceRow.underdogParser || underdogResult?.debug?.underdogParser || null;
+  const propsList = Array.isArray(underdogProps) ? underdogProps : [];
+  const propsLen = propsList.length;
+  const usableFromProps = countUsableFromProps(propsList);
+
+  const rawUnderdogProps = Math.max(
+    finite(feed.rawCount ?? feed.rawPropsLoaded),
+    finite(contextFeed.rawCount ?? contextFeed.rawPropsLoaded),
+    finite(sourceRow.rawPropsLoaded ?? sourceRow.rawCount),
+    finite(audit.rawUnderdog),
+    finite(underdogResult?.debug?.rawPropsLoaded),
+    finite(underdogResult?.pipelineAudit?.fetched),
+    finite(udParser?.rawCount),
+    propsLen
+  );
+  const normalizedUnderdogProps = Math.max(
+    finite(feed.normalizedCount ?? feed.normalizedProps),
+    finite(contextFeed.normalizedCount ?? contextFeed.normalizedProps),
+    finite(sourceRow.normalizedCount),
+    finite(audit.normalizedUnderdog),
+    finite(underdogResult?.debug?.normalizedCount)
+  );
+  const parsedUnderdogProps = Math.max(
+    finite(feed.parsedCount ?? feed.propsAfterParsing),
+    finite(contextFeed.parsedCount ?? contextFeed.propsAfterParsing),
+    finite(sourceRow.propsAfterParsing ?? sourceRow.parsedCount),
+    finite(audit.parsedUnderdog),
+    finite(underdogResult?.debug?.propsAfterParsing),
+    finite(udParser?.acceptedCount),
+    propsLen
+  );
+  const usableUnderdogProps = Math.max(
+    finite(feed.activeUsableCount ?? feed.usableCount),
+    finite(sourceRow.usablePropsCount),
+    finite(underdogResult?.debug?.usablePropsCount),
+    parsedUnderdogProps,
+    usableFromProps,
+    propsLen
+  );
+
+  return { rawUnderdogProps, normalizedUnderdogProps, parsedUnderdogProps, usableUnderdogProps };
 }
 
 export function prizePicksFeedIsConnected(counts = {}) {
   return (
     counts.rawPrizePicksProps > 0 ||
     counts.normalizedPrizePicksProps > 0 ||
-    counts.parsedPrizePicksProps > 0
+    counts.parsedPrizePicksProps > 0 ||
+    counts.usablePrizePicksProps > 0
+  );
+}
+
+export function underdogFeedIsConnected(counts = {}) {
+  return (
+    counts.rawUnderdogProps > 0 ||
+    counts.normalizedUnderdogProps > 0 ||
+    counts.parsedUnderdogProps > 0 ||
+    counts.usableUnderdogProps > 0
   );
 }
 
@@ -93,6 +189,7 @@ export function resolvePrizePicksProviderHealth(
     prizePicksDiagnostics,
   });
   const propsReturned = Math.max(
+    counts.usablePrizePicksProps,
     counts.parsedPrizePicksProps,
     counts.normalizedPrizePicksProps,
     counts.rawPrizePicksProps

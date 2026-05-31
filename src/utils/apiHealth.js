@@ -4,7 +4,7 @@
 
 import { getOddsApiKey, getSportsDataApiKey } from "../services/runtimeSettings.js";
 import { formatDateTime } from "./formatters.js";
-import { resolvePrizePicksProviderHealth } from "./providerStatus.js";
+import { resolvePrizePicksProviderHealth, resolveUnderdogPropCounts, underdogFeedIsConnected } from "./providerStatus.js";
 
 export const API_STATUS_COLOR = {
   GREEN: "green",
@@ -214,54 +214,75 @@ function resolveSportsDataHealth({ row, keyConfigured, testedAt, mlbPipelineStat
   };
 }
 
-function hasSuccessfulPropParse(feed = {}) {
-  const raw = finite(feed.rawCount);
-  const parsed = finite(feed.parsedCount ?? feed.normalizedCount);
-  if (parsed != null && parsed > 0) return true;
-  if (raw != null && raw > 0 && hasUsableProps(feed)) return true;
-  return hasUsableProps(feed);
-}
-
-function resolveUnderdogHealth(feed = {}) {
-  const usable = hasUsableProps(feed);
-  const live = Boolean(feed.liveHttpOk && !feed.cached && !feed.fallback && usable);
-  const sessionParsed = hasSuccessfulPropParse(feed);
+function resolveUnderdogHealth(
+  feed = {},
+  {
+    pipelinePropCountAudit = null,
+    feedHealthContext = null,
+    debugSources = null,
+    underdogResult = null,
+    underdogProps = null,
+    debugInfo = null,
+  } = {}
+) {
+  const counts = resolveUnderdogPropCounts({
+    feed,
+    pipelinePropCountAudit,
+    feedHealthContext,
+    debugSources,
+    underdogResult,
+    underdogProps,
+    debugInfo,
+  });
+  const propsReturned = Math.max(
+    counts.usableUnderdogProps,
+    counts.parsedUnderdogProps,
+    counts.rawUnderdogProps
+  );
+  const hasProps = underdogFeedIsConnected(counts) || propsReturned > 0;
+  const live = Boolean(feed.liveHttpOk && !feed.cached && !feed.fallback && hasProps);
   const cacheAgeMs = resolveCacheAgeMs(feed);
   const cacheFresh =
-    cacheAgeMs == null ? Boolean(feed.cached && usable) : cacheAgeMs <= USABLE_PROP_CACHE_MAX_AGE_MS;
+    cacheAgeMs == null ? Boolean(feed.cached && hasProps) : cacheAgeMs <= USABLE_PROP_CACHE_MAX_AGE_MS;
+  const usedCache = Boolean(
+    feed.cached ||
+      feed.fallback ||
+      /cached|fallback/i.test(String(feed.lineSourceBadge || feed.statusLabel || feed.status || ""))
+  );
   const debug = {
     endpointTested: feed.endpoint || "/underdog/props",
     responseCode: feed.httpStatus ?? null,
     lastChecked: feed.lastFetchAt || null,
     cacheAge: formatCacheAgeLabel(feed),
-    propsReturned: finite(feed.parsedCount ?? feed.activeUsableCount ?? feed.usableCount),
+    propsReturned,
     keyPresent: true,
     failureReason: feed.lastError || "",
+    ...counts,
   };
 
-  if (sessionParsed) {
+  if (hasProps && (live || (!usedCache && !feed.timedOut))) {
     return {
       status: "Connected",
       color: API_STATUS_COLOR.GREEN,
-      detail: `${debug.propsReturned ?? finite(feed.parsedCount) ?? finite(feed.rawCount) ?? 0} props`,
+      detail: `${propsReturned} props`,
       debug: { ...debug, failureReason: "" },
     };
   }
 
-  if (usable && cacheFresh) {
+  if (hasProps && usedCache && cacheFresh) {
     return {
       status: "Connected via cache",
       color: API_STATUS_COLOR.GREEN,
-      detail: `${debug.propsReturned} cached props (${debug.cacheAge})`,
+      detail: `${propsReturned} props`,
       debug: { ...debug, failureReason: "" },
     };
   }
 
-  if (usable && !cacheFresh) {
+  if (hasProps && usedCache && !cacheFresh) {
     return {
       status: "Cache stale",
       color: API_STATUS_COLOR.YELLOW,
-      detail: `Cached props older than 24h (${debug.cacheAge})`,
+      detail: `${propsReturned} cached props (${debug.cacheAge})`,
       debug: { ...debug, failureReason: "Cache older than 24 hours" },
     };
   }
@@ -530,7 +551,11 @@ export function getApiHealthStatus({
     testedAt,
     mlbPipelineStatus,
   });
-  const underdog = resolveUnderdogHealth(udFeed);
+  const underdog = resolveUnderdogHealth(udFeed, {
+    pipelinePropCountAudit: pipelinePropCountAudit || feedHealthContext?.pipelinePropCountAudit,
+    feedHealthContext,
+    debugSources: debugSources || apiHealth?.debugSources,
+  });
   const prizePicks = resolvePrizePicksHealth(ppFeed, {
     alternatePropSourcesAvailable:
       underdog.color === API_STATUS_COLOR.GREEN ||

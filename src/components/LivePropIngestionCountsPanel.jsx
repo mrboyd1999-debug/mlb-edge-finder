@@ -1,15 +1,16 @@
 import { memo } from "react";
 import { formatDateTime } from "../utils/formatters.js";
 import { getDebugFeedEvidence } from "../utils/feedHardEvidence.js";
+import { resolvePrizePicksPropCounts, resolveUnderdogPropCounts } from "../utils/providerStatus.js";
 
 function formatCacheAgeHours(ms) {
   if (ms == null || !Number.isFinite(ms)) return "—";
   return `${(ms / 3_600_000).toFixed(2)} hr`;
 }
 
-function resolvePrizePicksFailure({ evidence, liveRow, audit }) {
+function resolvePrizePicksFailure({ evidence, liveRow, audit, ppCounts }) {
   const httpStatus = Number(evidence?.httpStatus ?? liveRow?.httpStatus);
-  const rawCount = Number(evidence?.counts?.raw ?? liveRow?.fetched ?? audit?.prizepicksFetched ?? 0);
+  const rawCount = Number(ppCounts?.rawPrizePicksProps ?? evidence?.counts?.raw ?? liveRow?.fetched ?? audit?.prizepicksFetched ?? 0);
   const errorText = String(evidence?.error || liveRow?.lastError || audit?.prizepicksFailureReason || "");
   if (/timeout/i.test(errorText) || liveRow?.timedOut) return "timeout";
   if (httpStatus === 403) return "403";
@@ -29,23 +30,30 @@ function LivePropIngestionCountsPanel({ audit = null, liveFeedDiagnostics = null
   const ppLive = live?.prizepicks || {};
   const udLive = live?.underdog || {};
 
+  const ppCounts =
+    audit?.prizepicksPropCounts ||
+    resolvePrizePicksPropCounts({
+      feed: ppLive,
+      pipelinePropCountAudit: pipeline,
+      debugSources: audit?.debugSources,
+      prizePicksProps: null,
+      debugInfo: audit?.debugInfo,
+    });
+  const udCounts =
+    audit?.underdogPropCounts ||
+    resolveUnderdogPropCounts({
+      feed: udLive,
+      pipelinePropCountAudit: pipeline,
+      debugSources: audit?.debugSources,
+      underdogProps: null,
+      debugInfo: audit?.debugInfo,
+    });
+
   const prizePicksProps = Number(
-    ppEvidence?.counts?.parsed ??
-      ppLive?.parsed ??
-      ppLive?.fetched ??
-      audit?.prizepicksParsed ??
-      audit?.prizepicksLiveFetched ??
-      pipeline.rawPrizePicks ??
-      0
+    ppCounts.usablePrizePicksProps || ppCounts.parsedPrizePicksProps || ppCounts.rawPrizePicksProps || 0
   );
   const underdogProps = Number(
-    udEvidence?.counts?.parsed ??
-      udLive?.parsed ??
-      udLive?.fetched ??
-      audit?.underdogParsed ??
-      audit?.underdogLiveFetched ??
-      pipeline.rawUnderdog ??
-      0
+    udCounts.usableUnderdogProps || udCounts.parsedUnderdogProps || udCounts.rawUnderdogProps || 0
   );
   const mergedProps = Number(
     pipeline.combinedRaw ??
@@ -54,7 +62,7 @@ function LivePropIngestionCountsPanel({ audit = null, liveFeedDiagnostics = null
       prizePicksProps + underdogProps
   );
 
-  const ppFailure = resolvePrizePicksFailure({ evidence: ppEvidence, liveRow: ppLive, audit });
+  const ppFailure = resolvePrizePicksFailure({ evidence: ppEvidence, liveRow: ppLive, audit, ppCounts });
   const underdogCacheOnly = Boolean(
     audit?.underdogUsedCache && !audit?.underdogTimedOut && underdogProps > 0
   );
@@ -95,10 +103,10 @@ function LivePropIngestionCountsPanel({ audit = null, liveFeedDiagnostics = null
 
       <div className="live-prop-ingestion-counts__pipeline">
         <p className="live-prop-ingestion-counts__line">
-          rawPrizePicksProps: {pipeline.rawPrizePicks ?? audit?.prizepicksFetched ?? ppEvidence?.counts?.raw ?? 0} ·
-          normalizedPrizePicksProps: {ppEvidence?.counts?.normalized ?? ppLive?.normalized ?? pipeline.normalizedProps ?? 0} ·
-          rawUnderdogProps: {pipeline.rawUnderdog ?? audit?.underdogFetched ?? udEvidence?.counts?.raw ?? 0} ·
-          normalizedUnderdogProps: {udEvidence?.counts?.normalized ?? udLive?.normalized ?? 0}
+          rawPrizePicksProps: {ppCounts.rawPrizePicksProps ?? 0} ·
+          normalizedPrizePicksProps: {ppCounts.normalizedPrizePicksProps ?? ppEvidence?.counts?.normalized ?? ppLive?.normalized ?? 0} ·
+          rawUnderdogProps: {udCounts.rawUnderdogProps ?? 0} ·
+          normalizedUnderdogProps: {udCounts.normalizedUnderdogProps ?? udEvidence?.counts?.normalized ?? udLive?.normalized ?? 0}
         </p>
         <p className="live-prop-ingestion-counts__line">
           mergedProps: {mergedProps} · projectedProps: {pipeline.projectedProps ?? audit?.projected ?? 0} · verifiedProps:{" "}
@@ -110,12 +118,14 @@ function LivePropIngestionCountsPanel({ audit = null, liveFeedDiagnostics = null
         <p className="live-prop-ingestion-counts__line">
           <strong>PrizePicks</strong> — endpoint: {ppEvidence?.url || ppLive?.endpoint || "—"} · HTTP{" "}
           {ppEvidence?.httpStatus ?? ppLive?.httpStatus ?? "—"} · raw{" "}
-          {ppEvidence?.counts?.raw ?? ppLive?.fetched ?? 0} · last fetch:{" "}
+          {ppCounts.rawPrizePicksProps ?? ppEvidence?.counts?.raw ?? ppLive?.fetched ?? 0} · parsed{" "}
+          {ppCounts.parsedPrizePicksProps ?? ppEvidence?.counts?.parsed ?? ppLive?.parsed ?? 0} · last fetch:{" "}
           {ppEvidence?.updatedAt ? formatDateTime(ppEvidence.updatedAt) : "—"} · cache age: live fetch
         </p>
         <p className="live-prop-ingestion-counts__line">
           <strong>Underdog</strong> — endpoint: {udEvidence?.url || udLive?.endpoint || "—"} · HTTP{" "}
-          {udEvidence?.httpStatus ?? udLive?.httpStatus ?? "—"} · parsed {underdogProps} · last fetch:{" "}
+          {udEvidence?.httpStatus ?? udLive?.httpStatus ?? "—"} · parsed {underdogProps} · usable{" "}
+          {udCounts.usableUnderdogProps ?? underdogProps} · last fetch:{" "}
           {udEvidence?.updatedAt ? formatDateTime(udEvidence.updatedAt) : "—"} · cache age:{" "}
           {underdogCacheOnly
             ? formatCacheAgeHours(

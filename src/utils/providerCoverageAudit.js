@@ -7,6 +7,7 @@ import { isSupportedMlbMarket } from "./mlbAllowedMarkets.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
 import { getPrizePicksDiagnostics } from "./prizepicksDiagnostics.js";
 import { PRIZEPICKS_PROVIDER_TIMEOUT_MS, UNDERDOG_PROVIDER_TIMEOUT_MS } from "./apiTimeout.js";
+import { resolvePrizePicksPropCounts, resolveUnderdogPropCounts } from "./providerStatus.js";
 
 function finiteCount(value) {
   const num = Number(value);
@@ -240,27 +241,29 @@ export function buildProviderCoverageAudit({
   const udFetchDiag = providerFetchDiagnostics?.underdog || {};
   const pipeline = pipelinePropCountAudit || debugInfo.pipelinePropCountAudit || {};
 
-  const prizepicksFetched = finiteCount(
-    ppSource.rawPropsLoaded ?? ppDiag.rawPropCount ?? prizePicksResult?.debug?.rawPropsLoaded ?? 0
-  );
-  const prizepicksParsed = finiteCount(
-    ppSource.propsAfterParsing ?? ppDiag.parsedPropsCount ?? prizePicksProps.length ?? 0
-  );
-  const prizepicksUsable = finiteCount(
-    ppSource.usablePropsCount ?? ppDiag.validationCount ?? ppDiag.finalPropsCount ?? countUsableFromProps(prizePicksProps)
-  );
+  const ppCounts = resolvePrizePicksPropCounts({
+    pipelinePropCountAudit: pipeline,
+    debugSources: debugInfo.sources,
+    debugInfo,
+    prizePicksResult,
+    prizePicksProps,
+    prizePicksDiagnostics: ppDiag,
+  });
+  const udCounts = resolveUnderdogPropCounts({
+    pipelinePropCountAudit: pipeline,
+    debugSources: debugInfo.sources,
+    debugInfo,
+    underdogResult,
+    underdogProps,
+  });
 
-  const underdogFetched = finiteCount(
-    udSource.rawPropsLoaded ??
-      underdogResult?.debug?.rawPropsLoaded ??
-      underdogResult?.pipelineAudit?.fetched ??
-      udParser?.rawCount ??
-      0
-  );
-  const underdogParsed = finiteCount(
-    udSource.propsAfterParsing ?? underdogResult?.debug?.propsAfterParsing ?? underdogProps.length ?? udParser?.acceptedCount ?? 0
-  );
-  const underdogUsable = finiteCount(udSource.usablePropsCount ?? countUsableFromProps(underdogProps));
+  const prizepicksFetched = finiteCount(ppCounts.rawPrizePicksProps);
+  const prizepicksParsed = finiteCount(ppCounts.parsedPrizePicksProps);
+  const prizepicksUsable = finiteCount(ppCounts.usablePrizePicksProps);
+
+  const underdogFetched = finiteCount(udCounts.rawUnderdogProps);
+  const underdogParsed = finiteCount(udCounts.parsedUnderdogProps);
+  const underdogUsable = finiteCount(udCounts.usableUnderdogProps);
 
   const combinedUsable = finiteCount(
     pipeline.afterLineValidation ?? pipeline.normalizedProps ?? debugInfo.pipelineProviderRaw?.afterCacheMerge ?? 0
@@ -406,6 +409,8 @@ export function buildProviderCoverageAudit({
     underdogUsedCache,
     underdogParserMismatch: underdogAudit.parserMismatch,
     underdogRaw: underdogFetched,
+    prizepicksPropCounts: ppCounts,
+    underdogPropCounts: udCounts,
     ingestionFallback: debugInfo.ingestionFallback || "",
     pipelinePropCountAudit: pipeline,
     updatedAt: new Date().toISOString(),
