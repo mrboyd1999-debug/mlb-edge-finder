@@ -276,12 +276,32 @@ function BestPlayRowCard({
                     {" · "}
                     Season: <strong>{seasonHitRate !== "0%" ? seasonHitRate : hitRates?.seasonLabel ?? seasonHitRate}</strong>
                     {" · "}
+                    Edge: <strong>{probabilityAudit.projectionEdge ?? probabilityAudit.edgeContribution ?? "—"}</strong>
+                    {" · "}
                     Confidence: <strong>{probabilityAudit.confidence ?? confidenceLabel}</strong>
                     {" · "}
                     Playability: <strong>{probabilityAudit.playability ?? playabilityLabel}</strong>
-                    {" · "}
-                    Edge Bonus: <strong>{probabilityAudit.edgeBonus ?? probabilityAudit.edgeContribution ?? "—"}</strong>
                   </p>
+                  {probabilityAudit.rawProbability != null || probabilityAudit.calibratedProbability != null ? (
+                    <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 2, fontSize: 10 }}>
+                      Raw: <strong>{probabilityAudit.rawProbability != null ? `${probabilityAudit.rawProbability}%` : "—"}</strong>
+                      {" · "}
+                      Calibrated:{" "}
+                      <strong>
+                        {probabilityAudit.calibratedProbability != null
+                          ? `${probabilityAudit.calibratedProbability}%`
+                          : probabilityAudit.finalProbability != null
+                            ? `${Math.round(Number(probabilityAudit.finalProbability))}%`
+                            : "—"}
+                      </strong>
+                      {probabilityAudit.probabilityTier ? (
+                        <>
+                          {" · "}
+                          Tier: <strong>{probabilityAudit.probabilityTier}</strong>
+                        </>
+                      ) : null}
+                    </p>
+                  ) : null}
                   {probabilityAudit.finalProbability != null ? (
                     <p style={{ ...styles.bestPlayRowSubline, color: "#e2e8f0", marginTop: 2, fontSize: 11 }}>
                       Final Probability: <strong>{Math.round(Number(probabilityAudit.finalProbability))}%</strong>

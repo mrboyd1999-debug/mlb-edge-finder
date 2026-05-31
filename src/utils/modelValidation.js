@@ -183,7 +183,9 @@ function buildProbabilityAuditUnsafe(prop = {}, metrics = {}) {
     opponentAdjustment: signedPct(opponent.points),
     parkAdjustment: signedPct(park.points),
     matchupAdjustment: "—",
-    edgeContribution: breakdown.edgeBonus != null ? `+${round1(breakdown.edgeBonus)}` : "—",
+    edgeContribution:
+      breakdown.edgeContribution != null ? `${round1(breakdown.edgeContribution)}` : "—",
+    projectionEdge: calibrated?.inputs?.projectionEdge ?? "—",
     last5Contribution: "—",
     last10Contribution: breakdown.recentContribution != null ? `${round1(breakdown.recentContribution)}` : "—",
     seasonContribution: breakdown.seasonContribution != null ? `${round1(breakdown.seasonContribution)}` : "—",
@@ -192,17 +194,25 @@ function buildProbabilityAuditUnsafe(prop = {}, metrics = {}) {
     recentHitRate: calibrated?.inputs?.recentHitRate ?? hitRateSnapshot.last10Label,
     playability: calibrated?.inputs?.playability ?? "—",
     confidence: calibrated?.inputs?.confidence ?? "—",
-    edgeBonus: calibrated?.inputs?.edgeBonus ?? "—",
+    rawProbability:
+      calibrated?.rawProbability != null
+        ? round1(calibrated.rawProbability)
+        : breakdown.rawProbability != null
+          ? round1(breakdown.rawProbability)
+          : null,
+    calibratedProbability: finalProbability != null ? round1(finalProbability) : null,
+    probabilityTier: calibrated?.probabilityTier ?? calibrated?.inputs?.probabilityTier ?? "—",
   };
 
   const explanationLines = [
     "Probability Breakdown",
     `Recent: ${calibrated?.inputs?.recentHitRate ?? hitRateSnapshot.last10Label}`,
     `Season: ${calibrated?.inputs?.seasonHitRate ?? hitRateSnapshot.seasonLabel}`,
+    `Projection Edge: ${calibrated?.inputs?.projectionEdge ?? "—"}`,
     `Confidence: ${calibrated?.inputs?.confidence ?? "—"}`,
     `Playability: ${calibrated?.inputs?.playability ?? "—"}`,
-    `Edge Bonus: ${calibrated?.inputs?.edgeBonus ?? "—"}`,
-    `Final Probability: ${pct(finalProbability)}`,
+    `Raw Probability: ${inputs.rawProbability != null ? `${inputs.rawProbability}%` : "—"}`,
+    `Calibrated Probability: ${pct(finalProbability)}`,
   ];
 
   return {
@@ -211,8 +221,8 @@ function buildProbabilityAuditUnsafe(prop = {}, metrics = {}) {
     line,
     edge,
     edgePercent,
-    base: breakdown.base ?? 0,
-    projectionEdgePoints: breakdown.edgeBonus ?? 0,
+    base: breakdown.rawProbability ?? breakdown.base ?? 0,
+    projectionEdgePoints: breakdown.edgeContribution ?? 0,
     opponentAdjustment: opponent.points,
     opponentLabel: opponent.label,
     parkAdjustment: park.points,

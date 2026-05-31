@@ -428,9 +428,32 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
                 <MetricIf label="Season hits" value={seasonBundle.seasonHits} />
               ) : null}
               <MetricIf label="Projection vs line" value={prop.probabilityAudit.projectionVsLine} />
+              <MetricIf label="Projection edge" value={prop.probabilityAudit.projectionEdge} />
+              <MetricIf label="Edge contribution" value={prop.probabilityAudit.edgeContribution} />
               <MetricIf label="Opponent adjustment" value={prop.probabilityAudit.opponentAdjustment} />
               <MetricIf label="Park adjustment" value={prop.probabilityAudit.parkAdjustment} />
-              <MetricIf label="Final probability" value={prop.probabilityAudit.finalProbability != null ? `${prop.probabilityAudit.finalProbability}%` : null} strong />
+              <MetricIf
+                label="Raw probability"
+                value={
+                  prop.probabilityAudit.rawProbability != null
+                    ? `${prop.probabilityAudit.rawProbability}%`
+                    : prop.probabilityAudit.calibration?.rawProbability != null
+                      ? `${Math.round(Number(prop.probabilityAudit.calibration.rawProbability) * 10) / 10}%`
+                      : null
+                }
+              />
+              <MetricIf
+                label="Calibrated probability"
+                value={
+                  prop.probabilityAudit.calibratedProbability != null
+                    ? `${prop.probabilityAudit.calibratedProbability}%`
+                    : prop.probabilityAudit.finalProbability != null
+                      ? `${prop.probabilityAudit.finalProbability}%`
+                      : null
+                }
+                strong
+              />
+              <MetricIf label="Probability tier" value={prop.probabilityAudit.probabilityTier} />
             </div>
             {prop.probabilityAudit.explanationLines?.length ? (
               <p style={{ ...styles.compactFlags, margin: "4px 0 0", fontSize: "10px", lineHeight: 1.45, color: "#cbd5e1" }}>

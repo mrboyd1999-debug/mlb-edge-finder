@@ -5,25 +5,31 @@
 import { resolveSeasonHitRateBundle } from "./seasonHitRate.js";
 
 export const CALIBRATION_MIN_PROBABILITY = 50;
-export const CALIBRATION_MAX_VERIFIED = 95;
-export const CALIBRATION_MAX_RESEARCH = 95;
+export const CALIBRATION_MAX_PROBABILITY = 88;
+export const CALIBRATION_MAX_VERIFIED = CALIBRATION_MAX_PROBABILITY;
+export const CALIBRATION_MAX_RESEARCH = CALIBRATION_MAX_PROBABILITY;
 
 export const CALIBRATION_HISTOGRAM_BUCKETS = [
   { id: "50-55", label: "50-55%", min: 50, max: 55 },
-  { id: "55-60", label: "55-60%", min: 55, max: 60 },
-  { id: "60-65", label: "60-65%", min: 60, max: 65 },
-  { id: "65-70", label: "65-70%", min: 65, max: 70 },
-  { id: "70-75", label: "70-75%", min: 70, max: 75 },
-  { id: "75-80", label: "75-80%", min: 75, max: 80 },
-  { id: "80-85", label: "80-85%", min: 80, max: 85 },
-  { id: "85-90", label: "85-90%", min: 85, max: 90 },
-  { id: "90-95", label: "90-95%", min: 90, max: 95 },
+  { id: "55-60", label: "55-60% playable", min: 55, max: 60 },
+  { id: "60-65", label: "60-65% solid", min: 60, max: 65 },
+  { id: "65-72", label: "65-72% strong", min: 65, max: 72 },
+  { id: "72-80", label: "72-80% elite", min: 72, max: 80 },
+  { id: "80-88", label: "80-88% exceptional", min: 80, max: 88 },
 ];
 
 const PROBABILITY_WEIGHTS = {
-  recent: 0.4,
-  season: 0.2,
-  confidence: 0.25,
+  recent: 0.35,
+  season: 0.25,
+  edge: 0.2,
+  confidence: 0.1,
+  playability: 0.1,
+};
+
+const PROBABILITY_WEIGHTS_NO_SEASON = {
+  recent: 0.45,
+  edge: 0.25,
+  confidence: 0.15,
   playability: 0.15,
 };
 
@@ -174,6 +180,29 @@ function resolveProbabilityPlayability(prop = {}, options = {}) {
   );
 }
 
+function resolveProjectionEdgeScore(projection, line, edgePercent = null) {
+  const pct = finite(edgePercent);
+  if (pct != null) {
+    return clamp(round1(50 + Math.abs(pct) * 0.85), 50, 95);
+  }
+  const proj = finite(projection);
+  const ln = finite(line);
+  if (proj == null || ln == null || ln <= 0) return 50;
+  const relativeGap = (Math.abs(proj - ln) / ln) * 100;
+  return clamp(round1(50 + relativeGap * 0.75), 50, 95);
+}
+
+export function resolveProbabilityTier(probability) {
+  const prob = finite(probability);
+  if (prob == null) return "—";
+  if (prob >= 80) return "exceptional";
+  if (prob >= 72) return "elite";
+  if (prob >= 65) return "strong";
+  if (prob >= 60) return "solid";
+  if (prob >= 55) return "playable";
+  return "below playable";
+}
+
 export function computeCalibratedProbability(prop = {}, metrics = {}, options = {}) {
   const projection = finite(metrics.projection ?? resolveProjectionValue(prop));
   const line = finite(prop.line);
@@ -185,25 +214,26 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
   const recentHitRate = hitRates.last10HitRate ?? hitRates.last5HitRate ?? confidence;
   const seasonValid = Boolean(hitRates.seasonRateValid && hitRates.seasonHitRate > 0);
   const seasonHitRate = seasonValid ? hitRates.seasonHitRate : null;
+  const weights = seasonValid ? PROBABILITY_WEIGHTS : PROBABILITY_WEIGHTS_NO_SEASON;
+  const edgeScore = resolveProjectionEdgeScore(projection, line, metrics.edgePercent);
+  const edgePercent = finite(metrics.edgePercent);
 
-  const recentContribution = round2(recentHitRate * (seasonValid ? PROBABILITY_WEIGHTS.recent : 0.5));
-  const seasonContribution = seasonValid
-    ? round2(seasonHitRate * PROBABILITY_WEIGHTS.season)
-    : 0;
-  const confidenceContribution = round2(
-    confidence * (seasonValid ? PROBABILITY_WEIGHTS.confidence : 0.35)
+  const recentContribution = round2(recentHitRate * weights.recent);
+  const seasonContribution = seasonValid ? round2(seasonHitRate * weights.season) : 0;
+  const edgeContribution = round2(edgeScore * weights.edge);
+  const confidenceContribution = round2(confidence * weights.confidence);
+  const playabilityContribution = round2(playability * weights.playability);
+  const rawProbability = round2(
+    recentContribution +
+      seasonContribution +
+      edgeContribution +
+      confidenceContribution +
+      playabilityContribution
   );
-  const playabilityContribution = round2(
-    playability * (seasonValid ? PROBABILITY_WEIGHTS.playability : 0.15)
-  );
-  const base = round2(
-    recentContribution + seasonContribution + confidenceContribution + playabilityContribution
-  );
-  const edgeBonus = round1(Math.abs(projection - line) * 8);
 
-  const verified = Boolean(options.verified);
-  const ceiling = verified ? CALIBRATION_MAX_VERIFIED : CALIBRATION_MAX_RESEARCH;
-  const probability = clamp(round2(base + edgeBonus), CALIBRATION_MIN_PROBABILITY, ceiling);
+  const ceiling = CALIBRATION_MAX_PROBABILITY;
+  const probability = clamp(rawProbability, CALIBRATION_MIN_PROBABILITY, ceiling);
+  const probabilityTier = resolveProbabilityTier(probability);
 
   const inputs = {
     recentHitRate: `${round1(recentHitRate)}%`,
@@ -212,17 +242,22 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
     seasonHitRateSource: hitRates.seasonHitRateSource || "—",
     confidence: `${round1(confidence)}%`,
     playability: `${round1(playability)}%`,
-    edgeBonus: `+${round1(edgeBonus)}`,
+    projectionEdge: `${round1(edgeScore)}%`,
+    edgeScore: `${round1(edgeScore)}%`,
+    edgeContribution: round2(edgeContribution),
+    rawProbability: `${round1(rawProbability)}%`,
+    calibratedProbability: `${round1(probability)}%`,
+    probabilityTier,
     finalProbability: `${round1(probability)}%`,
     last5HitRate: hitRates.last5Label,
     last10HitRate: hitRates.last10Label,
-    seasonHitRate: hitRates.seasonLabel,
+    seasonHitRateLabel: hitRates.seasonLabel,
     recentContribution,
     last10Contribution: recentContribution,
     seasonContribution,
     confidenceContribution,
     playabilityContribution,
-    edgeContribution: edgeBonus,
+    edgeContributionValue: edgeContribution,
     projectionVsLine:
       projection != null && line != null
         ? `${round1(projection - line) > 0 ? "+" : ""}${round1(projection - line)}`
@@ -231,14 +266,21 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
 
   return {
     probability,
+    rawProbability,
+    calibratedProbability: probability,
+    probabilityTier,
     inputs,
     hitRates,
     breakdown: {
-      base,
+      rawProbability,
+      calibratedProbability: probability,
+      probabilityTier,
       recentHitRate,
       seasonHitRate: seasonValid ? seasonHitRate : null,
       seasonRateValid: seasonValid,
       seasonHitRateSource: hitRates.seasonHitRateSource,
+      edgeScore,
+      edgePercent,
       confidence,
       playability,
       recentContribution,
@@ -246,11 +288,10 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
       seasonContribution,
       confidenceContribution,
       playabilityContribution,
-      edgeBonus,
-      edgeContribution: edgeBonus,
-      rawTotal: probability,
+      edgeContribution,
       ceiling,
-      blendWeights: PROBABILITY_WEIGHTS,
+      blendWeights: weights,
+      capped: rawProbability > ceiling,
     },
   };
 }
@@ -258,12 +299,9 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
 export function assignCalibratedProbabilityBucket(probability) {
   const prob = finite(probability);
   if (prob == null) return null;
-  if (prob >= 90) return "90-95";
-  if (prob >= 85) return "85-90";
-  if (prob >= 80) return "80-85";
-  if (prob >= 75) return "75-80";
-  if (prob >= 70) return "70-75";
-  if (prob >= 65) return "65-70";
+  if (prob >= 80) return "80-88";
+  if (prob >= 72) return "72-80";
+  if (prob >= 65) return "65-72";
   if (prob >= 60) return "60-65";
   if (prob >= 55) return "55-60";
   if (prob >= 50) return "50-55";
@@ -326,5 +364,6 @@ export function computeEdgeContribution(edge, edgePercent, hitRates = {}, lean =
   void lean;
   const pct = finite(edgePercent);
   if (pct == null) return 0;
-  return round1(Math.abs(pct) * 0.08);
+  const edgeScore = clamp(50 + Math.abs(pct) * 0.85, 50, 95);
+  return round1(edgeScore * PROBABILITY_WEIGHTS.edge);
 }
