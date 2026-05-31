@@ -1,17 +1,22 @@
 /**
- * Phase 6 board quality — diversity, edge display, projection confidence, section builders.
+ * Phase 6/7 board quality — diversity, edge display, projection confidence, section builders.
  */
 
-import { computeRelativeEdgePercent } from "./standardPropMetrics.js";
-import { resolveRankingEdgePercent, computeTopPickScore } from "./bestPlayRankingScore.js";
+import { dataQualityBadge } from "../services/dataQuality.js";
 
 export const MAX_PLAYER_PROPS_IN_TOP_LIST = 2;
 export const TOP_SECTION_LIMIT = 5;
 export const MAX_DISPLAY_EDGE_PERCENT = 40;
+export const PARTIAL_DATA_CONFIDENCE_PENALTY = 10;
+export const TOP_FIVE_MIN_CONFIDENCE = 70;
 
 function finite(value, fallback = 0) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
 export function playerKey(prop = {}) {
@@ -30,8 +35,12 @@ export function buildPlayerMarketKey(prop = {}) {
   return `${playerKey(prop)}|${marketKey(prop)}`;
 }
 
+function defaultPickScore(prop = {}) {
+  return Number(prop.topPickScore ?? prop.verifiedRankingScore ?? prop.weightedBestPlayScore ?? 0);
+}
+
 /** Keep highest-scoring prop per player + market type. */
-export function dedupeByPlayerMarketBestScore(props = [], scoreFn = computeTopPickScore) {
+export function dedupeByPlayerMarketBestScore(props = [], scoreFn = defaultPickScore) {
   const best = new Map();
   for (const prop of props || []) {
     const key = buildPlayerMarketKey(prop);
@@ -67,20 +76,20 @@ export function applyPlayerDiversityFilter(
 export function computeValidatedEdgePercent(prop = {}) {
   const line = finite(prop.line, NaN);
   const projection = finite(prop.projection ?? prop.projectedValue, NaN);
-  if (!Number.isFinite(line) || line <= 0) return null;
-  if (Number.isFinite(projection)) {
-    return ((projection - line) / line) * 100;
-  }
-  const edge = finite(prop.edge, NaN);
-  if (Number.isFinite(edge)) {
-    return (edge / line) * 100;
-  }
-  return computeRelativeEdgePercent(edge, line);
+  if (!Number.isFinite(projection) || projection <= 0) return null;
+  if (!Number.isFinite(line)) return null;
+  return ((projection - line) / projection) * 100;
+}
+
+export function clampValidatedEdgePercent(edgePercent) {
+  const pct = finite(edgePercent, NaN);
+  if (!Number.isFinite(pct)) return null;
+  return clamp(pct, 0, MAX_DISPLAY_EDGE_PERCENT);
 }
 
 export function formatValidatedEdgeDisplay(prop = {}) {
-  const pct = computeValidatedEdgePercent(prop);
-  if (pct == null || !Number.isFinite(pct)) {
+  const rawPct = computeValidatedEdgePercent(prop);
+  if (rawPct == null || !Number.isFinite(rawPct)) {
     return {
       rawEdgeLabel: "—",
       displayEdgeLabel: "—",
@@ -89,11 +98,11 @@ export function formatValidatedEdgeDisplay(prop = {}) {
       edgeCapped: false,
     };
   }
-  const sign = pct > 0 ? "+" : pct < 0 ? "" : "";
-  const absPct = Math.abs(pct);
+  const absPct = Math.abs(rawPct);
   const edgeCapped = absPct > MAX_DISPLAY_EDGE_PERCENT;
-  const capped = Math.max(0, Math.min(absPct, MAX_DISPLAY_EDGE_PERCENT));
-  const displayEdgeLabel = edgeCapped ? "40%+" : `${sign}${Math.round(capped)}%`;
+  const capped = clampValidatedEdgePercent(absPct);
+  const sign = rawPct > 0 ? "+" : rawPct < 0 ? "" : "";
+  const displayEdgeLabel = edgeCapped ? "40%+" : `${sign}${Math.round(capped ?? 0)}%`;
   const rawEdge = finite(prop.edge, NaN);
   const rawEdgeLabel =
     Number.isFinite(rawEdge) && rawEdge !== 0
@@ -103,9 +112,63 @@ export function formatValidatedEdgeDisplay(prop = {}) {
     rawEdgeLabel,
     displayEdgeLabel,
     relativeEdgeLabel: displayEdgeLabel,
-    edgePercent: pct,
+    edgePercent: rawPct,
     edgeCapped,
   };
+}
+
+export function hasMlbStatsApiData(prop = {}) {
+  return Boolean(
+    prop.hasVerifiedStats ||
+      prop.statsProfile ||
+      prop.historicalCoverage === true ||
+      Number(prop.sampleSize) >= 5 ||
+      prop.historicalStatsAttached ||
+      prop.hasGameLogs ||
+      prop.historicalDataPresent
+  );
+}
+
+export function hasSportsDataIoData(prop = {}) {
+  return Boolean(
+    /sportsdata/i.test(String(prop.projectionSource || "")) ||
+      prop.sportsDataGames != null ||
+      prop.sportsDataRawStat != null ||
+      prop.sportsDataPropLabel
+  );
+}
+
+export function hasPartialDataBadge(prop = {}) {
+  const badge = prop.dataQualityBadge || dataQualityBadge(prop);
+  return /partial data/i.test(String(badge?.label || prop.dataQualityLabel || ""));
+}
+
+export function passesFullDataBestPlayRequirements(prop = {}) {
+  const projection = finite(prop.projection ?? prop.projectedValue, NaN);
+  if (!Number.isFinite(projection) || projection <= 0) return false;
+  if (!hasMlbStatsApiData(prop)) return false;
+  if (!hasSportsDataIoData(prop)) return false;
+  if (hasPartialDataBadge(prop)) return false;
+  return true;
+}
+
+export function classifyConfidenceTier(confidence) {
+  const conf = finite(confidence, NaN);
+  if (!Number.isFinite(conf)) return "D";
+  if (conf >= 80) return "A";
+  if (conf >= 70) return "B";
+  if (conf >= 60) return "C";
+  return "D";
+}
+
+export function passesTopFiveBestPlayGate(prop = {}) {
+  const confidence = finite(
+    prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence,
+    NaN
+  );
+  const tier = classifyConfidenceTier(confidence);
+  if (tier === "C" || tier === "D") return false;
+  return passesFullDataBestPlayRequirements(prop);
 }
 
 export function resolveProjectionConfidenceLevel(prop = {}) {
@@ -168,7 +231,9 @@ function compareSafestPlays(a = {}, b = {}) {
 }
 
 function compareHighestEdgePlays(a = {}, b = {}) {
-  return resolveRankingEdgePercent(b) - resolveRankingEdgePercent(a);
+  const edgeA = Math.abs(computeValidatedEdgePercent(a) ?? 0);
+  const edgeB = Math.abs(computeValidatedEdgePercent(b) ?? 0);
+  return edgeB - edgeA;
 }
 
 function compareValueSidePlays(a = {}, b = {}) {
@@ -179,8 +244,12 @@ function compareValueSidePlays(a = {}, b = {}) {
   );
 }
 
-export function buildTopSectionPicks(pool = [], { compareFn, side = "", limit = TOP_SECTION_LIMIT } = {}) {
+export function buildTopSectionPicks(
+  pool = [],
+  { compareFn, side = "", limit = TOP_SECTION_LIMIT, filterFn = null } = {}
+) {
   let rows = [...pool];
+  if (filterFn) rows = rows.filter(filterFn);
   if (side === "UNDER" || side === "OVER") {
     rows = rows.filter((prop) => resolveRecommendedSide(prop) === side);
   }

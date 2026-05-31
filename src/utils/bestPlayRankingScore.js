@@ -20,13 +20,15 @@ export const HERO_MIN_CONFIDENCE = 60;
 export const HERO_MIN_PLAYABILITY = 60;
 export const HERO_MIN_SANITY = 65;
 
+import { computeValidatedEdgePercent, clampValidatedEdgePercent } from "./boardQuality.js";
+
 export function resolveRankingEdgePercent(prop = {}) {
   const direct = finite(prop.edgePercent, NaN);
-  if (Number.isFinite(direct)) return Math.abs(direct);
-  const edge = Math.abs(finite(prop.edge ?? prop.rawEdge, NaN));
-  const line = finite(prop.line, NaN);
-  if (!Number.isFinite(edge) || !Number.isFinite(line) || line <= 0) return 0;
-  return Math.abs((edge / line) * 100);
+  const computed = Number.isFinite(direct)
+    ? direct
+    : computeValidatedEdgePercent(prop);
+  if (!Number.isFinite(computed)) return 0;
+  return clampValidatedEdgePercent(Math.abs(computed)) ?? 0;
 }
 
 export function resolveNormalizedEdgeScore(prop = {}) {

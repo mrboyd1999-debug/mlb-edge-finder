@@ -58,6 +58,7 @@ import {
   compareHighestEdgePlaysRank,
   compareValueSidePlaysRank,
   TOP_SECTION_LIMIT,
+  passesTopFiveBestPlayGate,
 } from "./boardQuality.js";
 import {
   selectStartupProjectionCandidates,
@@ -443,23 +444,27 @@ export function resolveTopMlbPlaySections(
   const topSafestPicks = buildTopSectionPicks(boardQualityPool, {
     compareFn: compareSafestPlaysRank,
     limit: TOP_SECTION_LIMIT,
+    filterFn: passesTopFiveBestPlayGate,
   }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
 
   const topHighestEdgePicks = buildTopSectionPicks(boardQualityPool, {
     compareFn: compareHighestEdgePlaysRank,
     limit: TOP_SECTION_LIMIT,
+    filterFn: passesTopFiveBestPlayGate,
   }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
 
   const topValueUnders = buildTopSectionPicks(boardQualityPool, {
     compareFn: compareValueSidePlaysRank,
     side: "UNDER",
     limit: TOP_SECTION_LIMIT,
+    filterFn: passesTopFiveBestPlayGate,
   }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
 
   const topValueOvers = buildTopSectionPicks(boardQualityPool, {
     compareFn: compareValueSidePlaysRank,
     side: "OVER",
     limit: TOP_SECTION_LIMIT,
+    filterFn: passesTopFiveBestPlayGate,
   }).map((prop, idx) => annotateHighestProbabilityPlay(prop, idx + 1));
 
   filterDiagnostics.selected = highestPicks.length;

@@ -5,7 +5,12 @@ import { computeMlbPlayConfidence } from "./mlbPlayConfidence.js";
 import { classifyVerifiedTier } from "./verifiedTierSystem.js";
 import { resolveProjectionLeanDisplay, resolveProjectionLean } from "./pickDirectionAudit.js";
 import { computeCalibratedProbability } from "./probabilityCalibration.js";
-import { formatValidatedEdgeDisplay } from "./boardQuality.js";
+import {
+  formatValidatedEdgeDisplay,
+  hasPartialDataBadge,
+  PARTIAL_DATA_CONFIDENCE_PENALTY,
+  classifyConfidenceTier,
+} from "./boardQuality.js";
 
 export const PICK_TIER_VERIFIED = "Verified Play";
 export const PICK_TIER_RESEARCH = "Research Candidate";
@@ -104,6 +109,7 @@ export function computeAdjustedConfidence(prop = {}) {
   else if (hasMissingMatchupData(prop)) adjusted -= 10;
   if (hasMissingOpponentData(prop)) adjusted -= 6;
   if (hasMissingSportsbookComparison(prop)) adjusted -= 4;
+  if (hasPartialDataBadge(prop)) adjusted -= PARTIAL_DATA_CONFIDENCE_PENALTY;
   const line = finiteOr(prop.line, NaN);
   if (projection != null && Number.isFinite(line) && line > 0) {
     adjusted += Math.min(3, (Math.abs(projection - line) / line) * 8);
@@ -157,6 +163,8 @@ export function resolveDisplayConfidence(prop = {}, tier = PICK_TIER_RESEARCH, a
   return Math.round(raw);
 }
 
+export { classifyConfidenceTier } from "./boardQuality.js";
+
 export function formatEdgeDisplay(prop = {}) {
   return formatValidatedEdgeDisplay(prop);
 }
@@ -176,7 +184,8 @@ export function resolveResearchReasons(prop = {}) {
 }
 
 function applyProbabilityCaps(probability, prop = {}, { verified = false } = {}) {
-  const ceiling = verified ? 90 : 90;
+  void verified;
+  const ceiling = 85;
   const floor = 50;
   let value = round1(probability);
   if (isResearchCandidate(prop) && !verified) {

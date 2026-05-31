@@ -1594,6 +1594,11 @@ body,
   color: #fca5a5 !important;
 }
 
+.best-play-tier-badge {
+  color: #bfdbfe !important;
+  font-size: 10px;
+}
+
 .best-play-audit-toggle-wrap {
   margin-top: 6px;
 }

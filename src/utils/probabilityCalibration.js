@@ -4,12 +4,12 @@
 
 import {
   computeStandardEdge,
-  computeRelativeEdgePercent,
 } from "./standardPropMetrics.js";
+import { computeValidatedEdgePercent, clampValidatedEdgePercent } from "./boardQuality.js";
 
 export const CALIBRATION_MIN_PROBABILITY = 50;
-export const CALIBRATION_MAX_VERIFIED = 90;
-export const CALIBRATION_MAX_RESEARCH = 90;
+export const CALIBRATION_MAX_VERIFIED = 85;
+export const CALIBRATION_MAX_RESEARCH = 85;
 
 export const CALIBRATION_HISTOGRAM_BUCKETS = [
   { id: "50-55", label: "50-55%", min: 50, max: 55 },
@@ -23,9 +23,9 @@ export const CALIBRATION_HISTOGRAM_BUCKETS = [
 ];
 
 const BLEND_WEIGHTS = {
-  recent: 0.35,
-  season: 0.35,
-  edge: 0.2,
+  season: 0.4,
+  last10: 0.3,
+  projectionStrength: 0.2,
   matchup: 0.1,
 };
 
@@ -85,11 +85,13 @@ export function resolveCalibrationHitRates(prop = {}, line = null) {
   };
 }
 
-function resolveRecentHitRate(hitRates = {}) {
-  const last5 = hitRates.last5HitRate;
-  const last10 = hitRates.last10HitRate ?? hitRates.recentHitRate;
-  if (last5 != null && last10 != null) return round1((last5 + last10) / 2);
-  return last10 ?? last5 ?? null;
+
+function projectionStrengthToScore(prop = {}, metrics = {}) {
+  const edgePercent = finite(
+    metrics.edgePercent ?? computeValidatedEdgePercent({ ...prop, ...metrics })
+  );
+  const capped = clampValidatedEdgePercent(Math.abs(edgePercent ?? 0)) ?? 0;
+  return clamp(round1(50 + capped * 0.875), CALIBRATION_MIN_PROBABILITY, CALIBRATION_MAX_VERIFIED);
 }
 
 function resolveProjectionValue(prop = {}) {
@@ -157,8 +159,7 @@ export function computeMatchupAdjustment(prop = {}) {
 }
 
 function edgePercentToScore(edgePercent = 0) {
-  const pct = Math.min(Math.abs(finite(edgePercent) ?? 0), 100);
-  return clamp(round1(50 + pct * 0.35), CALIBRATION_MIN_PROBABILITY, CALIBRATION_MAX_VERIFIED);
+  return projectionStrengthToScore({}, { edgePercent });
 }
 
 function matchupAdjustmentToScore(prop = {}) {
@@ -172,21 +173,23 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
   if (projection == null || line == null || line <= 0) return null;
 
   const edge = finite(metrics.edge ?? computeStandardEdge(projection, line));
-  const edgePercent = finite(metrics.edgePercent ?? computeRelativeEdgePercent(edge, line) ?? 0);
+  const edgePercent = finite(
+    metrics.edgePercent ?? computeValidatedEdgePercent({ ...prop, projection, line, edge })
+  );
   const hitRates = resolveCalibrationHitRates(prop, line);
 
-  const recentRate = resolveRecentHitRate(hitRates) ?? 50;
+  const last10Rate = hitRates.last10HitRate ?? hitRates.last5HitRate ?? 50;
   const seasonRate = hitRates.seasonHitRate ?? 50;
-  const edgeScore = edgePercentToScore(edgePercent);
+  const projectionStrengthScore = projectionStrengthToScore(prop, { edge, edgePercent, projection });
   const matchupScore = matchupAdjustmentToScore(prop);
 
-  const recentContribution = round2(recentRate * BLEND_WEIGHTS.recent);
+  const last10Contribution = round2(last10Rate * BLEND_WEIGHTS.last10);
   const seasonContribution = round2(seasonRate * BLEND_WEIGHTS.season);
-  const edgeContribution = round2(edgeScore * BLEND_WEIGHTS.edge);
+  const projectionStrengthContribution = round2(projectionStrengthScore * BLEND_WEIGHTS.projectionStrength);
   const matchupContribution = round2(matchupScore * BLEND_WEIGHTS.matchup);
 
   let probability = round2(
-    recentContribution + seasonContribution + edgeContribution + matchupContribution
+    seasonContribution + last10Contribution + projectionStrengthContribution + matchupContribution
   );
 
   const verified = Boolean(options.verified);
@@ -197,15 +200,16 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
     last5HitRate: hitRates.last5Label,
     last10HitRate: hitRates.last10Label,
     seasonHitRate: hitRates.seasonLabel,
-    recentHitRate: `${round1(recentRate)}%`,
+    recentHitRate: `${round1(last10Rate)}%`,
     projectionVsLine:
       edgePercent != null ? `${edgePercent > 0 ? "+" : ""}${round1(edgePercent)}%` : "—",
     matchupAdjustment: `${computeMatchupAdjustment(prop) > 0 ? "+" : ""}${computeMatchupAdjustment(prop)}`,
-    recentContribution,
-    last5Contribution: recentContribution,
-    last10Contribution: 0,
+    recentContribution: last10Contribution,
+    last5Contribution: 0,
+    last10Contribution,
     seasonContribution,
-    edgeContribution,
+    edgeContribution: projectionStrengthContribution,
+    projectionStrengthContribution,
     matchupAdjustmentValue: matchupContribution,
     dataQualityAdjustment: 0,
     projectionSpreadContribution: 0,
@@ -218,11 +222,12 @@ export function computeCalibratedProbability(prop = {}, metrics = {}, options = 
     hitRates,
     breakdown: {
       base: 0,
-      recentContribution,
-      last5Contribution: recentContribution,
-      last10Contribution: 0,
+      recentContribution: last10Contribution,
+      last5Contribution: 0,
+      last10Contribution,
       seasonContribution,
-      edgeContribution,
+      edgeContribution: projectionStrengthContribution,
+      projectionStrengthContribution,
       matchupAdjustment: matchupContribution,
       dataQualityAdjustment: 0,
       projectionSpreadContribution: 0,
@@ -301,5 +306,5 @@ export function computeEdgeContribution(edge, edgePercent, hitRates = {}, lean =
   void edge;
   void hitRates;
   void lean;
-  return edgePercentToScore(edgePercent) * BLEND_WEIGHTS.edge;
+  return projectionStrengthToScore({}, { edgePercent }) * BLEND_WEIGHTS.projectionStrength;
 }

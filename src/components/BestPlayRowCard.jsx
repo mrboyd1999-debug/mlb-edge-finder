@@ -54,6 +54,11 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false, cacheStatus = ""
   const probability = enriched.probabilityScore ?? enriched.verifiedProbability ?? 0;
   const probLabel = Number.isFinite(Number(probability)) ? `${Math.round(Number(probability))}%` : "—";
   const projectionConfidence = enriched.projectionConfidenceLevel || "LOW";
+  const confidenceTier = enriched.confidenceTierLabel || (enriched.confidenceTier ? `Tier ${enriched.confidenceTier}` : null);
+  const displayConfidenceScore = enriched.displayConfidenceScore ?? enriched.confidenceScore ?? enriched.confidence;
+  const confidenceLabel = Number.isFinite(Number(displayConfidenceScore))
+    ? `${Math.round(Number(displayConfidenceScore))}%`
+    : "—";
   const edgeLabels = enriched.rawEdgeLabel
     ? { rawEdgeLabel: enriched.rawEdgeLabel, displayEdgeLabel: enriched.displayEdgeLabel }
     : formatEdgeDisplay(enriched);
@@ -93,6 +98,8 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false, cacheStatus = ""
     formatBestPlayProjectionSource(enriched);
   const statsLine = explanation?.statsLine || "";
   const projectionSanityAudit = enriched.projectionSanityAudit;
+  const projectionFormulaAudit = enriched.projectionFormulaAudit;
+  const playabilityBreakdown = enriched.playabilityBreakdown ?? enriched.playabilityAudit;
   const reason = explanation?.reason || enriched.qualifyReason || enriched.whyThisPick || "";
   const hasAuditDetails = Boolean(
     probabilityAudit ||
@@ -102,6 +109,8 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false, cacheStatus = ""
       rankingReason ||
       reason ||
       projectionSanityAudit?.supported ||
+      projectionFormulaAudit ||
+      playabilityBreakdown ||
       isVerifiedPlay
   );
 
@@ -166,7 +175,16 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false, cacheStatus = ""
               Probability <strong>{probLabel}</strong>
             </span>
             <span>
-              Confidence{" "}
+              Confidence <strong>{confidenceLabel}</strong>
+              {confidenceTier ? (
+                <>
+                  {" "}
+                  <strong className="best-play-tier-badge">{confidenceTier}</strong>
+                </>
+              ) : null}
+            </span>
+            <span>
+              Data{" "}
               <strong className={`best-play-confidence ${confidenceLevelClass(projectionConfidence)}`}>
                 {projectionConfidence}
               </strong>
@@ -210,6 +228,21 @@ function BestPlayRowCard({ prop, onOpen, rank, grouped = false, cacheStatus = ""
                 <SectionErrorBoundary name="Projection Sanity">
                   <ProjectionSanityAuditPanel audit={projectionSanityAudit} compact />
                 </SectionErrorBoundary>
+              ) : null}
+              {projectionFormulaAudit ? (
+                <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 10 }}>
+                  Formula: {projectionFormulaAudit.formulaPath || projectionFormulaAudit.formula || "—"}
+                  {projectionFormulaAudit.projectionFormulaErrorReason
+                    ? ` · ${projectionFormulaAudit.projectionFormulaErrorReason}`
+                    : ""}
+                </p>
+              ) : null}
+              {playabilityBreakdown ? (
+                <p style={{ ...styles.bestPlayRowSubline, color: "#94a3b8", marginTop: 4, fontSize: 10 }}>
+                  Playability {playabilityLabel} · Confidence {playabilityBreakdown.confidence ?? "—"} · Reliability{" "}
+                  {playabilityBreakdown.reliabilityComponent ?? playabilityBreakdown.projectionComponent ?? "—"} ·
+                  Completeness {playabilityBreakdown.completenessComponent ?? playabilityBreakdown.historicalComponent ?? "—"}
+                </p>
               ) : null}
               {isVerifiedPlay && !projectionSanityAudit?.supported ? (
                 <div className="hit-rate-viz" aria-label="Hit rate snapshot">
