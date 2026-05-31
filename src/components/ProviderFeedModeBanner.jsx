@@ -4,6 +4,7 @@ import {
   apiStatusStyle,
   API_STATUS_COLOR,
 } from "../utils/apiHealth.js";
+import ApiStatusPanel from "./ApiStatusPanel.jsx";
 
 function ProviderFeedModeBanner({
   apiHealth = {},
@@ -12,6 +13,9 @@ function ProviderFeedModeBanner({
   renderSourceAudit = null,
   mlbPipelineStatus = null,
   pipelineProjectionStats = null,
+  pipelinePropCountAudit = null,
+  feedHealthContext = null,
+  debugSources = null,
   loading = false,
 }) {
   const health = getApiHealthStatus({
@@ -19,6 +23,9 @@ function ProviderFeedModeBanner({
     connectionReport,
     mlbPipelineStatus,
     pipelineProjectionStats,
+    pipelinePropCountAudit,
+    feedHealthContext,
+    debugSources,
   });
 
   const liveAvailable =
@@ -30,8 +37,6 @@ function ProviderFeedModeBanner({
     ? apiStatusStyle(API_STATUS_COLOR.YELLOW)
     : apiStatusStyle(health.overall.color);
 
-  const bannerRows = health.providerRows;
-
   return (
     <section
       className={`provider-feed-mode-banner provider-feed-mode-banner--${liveAvailable && !loading ? "live" : "cache"}`}
@@ -39,21 +44,23 @@ function ProviderFeedModeBanner({
     >
       <div className="provider-feed-mode-banner__head">
         <strong className="provider-feed-mode-banner__title">{headline}</strong>
-        {!loading ? <span style={headlineStyle}>{liveAvailable ? "Live" : "Limited"}</span> : null}
+        {!loading ? <span style={headlineStyle}>{liveAvailable ? "Live Data Available" : "Limited"}</span> : null}
       </div>
       {!loading ? (
         <>
           <p className="provider-feed-mode-banner__stats">
             Stats Verification: <strong>{health.statsVerification.status}</strong>
           </p>
-          <ul className="provider-feed-mode-banner__providers">
-            {bannerRows.map((row) => (
-              <li key={row.provider}>
-                <span className="provider-feed-mode-banner__provider-name">{row.provider}</span>
-                <span style={apiStatusStyle(row.color)}>{row.status}</span>
-              </li>
-            ))}
-          </ul>
+          <ApiStatusPanel
+            apiHealth={apiHealth}
+            connectionReport={connectionReport}
+            mlbPipelineStatus={mlbPipelineStatus}
+            pipelineProjectionStats={pipelineProjectionStats}
+            pipelinePropCountAudit={pipelinePropCountAudit}
+            feedHealthContext={feedHealthContext}
+            debugSources={debugSources}
+            className="provider-feed-mode-banner__providers api-status-panel"
+          />
         </>
       ) : null}
     </section>

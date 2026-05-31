@@ -4,6 +4,7 @@
 
 import { getOddsApiKey, getSportsDataApiKey } from "../services/runtimeSettings.js";
 import { formatDateTime } from "./formatters.js";
+import { resolvePrizePicksProviderHealth } from "./providerStatus.js";
 
 export const API_STATUS_COLOR = {
   GREEN: "green",
@@ -282,64 +283,8 @@ function resolveUnderdogHealth(feed = {}) {
   };
 }
 
-function resolvePrizePicksHealth(feed = {}, { alternatePropSourcesAvailable = false } = {}) {
-  const usable = hasUsableProps(feed);
-  const sessionParsed = hasSuccessfulPropParse(feed);
-  const live = Boolean(feed.liveHttpOk && !feed.cached && !feed.fallback && usable);
-  const debug = {
-    endpointTested: feed.endpoint || "/prizepicks/props",
-    responseCode: feed.httpStatus ?? null,
-    lastChecked: feed.lastFetchAt || null,
-    cacheAge: formatCacheAgeLabel(feed),
-    propsReturned: finite(feed.parsedCount ?? feed.activeUsableCount ?? feed.usableCount),
-    keyPresent: Boolean(feed.httpExecuted ?? feed.diagnostics?.httpExecuted ?? true),
-    failureReason: feed.lastError || feed.statusLabel || "",
-  };
-
-  if (sessionParsed) {
-    return {
-      status: "Connected",
-      color: API_STATUS_COLOR.GREEN,
-      detail: `${debug.propsReturned ?? finite(feed.rawCount) ?? 0} props`,
-      debug: { ...debug, failureReason: "" },
-    };
-  }
-
-  if (live) {
-    return {
-      status: "Connected",
-      color: API_STATUS_COLOR.GREEN,
-      detail: `${debug.propsReturned} live props`,
-      debug: { ...debug, failureReason: "" },
-    };
-  }
-
-  if (usable) {
-    const cacheFresh =
-      resolveCacheAgeMs(feed) == null ? true : resolveCacheAgeMs(feed) <= USABLE_PROP_CACHE_MAX_AGE_MS;
-    return {
-      status: cacheFresh ? "Connected via cache" : "Cache stale",
-      color: cacheFresh ? API_STATUS_COLOR.GREEN : API_STATUS_COLOR.YELLOW,
-      detail: `${debug.propsReturned} cached props`,
-      debug,
-    };
-  }
-
-  if (alternatePropSourcesAvailable) {
-    return {
-      status: "Optional unavailable",
-      color: API_STATUS_COLOR.GREEN,
-      detail: "Other prop sources are supplying lines",
-      debug: { ...debug, failureReason: feed.lastError || "Live fetch failed — optional provider" },
-    };
-  }
-
-  return {
-    status: "Temporarily unavailable",
-    color: API_STATUS_COLOR.YELLOW,
-    detail: feed.lastError || "PrizePicks feed unavailable",
-    debug: { ...debug, failureReason: feed.lastError || "No usable props" },
-  };
+function resolvePrizePicksHealth(feed = {}, options = {}) {
+  return resolvePrizePicksProviderHealth(feed, options);
 }
 
 function resolveMlbStatsHealth({ sportsDataHealth, mlbStatsTest = null, mlbPipelineStatus = null }) {
@@ -549,6 +494,9 @@ export function getApiHealthStatus({
   mlbPipelineStatus = null,
   pipelineProjectionStats = null,
   mlbStatsTest = null,
+  pipelinePropCountAudit = null,
+  feedHealthContext = null,
+  debugSources = null,
 } = {}) {
   const meta = connectionReport || {};
   const rows = meta.results || [];
@@ -588,6 +536,9 @@ export function getApiHealthStatus({
       underdog.color === API_STATUS_COLOR.GREEN ||
       oddsApi.color === API_STATUS_COLOR.GREEN ||
       hasUsableProps(oddsFeed),
+    pipelinePropCountAudit: pipelinePropCountAudit || feedHealthContext?.pipelinePropCountAudit,
+    feedHealthContext,
+    debugSources: debugSources || apiHealth?.debugSources,
   });
   const mlbStats = resolveMlbStatsHealth({
     sportsDataHealth: sportsDataIO,

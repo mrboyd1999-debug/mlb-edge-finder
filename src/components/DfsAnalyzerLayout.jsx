@@ -97,6 +97,9 @@ function DfsAnalyzerLayout({
         renderSourceAudit={renderSourceAudit}
         mlbPipelineStatus={mlbPipelineStatus}
         pipelineProjectionStats={pipelineRenderCounts?.projectionStats ?? null}
+        pipelinePropCountAudit={debugInfo?.pipelinePropCountAudit}
+        feedHealthContext={feedHealthContext}
+        debugSources={debugInfo?.sources}
         loading={loading}
       />
 
@@ -167,6 +170,8 @@ function DfsAnalyzerLayout({
             onConnectionReportChange={handleConnectionReportChange}
             feedHealthContext={feedHealthContext}
             pipelineProjectionStats={pipelineRenderCounts?.projectionStats ?? null}
+            pipelinePropCountAudit={debugInfo?.pipelinePropCountAudit}
+            debugSources={debugInfo?.sources}
           />
           <ProviderCoverageAuditSection audit={providerCoverageAudit} loading={loading} />
           <LiveFeedDiagnosticsPanel audit={providerCoverageAudit} />

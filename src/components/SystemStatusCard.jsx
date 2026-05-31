@@ -41,6 +41,8 @@ function SystemStatusCard({
   onConnectionReportChange,
   feedHealthContext = null,
   pipelineProjectionStats = null,
+  pipelinePropCountAudit = null,
+  debugSources = null,
 }) {
   const meta = readSettingsMeta();
   const reportRows = connectionReport?.results || meta.lastConnectionReport || [];
@@ -99,6 +101,9 @@ function SystemStatusCard({
     mlbPipelineStatus,
     pipelineProjectionStats,
     mlbStatsTest,
+    pipelinePropCountAudit: pipelinePropCountAudit || feedHealthContext?.pipelinePropCountAudit,
+    feedHealthContext,
+    debugSources,
   });
 
   const ppFeed = apiHealth?.PrizePicks || {};
