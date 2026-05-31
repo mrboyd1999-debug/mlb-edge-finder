@@ -82,12 +82,18 @@ export function buildDataIntegrityAudit(prop = {}) {
     projectionDataScore: resolveProjectionDataScore(prop),
     probabilityDataScore: resolveProbabilityDataScore(prop),
     integrityScore: integrityAudit.integrityScore,
-    pitcherIntegrity: integrityAudit.pitcherIntegrity,
-    opponentIntegrity: integrityAudit.opponentIntegrity,
+    projectionIntegrity: integrityAudit.projectionIntegrity,
     seasonDataIntegrity: integrityAudit.seasonDataIntegrity,
+    opponentIntegrity: integrityAudit.opponentIntegrity,
+    pitcherIntegrity: integrityAudit.pitcherIntegrity,
+    integrityComponents: integrityAudit.integrityComponents,
+    weightedBreakdown: integrityAudit.weightedBreakdown,
+    integrityWeights: integrityAudit.integrityWeights,
     penalties: integrityAudit.penalties,
     tierAEligible: integrityAudit.tierAEligible,
     reviewNeeded: integrityAudit.reviewNeeded,
+    maxTierB: integrityAudit.maxTierB,
+    pitcherMatchupUnverified: integrityAudit.pitcherMatchupUnverified,
   };
 }
 

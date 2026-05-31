@@ -20,7 +20,24 @@ export const RANKING_PENALTY_MISSING_SEASON = 15;
 export const RANKING_PENALTY_SMALL_SAMPLE = 10;
 export const LOW_CONFIDENCE_MAX_RANK = 5;
 export const LOW_CONFIDENCE_EXCLUDE_TOP = 3;
+export const PITCHER_ZERO_MAX_RANK = 3;
 export const STABLE_VS_OUTLIER_PROB_WINDOW = 10;
+
+function resolvePitcherIntegrityForRank(prop = {}) {
+  const value = prop.integrityAudit?.pitcherIntegrity ?? prop.pitcherIntegrity;
+  return Number.isFinite(Number(value)) ? Number(value) : null;
+}
+
+function enforcePitcherZeroRankFloor(sorted = [], maxRank = PITCHER_ZERO_MAX_RANK) {
+  if (!sorted.length || maxRank <= 1) return sorted;
+
+  const reservedSlots = maxRank - 1;
+  const verified = sorted.filter((prop) => resolvePitcherIntegrityForRank(prop) !== 0);
+  const head = verified.slice(0, reservedSlots);
+  const headSet = new Set(head);
+  const tail = sorted.filter((prop) => !headSet.has(prop));
+  return [...head, ...tail];
+}
 
 export function resolveBestPlayRankingFlags(prop = {}) {
   const audit = prop.projectionSanityAudit || {};
@@ -352,7 +369,7 @@ export function applyBestPlayRankConstraints(sorted = [], { limit = null } = {})
     result.push(prop);
   }
 
-  return result.slice(0, target);
+  return enforcePitcherZeroRankFloor(result.slice(0, target));
 }
 
 export const compareVerifiedRankingPlays = compareVerifiedPlaysRank;

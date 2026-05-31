@@ -11,7 +11,12 @@ import {
   annotateBestPlayRankingAudit,
   resolveBestPlayRankingFlags,
 } from "./bestPlayRankingScore.js";
-import { attachIntegrityAuditFields, buildIntegrityAudit } from "./integrityAudit.js";
+import {
+  attachIntegrityAuditFields,
+  buildIntegrityAudit,
+  PITCHER_MATCHUP_NOT_VERIFIED_MESSAGE,
+  canSelectOverallPlayAtRank,
+} from "./integrityAudit.js";
 import { resolveVerifiedHitRateSnapshot } from "./verifiedHitRates.js";
 
 export const MAX_PLAYER_PROPS_IN_TOP_LIST = 2;
@@ -341,7 +346,8 @@ export function classifyPropTier(prop = {}) {
     recentAvailable &&
     projectionAvailable &&
     opponentAvailable &&
-    integrity.tierAEligible;
+    integrity.tierAEligible &&
+    !integrity.maxTierB;
 
   if (qualifiesA) {
     tier = "A";
@@ -349,8 +355,12 @@ export function classifyPropTier(prop = {}) {
     confidence >= TIER_A_MIN_CONFIDENCE &&
     playability >= TIER_A_MIN_PLAYABILITY &&
     sanity >= TIER_A_MIN_SANITY &&
-    !seasonAvailable
+    (!seasonAvailable || integrity.maxTierB)
   ) {
+    tier = "B";
+  }
+
+  if (integrity.maxTierB && tier === "A") {
     tier = "B";
   }
 
@@ -663,32 +673,54 @@ export function passesOverallPlayVerification(prop = {}) {
 
 export function selectOverallPlay(pool = []) {
   const eligible = (pool || []).filter(isFullDataProp);
-  const verified = applyBestPlayRankConstraints(
+  const ranked = applyBestPlayRankConstraints(
     eligible.filter((prop) => {
       const flags = resolveBestPlayRankingFlags(prop);
-      return (
-        !flags.projectionConfidenceLow &&
-        !flags.outlierDetected &&
-        passesOverallPlayVerification(prop)
-      );
+      return !flags.projectionConfidenceLow && !flags.outlierDetected;
     })
   );
-  if (verified[0]) {
-    return { ...verified[0], overallPlayVerified: true };
-  }
 
-  const fallback = applyBestPlayRankConstraints(
-    eligible.filter((prop) => passesOverallPlayVerification(prop))
+  const verifiedCandidate = ranked.find(
+    (prop) => passesOverallPlayVerification(prop) && canSelectOverallPlayAtRank(prop, 1)
   );
-  if (fallback[0]) {
-    return { ...fallback[0], overallPlayVerified: true };
+  if (verifiedCandidate) {
+    return { ...verifiedCandidate, overallPlayVerified: true };
   }
 
-  const best = applyBestPlayRankConstraints(eligible);
-  return best[0] ? { ...best[0], overallPlayVerified: false } : null;
+  const pitcherVerifiedCandidate = ranked.find(
+    (prop) => passesOverallPlayVerification(prop) && (prop.integrityAudit?.pitcherIntegrity ?? 0) > 0
+  );
+  if (pitcherVerifiedCandidate) {
+    return { ...pitcherVerifiedCandidate, overallPlayVerified: true };
+  }
+
+  const verifiedAny = ranked.find((prop) => passesOverallPlayVerification(prop));
+  if (verifiedAny) {
+    return {
+      ...verifiedAny,
+      overallPlayVerified: false,
+      overallPlayPitcherWarning: PITCHER_MATCHUP_NOT_VERIFIED_MESSAGE,
+    };
+  }
+
+  const best = ranked.find((prop) => canSelectOverallPlayAtRank(prop, 1)) || ranked[0];
+  if (!best) return null;
+
+  if ((best.integrityAudit?.pitcherIntegrity ?? buildIntegrityAudit(best).pitcherIntegrity) === 0) {
+    return {
+      ...best,
+      overallPlayVerified: false,
+      overallPlayPitcherWarning: PITCHER_MATCHUP_NOT_VERIFIED_MESSAGE,
+    };
+  }
+
+  return { ...best, overallPlayVerified: false };
 }
 
 export function buildOverallPlayExplanation(prop = {}) {
+  if (prop.overallPlayPitcherWarning) {
+    return prop.overallPlayPitcherWarning;
+  }
   if (prop.overallPlayVerified === false) {
     return OVERALL_PLAY_PENDING_MESSAGE;
   }
