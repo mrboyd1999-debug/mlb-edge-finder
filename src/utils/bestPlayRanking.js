@@ -13,7 +13,7 @@ import {
   classifyVerifiedTier,
   sanitizeProjectionValue,
 } from "./bestPlaysPipelineDebug.js";
-import { computeMlbPlayConfidence, computeMlbConfidenceBreakdown } from "./mlbPlayConfidence.js";
+import { computeMlbPlayConfidence, computeMlbConfidenceBreakdown, applyConfidenceDisplayFloor } from "./mlbPlayConfidence.js";
 import { attachBestPlayExplanation } from "./bestPlayExplanation.js";
 import { attachModelValidationFields } from "./modelValidation.js";
 import {
@@ -230,15 +230,16 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     metrics
   );
   let verifiedProbability = playability.probabilityScore ?? metrics.probabilityScore;
+  const baseConfidenceBreakdown =
+    prop.confidenceComponents ??
+    computeMlbConfidenceBreakdown({ ...prop, projection }, projection);
   const modelConfidence =
     metrics.adjustedConfidence ??
+    baseConfidenceBreakdown.final ??
     computeMlbPlayConfidence({ ...prop, projection }, projection) ??
     prop.displayConfidenceScore ??
     prop.confidenceScore ??
     prop.confidence;
-  const confidenceBreakdown =
-    prop.confidenceBreakdown ??
-    computeMlbConfidenceBreakdown({ ...prop, projection }, projection);
   const sanityAudit = buildProjectionSanityAudit({
     ...validatedProp,
     projection,
@@ -250,7 +251,7 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     projectedValue: projection,
     projectionSanityAudit: sanityAudit,
   });
-  const displayConfidence = applySanityConfidencePenalty(modelConfidence, sanityAudit);
+  const afterSanityConfidence = applySanityConfidencePenalty(modelConfidence, sanityAudit);
   const playabilityBreakdown = computePlayabilityBreakdown(
     {
       ...prop,
@@ -258,17 +259,31 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
       projectedValue: projection,
       edge: metrics.edge,
       edgePercent: metrics.edgePercent,
-      displayConfidenceScore: displayConfidence,
+      displayConfidenceScore: afterSanityConfidence,
       probabilityScore: verifiedProbability,
     },
     {
       metrics,
       sanityAudit,
-      confidence: displayConfidence,
+      confidence: afterSanityConfidence,
       probability: verifiedProbability,
     }
   );
   const playabilityScore = playabilityBreakdown.finalPlayability;
+  const displayConfidence = applyConfidenceDisplayFloor(
+    { ...prop, projectionSanityAudit: sanityAudit },
+    projection,
+    afterSanityConfidence,
+    playabilityScore
+  );
+  const sanityPenalty = Math.max(0, Math.round(modelConfidence - afterSanityConfidence));
+  const confidenceBreakdown = {
+    ...baseConfidenceBreakdown,
+    sanityPenalty,
+    afterSanity: afterSanityConfidence,
+    final: displayConfidence,
+    floorApplied: displayConfidence > afterSanityConfidence,
+  };
   const tierLabel = classifyBestPlayTier({
     ...prop,
     projection,
@@ -394,6 +409,7 @@ function enrichBestPlayRankingFieldsUnsafe(prop = {}) {
     playabilityBreakdown,
     playabilityAudit: playabilityBreakdown,
     confidenceBreakdown,
+    confidenceComponents: confidenceBreakdown,
     projectionFormulaAudit,
     projectionFormulaValid: projectionFormulaAudit.projectionFormulaValid,
     projectionFormulaError: projectionFormulaAudit.projectionFormulaError,

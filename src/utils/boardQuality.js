@@ -361,24 +361,13 @@ export function isPitcherPendingPlay(prop = {}) {
 
 export function applyPitcherPendingConfidencePenalty(prop = {}) {
   if (!isPitcherPendingPlay(prop)) return prop;
-  const base = finite(
-    prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence,
-    NaN
-  );
-  const withTag = {
+  return {
     ...prop,
     pitcherPendingTag: PITCHER_PENDING_TAG,
     opposingPitcher:
       prop.opposingPitcher && prop.opposingPitcher !== "—"
         ? prop.opposingPitcher
         : STARTER_PENDING_LABEL,
-  };
-  if (!Number.isFinite(base)) return withTag;
-  const adjusted = clamp(base - PITCHER_PENDING_CONFIDENCE_PENALTY, CONFIDENCE_CALIBRATION_MIN, CONFIDENCE_CALIBRATION_MAX);
-  return {
-    ...withTag,
-    displayConfidenceScore: adjusted,
-    pitcherPendingPenaltyApplied: true,
   };
 }
 

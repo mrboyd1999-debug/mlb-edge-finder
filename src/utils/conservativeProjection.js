@@ -121,7 +121,16 @@ function matchupScoreForConfidence(prop = {}) {
   return clamp(50 + adj * 2, 50, 95);
 }
 
+function isMlbConfidenceProp(prop = {}) {
+  const sport = String(prop.sport || prop.league || "").toUpperCase();
+  return !sport || sport === "MLB";
+}
+
 export function computeAdjustedConfidence(prop = {}) {
+  if (isMlbConfidenceProp(prop)) {
+    return computeMlbPlayConfidence(prop);
+  }
+
   const hitRates = resolveCalibrationHitRates(prop);
   const recentHitRate = normalizeHitRatePercent(
     prop.last10HitRate ?? prop.recentHitRate ?? hitRates.last10HitRate ?? 50

@@ -5,6 +5,7 @@ import { readManualStatsForProp } from "../services/pickStore.js";
 import DataQualityBadge from "./DataQualityBadge.jsx";
 import PlayerImage from "./PlayerImage.jsx";
 import ProjectionSanityAuditPanel from "./ProjectionSanityAuditPanel.jsx";
+import ConfidenceComponentsPanel from "./ConfidenceComponentsPanel.jsx";
 import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import {
   formatHitRatePercent,
@@ -634,6 +635,14 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
           </div>
         ) : null}
 
+        {prop.confidenceComponents || prop.confidenceBreakdown?.components ? (
+          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
+            <SectionErrorBoundary name="Confidence Components">
+              <ConfidenceComponentsPanel audit={prop.confidenceComponents || prop.confidenceBreakdown} />
+            </SectionErrorBoundary>
+          </div>
+        ) : null}
+
         {manualProp && prop.sideEngineDebug ? (
           <details style={{ ...styles.compactDetails, marginTop: "4px" }}>
             <summary style={styles.detailsSummary}>
@@ -789,7 +798,7 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
               </div>
             )}
 
-            {!manualProp && (prop.confidenceBreakdown?.length > 0 || prop.projectionReasoning?.length > 0) && (
+            {!manualProp && (Array.isArray(prop.confidenceBreakdown) && prop.confidenceBreakdown.length > 0 || prop.projectionReasoning?.length > 0) && (
               <details style={{ ...styles.compactDetails, marginTop: "8px" }}>
                 <summary style={styles.detailsSummary}>Model breakdown</summary>
                 <div style={{ marginTop: "6px" }}>
@@ -800,7 +809,7 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
                       ))}
                     </ul>
                   )}
-                  {(prop.confidenceBreakdown || []).length > 0 && (
+                  {Array.isArray(prop.confidenceBreakdown) && prop.confidenceBreakdown.length > 0 && (
                     <ul style={styles.explanationList}>
                       {(prop.confidenceBreakdown || []).slice(0, 6).map((row) => (
                         <li key={row.key}>{row.label}: {row.score}/{row.max}</li>
