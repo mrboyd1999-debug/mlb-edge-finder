@@ -11,7 +11,9 @@ import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import {
   formatHitRatePercent,
   resolveBreakdownTitle,
+  resolveProjectionLean,
   resolveProjectionLeanDisplay,
+  resolveProjectionValues,
   validatePickDirectionBeforeRender,
   isVerifiedHighestProbabilityPick,
 } from "../utils/pickDirectionAudit.js";
@@ -40,6 +42,7 @@ import {
   attachBoardQualityFields,
   resolveBoardDataQualityBadge,
   resolveBoardDataQualityLabel,
+  resolveFinalTier,
   resolveFinalTierLabel,
 } from "../utils/boardQuality.js";
 import { buildHitRateSnapshot } from "../utils/modelValidation.js";
@@ -81,6 +84,76 @@ function MetricIf({ label, value, strong = false }) {
       <strong style={strong ? styles.metricValueStrong : styles.metricValue}>{value}</strong>
     </div>
   );
+}
+
+function SummaryMetric({ label, value, strong = false }) {
+  if (!hasValue(value)) return null;
+  return (
+    <div className="pick-detail-metric">
+      <span>{label}</span>
+      <strong style={strong ? styles.metricValueStrong : undefined}>{value}</strong>
+    </div>
+  );
+}
+
+function formatModalMatchup(prop = {}) {
+  const raw = String(prop.matchup || "").trim();
+  if (raw) {
+    return raw
+      .replace(/^MLB\s*vs\.?\s*/i, "")
+      .replace(/^MLB\s*[·•-]\s*/i, "")
+      .replace(/\s+vs\.?\s+/gi, " @ ");
+  }
+  const team = String(prop.team || prop.playerTeam || "").trim();
+  const opponent = String(prop.opponent || prop.opponentTeam || "").trim();
+  if (team && opponent) {
+    if (team.includes("@")) return team;
+    return `${team} @ ${opponent}`;
+  }
+  return team || opponent || "";
+}
+
+function buildRecommendationSummary(prop = {}) {
+  const lean = resolveProjectionLean(prop);
+  const { projection, line } = resolveProjectionValues(prop);
+  if (lean === "PASS" || projection == null || line == null) return null;
+  const delta = Math.round((projection - line) * 10) / 10;
+  const signedDelta = delta > 0 ? `+${delta}` : `${delta}`;
+  const direction = lean === "HIGHER" ? "above" : "below";
+  return {
+    recommended: lean,
+    reason: `Projection ${formatNumber(projection)} is ${direction} line ${formatNumber(line)} by ${signedDelta}`,
+  };
+}
+
+function buildProbabilityAuditRows(prop = {}, hitRateSnapshot = {}, seasonHitRate = "") {
+  const audit = prop.probabilityAudit || {};
+  const sampleSizeAdjustment =
+    audit.calibration?.breakdown?.sampleSizeSmall || audit.probabilityPenalties?.sampleSizeSmall
+      ? "Confidence ×0.85"
+      : null;
+  const probabilityCap =
+    audit.probabilityCap != null
+      ? `${audit.probabilityCap}%`
+      : audit.calibration?.breakdown?.ceiling != null
+        ? `${audit.calibration.breakdown.ceiling}%`
+        : null;
+  const calibratedProbability =
+    audit.calibratedProbability != null
+      ? `${audit.calibratedProbability}%`
+      : audit.finalProbability != null
+        ? `${audit.finalProbability}%`
+        : null;
+
+  return [
+    { label: "Last 5 hit rate", value: audit.last5HitRate },
+    { label: "Last 10 hit rate", value: audit.last10HitRate },
+    { label: "Recent form", value: audit.recentHitRate },
+    { label: "Projection vs line", value: audit.projectionVsLine },
+    { label: "Calibrated probability", value: calibratedProbability, strong: true },
+    { label: "Probability cap", value: probabilityCap },
+    { label: "Sample size adjustment", value: sampleSizeAdjustment },
+  ].filter((row) => hasValue(row.value));
 }
 
 function FlagRow({ flags = [], tone = "positive" }) {
@@ -164,6 +237,8 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
     pitchCountNote: storedManual.pitchCountNote ?? "",
     injuryNote: storedManual.injuryNote ?? "",
   });
+  const [showProbabilityAudit, setShowProbabilityAudit] = useState(false);
+  const [showAdvancedDetails, setShowAdvancedDetails] = useState(false);
 
   useEffect(() => {
     if (breakdownMode) {
@@ -203,685 +278,327 @@ export default function PickDetailModal({ prop: rawProp, onClose, onUpdateResult
       premiumFallbackWhy(prop);
   const projVsLine = projectionVsLineLabel(prop);
   const payoutLabel = payoutDisplayLabel(prop);
+  const finalTier = resolveFinalTier(prop);
+  const matchupLine = formatModalMatchup(prop);
+  const sportLabel = displaySport(prop);
+  const recommendation = buildRecommendationSummary(prop);
+  const probabilityAuditRows = buildProbabilityAuditRows(prop, hitRateSnapshot, seasonHitRate);
+  const probabilityLabel = prop.probabilityScore != null
+    ? `${Math.round(Number(prop.probabilityScore))}%`
+    : prop.calibratedProbability != null
+      ? `${Math.round(Number(prop.calibratedProbability))}%`
+      : prop.impliedHitChance != null
+        ? `${prop.impliedHitChance}%`
+        : prop.hitChanceLabel || null;
+  const confidenceLabel =
+    prop.displayConfidenceScore != null
+      ? `${Math.round(Number(prop.displayConfidenceScore))}%`
+      : prop.confidenceScore != null && prop.confidenceScore > 0
+        ? `${prop.confidenceScore}%`
+        : null;
+  const edgeLabel =
+    Number.isFinite(Number(prop.edge)) && Number(prop.edge) !== 0
+      ? formatSignedNumber(prop.edge)
+      : null;
+  const projectionLabel =
+    prop.projectedValue != null
+      ? formatNumber(prop.projectedValue)
+      : prop.projection != null
+        ? formatNumber(prop.projection)
+        : null;
+
+  const headerActions = (
+    <div className="pick-detail-modal-header__actions">
+      {onSavePick ? (
+        <button
+          type="button"
+          style={{ ...styles.secondaryButton, padding: "8px 10px", fontSize: "12px" }}
+          onClick={() => onSavePick(prop)}
+        >
+          Save
+        </button>
+      ) : null}
+      <button
+        type="button"
+        style={{ ...styles.closeButton, padding: "8px 12px", minHeight: "36px", fontSize: "13px" }}
+        onClick={onClose}
+        aria-label="Close evaluation"
+      >
+        ✕
+      </button>
+    </div>
+  );
 
   return (
-    <div style={styles.modalBackdrop} role="presentation" onClick={onClose}>
+    <div className="pick-detail-backdrop" role="presentation" onClick={onClose}>
       <section
         className={manualProp ? "pick-detail-modal pick-detail-modal-manual" : "pick-detail-modal"}
-        style={{ ...styles.modalPanel, maxHeight: manualProp ? "76vh" : "80vh", padding: manualProp ? "4px 6px" : "6px 8px" }}
         role="dialog"
         aria-modal="true"
         aria-label={breakdownMode ? breakdownTitle : `${prop.playerName} evaluation`}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="pick-detail-modal-sticky" style={{ ...styles.modalHeader, position: "sticky", top: 0, zIndex: 2, background: "#0f172a", paddingBottom: "4px", marginBottom: "4px", borderBottom: "1px solid #1e293b" }}>
-          <div style={styles.modalPlayer}>
-            <PlayerImage prop={prop} large />
-            <div style={{ minWidth: 0 }}>
-              <p style={styles.platform}>{breakdownMode ? breakdownTitle : prop.platform}</p>
-              <h2 style={{ ...styles.modalTitle, fontSize: "15px" }}>{prop.playerName}</h2>
-              {(prop.team || prop.opponent) ? (
-                <p style={{ ...styles.gameLine, fontSize: "11px", margin: "2px 0 0" }}>
-                  {displaySport(prop)}{prop.team ? ` · ${prop.team}` : ""}{prop.opponent ? ` vs ${prop.opponent}` : ""}
-                </p>
-              ) : (
-                <p style={{ ...styles.gameLine, fontSize: "11px", margin: "2px 0 0" }}>{displaySport(prop)}</p>
-              )}
+        <header className="pick-detail-modal-header pick-detail-modal-sticky">
+          <div className="pick-detail-modal-header__meta">
+            <div style={styles.modalPlayer}>
+              <PlayerImage prop={prop} large />
+              <div style={{ minWidth: 0 }}>
+                <p className="pick-detail-modal-sport">{sportLabel}</p>
+                <h2 style={{ ...styles.modalTitle, fontSize: "16px", margin: 0 }}>{prop.playerName}</h2>
+                {matchupLine ? <p className="pick-detail-modal-matchup">{matchupLine}</p> : null}
+                <div className="pick-detail-modal-badges">
+                  {manualProp ? (
+                    noVerifiedPlay ? (
+                      <>
+                        <span style={{ ...styles.scoreBadge, border: "1px solid #475569", background: "#1e293b", color: "#94a3b8", fontSize: "9px", padding: "2px 6px" }}>
+                          {prop.displayStatus || NO_VERIFIED_PLAY_STATUS}
+                        </span>
+                        <span style={{ ...styles.scoreBadge, ...payoutBadgeStyle(prop), fontSize: "9px", padding: "2px 6px" }}>
+                          {payoutLabel}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        {lean === "Over" || lean === "Under" ? (
+                          <span style={{ ...styles.scoreBadge, ...leanBadgeStyle(lean), fontSize: "9px", padding: "2px 6px" }}>
+                            {lean.toUpperCase()}
+                          </span>
+                        ) : null}
+                        <span style={{ ...styles.scoreBadge, ...payoutBadgeStyle(prop), fontSize: "9px", padding: "2px 6px" }}>
+                          {payoutLabel}
+                        </span>
+                      </>
+                    )
+                  ) : (
+                    <>
+                      <span style={styles.segmentActive}>{tierBadgeLabel}</span>
+                      {lean ? <span style={styles.valueTag}>{String(lean).toUpperCase()}</span> : null}
+                      <span style={ready ? styles.segmentActive : styles.segment}>{bandLabel}</span>
+                      <DataQualityBadge badge={badge} />
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
-          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "flex-start" }}>
-            {onSavePick ? (
-              <button type="button" style={{ ...styles.secondaryButton, padding: manualProp ? "6px 8px" : "8px 10px", fontSize: manualProp ? "11px" : "12px" }} onClick={() => onSavePick(prop)}>
-                Save
-              </button>
-            ) : null}
-            <button type="button" style={{ ...styles.closeButton, padding: manualProp ? "6px 10px" : "8px 12px", minHeight: manualProp ? "30px" : "36px", fontSize: manualProp ? "12px" : "13px" }} onClick={onClose} aria-label="Close evaluation">
-              ✕
-            </button>
-          </div>
-        </div>
+          {headerActions}
+        </header>
 
-        <div style={{ ...styles.tagRow, marginBottom: manualProp ? "4px" : "6px", gap: "3px" }}>
-          {manualProp ? (
-            noVerifiedPlay ? (
+        <div className="pick-detail-modal-body">
+          {!manualProp && finalTier === "C" ? (
+            <p className="pick-detail-modal-tier-warning">Research Candidate — not a locked play</p>
+          ) : null}
+
+          {!manualProp && recommendation ? (
+            <div className="pick-detail-modal-recommendation">
+              <strong>Recommended: {recommendation.recommended}</strong>
+              <p>Reason: {recommendation.reason}</p>
+            </div>
+          ) : null}
+
+          <div className="pick-detail-modal-summary">
+            {manualProp && noVerifiedPlay ? (
               <>
-                <span style={{ ...styles.scoreBadge, border: "1px solid #475569", background: "#1e293b", color: "#94a3b8", fontSize: "9px", padding: "1px 5px" }}>
-                  {prop.displayStatus || NO_VERIFIED_PLAY_STATUS}
-                </span>
-                <span style={{ ...styles.scoreBadge, ...payoutBadgeStyle(prop), fontSize: "9px", padding: "1px 5px" }}>
-                  {payoutLabel}
-                </span>
+                <SummaryMetric label="Status" value={prop.displayStatus || NO_VERIFIED_PLAY_STATUS} strong />
+                <SummaryMetric label="Line" value={formatNumber(prop.line)} strong />
+                <SummaryMetric label="Projection" value="Unavailable" strong />
+                <SummaryMetric label="Proj vs Line" value={projVsLine} strong />
               </>
             ) : (
-            <>
-              {lean === "Over" || lean === "Under" ? (
-                <span style={{ ...styles.scoreBadge, ...leanBadgeStyle(lean), fontSize: "9px", padding: "1px 5px" }}>
-                  {lean.toUpperCase()}
-                </span>
-              ) : null}
-              {prop.riskLevel ? (
-                <span style={{ ...styles.scoreBadge, ...manualRiskBadgeStyle(prop.riskLevel), fontSize: "9px", padding: "1px 5px" }}>
-                  {riskShortLabel(prop.riskLevel)} RISK
-                </span>
-              ) : null}
-              {prop.confidenceScore != null && prop.confidenceScore > 0 ? (
-                <span style={{ ...styles.scoreBadge, border: "1px solid #166534", background: "#052e16", color: "#86efac", fontSize: "9px", padding: "1px 5px" }}>
-                  {prop.confidenceScore}%
-                </span>
-              ) : null}
-              <span style={{ ...styles.scoreBadge, ...payoutBadgeStyle(prop), fontSize: "9px", padding: "1px 5px" }}>
-                {payoutLabel}
-              </span>
-              {prop.playTag === "Strong Play" ? (
-                <span style={{ ...styles.scoreBadge, ...strongPlayBadgeStyle(), fontSize: "9px", padding: "1px 5px" }}>
-                  Strong Play
-                </span>
-              ) : null}
-            </>
-            )
-          ) : (
-            <>
-              <span style={styles.segmentActive}>{tierBadgeLabel}</span>
-              <span style={ready ? styles.segmentActive : styles.segment}>{bandLabel}</span>
-              <span style={riskStyle(prop.riskLevel)}>{prop.riskLevel || "Medium"}</span>
-              {Number.isFinite(Number(prop.playabilityScore)) ? (
-                <span style={styles.valueTag}>Playability {Math.round(Number(prop.playabilityScore))}</span>
-              ) : null}
-              <DataQualityBadge badge={badge} />
-              {(prop.payoutLabel || propPayoutLabel(prop)) !== "standard" && (
-                <span style={styles.valueTag}>{prop.payoutLabel || propPayoutLabel(prop)}</span>
-              )}
-            </>
-          )}
-        </div>
+              <>
+                <SummaryMetric label="Line" value={formatNumber(prop.line)} strong />
+                <SummaryMetric label="Projection" value={projectionLabel} strong />
+                <SummaryMetric label="Edge" value={edgeLabel} strong />
+                <SummaryMetric label="Probability" value={probabilityLabel} strong />
+                <SummaryMetric label="Confidence" value={confidenceLabel} strong />
+                {breakdownMode ? <SummaryMetric label="Prop" value={prop.statType} /> : null}
+              </>
+            )}
+          </div>
 
-        {!manualProp ? (
-          <>
-            <FlagRow flags={prop.positiveFlags || prop.smartFlags?.positive} tone="positive" />
-            <FlagRow flags={prop.negativeFlags || prop.smartFlags?.negative} tone="negative" />
-          </>
-        ) : null}
+          <div className="pick-detail-modal-section">
+            <strong>{breakdownMode ? "Why it qualifies" : manualProp ? "Grade summary" : "Why this pick"}</strong>
+            {manualProp && noVerifiedPlay ? (
+              <p>{prop.statusMessage || AWAITING_PROJECTION_STATUS}</p>
+            ) : (
+              <>
+                {manualProp && (prop.dataStatus || prop.projectionLabel) && !noVerifiedPlay ? (
+                  <p style={{ color: "#86efac", marginBottom: "6px" }}>
+                    {prop.isVerifiedProjection ? "Verified MLB projection" : prop.dataStatus || prop.projectionLabel}
+                  </p>
+                ) : null}
+                <p>{whyText}</p>
+                {!manualProp && riskExplanation(prop) ? (
+                  <p style={{ marginTop: "6px", fontSize: "11px" }}>{riskExplanation(prop)}</p>
+                ) : null}
+              </>
+            )}
+          </div>
 
-        <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: manualProp ? "3px" : "4px", marginBottom: manualProp ? "4px" : "6px" }}>
-          {manualProp && noVerifiedPlay ? (
-            <>
-              <MetricIf label="Status" value={prop.displayStatus || NO_VERIFIED_PLAY_STATUS} strong />
-              <MetricIf label="Line" value={formatNumber(prop.line)} strong />
-              <MetricIf label="Projection" value="Unavailable" strong />
-              <MetricIf label="Proj vs Line" value={projVsLine} strong />
-            </>
-          ) : (
-            <>
-          <MetricIf label="Confidence" value={prop.confidenceScore != null && prop.confidenceScore > 0 ? `${prop.confidenceScore}%` : null} strong />
-          <MetricIf
-            label="Hit Chance"
-            value={
-              prop.impliedHitChance != null
-                ? `${prop.impliedHitChance}%`
-                : prop.hitChanceLabel || null
-            }
-            strong
-          />
-          <MetricIf label="Edge" value={Number.isFinite(Number(prop.edge)) && Number(prop.edge) > 0 ? formatSignedNumber(prop.edge) : null} strong />
-          <MetricIf label="Proj vs Line" value={projVsLine} strong />
-          {manualProp ? (
-            <>
-              <MetricIf label="Line" value={formatNumber(prop.line)} strong />
-              <MetricIf
-                label="Projection"
-                value={
-                  prop.projectedValue != null
-                    ? formatNumber(prop.projectedValue)
-                    : prop.projection != null
-                      ? formatNumber(prop.projection)
-                      : null
-                }
-                strong
-              />
-            </>
-          ) : null}
-          <MetricIf label="Prop" value={prop.statType} />
-          {breakdownMode ? <MetricIf label="Projection Source" value={projectionSourceLabel} /> : null}
-          {breakdownMode ? <MetricIf label="Last 10 Hit Rate" value={last10HitRate !== "—" ? last10HitRate : null} /> : null}
-          {breakdownMode ? <MetricIf label="Season Hit Rate" value={seasonHitRate !== "—" && seasonHitRate !== "0%" ? seasonHitRate : null} /> : null}
-          {breakdownMode && seasonRateSourceLabel ? (
-            <MetricIf label="Season rate source" value={seasonRateSourceLabel} />
-          ) : null}
-          {breakdownMode && gamesCountValue != null ? (
-            <MetricIf label={gamesCountLabel} value={gamesCountValue} />
-          ) : null}
-          {breakdownMode && seasonBundle.seasonHits != null ? (
-            <MetricIf label="Season hits" value={seasonBundle.seasonHits} />
-          ) : null}
-          {breakdownMode ? <MetricIf label="Source" value={prop.platform || prop.source} /> : null}
-          {breakdownMode ? <MetricIf label="Line" value={formatNumber(prop.line)} strong /> : null}
-          {breakdownMode ? (
-            <MetricIf
-              label="Projection"
-              value={
-                prop.projectedValue != null
-                  ? formatNumber(prop.projectedValue)
-                  : prop.projection != null
-                    ? formatNumber(prop.projection)
-                    : null
-              }
-              strong
-            />
-          ) : null}
-          {breakdownMode && prop.rawProjection != null && prop.rawProjection !== (prop.projection ?? prop.projectedValue) ? (
-            <MetricIf label="Raw projection" value={formatNumber(prop.rawProjection)} />
-          ) : null}
-          {breakdownMode && prop.projectionValidationConfidence ? (
-            <MetricIf label="Projection confidence" value={prop.projectionValidationConfidence} />
-          ) : null}
-          {breakdownMode && prop.projectionRisk ? (
-            <MetricIf label="Projection risk" value={prop.projectionRisk} />
-          ) : null}
-          {breakdownMode && prop.projectionOutlierWarning ? (
-            <MetricIf label="Projection warning" value={prop.projectionOutlierWarning} />
-          ) : null}
-          {breakdownMode ? <MetricIf label="Lean" value={lean} strong /> : null}
-          {manualProp && !noVerifiedPlay ? <MetricIf label="Risk" value={prop.riskLevel} /> : null}
-          {!manualProp ? <MetricIf label="Risk" value={prop.riskLevel} /> : null}
-          {!noVerifiedPlay ? <MetricIf label="Volatility" value={prop.volatilityLabel || null} /> : null}
-            </>
-          )}
           {!manualProp ? (
             <>
-              <MetricIf
-                label="Edge %"
-                value={
-                  prop.edgePercent != null && Number.isFinite(Number(prop.edgePercent))
-                    ? formatSignedPercent(Number(prop.edgePercent) / 100)
-                    : formatSignedPercent(edgePercentForProp(prop) != null ? edgePercentForProp(prop) / 100 : null)
-                }
-              />
-              <MetricIf label="Playability" value={Number.isFinite(Number(prop.playabilityScore)) ? `${Math.round(Number(prop.playabilityScore))}/100` : null} />
+              <FlagRow flags={prop.positiveFlags || prop.smartFlags?.positive} tone="positive" />
+              <FlagRow flags={prop.negativeFlags || prop.smartFlags?.negative} tone="negative" />
             </>
           ) : null}
-        </div>
 
-        <div style={{ ...styles.explanationBlock, padding: manualProp ? "5px 6px" : "6px 8px", marginBottom: "3px" }}>
-          <strong style={{ fontSize: "11px" }}>{breakdownMode ? "Why it qualifies" : manualProp ? "Grade summary" : "Why this pick"}</strong>
-          {manualProp && noVerifiedPlay ? (
-            <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "11px", lineHeight: 1.35, color: "#94a3b8" }}>
-              {prop.statusMessage || AWAITING_PROJECTION_STATUS}
-            </p>
-          ) : (
+          {breakdownMode && prop.probabilityAudit ? (
             <>
-          {manualProp && (prop.dataStatus || prop.projectionLabel) && !noVerifiedPlay ? (
-            <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "10px", color: "#86efac" }}>
-              {prop.isVerifiedProjection ? "Verified MLB projection" : prop.dataStatus || prop.projectionLabel}
-            </p>
-          ) : null}
-          <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "11px", lineHeight: 1.35 }}>{whyText}</p>
-            </>
-          )}
-          {!manualProp ? (
-            <p style={{ ...styles.compactFlags, margin: "3px 0 0", color: "#94a3b8", fontSize: "10px" }}>{riskExplanation(prop)}</p>
-          ) : null}
-        </div>
-
-        {breakdownMode && prop.probabilityAudit ? (
-          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
-            <strong style={{ fontSize: "11px" }}>Probability audit</strong>
-            {prop.probabilityAudit.historicalDataWarning ? (
-              <p className="probability-audit__warning">{prop.probabilityAudit.historicalDataWarning}</p>
-            ) : null}
-            <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "3px", marginTop: "4px" }}>
-              <MetricIf label="Last 5 hit rate" value={prop.probabilityAudit.last5HitRate} />
-              <MetricIf label="Last 10 hit rate" value={prop.probabilityAudit.last10HitRate} />
-              <MetricIf label="Recent form" value={prop.probabilityAudit.recentHitRate} />
-              <MetricIf label="Season hit rate" value={hitRateSnapshot.seasonLabel !== "0%" ? hitRateSnapshot.seasonLabel : seasonHitRate} />
-              {seasonRateSourceLabel ? (
-                <MetricIf label="Season rate source" value={seasonRateSourceLabel} />
-              ) : null}
-              {gamesCountValue != null ? (
-                <MetricIf label={gamesCountLabel} value={gamesCountValue} />
-              ) : null}
-              {seasonBundle.seasonGamesPlayed != null && seasonBundle.gamesLabelKey === "sample" ? (
-                <MetricIf label="Season Games" value={seasonBundle.seasonGamesPlayed} />
-              ) : null}
-              {seasonBundle.seasonHits != null ? (
-                <MetricIf label="Season hits" value={seasonBundle.seasonHits} />
-              ) : null}
-              <MetricIf label="Projection vs line" value={prop.probabilityAudit.projectionVsLine} />
-              <MetricIf
-                label="Projection quality"
-                value={prop.probabilityAudit.calibration?.inputs?.projectionQuality}
-              />
-              <MetricIf label="Projection edge" value={prop.probabilityAudit.projectionEdge} />
-              <MetricIf
-                label="Market edge score"
-                value={prop.probabilityAudit.calibration?.inputs?.edgeScore}
-              />
-              <MetricIf label="Edge contribution" value={prop.probabilityAudit.edgeContribution} />
-              <MetricIf label="Opponent adjustment" value={prop.probabilityAudit.opponentAdjustment} />
-              <MetricIf label="Park adjustment" value={prop.probabilityAudit.parkAdjustment} />
-              <MetricIf
-                label="Pre-penalty probability"
-                value={
-                  prop.probabilityAudit.prePenaltyProbability != null
-                    ? `${prop.probabilityAudit.prePenaltyProbability}%`
-                    : prop.probabilityAudit.rawProbability != null
-                      ? `${prop.probabilityAudit.rawProbability}%`
-                      : null
-                }
-              />
-              <MetricIf
-                label="Outlier penalty"
-                value={
-                  prop.probabilityAudit.outlierPenalty
-                    ? `-${prop.probabilityAudit.outlierPenalty}`
-                    : prop.probabilityAudit.probabilityPenalties?.outlierPenalty
-                      ? `-${prop.probabilityAudit.probabilityPenalties.outlierPenalty}`
-                      : "0"
-                }
-              />
-              <MetricIf
-                label="Aggressive risk penalty"
-                value={
-                  prop.probabilityAudit.aggressiveRiskPenalty
-                    ? `-${prop.probabilityAudit.aggressiveRiskPenalty}`
-                    : prop.probabilityAudit.probabilityPenalties?.aggressiveRiskPenalty
-                      ? `-${prop.probabilityAudit.probabilityPenalties.aggressiveRiskPenalty}`
-                      : "0"
-                }
-              />
-              <MetricIf
-                label="Missing season cap"
-                value={
-                  prop.probabilityAudit.calibration?.breakdown?.seasonRateValid === false
-                    ? "70%"
-                    : prop.probabilityAudit.missingSeasonPenalty === 0
-                      ? null
-                      : "70%"
-                }
-              />
-              <MetricIf
-                label="Sample size adjustment"
-                value={
-                  prop.probabilityAudit.calibration?.breakdown?.sampleSizeSmall ||
-                  prop.probabilityAudit.probabilityPenalties?.sampleSizeSmall
-                    ? "Confidence ×0.85"
-                    : null
-                }
-              />
-              <MetricIf
-                label="Probability cap"
-                value={
-                  prop.probabilityAudit.probabilityCap != null
-                    ? `${prop.probabilityAudit.probabilityCap}%`
-                    : prop.probabilityAudit.calibration?.breakdown?.ceiling != null
-                      ? `${prop.probabilityAudit.calibration.breakdown.ceiling}%`
-                      : null
-                }
-              />
-              <MetricIf
-                label="Calibrated probability"
-                value={
-                  prop.probabilityAudit.calibratedProbability != null
-                    ? `${prop.probabilityAudit.calibratedProbability}%`
-                    : prop.probabilityAudit.finalProbability != null
-                      ? `${prop.probabilityAudit.finalProbability}%`
-                      : null
-                }
-                strong
-              />
-              <MetricIf label="Probability tier" value={prop.probabilityAudit.probabilityTier} />
-            </div>
-            {prop.probabilityAudit.explanationLines?.length ? (
-              <p style={{ ...styles.compactFlags, margin: "4px 0 0", fontSize: "10px", lineHeight: 1.45, color: "#cbd5e1" }}>
-                {prop.probabilityAudit.explanationLines.join(" · ")}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-
-        {breakdownMode && prop.edgeValidation ? (
-          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
-            <strong style={{ fontSize: "11px" }}>Edge validation</strong>
-            <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "10px", lineHeight: 1.45, color: "#cbd5e1" }}>
-              {prop.edgeValidation.formula}
-            </p>
-            <p style={{ ...styles.compactFlags, margin: "2px 0 0", fontSize: "10px", lineHeight: 1.45, color: "#e2e8f0" }}>
-              {prop.edgeValidation.substitution}
-            </p>
-            {prop.edgeValidation.note ? (
-              <p style={{ ...styles.compactFlags, margin: "2px 0 0", fontSize: "10px", color: "#fbbf24" }}>
-                {prop.edgeValidation.note}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-
-        {breakdownMode && prop.matchupAudit ? (
-          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
-            <strong style={{ fontSize: "11px" }}>Matchup context</strong>
-            <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "3px", marginTop: "4px" }}>
-              <MetricIf label="Team" value={prop.matchupAudit.team !== "—" ? prop.matchupAudit.team : null} />
-              <MetricIf label="Opponent" value={prop.matchupAudit.opponent !== "—" ? prop.matchupAudit.opponent : null} />
-              <MetricIf label="Pitcher" value={prop.matchupAudit.pitcher !== "—" ? prop.matchupAudit.pitcher : null} />
-              <MetricIf label="WHIP" value={prop.matchupAudit.whip && prop.matchupAudit.whip !== "—" ? prop.matchupAudit.whip : null} />
-              <MetricIf label="Venue" value={prop.matchupAudit.venue !== "—" ? prop.matchupAudit.venue : null} />
-              <MetricIf label="Matchup score" value={prop.matchupAudit.matchupScore != null ? `${prop.matchupAudit.matchupScore}/100` : null} strong />
-              <MetricIf label="Matchup confidence" value={prop.matchupAudit.matchupConfidence !== "—" ? prop.matchupAudit.matchupConfidence : null} />
-            </div>
-            {prop.matchupAudit.matchupNote ? (
-              <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "10px", color: "#94a3b8" }}>
-                {prop.matchupAudit.matchupNote}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-
-        {breakdownMode && hitRateSnapshot ? (
-          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
-            <strong style={{ fontSize: "11px" }}>Hit rate snapshot</strong>
-            <div className="hit-rate-viz hit-rate-viz--modal">
-              <span>
-                Last 5: <strong>{hitRateSnapshot.last5Label}</strong>
-              </span>
-              <span>
-                Last 10: <strong>{hitRateSnapshot.last10Label}</strong>
-              </span>
-              <span>
-                Season: <strong>{hitRateSnapshot.seasonLabel !== "0%" ? hitRateSnapshot.seasonLabel : seasonHitRate}</strong>
-              </span>
-            </div>
-          </div>
-        ) : null}
-
-        {(manualProp || Array.isArray(prop.projectionBreakdown)) && Array.isArray(prop.projectionBreakdown) && prop.projectionBreakdown.length > 0 ? (
-          <div style={{ ...styles.explanationBlock, padding: "5px 6px", marginBottom: "4px" }}>
-            <strong style={{ fontSize: "11px" }}>Projection breakdown</strong>
-            {prop.projectionLabel || boardDataLabel ? (
-              <p style={{ ...styles.compactFlags, margin: "3px 0 0", fontSize: "10px", color: noVerifiedPlay ? "#94a3b8" : "#86efac" }}>
-                {noVerifiedPlay ? prop.statusMessage || AWAITING_PROJECTION_STATUS : boardDataLabel || prop.projectionLabel}
-              </p>
-            ) : null}
-            <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "3px", marginTop: "4px" }}>
-            {safeArray(prop.projectionBreakdown)
-                .filter((row) => row?.label !== "Projected Output" && row?.label !== "Projected Ks" && row?.label !== "Data status")
-                .slice(0, 10)
-                .map((row) => (
-                  <MetricIf key={row.label} label={row.label} value={row.display ?? row.value} strong={/projected/i.test(row.label)} />
-                ))}
-              {safeArray(prop.projectionBreakdown).find((row) => /projected|final projection/i.test(String(row?.label || ""))) ? (
-                <MetricIf
-                  label="Projected"
-                  value={safeArray(prop.projectionBreakdown).find((row) => /projected|final projection/i.test(String(row?.label || "")))?.display}
-                  strong
-                />
-              ) : null}
-              {boardDataLabel ? (
-                <MetricIf label="Data status" value={boardDataLabel} strong={!noVerifiedPlay} />
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-
-        {prop.projectionSanityAudit?.supported ? (
-          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
-            <SectionErrorBoundary name="Projection Sanity">
-              <ProjectionSanityAuditPanel audit={prop.projectionSanityAudit} />
-            </SectionErrorBoundary>
-          </div>
-        ) : null}
-
-        {prop.confidenceComponents || prop.confidenceBreakdown?.components ? (
-          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
-            <SectionErrorBoundary name="Confidence Components">
-              <ConfidenceComponentsPanel audit={prop.confidenceComponents || prop.confidenceBreakdown} />
-            </SectionErrorBoundary>
-          </div>
-        ) : null}
-
-        {prop.tierAudit || prop.confidenceAudit ? (
-          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
-            <SectionErrorBoundary name="Tier Audit">
-              <TierAuditPanel auditRows={[prop.tierAudit].filter(Boolean)} limit={1} />
-            </SectionErrorBoundary>
-          </div>
-        ) : null}
-
-        {manualProp && prop.sideEngineDebug ? (
-          <details style={{ ...styles.compactDetails, marginTop: "4px" }}>
-            <summary style={styles.detailsSummary}>
-              <span>
-                <span style={styles.eyebrow}>Debug</span>
-                <strong>Projection engine</strong>
-              </span>
-            </summary>
-            <div style={{ ...styles.compactPanel, marginTop: "4px" }}>
-              <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "4px" }}>
-                <MetricIf label="Projection source" value={prop.sideEngineDebug.projectionSource} />
-                <MetricIf label="Data status" value={prop.sideEngineDebug.dataStatus} />
-                <MetricIf label="Edge formula" value={prop.sideEngineDebug.edgeFormula} />
-                {prop.sideEngineDebug.projectionUnavailable ? (
-                  <MetricIf label="Edge calculation" value={prop.sideEngineDebug.edgeCalculation || "Edge calculation unavailable"} />
-                ) : (
-                  <>
-                    <MetricIf label="Raw edge" value={prop.sideEngineDebug.rawEdge != null ? formatSignedNumber(prop.sideEngineDebug.rawEdge) : null} />
-                    <MetricIf label="Recommended side" value={prop.sideEngineDebug.recommendedSide?.toUpperCase()} />
-                    <MetricIf label="Side aligned" value={prop.sideEngineDebug.sideAligned == null ? null : prop.sideEngineDebug.sideAligned ? "Yes" : "No"} />
-                    <MetricIf label="Recent average" value={prop.sideEngineDebug.recentAverage != null ? formatNumber(prop.sideEngineDebug.recentAverage) : null} />
-                    <MetricIf label="Matchup adjustment" value={prop.sideEngineDebug.matchupNote} />
-                    <MetricIf label="Volatility tier" value={prop.sideEngineDebug.volatilityTier} />
-                  </>
-                )}
-                <MetricIf label="Sportsbook line" value={prop.sideEngineDebug.sportsbookLine != null ? formatNumber(prop.sideEngineDebug.sportsbookLine) : null} />
-              </div>
-            </div>
-          </details>
-        ) : null}
-
-        {breakdownMode && hitRateSnapshot?.verified ? (
-          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
-            <strong style={{ fontSize: "11px" }}>Historical tracking</strong>
-            <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "6px", marginTop: "6px" }}>
-              <MetricIf label="Last 5 hit" value={hitRateSnapshot.last5Label !== "—" ? hitRateSnapshot.last5Label : null} />
-              <MetricIf label="Last 10 hit" value={hitRateSnapshot.last10Label !== "—" ? hitRateSnapshot.last10Label : null} />
-              <MetricIf label="Last 20 hit" value={hitRateSnapshot.last20Label !== "—" ? hitRateSnapshot.last20Label : null} />
-              <MetricIf label="Season hit" value={hitRateSnapshot.seasonLabel !== "—" && hitRateSnapshot.seasonLabel !== "0%" ? hitRateSnapshot.seasonLabel : seasonHitRate !== "—" ? seasonHitRate : null} />
-            </div>
-          </div>
-        ) : null}
-
-        {breakdownMode && prop.dataIntegrity ? (
-          <div style={{ ...styles.explanationBlock, padding: "6px 8px", marginBottom: "4px" }}>
-            <DataIntegrityPanel audit={prop.dataIntegrity} />
-          </div>
-        ) : null}
-
-        {(prop.lineComparison || prop.sportsbookComparison) && !manualProp && (
-          <div style={{ ...styles.comparisonBox, marginTop: "8px", padding: "6px 8px", fontSize: "11px" }}>
-            {prop.lineComparison?.prizePicksLine != null ? <span>PP {formatMaybeLine(prop.lineComparison.prizePicksLine)}</span> : null}
-            {prop.lineComparison?.underdogLine != null ? <span>UD {formatMaybeLine(prop.lineComparison.underdogLine)}</span> : null}
-            {prop.sportsbookComparison?.marketAverageLine != null ? (
-              <span>Books {formatMaybeLine(prop.sportsbookComparison.marketAverageLine)}</span>
-            ) : null}
-          </div>
-        )}
-
-        <details style={{ ...styles.compactDetails, marginTop: manualProp ? "4px" : "8px" }} open={breakdownMode ? false : undefined}>
-          <summary style={styles.detailsSummary}>
-            <span>
-              <span style={styles.eyebrow}>{manualProp ? "Details" : "Deep dive"}</span>
-              <strong>{breakdownMode ? "More breakdown" : manualProp ? "More info" : "More research"}</strong>
-            </span>
-          </summary>
-          <div style={{ ...styles.compactPanel, marginTop: "4px" }}>
-            {manualProp ? (
-              <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "4px", marginBottom: "4px" }}>
-                <MetricIf label="Line" value={formatNumber(prop.line)} />
-                <MetricIf label="Projection" value={prop.projectedValue != null ? formatNumber(prop.projectedValue) : prop.projection != null ? formatNumber(prop.projection) : null} />
-                <MetricIf label="Edge %" value={prop.edgePercent != null ? `${prop.edgePercent}%` : null} />
-                <MetricIf label="Grade source" value={prop.scoringModeLabel || "Projection unavailable"} />
-              </div>
-            ) : null}
-            {!manualProp ? (
-            <div style={{ ...styles.modalGrid, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "6px" }}>
-              <MetricIf label="Calibrated conf" value={prop.calibratedConfidence != null ? `${prop.calibratedConfidence}%` : null} />
-              <MetricIf label="Data quality" value={Number.isFinite(Number(prop.dataQualityScore)) ? `${Math.round(Number(prop.dataQualityScore))}/100` : null} />
-              <MetricIf label="Completeness" value={Number.isFinite(Number(prop.dataCompleteness)) ? `${Math.round(Number(prop.dataCompleteness))}%` : null} />
-              <MetricIf label="EV score" value={Number.isFinite(Number(prop.expectedValueScore)) ? `${Math.round(Number(prop.expectedValueScore))}/100` : null} />
-              <MetricIf label="Volatility" value={Number.isFinite(Number(prop.volatilityScore)) ? `${Math.round(Number(prop.volatilityScore))}/100` : null} />
-              <MetricIf
-                label="Raw probability"
-                value={
-                  prop.rawProbability != null
-                    ? `${Math.round(Number(prop.rawProbability))}%`
-                    : prop.probabilityTruth?.rawProbability != null
-                      ? `${Math.round(Number(prop.probabilityTruth.rawProbability))}%`
-                      : null
-                }
-              />
-              <MetricIf
-                label="Calibrated probability"
-                value={
-                  prop.calibratedProbability != null
-                    ? `${Math.round(Number(prop.calibratedProbability))}%`
-                    : prop.probabilityTruth?.calibratedProbability != null
-                      ? `${Math.round(Number(prop.probabilityTruth.calibratedProbability))}%`
-                      : prop.probabilityScore != null
-                        ? `${Math.round(Number(prop.probabilityScore))}%`
-                        : null
-                }
-              />
-              <MetricIf
-                label="Confidence"
-                value={
-                  prop.confidence != null
-                    ? `${Math.round(Number(prop.confidence))}%`
-                    : prop.displayConfidenceScore != null
-                      ? `${Math.round(Number(prop.displayConfidenceScore))}%`
-                      : null
-                }
-              />
-              <MetricIf label="Model prob" value={formatPercent(prop.modelProbability)} />
-              <MetricIf label="EV (prob)" value={formatSignedPercent(prop.expectedValue)} />
-              <MetricIf
-                label="L5 / L10"
-                value={
-                  prop.last5HitRate != null || prop.last10HitRate != null || prop.recentHitRate != null
-                    ? `${formatHitRatePercentSafe(prop.last5HitRate)} / ${formatHitRatePercentSafe(prop.last10HitRate || prop.recentHitRate)}`
-                    : null
-                }
-              />
-              <MetricIf label="Historical hit" value={prop.historicalHitRate == null ? null : formatHitRatePercentSafe(prop.historicalHitRate)} />
-              <MetricIf label="Sportsbook line" value={formatMaybeLine(prop.sportsbookLine ?? prop.sportsbookComparison?.marketAverageLine)} />
-              <MetricIf label="Line movement" value={lineMovementStatusText(prop) !== "No movement yet" ? lineMovementStatusText(prop) : null} />
-              <MetricIf label="Matchup" value={prop.matchupRating && prop.matchupRating !== "Neutral" ? prop.matchupRating : null} />
-              <MetricIf label="Injury/news" value={prop.injuryRisk && prop.injuryRisk !== "Low" ? prop.injuryRisk : null} />
-              <MetricIf label="Sources" value={(dataSourcesUsed(prop) || []).join(", ") || null} />
-            </div>
-            ) : null}
-
-            {!manualProp && !ready && (prop.lowConfidenceReasons || []).length > 0 && (
-              <div style={{ ...styles.explanationBlock, marginTop: "8px" }}>
-                <strong>Why not playable yet</strong>
-                <ul style={styles.explanationList}>
-                  {(prop.lowConfidenceReasons || []).slice(0, 4).map((line) => (
-                    <li key={line}>{line}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {!manualProp && prop.researchGaps?.length > 0 && (
-              <div style={{ ...styles.explanationBlock, marginTop: "8px" }}>
-                <strong>Research gaps</strong>
-                <ul style={styles.explanationList}>
-                  {safeArray(prop.researchGaps).map((gap) => (
-                    <li key={gap}>{gap}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {!manualProp && (Array.isArray(prop.confidenceBreakdown) && prop.confidenceBreakdown.length > 0 || prop.projectionReasoning?.length > 0) && (
-              <details style={{ ...styles.compactDetails, marginTop: "8px" }}>
-                <summary style={styles.detailsSummary}>Model breakdown</summary>
-                <div style={{ marginTop: "6px" }}>
-                  {(prop.projectionReasoning || []).length > 0 && (
-                    <ul style={styles.explanationList}>
-                      {(prop.projectionReasoning || []).map((line) => (
-                        <li key={line}>{line}</li>
-                      ))}
-                    </ul>
-                  )}
-                  {Array.isArray(prop.confidenceBreakdown) && prop.confidenceBreakdown.length > 0 && (
-                    <ul style={styles.explanationList}>
-                      {(prop.confidenceBreakdown || []).slice(0, 6).map((row) => (
-                        <li key={row.key}>{row.label}: {row.score}/{row.max}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </details>
-            )}
-
-            <div style={{ ...styles.explanationSections, marginTop: manualProp ? "4px" : "8px" }}>
-              {!manualProp && safeArray(explanation).slice(1).map((section) => (
-                <div key={section.title} style={styles.explanationBlock}>
-                  <strong>{section.title}</strong>
-                  <ul style={styles.explanationList}>
-                    {safeArray(section?.lines).map((line) => (
-                      <li key={line}>{line}</li>
+              <button
+                type="button"
+                className="pick-detail-toggle-btn"
+                onClick={() => setShowProbabilityAudit((open) => !open)}
+                aria-expanded={showProbabilityAudit}
+              >
+                {showProbabilityAudit ? "Hide Probability Audit" : "Show Probability Audit"}
+              </button>
+              {showProbabilityAudit ? (
+                <div className="pick-detail-modal-audit">
+                  <strong style={{ fontSize: "11px" }}>Probability audit</strong>
+                  {prop.probabilityAudit.historicalDataWarning ? (
+                    <p className="probability-audit__warning">{prop.probabilityAudit.historicalDataWarning}</p>
+                  ) : null}
+                  <div className="compact-prop-grid" style={{ marginTop: "8px" }}>
+                    {probabilityAuditRows.map((row) => (
+                      <SummaryMetric key={row.label} label={row.label} value={row.value} strong={row.strong} />
                     ))}
-                  </ul>
+                  </div>
+                  {prop.probabilityAudit.explanationLines?.length ? (
+                    <p style={{ ...styles.compactFlags, margin: "8px 0 0", fontSize: "11px", lineHeight: 1.45, color: "#cbd5e1" }}>
+                      {prop.probabilityAudit.explanationLines.join(" · ")}
+                    </p>
+                  ) : null}
                 </div>
+              ) : null}
+            </>
+          ) : null}
+
+          <button
+            type="button"
+            className="pick-detail-toggle-btn"
+            onClick={() => setShowAdvancedDetails((open) => !open)}
+            aria-expanded={showAdvancedDetails}
+          >
+            {showAdvancedDetails ? "Hide Advanced Details" : "Show Advanced Details"}
+          </button>
+
+          {showAdvancedDetails ? (
+            <div className="pick-detail-modal-audit">
+              {breakdownMode && prop.edgeValidation ? (
+                <div className="pick-detail-modal-section">
+                  <strong>Edge validation</strong>
+                  <p>{prop.edgeValidation.formula}</p>
+                  <p style={{ marginTop: "4px" }}>{prop.edgeValidation.substitution}</p>
+                  {prop.edgeValidation.note ? <p style={{ marginTop: "4px", color: "#fbbf24" }}>{prop.edgeValidation.note}</p> : null}
+                </div>
+              ) : null}
+
+              {breakdownMode && prop.matchupAudit ? (
+                <div className="pick-detail-modal-section">
+                  <strong>Matchup context</strong>
+                  <div className="compact-prop-grid" style={{ marginTop: "8px" }}>
+                    <MetricIf label="Team" value={prop.matchupAudit.team !== "—" ? prop.matchupAudit.team : null} />
+                    <MetricIf label="Opponent" value={prop.matchupAudit.opponent !== "—" ? prop.matchupAudit.opponent : null} />
+                    <MetricIf label="Pitcher" value={prop.matchupAudit.pitcher !== "—" ? prop.matchupAudit.pitcher : null} />
+                    <MetricIf label="Matchup score" value={prop.matchupAudit.matchupScore != null ? `${prop.matchupAudit.matchupScore}/100` : null} strong />
+                  </div>
+                </div>
+              ) : null}
+
+              {breakdownMode && hitRateSnapshot ? (
+                <div className="pick-detail-modal-section">
+                  <strong>Hit rate snapshot</strong>
+                  <div className="hit-rate-viz hit-rate-viz--modal">
+                    <span>Last 5: <strong>{hitRateSnapshot.last5Label}</strong></span>
+                    <span>Last 10: <strong>{hitRateSnapshot.last10Label}</strong></span>
+                    <span>Season: <strong>{hitRateSnapshot.seasonLabel !== "0%" ? hitRateSnapshot.seasonLabel : seasonHitRate}</strong></span>
+                  </div>
+                </div>
+              ) : null}
+
+              {prop.projectionSanityAudit?.supported ? (
+                <div className="pick-detail-modal-section">
+                  <SectionErrorBoundary name="Projection Sanity">
+                    <ProjectionSanityAuditPanel audit={prop.projectionSanityAudit} />
+                  </SectionErrorBoundary>
+                </div>
+              ) : null}
+
+              {prop.confidenceComponents || prop.confidenceBreakdown?.components ? (
+                <div className="pick-detail-modal-section">
+                  <SectionErrorBoundary name="Confidence Components">
+                    <ConfidenceComponentsPanel audit={prop.confidenceComponents || prop.confidenceBreakdown} />
+                  </SectionErrorBoundary>
+                </div>
+              ) : null}
+
+              {prop.tierAudit || prop.confidenceAudit ? (
+                <div className="pick-detail-modal-section">
+                  <SectionErrorBoundary name="Tier Audit">
+                    <TierAuditPanel auditRows={[prop.tierAudit].filter(Boolean)} limit={1} />
+                  </SectionErrorBoundary>
+                </div>
+              ) : null}
+
+              {breakdownMode && prop.dataIntegrity ? (
+                <div className="pick-detail-modal-section">
+                  <DataIntegrityPanel audit={prop.dataIntegrity} />
+                </div>
+              ) : null}
+
+              {manualProp ? (
+                <div className="pick-detail-modal-section">
+                  <strong>Manual stat boost</strong>
+                  <div style={styles.controls}>
+                    <label style={styles.selectLabel}>
+                      Last 5 average
+                      <input style={styles.textInput} type="number" step="0.1" value={manualDraft.last5Average} onChange={(e) => setManualDraft((c) => ({ ...c, last5Average: e.target.value }))} />
+                    </label>
+                    <label style={styles.selectLabel}>
+                      Season average
+                      <input style={styles.textInput} type="number" step="0.1" value={manualDraft.seasonAverage} onChange={(e) => setManualDraft((c) => ({ ...c, seasonAverage: e.target.value }))} />
+                    </label>
+                  </div>
+                  <button type="button" style={{ ...styles.secondaryButton, marginTop: "8px" }} onClick={saveManualStats}>
+                    Apply manual boost
+                  </button>
+                </div>
+              ) : null}
+
+              <div className="pick-detail-modal-section">
+                <strong>{manualProp ? "More info" : "More breakdown"}</strong>
+                <div className="compact-prop-grid" style={{ marginTop: "8px" }}>
+                  <MetricIf label="Projection Source" value={projectionSourceLabel} />
+                  <MetricIf label="Last 10 Hit Rate" value={last10HitRate !== "—" ? last10HitRate : null} />
+                  <MetricIf label="Season Hit Rate" value={seasonHitRate !== "—" && seasonHitRate !== "0%" ? seasonHitRate : null} />
+                  <MetricIf label="Playability" value={Number.isFinite(Number(prop.playabilityScore)) ? `${Math.round(Number(prop.playabilityScore))}/100` : null} />
+                  <MetricIf label="Data quality" value={Number.isFinite(Number(prop.dataQualityScore)) ? `${Math.round(Number(prop.dataQualityScore))}/100` : null} />
+                  <MetricIf label="Risk" value={prop.riskLevel} />
+                  <MetricIf label="Sources" value={(dataSourcesUsed(prop) || []).join(", ") || null} />
+                </div>
+                <div style={{ ...styles.evaluationText, marginTop: "10px", fontSize: "11px" }}>
+                  <p>{keyStatsSummary(prop)}</p>
+                  <p>{usageContextForProp(prop)}</p>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {onUpdateResult ? (
+            <div style={{ ...styles.resultButtons, marginTop: "10px" }}>
+              {["Win", "Loss", "Push", "Pending", "Manual"].map((result) => (
+                <button
+                  key={result}
+                  type="button"
+                  style={(prop.resultStatus || prop.finalResult) === result ? styles.resultButtonActive : styles.resultButton}
+                  onClick={() => onUpdateResult(prop.id, result)}
+                >
+                  {result}
+                </button>
               ))}
             </div>
-
-            {manualProp ? (
-            <details style={{ ...styles.compactDetails, marginTop: "8px" }}>
-              <summary style={styles.detailsSummary}>Manual stat boost</summary>
-              <div style={{ ...styles.compactPanel, marginTop: "6px" }}>
-                <div style={styles.controls}>
-                  <label style={styles.selectLabel}>
-                    Last 5 average
-                    <input style={styles.textInput} type="number" step="0.1" value={manualDraft.last5Average} onChange={(e) => setManualDraft((c) => ({ ...c, last5Average: e.target.value }))} />
-                  </label>
-                  <label style={styles.selectLabel}>
-                    Season average
-                    <input style={styles.textInput} type="number" step="0.1" value={manualDraft.seasonAverage} onChange={(e) => setManualDraft((c) => ({ ...c, seasonAverage: e.target.value }))} />
-                  </label>
-                  <label style={{ ...styles.selectLabel, gridColumn: "1 / -1" }}>
-                    Matchup context
-                    <input style={styles.textInput} value={manualDraft.matchupNote} onChange={(e) => setManualDraft((c) => ({ ...c, matchupNote: e.target.value }))} />
-                  </label>
-                </div>
-                <button type="button" style={{ ...styles.secondaryButton, marginTop: "8px" }} onClick={saveManualStats}>
-                  Apply manual boost
-                </button>
-              </div>
-            </details>
-            ) : null}
-
-            <div style={{ ...styles.evaluationText, marginTop: "8px", fontSize: "11px" }}>
-              <p>{keyStatsSummary(prop)}</p>
-              <p>{usageContextForProp(prop)}</p>
-              {!ready ? <p>{prop.bettingEdgeMessage || prop.watchlistMessage || resolveBettingEdgeMessage(prop)}</p> : null}
-            </div>
-          </div>
-        </details>
-
-        {onUpdateResult && (
-          <div style={{ ...styles.resultButtons, marginTop: "10px" }}>
-            {["Win", "Loss", "Push", "Pending", "Manual"].map((result) => (
-              <button
-                key={result}
-                type="button"
-                style={(prop.resultStatus || prop.finalResult) === result ? styles.resultButtonActive : styles.resultButton}
-                onClick={() => onUpdateResult(prop.id, result)}
-              >
-                {result}
-              </button>
-            ))}
-          </div>
-        )}
+          ) : null}
+        </div>
       </section>
     </div>
   );
