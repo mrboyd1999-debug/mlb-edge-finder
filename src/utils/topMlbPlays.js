@@ -562,7 +562,7 @@ export function resolveTopMlbPlaySections(
     {
       id: "top-10-best-plays",
       title: "Best Plays",
-      eyebrow: "Top 10 · Tier A → B → Research · Full or partial verification",
+      eyebrow: "Top 10 · Probability-first rank · Confidence ≥70 · Probability ≥62",
       emptyMessage: topBestPlayPicks.length
         ? ""
         : resolveVerifiedPlaysEmptyMessage({

@@ -9,9 +9,12 @@ import {
 } from "./verificationStatus.js";
 
 export const TIER_A_METRICS = { confidence: 80, probability: 70 };
-export const TIER_B_METRICS = { confidence: 68, probability: 58 };
+/** Playable tier — probability >= 60, confidence >= 68 */
+export const TIER_B_METRICS = { confidence: 68, probability: 60 };
 export const RESEARCH_TIER_METRICS = { confidence: 65 };
-export const BEST_PLAY_DISPLAY_MIN = { confidence: 60, probability: 55 };
+/** Best Plays board — stricter than Playable; below this stays on MLB Props only */
+export const BEST_PLAYS_BOARD_MIN = { confidence: 70, probability: 62 };
+export const BEST_PLAY_DISPLAY_MIN = BEST_PLAYS_BOARD_MIN;
 
 function finite(value, fallback = NaN) {
   const num = Number(value);
@@ -176,21 +179,20 @@ export function getTierBFailures(prop = {}) {
     const pitcherVerification =
       prop.pitcherVerification || resolvePitcherVerification(prop).pitcherVerification;
     if (pitcherVerification === PITCHER_VERIFICATION.FAIL) {
-      failures.push("capped at C: pitcherVerification FAIL with confidence < 68 or probability < 58");
+      failures.push("capped at C: pitcherVerification FAIL with confidence < 68 or probability < 60");
     }
   }
   return failures;
 }
 
 export function passesBestPlayDisplayGate(prop = {}) {
-  const tier = classifyPropTier(prop);
-  if (tier !== "A" && tier !== "B") return false;
+  if (!hasAllowedVerification(prop)) return false;
+  if (!hasPositiveEdge(prop)) return false;
   const confidence = resolvePropConfidence(prop);
   const probability = resolvePropProbability(prop);
-  if (confidence < BEST_PLAY_DISPLAY_MIN.confidence || probability < BEST_PLAY_DISPLAY_MIN.probability) {
-    return false;
-  }
-  return hasPositiveEdge(prop);
+  if (!Number.isFinite(confidence) || confidence < BEST_PLAYS_BOARD_MIN.confidence) return false;
+  if (!Number.isFinite(probability) || probability < BEST_PLAYS_BOARD_MIN.probability) return false;
+  return true;
 }
 
 export function buildTierDebugSummary(pool = []) {

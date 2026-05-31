@@ -245,8 +245,43 @@ export function computeTopPlayFinalScore(prop = {}) {
   const edgeScore = resolveNormalizedEdgeScore(prop);
   const recentForm = resolveRecentFormScore(prop);
   const score =
-    probability * 0.4 + edgeScore * 0.3 + confidence * 0.2 + recentForm * 0.1;
+    probability * 0.5 + confidence * 0.25 + edgeScore * 0.15 + recentForm * 0.1;
   return Math.round(score * 100) / 100;
+}
+
+/** User-facing Best Play rank breakdown for card display. */
+export function buildTopPlayRankExplanation(prop = {}) {
+  const rankScore = computeTopPlayFinalScore(prop);
+  const probability = finite(
+    prop.probabilityNormalized ?? prop.probabilityScore ?? prop.verifiedProbability,
+    NaN
+  );
+  const confidence = finite(
+    prop.confidenceNormalized ?? prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence,
+    NaN
+  );
+  const edgePercent = resolveRankingEdgePercent(prop);
+  const edgeLabel =
+    prop.displayEdgeLabel ||
+    (Number.isFinite(edgePercent) && edgePercent !== 0
+      ? `${edgePercent > 0 ? "+" : ""}${Math.round(edgePercent)}%`
+      : null);
+
+  return {
+    rankScore,
+    rankScoreLabel: `Rank Score ${rankScore}`,
+    probabilityLabel: Number.isFinite(probability) ? `Probability ${Math.round(probability)}%` : null,
+    confidenceLabel: Number.isFinite(confidence) ? `Confidence ${Math.round(confidence)}%` : null,
+    edgeLabel: edgeLabel ? `Edge ${edgeLabel.startsWith("+") || edgeLabel.startsWith("-") ? edgeLabel : `+${edgeLabel}`}` : null,
+    lines: [
+      `Rank Score ${rankScore}`,
+      Number.isFinite(probability) ? `Probability ${Math.round(probability)}%` : null,
+      Number.isFinite(confidence) ? `Confidence ${Math.round(confidence)}%` : null,
+      edgeLabel
+        ? `Edge ${edgeLabel.startsWith("+") || edgeLabel.startsWith("-") ? edgeLabel : `+${edgeLabel}`}`
+        : null,
+    ].filter(Boolean),
+  };
 }
 
 export function compareTopPlayFinalScore(a = {}, b = {}) {

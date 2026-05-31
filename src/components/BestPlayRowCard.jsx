@@ -13,6 +13,7 @@ import { formatEdgeDisplay } from "../utils/conservativeProjection.js";
 import { validatePickDirectionBeforeRender } from "../utils/pickDirectionAudit.js";
 import { resolveRecommendedSide, resolveTierDisplayLabel } from "../utils/boardQuality.js";
 import { resolveNormalizedConfidence, resolveNormalizedProbability } from "../utils/propDisplayFields.js";
+import { buildTopPlayRankExplanation } from "../utils/bestPlayRankingScore.js";
 import ProviderLabel from "./ProviderLabel.jsx";
 
 function resolveLeanSideLabel(prop = {}, recommendedSide = "PASS") {
@@ -68,6 +69,7 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
     : formatEdgeDisplay(enriched);
   const projection = resolveProjectionValue(enriched);
   const projectionLabel = projection != null && projection > 0 ? formatNumber(projection) : "—";
+  const rankExplanation = enriched.topPlayRankExplanation || buildTopPlayRankExplanation(enriched);
 
   function openDetails(event) {
     event?.stopPropagation?.();
@@ -104,6 +106,13 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
           <ProviderLabel prop={enriched} compact />
           {enriched.cardDescription ? (
             <p className="best-play-row-description">{enriched.cardDescription}</p>
+          ) : null}
+          {rankExplanation?.lines?.length ? (
+            <div className="best-play-row-rank-explanation" style={{ marginTop: 6, fontSize: "11px", lineHeight: 1.45, color: "#cbd5e1" }}>
+              {rankExplanation.lines.map((line) => (
+                <div key={line}>{line}</div>
+              ))}
+            </div>
           ) : null}
           <div className="prop-card-core-metrics prop-card-core-metrics--mobile" style={{ marginTop: 4 }}>
             <span>

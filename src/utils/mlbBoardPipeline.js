@@ -17,9 +17,9 @@ export const DATA_STATUS = {
 };
 
 export const BEST_PLAYS_MIN = {
-  confidence: 65,
-  probability: 65,
-  playability: 70,
+  confidence: 70,
+  probability: 62,
+  playability: 0,
 };
 
 export const TIER_A_RULES = {
@@ -30,11 +30,13 @@ export const TIER_A_RULES = {
 
 export const TIER_B_RULES = {
   confidence: 68,
-  probability: 58,
+  probability: 60,
   playability: 0,
 };
 
 export const NO_VERIFIED_PLAYS_MESSAGE = "No verified MLB plays meet today's safety threshold.";
+export const NO_BEST_PLAYS_STANDARDS_MESSAGE =
+  "No verified MLB plays currently meet Best Play standards.";
 export const NO_MLB_PROPS_LOADED_MESSAGE = "No MLB props loaded yet.";
 export const NO_TIER_AB_RESEARCH_MESSAGE =
   "No Tier A/B verified plays today — showing research candidates.";
@@ -200,7 +202,9 @@ export function passesBestPlayBoardGate(prop = {}) {
 
   const confidence = resolvePropConfidence(prop);
   const probability = resolvePropProbability(prop);
-  if (finite(confidence) < 60 || finite(probability) < 55) return false;
+  if (finite(confidence) < BEST_PLAYS_MIN.confidence || finite(probability) < BEST_PLAYS_MIN.probability) {
+    return false;
+  }
 
   const line = finite(prop.line);
   const projection = finite(prop.projection ?? prop.projectedValue);

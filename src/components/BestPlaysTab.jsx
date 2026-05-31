@@ -3,7 +3,7 @@ import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
 import BestPlayFilterDiagnostics from "./BestPlayFilterDiagnostics.jsx";
 import TierAuditPanel from "./TierAuditPanel.jsx";
-import { NO_VERIFIED_PLAYS_MESSAGE } from "../utils/mlbBoardPipeline.js";
+import { NO_BEST_PLAYS_STANDARDS_MESSAGE } from "../utils/mlbBoardPipeline.js";
 import { safeArray } from "../utils/safeStats.js";
 import { liveBoardLoadingMessage } from "../utils/liveBoardLoading.js";
 
@@ -61,7 +61,7 @@ function BestPlaysTab({
           </div>
         ) : (
           <p className="compact-empty">
-            {topBestPlaysSection?.emptyMessage || NO_VERIFIED_PLAYS_MESSAGE}
+            {topBestPlaysSection?.emptyMessage || NO_BEST_PLAYS_STANDARDS_MESSAGE}
           </p>
         )}
       </section>

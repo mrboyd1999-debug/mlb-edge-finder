@@ -12,6 +12,7 @@ import {
   resolveBestPlayRankingFlags,
   computeTopPlayFinalScore,
   compareTopPlayFinalScore,
+  buildTopPlayRankExplanation,
 } from "./bestPlayRankingScore.js";
 import {
   attachIntegrityAuditFields,
@@ -30,6 +31,7 @@ import {
 import {
   DATA_STATUS,
   NO_VERIFIED_PLAYS_MESSAGE,
+  NO_BEST_PLAYS_STANDARDS_MESSAGE,
   NO_TIER_AB_RESEARCH_MESSAGE,
   NO_MLB_PROPS_LOADED_MESSAGE,
   TIER_A_RULES,
@@ -41,12 +43,13 @@ import {
   passesBestPlayBoardGate,
   normalizeBoardProp,
 } from "./mlbBoardPipeline.js";
-import { attachPropDisplayFields } from "./propDisplayFields.js";
+import { attachPropDisplayFields, resolveNormalizedConfidence, resolveNormalizedProbability } from "./propDisplayFields.js";
 
-export { classifyPropTier, getTierAFailures, getTierBFailures, buildTierDebugSummary, hasPositiveEdge, hasAllowedVerification, passesResearchPlayThresholds } from "./tierClassification.js";
+export { classifyPropTier, getTierAFailures, getTierBFailures, buildTierDebugSummary, hasPositiveEdge, hasAllowedVerification, passesResearchPlayThresholds, passesBestPlayDisplayGate, BEST_PLAYS_BOARD_MIN } from "./tierClassification.js";
 import {
   TIER_A_METRICS,
   TIER_B_METRICS,
+  BEST_PLAYS_BOARD_MIN,
   classifyPropTier,
   getTierAFailures,
   getTierBFailures,
@@ -54,6 +57,7 @@ import {
   hasPositiveEdge,
   hasAllowedVerification,
   passesResearchPlayThresholds,
+  passesBestPlayDisplayGate,
 } from "./tierClassification.js";
 
 export const MAX_PLAYER_PROPS_IN_TOP_LIST = 2;
@@ -482,7 +486,7 @@ export function compareBestPlaysDisplayRank(a = {}, b = {}) {
   return edgeB - edgeA;
 }
 
-export { NO_VERIFIED_PLAYS_MESSAGE, NO_TIER_AB_RESEARCH_MESSAGE, NO_MLB_PROPS_LOADED_MESSAGE, passesBestPlayBoardGate, isResearchCandidate, DATA_STATUS };
+export { NO_VERIFIED_PLAYS_MESSAGE, NO_BEST_PLAYS_STANDARDS_MESSAGE, NO_TIER_AB_RESEARCH_MESSAGE, NO_MLB_PROPS_LOADED_MESSAGE, passesBestPlayBoardGate, isResearchCandidate, DATA_STATUS };
 
 export function resolveVerifiedPlaysEmptyMessage({
   loadedPropCount = 0,
@@ -491,10 +495,18 @@ export function resolveVerifiedPlaysEmptyMessage({
   if (loadedPropCount === 0 && boardPoolCount === 0) {
     return NO_MLB_PROPS_LOADED_MESSAGE;
   }
-  if (loadedPropCount > 0 || boardPoolCount > 0) {
-    return NO_VERIFIED_PLAYS_MESSAGE;
-  }
-  return NO_MLB_PROPS_LOADED_MESSAGE;
+  return NO_BEST_PLAYS_STANDARDS_MESSAGE;
+}
+
+/** Best Plays board gate — probability >= 62, confidence >= 70, verified edge. */
+export function passesBestPlayBoardThresholds(prop = {}) {
+  if (!hasAllowedVerification(prop)) return false;
+  if (!hasPositiveEdge(prop)) return false;
+  const confidence = resolveNormalizedConfidence(prop);
+  const probability = resolveNormalizedProbability(prop);
+  if (confidence == null || confidence < BEST_PLAYS_BOARD_MIN.confidence) return false;
+  if (probability == null || probability < BEST_PLAYS_BOARD_MIN.probability) return false;
+  return true;
 }
 
 /** Single source of truth — read stored tier on enriched props, compute otherwise. */
@@ -560,11 +572,7 @@ export function resolvePropTier(prop = {}) {
 }
 
 export function passesBestPlayDisplayThresholds(prop = {}) {
-  const confidence = resolvePropConfidence(prop);
-  const probability = resolvePropProbability(prop);
-  if (!Number.isFinite(confidence) || confidence < 60) return false;
-  if (!Number.isFinite(probability) || probability < 55) return false;
-  return hasPositiveEdge(prop);
+  return passesBestPlayBoardThresholds(prop);
 }
 
 export function passesBestPlayHardExclusions(prop = {}) {
@@ -731,50 +739,11 @@ function buildBestPlaysTierPools(pool = []) {
   return { eligible, tierA, tierB, tierC, projectedFallback, fullData: eligible.filter(isFullDataProp) };
 }
 
-function resolveBestPlaysSourcePool({ tierA, tierB, tierC, projectedFallback }) {
-  if (tierA.length >= TOP_BEST_PLAYS_TARGET) {
-    return {
-      sourcePool: tierA,
-      activeTier: "A",
-      usedFallback: false,
-      fallbackNotice: "",
-    };
-  }
-  if (tierA.length > 0) {
-    return {
-      sourcePool: [...tierA, ...tierB],
-      activeTier: "A",
-      usedFallback: tierB.length > 0,
-      fallbackNotice: tierB.length ? BEST_PLAY_FALLBACK_NOTICE : "",
-    };
-  }
-  if (tierB.length) {
-    return {
-      sourcePool: tierB,
-      activeTier: "B",
-      usedFallback: true,
-      fallbackNotice: BEST_PLAY_FALLBACK_NOTICE,
-    };
-  }
-  if (tierC?.length) {
-    return {
-      sourcePool: tierC,
-      activeTier: "C",
-      usedFallback: true,
-      fallbackNotice: TIER_C_FALLBACK_NOTICE,
-    };
-  }
-  if (projectedFallback?.length) {
-    return {
-      sourcePool: projectedFallback,
-      activeTier: "projected",
-      usedFallback: true,
-      fallbackNotice: PROJECTED_FALLBACK_NOTICE,
-    };
-  }
+function resolveBestPlaysSourcePool({ tierA, tierB }) {
+  const sourcePool = [...tierA, ...tierB].filter(passesBestPlayBoardThresholds);
   return {
-    sourcePool: [],
-    activeTier: "none",
+    sourcePool,
+    activeTier: sourcePool.length ? "qualified" : "none",
     usedFallback: false,
     fallbackNotice: "",
   };
@@ -821,11 +790,8 @@ function compareBestPlaysTierRank(a = {}, b = {}) {
   return tierA - tierB;
 }
 
-function passesVerifiedPlayShowThresholds(prop = {}, activeTier = "A") {
-  const tier = classifyPropTier(prop);
-  if (tier === "A" || tier === "B") return true;
-  if (activeTier === "C" || tier === "C") return passesResearchPlayThresholds(prop);
-  return passesBestPlayDisplayThresholds(prop);
+function passesVerifiedPlayShowThresholds(prop = {}) {
+  return passesBestPlayBoardThresholds(prop);
 }
 
 export function buildTopBestPlaysPicks(
@@ -860,7 +826,7 @@ export function buildTopBestPlaysPicks(
   }
 
   picks = picks
-    .filter((prop) => passesVerifiedPlayShowThresholds(prop, activeTier))
+    .filter(passesBestPlayBoardThresholds)
     .sort(compareTopPlayFinalScore)
     .slice(0, limit);
 
@@ -870,17 +836,17 @@ export function buildTopBestPlaysPicks(
   diagnostics.tierCDisplayed = picks.filter((prop) => resolveFinalTier(prop) === "C").length;
 
   const annotatedPicks = picks.map((prop, index) => {
-    const propTier = resolveFinalTier(prop);
     const tierAudit = explainTierClassification(prop);
     return annotateBestPlayRankingAudit(
       attachFinalTierFields({
         ...prop,
         topPlayFinalScore: computeTopPlayFinalScore(prop),
+        topPlayRankExplanation: buildTopPlayRankExplanation(prop),
         sortScore: computeTopPlayFinalScore(prop),
         fallbackRankingScore: computeTopPlayFinalScore(prop),
         bestPlayActiveTier: activeTier,
         bestPlayFilterReason: tierAudit.reason,
-        bestPlayUsedFallback: usedFallback || propTier !== activeTier,
+        bestPlayUsedFallback: false,
       }),
       index + 1
     );
