@@ -3,11 +3,9 @@
  */
 
 import { STARTER_PENDING_LABEL, PITCHER_VERIFICATION, resolvePitcherVerification } from "./opponentStarter.js";
-import {
-  allowFallbackVerification,
-  resolveVerificationStatus,
-  VERIFICATION_STATUS,
-} from "./verificationStatus.js";
+import { resolveVerificationStatus, VERIFICATION_STATUS, allowFallbackVerification } from "./verificationStatus.js";
+import { passesStrongMetricBestPlayGate } from "./verificationBreakdown.js";
+import { hasPositiveEdge } from "./tierClassification.js";
 
 export const DATA_STATUS = {
   FULL_MLB_DATA: "FULL_MLB_DATA",
@@ -135,6 +133,7 @@ export function resolvePitcherStatus(prop = {}) {
 export function isResearchCandidate(prop = {}) {
   if (prop.isResearchCandidate === true) return true;
   if (prop.isResearchCandidate === false) return false;
+  if (passesStrongMetricBestPlayGate(prop)) return false;
 
   const confidence = resolvePropConfidence(prop);
   const probability = resolvePropProbability(prop);
@@ -146,6 +145,8 @@ export function isResearchCandidate(prop = {}) {
   const partialEligible =
     allowFallbackVerification && verificationStatus === VERIFICATION_STATUS.PARTIAL;
 
+  if (verificationStatus === VERIFICATION_STATUS.FULL) return false;
+
   if (pitcherVerification === PITCHER_VERIFICATION.FAIL) {
     if (finite(confidence) != null && confidence < 70 && finite(probability) != null && probability < 60) {
       return true;
@@ -154,10 +155,14 @@ export function isResearchCandidate(prop = {}) {
   if (dataStatus === DATA_STATUS.RESEARCH_ONLY) return true;
   if (
     !partialEligible &&
+    verificationStatus !== VERIFICATION_STATUS.RESEARCH &&
     dataStatus !== DATA_STATUS.FULL_MLB_DATA &&
     dataStatus !== DATA_STATUS.REVIEW_NEEDED
   ) {
     return true;
+  }
+  if (verificationStatus === VERIFICATION_STATUS.RESEARCH) {
+    return finite(confidence) == null || confidence < 65 || finite(probability) == null || probability < 55;
   }
   if (prop.reviewNeeded || prop.integrityAudit?.hitRateInvalid || prop.integrityAudit?.probabilityMismatch) {
     return true;
@@ -179,6 +184,8 @@ export function resolveMlbDataStatus(prop = {}) {
   ) {
     return prop.dataStatus;
   }
+  const verificationStatus = prop.verificationStatus;
+  if (verificationStatus === VERIFICATION_STATUS.FULL) return DATA_STATUS.FULL_MLB_DATA;
   if (hasFullMlbDataFields(prop)) return DATA_STATUS.FULL_MLB_DATA;
   if (!finite(prop.line) || !finite(prop.projection ?? prop.projectedValue)) return DATA_STATUS.RESEARCH_ONLY;
   if (
@@ -193,10 +200,15 @@ export function resolveMlbDataStatus(prop = {}) {
 }
 
 export function passesBestPlayBoardGate(prop = {}) {
+  if (passesStrongMetricBestPlayGate(prop) && hasPositiveEdge(prop)) return true;
   if (isResearchCandidate(prop)) return false;
 
   const verificationStatus = prop.verificationStatus || resolveVerificationStatus(prop);
-  if (verificationStatus !== VERIFICATION_STATUS.FULL && verificationStatus !== VERIFICATION_STATUS.PARTIAL) {
+  if (
+    verificationStatus !== VERIFICATION_STATUS.FULL &&
+    verificationStatus !== VERIFICATION_STATUS.PARTIAL &&
+    verificationStatus !== VERIFICATION_STATUS.RESEARCH
+  ) {
     return false;
   }
 

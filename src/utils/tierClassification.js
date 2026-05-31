@@ -113,7 +113,11 @@ export function hasTierBasics(prop = {}) {
 
 export function hasAllowedVerification(prop = {}) {
   const status = prop.verificationStatus || resolveVerificationStatus(prop);
-  return status === VERIFICATION_STATUS.FULL || status === VERIFICATION_STATUS.PARTIAL;
+  return (
+    status === VERIFICATION_STATUS.FULL ||
+    status === VERIFICATION_STATUS.PARTIAL ||
+    status === VERIFICATION_STATUS.RESEARCH
+  );
 }
 
 export function isMissingSeasonSource(prop = {}) {
@@ -144,7 +148,13 @@ export function passesResearchPlayThresholds(prop = {}) {
   if (!hasPositiveEdge(prop)) return false;
   const status = prop.verificationStatus || resolveVerificationStatus(prop);
   if (status === VERIFICATION_STATUS.UNVERIFIED) return false;
-  if (status !== VERIFICATION_STATUS.FULL && status !== VERIFICATION_STATUS.PARTIAL) return false;
+  if (
+    status !== VERIFICATION_STATUS.FULL &&
+    status !== VERIFICATION_STATUS.PARTIAL &&
+    status !== VERIFICATION_STATUS.RESEARCH
+  ) {
+    return false;
+  }
   const confidence = resolvePropConfidence(prop);
   return Number.isFinite(confidence) && confidence >= RESEARCH_TIER_METRICS.confidence;
 }

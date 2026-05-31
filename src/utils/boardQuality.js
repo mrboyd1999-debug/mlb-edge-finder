@@ -48,6 +48,7 @@ import {
 } from "./mlbBoardPipeline.js";
 import { attachPropDisplayFields, resolveNormalizedConfidence, resolveNormalizedProbability } from "./propDisplayFields.js";
 import { passesVerifiedBestPlaysFilter } from "./bestPlaysPipelineDebug.js";
+import { passesStrongMetricBestPlayGate } from "./verificationBreakdown.js";
 
 export { classifyPropTier, getTierAFailures, getTierBFailures, buildTierDebugSummary, hasPositiveEdge, hasAllowedVerification, passesResearchPlayThresholds, passesBestPlayDisplayGate, BEST_PLAYS_BOARD_MIN, ELITE_TIER_METRICS, resolvePlayCategory, resolvePlayCategoryLabel } from "./tierClassification.js";
 import {
@@ -521,8 +522,11 @@ export function resolveVerifiedPlaysEmptyMessage({
   return NO_BEST_PLAYS_STANDARDS_MESSAGE;
 }
 
-/** Best Plays board gate — any classified tier with verified edge. */
+/** Best Plays board gate — any classified tier with verified edge, or strong metric override. */
 export function passesBestPlayBoardThresholds(prop = {}) {
+  if (passesStrongMetricBestPlayGate(prop) && hasPositiveEdge(prop) && hasTierBasics(prop)) {
+    return true;
+  }
   if (!hasAllowedVerification(prop)) return false;
   if (!hasPositiveEdge(prop)) return false;
   if (!hasTierBasics(prop)) return false;
@@ -898,18 +902,24 @@ export function buildTopProjectedDebugPlays(pool = [], { limit = DEBUG_BEST_PLAY
   return projected.map((prop, index) => {
     const verified = passesVerifiedBestPlaysFilter(prop);
     const boardEligible = passesBestPlayBoardThresholds(prop);
-    const isDebugPlay = !verified || !boardEligible;
+    const strongMetric = passesStrongMetricBestPlayGate(prop);
+    const isDebugPlay = !verified && !boardEligible && !strongMetric;
+    const isFullVerified = prop.verificationStatus === "FULL" || (strongMetric && verified);
     return annotateBestPlayRankingAudit(
       attachFinalTierFields({
         ...prop,
         isDebugPlay,
         playCategory: isDebugPlay ? "DEBUG" : resolvePlayCategory(prop),
-        playCategoryLabel: isDebugPlay ? "DEBUG PLAY" : resolvePlayCategoryLabel(prop),
+        playCategoryLabel: isDebugPlay
+          ? "DEBUG PLAY"
+          : isFullVerified || prop.verificationStatus === "FULL"
+            ? "Verified Play"
+            : resolvePlayCategoryLabel(prop),
         topPlayFinalScore: computeTopPlayFinalScore(prop),
         topPlayRankExplanation: buildTopPlayRankExplanation(prop),
         sortScore: computeTopPlayFinalScore(prop),
         fallbackRankingScore: computeTopPlayFinalScore(prop),
-        bestPlayFilterReason: isDebugPlay ? "Probability or tier threshold failed" : "",
+        bestPlayFilterReason: isDebugPlay ? prop.partialVerificationReason || "Threshold not met" : "",
       }),
       index + 1
     );
@@ -1341,8 +1351,8 @@ export function attachBoardQualityFields(prop = {}) {
   const dataQualityBadge = resolveBoardDataQualityBadge({ ...normalized, isFullData: fullData, partialData: !fullData });
   const propTier = classifyPropTier(normalized);
   return attachPropDisplayFields(
-    attachFinalTierFields(
-      attachVerificationStatusFields({
+    attachVerificationStatusFields(
+      attachFinalTierFields({
         ...normalized,
         ...edgeLabels,
         rawEdgeLabel: edgeLabels.rawEdgeLabel,

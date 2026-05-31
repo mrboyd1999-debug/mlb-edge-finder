@@ -64,7 +64,9 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
   const probLabel = probabilityValue != null ? `${probabilityValue}%` : "—";
   const tierLabel = enriched.isDebugPlay
     ? "DEBUG PLAY"
-    : enriched.playCategoryLabel || resolveTierDisplayLabel(enriched);
+    : enriched.verificationStatus === "FULL"
+      ? "Verified Play"
+      : enriched.playCategoryLabel || resolveTierDisplayLabel(enriched);
   const riskLevel = String(enriched.riskLevel || "HIGH").toUpperCase();
   const edgeLabels = enriched.rawEdgeLabel
     ? { displayEdgeLabel: enriched.displayEdgeLabel }
@@ -115,6 +117,18 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
                 <div key={line}>{line}</div>
               ))}
             </div>
+          ) : null}
+          {enriched.verificationBreakdownLines?.length ? (
+            <div className="best-play-row-verification-breakdown" style={{ marginTop: 4, fontSize: "10px", lineHeight: 1.4, color: "#94a3b8" }}>
+              {enriched.verificationBreakdownLines.map((line) => (
+                <div key={line}>{line}</div>
+              ))}
+            </div>
+          ) : null}
+          {enriched.verificationReason ? (
+            <p className="best-play-row-verification-reason" style={{ marginTop: 4, fontSize: "10px", color: "#94a3b8" }}>
+              {enriched.verificationStatus === "PARTIAL" ? `PARTIAL: ${enriched.partialVerificationReason || enriched.verificationReason}` : enriched.verificationReason}
+            </p>
           ) : null}
           <div className="prop-card-core-metrics prop-card-core-metrics--mobile" style={{ marginTop: 4 }}>
             <span>

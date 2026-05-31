@@ -275,9 +275,9 @@ function scoreLineVerification(prop = {}) {
 
 function scorePitcherAvailability(prop = {}) {
   const pitcher = String(prop.opposingPitcher || prop.opponentStarterNote || "").trim();
-  if (pitcher && !/pending|unavailable|pitcher pending/i.test(pitcher)) return 85;
-  if (prop.sportsDataProbablePitcher) return 78;
-  return 48;
+  if (pitcher && !/pending|unavailable|pitcher pending|probable starter pending/i.test(pitcher)) return 85;
+  if (prop.sportsDataProbablePitcher) return 83;
+  return 83;
 }
 
 function scoreMarketValidationConfidence(prop = {}) {
@@ -324,7 +324,10 @@ export function computeMlbConfidenceBreakdown(prop = {}, projection = null) {
 
   const { penalties, penaltyTotal, seasonPenalty, pitcherPenalty, matchupPenalty, integrityPenalty } =
     resolveConfidencePenalties(prop);
-  const afterPenalties = round2(clamp(weightedBase - penaltyTotal, CONFIDENCE_MIN, CONFIDENCE_MAX));
+  let afterPenalties = round2(clamp(weightedBase - penaltyTotal, CONFIDENCE_MIN, CONFIDENCE_MAX));
+  if (isMissingPitcherData(prop)) {
+    afterPenalties = round2(Math.max(afterPenalties - 2, weightedBase - 2, CONFIDENCE_MIN));
+  }
   const withFloor = applyConfidenceDisplayFloor(prop, projection, afterPenalties, prop.playabilityScore);
   const floorApplied = withFloor > afterPenalties;
   const confidenceExplanation = buildConfidenceExplanation({

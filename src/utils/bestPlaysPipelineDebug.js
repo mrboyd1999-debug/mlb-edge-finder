@@ -30,6 +30,7 @@ import {
   resolvePlayProjection,
   VERIFICATION_STATUS,
 } from "./verificationStatus.js";
+import { passesStrongMetricBestPlayGate } from "./verificationBreakdown.js";
 import { hasPositiveEdge } from "./tierClassification.js";
 
 export const BEST_PLAYS_DEBUG_MODE = false;
@@ -145,8 +146,12 @@ export function passesPartialBestPlaysFilter(prop = {}) {
   return true;
 }
 
-/** Board pool — FULL strict path or PARTIAL fallback when MLB Stats API is unavailable. */
+/** Board pool — FULL strict path, PARTIAL fallback, or strong metric override. */
 export function passesPlayboardPoolFilter(prop = {}) {
+  if (passesStrongMetricBestPlayGate(prop) && hasPositiveEdge(prop)) {
+    return passesVerifiedBestPlaysFilter(prop) || passesPartialBestPlaysFilter(prop);
+  }
+
   if (!isBoardEligibleVerification(prop)) return false;
 
   const status = resolveVerificationStatus(prop);
@@ -154,6 +159,9 @@ export function passesPlayboardPoolFilter(prop = {}) {
     return passesVerifiedBestPlaysFilter(prop) || passesPartialBestPlaysFilter(prop);
   }
   if (allowFallbackVerification && status === VERIFICATION_STATUS.PARTIAL) {
+    return passesPartialBestPlaysFilter(prop);
+  }
+  if (status === VERIFICATION_STATUS.RESEARCH) {
     return passesPartialBestPlaysFilter(prop);
   }
   return false;
