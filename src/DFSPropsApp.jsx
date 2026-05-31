@@ -268,8 +268,10 @@ import {
 } from "./utils/projectionCoverageAudit.js";
 import {
   attachHistoricalStatsToProps,
+  buildProjectedHistoricalMatchLog,
   buildStatsAttachmentMetrics,
 } from "./utils/historicalStatsLoader.js";
+import { computeTopPlayFinalScore } from "./utils/bestPlayRankingScore.js";
 import { enrichMlbPropsBatch } from "./services/mlb/mlbEnrichmentPipeline.js";
 import {
   buildPipelinePropCountAudit,
@@ -2675,6 +2677,23 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       allDisplayProps = attachHistoricalStatsToProps(allDisplayProps, historicalContext);
       workingNormalProps = attachHistoricalStatsToProps(workingNormalProps, historicalContext);
       workingActiveProps = attachHistoricalStatsToProps(workingActiveProps, historicalContext);
+      debugInfo.historicalMatchLog = buildProjectedHistoricalMatchLog(allDisplayProps, historicalContext);
+      debugInfo.topProjectedDebugPlays = [...allDisplayProps]
+        .filter((prop) => Number(prop.projection ?? prop.projectedValue) > 0)
+        .sort((a, b) => computeTopPlayFinalScore(b) - computeTopPlayFinalScore(a))
+        .slice(0, 10)
+        .map((prop) => ({
+          player: prop.playerName || prop.player || "Unknown",
+          market: prop.statType || prop.market || prop.propType || "—",
+          projection: prop.projection ?? prop.projectedValue,
+          probability: prop.probabilityScore ?? prop.verifiedProbability,
+          confidence: prop.finalConfidence ?? prop.displayConfidenceScore ?? prop.confidence,
+          tier: prop.finalTier || prop.tier || "—",
+          matchedProfile: prop.historicalProfileKey || prop.matchedProfileId || "—",
+          playerId: prop.sportsDataPlayerId || prop.playerId || "—",
+          historicalSource: prop.historicalSource || "—",
+          historicalStatus: prop.historicalStatus || "neutral",
+        }));
       debugInfo.statsAttachmentAudit = buildStatsAttachmentMetrics(allDisplayProps, historicalContext);
       const historicalCounts = countHistoricalAttachment(allDisplayProps, stableStats.statsMap);
       pipelinePropCountSnapshot.afterHistoricalAttachment = historicalCounts.attached;
@@ -4395,7 +4414,13 @@ export default function DFSPropsApp() {
       base?.pipelineCounts?.engineProjectedCount ??
       base?.pipelineCounts?.withProjections ??
       0;
-    if (projectedFromBoard > 0) return base;
+    if (projectedFromBoard > 0) {
+      return {
+        ...(base || {}),
+        topProjectedDebugPlays: debugInfo?.topProjectedDebugPlays || base?.topProjectedDebugPlays || [],
+        historicalMatchLog: debugInfo?.historicalMatchLog || base?.historicalMatchLog || [],
+      };
+    }
 
     const statsMap = debugInfo?.statsMap || scoringContextRef.current?.stats || null;
     const projectedPool = resolveEngineProjectedPool(allDisplayProps);
@@ -4410,6 +4435,8 @@ export default function DFSPropsApp() {
 
     return {
       ...(base || {}),
+      topProjectedDebugPlays: debugInfo?.topProjectedDebugPlays || base?.topProjectedDebugPlays || [],
+      historicalMatchLog: debugInfo?.historicalMatchLog || base?.historicalMatchLog || [],
       verificationDashboard: dashboard,
       pipelineCounts: {
         ...(base?.pipelineCounts || {}),
@@ -4420,7 +4447,7 @@ export default function DFSPropsApp() {
         filtered: dashboard.verifiedPasses,
       },
     };
-  }, [topMlbPlayBoard, allDisplayProps, debugInfo?.statsMap, debugInfo?.sportsDataSeasonStats, debugPanelsVisible]);
+  }, [topMlbPlayBoard, allDisplayProps, debugInfo?.statsMap, debugInfo?.sportsDataSeasonStats, debugInfo?.topProjectedDebugPlays, debugInfo?.historicalMatchLog, debugPanelsVisible]);
   const pipelineRenderCounts = useMemo(() => {
     const base = liveRenderBoard.counts;
     const audit = verificationFilterDiagnostics || topMlbPlayBoard?.filterDiagnostics;

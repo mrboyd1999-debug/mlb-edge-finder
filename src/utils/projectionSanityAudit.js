@@ -444,7 +444,6 @@ function buildProjectionSanityAuditUnsafe(prop = {}) {
   const seasonDeviationPct = deviationPct(projection, season);
   const last10DeviationPct = deviationPct(projection, last10);
   const blocksTierA =
-    !historical.present ||
     !hitRateValidation.present ||
     capValidation.sanityFail ||
     sanityScore < TIER_A_MIN_SANITY_SCORE ||
@@ -631,6 +630,7 @@ export function attachProjectionSanityAudit(prop = {}, options = {}) {
       projectionRisk: validatedProp.projectionRisk || audit?.projectionRisk,
       projectionSanityFail: audit?.sanityFail ?? false,
       historicalDataPresent: historicalPresent,
+      historicalStatus: historicalPresent ? "present" : "neutral",
       usesNeutralHistoricalFallback,
       displayConfidenceScore: adjustedConfidence,
       confidenceScore: adjustedConfidence,

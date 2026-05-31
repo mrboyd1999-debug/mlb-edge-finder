@@ -1,6 +1,7 @@
 import { canonicalMarketKey } from "./marketNormalization.js";
 import { marketsMatchForHistoricalAttach } from "./mlbHistoricalStatMapping.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
+import { mlbTeamsMatch } from "./mlbTeamMatch.js";
 
 /** Common MLB broadcast / DFS aliases → canonical normalized name fragment. */
 const MLB_PLAYER_ALIASES = new Map([
@@ -10,13 +11,16 @@ const MLB_PLAYER_ALIASES = new Map([
   ["juan soto", "juan soto"],
   ["ronald acuna", "ronald acuna"],
   ["ronald acuna jr", "ronald acuna"],
-  ["ronald acuna", "ronald acuna"],
   ["mookie betts", "mookie betts"],
   ["shohei ohtani", "shohei ohtani"],
   ["aaron judge", "aaron judge"],
   ["vladimir guerrero", "vladimir guerrero"],
   ["vladimir guerrero jr", "vladimir guerrero"],
   ["bo bichette", "bo bichette"],
+  ["bobby witt", "bobby witt"],
+  ["bobby witt jr", "bobby witt"],
+  ["robert witt", "bobby witt"],
+  ["robert witt jr", "bobby witt"],
   ["fernando tatis jr", "fernando tatis"],
 ]);
 
@@ -75,12 +79,20 @@ export function buildPlayerMatchKeys(name = "") {
     if (first.length === 1) keys.add(`${first} ${last}`);
     if (first.length > 1) keys.add(`${first[0]} ${last}`);
     if (first.length > 1) keys.add(`${first[0]}.${last}`);
+    if (first === "robert" && last === "witt") keys.add("bobby witt");
+    if (first === "bobby" && last === "witt") keys.add("robert witt");
   }
 
   const alias = MLB_PLAYER_ALIASES.get(normalized);
   if (alias) keys.add(alias);
 
   return [...keys].filter(Boolean);
+}
+
+export function resolveCanonicalPlayerIdentity(name = "") {
+  const normalized = normalizePlayerName(name);
+  if (!normalized) return "";
+  return MLB_PLAYER_ALIASES.get(normalized) || collapseMiddleInitials(normalized);
 }
 
 export function playerNameTokens(name = "") {
@@ -186,6 +198,73 @@ function isHistoricalAttachProfile(profile = {}) {
   return Boolean(hasAverages || hasSplits || profile.hasGameLogs);
 }
 
+function resolvePropTeam(prop = {}) {
+  return String(prop.team || prop.playerTeam || prop.teamAbbrev || "").trim();
+}
+
+function profileTeamMatch(prop = {}, profile = {}) {
+  const team = resolvePropTeam(prop);
+  const profileTeam = String(profile.team || profile.playerTeam || profile.teamAbbrev || "").trim();
+  if (!team || !profileTeam) return false;
+  return mlbTeamsMatch(team, profileTeam);
+}
+
+function lastNameToken(name = "") {
+  const tokens = playerNameTokens(normalizePlayerName(name));
+  return tokens.length ? tokens[tokens.length - 1] : "";
+}
+
+function findProfileByPlayerId(statsMap, prop, { exactStat = true } = {}) {
+  const playerId = resolvePropPlayerId(prop);
+  if (!playerId || !(statsMap instanceof Map)) return null;
+
+  const idKey = `id:${playerId}`;
+  const directId = statsMap.get(idKey);
+  if (
+    directId &&
+    isHistoricalAttachProfile(directId) &&
+    (!exactStat || marketsMatchForHistoricalAttach(directId.statType || profileStatCanonical(directId), prop.statType))
+  ) {
+    return directId;
+  }
+
+  let best = null;
+  let bestScore = 0;
+  for (const profile of statsMap.values()) {
+    if (!isHistoricalAttachProfile(profile)) continue;
+    if (profilePlayerId(profile) !== playerId) continue;
+    if (exactStat && !marketsMatchForHistoricalAttach(profile.statType || profileStatCanonical(profile), prop.statType)) {
+      continue;
+    }
+    const score = scoreProfileMatch(prop, profile, { exactStat });
+    if (score > bestScore) {
+      bestScore = score;
+      best = profile;
+    }
+  }
+  return best;
+}
+
+function findTeamFallbackProfile(statsMap, prop) {
+  const team = resolvePropTeam(prop);
+  const lastName = lastNameToken(resolvePropPlayerName(prop));
+  if (!team || !lastName) return null;
+
+  let best = null;
+  let bestScore = 0;
+  statsMap.forEach((profile) => {
+    if (!profile || profile.fallback) return;
+    if (!profileTeamMatch(prop, profile)) return;
+    if (lastNameToken(profile.playerName) !== lastName) return;
+    const score = scoreProfileMatch(prop, profile, { exactStat: false });
+    if (score > bestScore) {
+      bestScore = score;
+      best = profile;
+    }
+  });
+  return bestScore > 0 ? best : null;
+}
+
 function scoreProfileMatch(prop = {}, profile = {}, { exactStat = true } = {}) {
   const propStatKey = propStatCanonical(prop);
   const profileStatKey = profileStatCanonical(profile);
@@ -197,11 +276,18 @@ function scoreProfileMatch(prop = {}, profile = {}, { exactStat = true } = {}) {
   const profileSport = String(profile.sport || "").toLowerCase();
   if (propSport && profileSport && profileSport !== propSport) return 0;
 
-  if (!playerNamesMatch(resolvePropPlayerName(prop), profile.playerName)) return 0;
+  if (!playerNamesMatch(resolvePropPlayerName(prop), profile.playerName)) {
+    if (!profileTeamMatch(prop, profile)) return 0;
+    if (lastNameToken(resolvePropPlayerName(prop)) !== lastNameToken(profile.playerName)) return 0;
+  }
 
   let score = playerNameTokens(resolvePropPlayerName(prop)).length;
+  if (resolvePropPlayerId(prop) && resolvePropPlayerId(prop) === profilePlayerId(profile)) score += 12;
   if (normalizePlayerName(resolvePropPlayerName(prop)) === normalizePlayerName(profile.playerName)) score += 4;
-  if (resolvePropPlayerId(prop) && resolvePropPlayerId(prop) === profilePlayerId(profile)) score += 8;
+  if (resolveCanonicalPlayerIdentity(resolvePropPlayerName(prop)) === resolveCanonicalPlayerIdentity(profile.playerName)) {
+    score += 3;
+  }
+  if (profileTeamMatch(prop, profile)) score += 2;
   if (propStatKey && profileStatKey && propStatKey === profileStatKey) score += 6;
   if (profile.projectionSource === "player-stats") score += 2;
   if (profile.hasGameLogs || Number(profile.sampleSize) >= 3) score += 2;
@@ -236,20 +322,13 @@ export function findStatProfile(statsMap, prop) {
   const playerName = resolvePropPlayerName(prop);
   if (!playerName) return null;
 
+  const byId = findProfileByPlayerId(statsMap, { ...prop, playerName }, { exactStat: true });
+  if (byId) return byId;
+
   const primary = statProfileKey({ ...prop, playerName, sport: prop.sport || resolvePropSport(prop) || "MLB" });
   const direct = statsMap.get(primary);
   if (direct && isHistoricalAttachProfile(direct) && marketsMatchForHistoricalAttach(direct.statType || propStatKey, prop.statType)) {
     return direct;
-  }
-
-  const playerId = resolvePropPlayerId(prop);
-  if (playerId) {
-    for (const profile of statsMap.values()) {
-      if (!isHistoricalAttachProfile(profile)) continue;
-      if (profilePlayerId(profile) !== playerId) continue;
-      if (!marketsMatchForHistoricalAttach(profile.statType || profileStatCanonical(profile), prop.statType)) continue;
-      return profile;
-    }
   }
 
   for (const key of buildPlayerMatchKeys(playerName)) {
@@ -267,9 +346,12 @@ export function findStatProfile(statsMap, prop) {
     }
   }
 
-  return findBestProfileMatch(statsMap, { ...prop, playerName, sport: prop.sport || resolvePropSport(prop) || "MLB" }, {
+  const fuzzy = findBestProfileMatch(statsMap, { ...prop, playerName, sport: prop.sport || resolvePropSport(prop) || "MLB" }, {
     exactStat: true,
   });
+  if (fuzzy) return fuzzy;
+
+  return findTeamFallbackProfile(statsMap, { ...prop, playerName });
 }
 
 /** Same-player profile fallback when exact market profile is missing (season / recent averages). */
@@ -277,12 +359,21 @@ export function findPlayerHistoricalProfile(statsMap, prop) {
   const exact = findStatProfile(statsMap, prop);
   if (exact) return exact;
 
+  const byId = findProfileByPlayerId(statsMap, prop, { exactStat: false });
+  if (byId) return byId;
+
   const playerName = resolvePropPlayerName(prop);
   let bestSplitProfile = null;
   let bestSplitCount = 0;
   for (const profile of statsMap.values()) {
     if (!profile || profile.fallback) continue;
-    if (!playerNamesMatch(playerName, profile.playerName)) continue;
+    if (!playerNamesMatch(playerName, profile.playerName) && !profileTeamMatch(prop, profile)) continue;
+    if (
+      !playerNamesMatch(playerName, profile.playerName) &&
+      lastNameToken(playerName) !== lastNameToken(profile.playerName)
+    ) {
+      continue;
+    }
     const splitCount = Array.isArray(profile.splits)
       ? profile.splits.length
       : Number(profile.sampleSize) || 0;
@@ -293,21 +384,8 @@ export function findPlayerHistoricalProfile(statsMap, prop) {
   }
   if (bestSplitProfile?.splits?.length >= 3) return bestSplitProfile;
 
-  const playerId = resolvePropPlayerId(prop);
-  if (playerId) {
-    let best = null;
-    let bestScore = 0;
-    for (const profile of statsMap.values()) {
-      if (!profile || profile.fallback) continue;
-      if (profilePlayerId(profile) !== playerId) continue;
-      const score = scoreProfileMatch(prop, profile, { exactStat: false });
-      if (score > bestScore) {
-        bestScore = score;
-        best = profile;
-      }
-    }
-    if (best) return best;
-  }
+  const teamFallback = findTeamFallbackProfile(statsMap, prop);
+  if (teamFallback) return teamFallback;
 
   return findBestProfileMatch(
     statsMap,

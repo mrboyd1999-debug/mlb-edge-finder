@@ -10,7 +10,7 @@ import {
   resolveMlbHistoricalMarketKey,
   sumSeasonFieldsPerGame,
 } from "./mlbHistoricalStatMapping.js";
-import { resolveHistoricalDataPresent } from "./tierHistoricalValidation.js";
+import { resolveHistoricalDataPresent, resolveHistoricalStatus } from "./tierHistoricalValidation.js";
 import { attachSeasonHitRateFields } from "./seasonHitRate.js";
 
 function finite(value) {
@@ -208,7 +208,56 @@ function applyHistoricalFields(prop = {}, profile = null, fields = {}, context =
     { seasonStats: context.seasonStats || prop.seasonStats || [] }
   );
   next.historicalCoverage = resolveHistoricalDataPresent(next).present;
+  next.historicalStatus = resolveHistoricalStatus(next);
   return next;
+}
+
+function enrichPropPlayerIdFromSeason(prop = {}, seasonStats = []) {
+  if (resolvePropPlayerId(prop)) return prop;
+  const row = findSeasonStatRow(seasonStats, {
+    playerName: resolvePropPlayerName(prop),
+    playerId: prop.playerId ?? prop.sportsDataPlayerId,
+  });
+  if (!row?.PlayerID) return prop;
+  const playerId = String(row.PlayerID);
+  return {
+    ...prop,
+    playerId: prop.playerId ?? playerId,
+    sportsDataPlayerId: prop.sportsDataPlayerId ?? playerId,
+  };
+}
+
+function buildHistoricalMatchLogRow(prop = {}, enriched = {}, context = {}) {
+  const statsMap = context.statsMap;
+  const profile =
+    statsMap instanceof Map ? findPlayerHistoricalProfile(statsMap, enrichPropPlayerIdFromSeason(prop, context.seasonStats || [])) : null;
+  return {
+    playerName: resolvePropPlayerName(prop) || "Unknown",
+    matchedProfile: profile
+      ? `${profile.playerName || "Unknown"}|${profile.statType || profile.market || "—"}`
+      : enriched.historicalProfileKey || "—",
+    playerId: resolveProfilePlayerId(profile) || resolvePropPlayerId(enriched) || resolvePropPlayerId(prop) || "—",
+    historicalSource: enriched.historicalSource || resolveHistoricalSource(profile, enriched),
+    historicalStatus: enriched.historicalStatus || resolveHistoricalStatus(enriched),
+    historicalAttached: Boolean(enriched.historicalStatsAttached),
+  };
+}
+
+export function buildProjectedHistoricalMatchLog(props = [], context = {}) {
+  return (props || [])
+    .filter((prop) => Number(prop.projection ?? prop.projectedValue) > 0)
+    .map((prop) => {
+      const enriched = attachHistoricalStatsFromProfile(prop, context);
+      return buildHistoricalMatchLogRow(prop, enriched, context);
+    });
+}
+
+export function logProjectedHistoricalMatchBatch(props = [], context = {}) {
+  const rows = buildProjectedHistoricalMatchLog(props, context);
+  rows.forEach((row) => {
+    console.info("[HistoricalMatch]", row);
+  });
+  return rows;
 }
 
 export function auditStatsAttach(prop = {}, enriched = {}, context = {}) {
@@ -246,31 +295,55 @@ export function logStatsAttachAudit(audit = {}) {
 
 /** Merge statsMap profile historical fields onto a prop (never overwrites existing prop values). */
 export function attachHistoricalStatsFromProfile(prop = {}, context = {}) {
+  const enrichedProp = enrichPropPlayerIdFromSeason(prop, context.seasonStats || []);
   const statsMap = context.statsMap;
-  if (!(statsMap instanceof Map)) return prop;
+  if (!(statsMap instanceof Map)) {
+    const seasonFallback = resolveSeasonHistoricalFallback(enrichedProp, context.seasonStats || []);
+    if (seasonFallback) {
+      return applyHistoricalFields(enrichedProp, null, seasonFallback, context);
+    }
+    return {
+      ...enrichedProp,
+      historicalStatsAttached: false,
+      historicalStatus: "neutral",
+      historicalCoverage: false,
+      usesNeutralHistoricalFallback: true,
+    };
+  }
 
-  const profile = findPlayerHistoricalProfile(statsMap, prop);
+  const profile = findPlayerHistoricalProfile(statsMap, enrichedProp);
   if (profile && profileHasAttachableData(profile)) {
-    const fields = resolveHistoricalFieldsFromProfile(profile, prop);
+    const fields = resolveHistoricalFieldsFromProfile(profile, enrichedProp);
     if (fields) {
-      return applyHistoricalFields(prop, profile, fields, context);
+      const attached = applyHistoricalFields(enrichedProp, profile, fields, context);
+      return {
+        ...attached,
+        historicalStatus: resolveHistoricalDataPresent(attached).present ? "present" : "neutral",
+      };
     }
   }
 
-  const seasonFallback = resolveSeasonHistoricalFallback(prop, context.seasonStats || []);
+  const seasonFallback = resolveSeasonHistoricalFallback(enrichedProp, context.seasonStats || []);
   if (seasonFallback) {
-    return applyHistoricalFields(prop, profile, seasonFallback, context);
+    const attached = applyHistoricalFields(enrichedProp, profile, seasonFallback, context);
+    return {
+      ...attached,
+      historicalStatus: "neutral",
+      usesNeutralHistoricalFallback: true,
+    };
   }
 
   return {
-    ...prop,
+    ...enrichedProp,
     historicalStatsAttached: false,
-    historicalCoverage: resolveHistoricalDataPresent(prop).present,
+    historicalStatus: "neutral",
+    historicalCoverage: resolveHistoricalDataPresent(enrichedProp).present,
+    usesNeutralHistoricalFallback: true,
   };
 }
 
 export function attachHistoricalStatsToProps(props = [], context = {}) {
-  const logAttach = Boolean(context.logAttach);
+  const logAttach = Boolean(context.logAttach ?? import.meta.env.DEV);
 
   return (props || []).map((prop) => {
     try {
@@ -279,6 +352,7 @@ export function attachHistoricalStatsToProps(props = [], context = {}) {
         const hasProjection = Number(next.projection ?? next.projectedValue) > 0;
         if (hasProjection) {
           logStatsAttachAudit(auditStatsAttach(prop, next, context));
+          console.info("[HistoricalMatch]", buildHistoricalMatchLogRow(prop, next, context));
         }
       }
       return next;
@@ -291,6 +365,7 @@ export function attachHistoricalStatsToProps(props = [], context = {}) {
         ...prop,
         sampleSize: finite(prop?.sampleSize) ?? 0,
         historicalCoverage: false,
+        historicalStatus: "neutral",
       };
     }
   });
@@ -403,6 +478,11 @@ export function buildHistoricalPipelineAuditRow(prop = {}, context = {}) {
       gameLogCount: sampleSize,
       sampleSize,
       historicalSource: resolveHistoricalSource(profile, enriched),
+      matchedProfile: profile
+        ? `${profile.playerName || "Unknown"}|${profile.statType || profile.market || "—"}`
+        : enriched?.historicalProfileKey || "—",
+      playerId: resolveProfilePlayerId(profile) || resolvePropPlayerId(enriched) || resolvePropPlayerId(prop) || "—",
+      historicalStatus: enriched?.historicalStatus || resolveHistoricalStatus(enriched),
       profileHasLogs: profileHasAttachableData(profile),
       historicalPresent: Boolean(historical?.present),
       historicalCoverage: Boolean(historical?.present),

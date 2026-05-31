@@ -11,9 +11,9 @@ export const HISTORICAL_DATA_UNAVAILABLE_WARNING = "⚠ Historical data unavaila
 export const TIER_A_MIN_SANITY_SCORE = 80;
 export const TIER_B_MIN_SANITY_SCORE = 65;
 export const TIER_C_MIN_SANITY_SCORE = 50;
-export const MAX_SANITY_WITHOUT_HISTORY = 50;
-export const MAX_CONFIDENCE_WITHOUT_HISTORY = 50;
-export const MAX_PLAYABILITY_WITHOUT_HISTORY = 25;
+export const MAX_SANITY_WITHOUT_HISTORY = 75;
+export const MAX_CONFIDENCE_WITHOUT_HISTORY = 100;
+export const MAX_PLAYABILITY_WITHOUT_HISTORY = 100;
 export const RESEARCH_ONLY_TIER_LABEL = "Research Only";
 
 const TIER_RANK = { A: 0, B: 1, C: 2, D: 3 };
@@ -85,18 +85,19 @@ export function resolveMaximumTier({ playability, sanityFail = false } = {}) {
   return "A";
 }
 
-/** Small confidence haircut when history is incomplete — informational, not a rejection gate. */
+/** Small confidence adjustment when history is incomplete — neutral, not a rejection gate. */
 export function applyMissingHistoricalConfidencePenalty(confidence, prop = {}) {
+  void prop;
   const base = Number(confidence);
   if (!Number.isFinite(base)) return confidence;
-  const historical = resolveHistoricalDataPresent(prop);
-  if (historical.present) return Math.round(base);
+  return Math.round(base);
+}
 
-  let penalty = 0;
-  if (!historical.last5Present) penalty += 3;
-  if (!historical.last10Present) penalty += 3;
-  if (!historical.seasonPresent) penalty += 2;
-  return Math.max(35, Math.round(base - penalty));
+export function resolveHistoricalStatus(prop = {}) {
+  if (resolveHistoricalDataPresent(prop).present) return "present";
+  if (prop.historicalStatus === "fail") return "fail";
+  if (prop.historicalNeutralFallback || prop.usesNeutralHistoricalFallback) return "neutral";
+  return "neutral";
 }
 
 export function capTierToMaximum(tier, maximumTier) {

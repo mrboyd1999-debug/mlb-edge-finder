@@ -75,8 +75,8 @@ export const VERIFIED_TIER_D = {
   label: "Research",
 };
 
-export const VERIFIED_BASE_MIN_PROBABILITY = 45;
-export const VERIFIED_BASE_MIN_CONFIDENCE = 50;
+export const VERIFIED_BASE_MIN_PROBABILITY = 55;
+export const VERIFIED_BASE_MIN_CONFIDENCE = 60;
 export const VERIFIED_MIN_DATA_QUALITY = 50;
 
 export const VERIFIED_TIERS = [VERIFIED_TIER_A, VERIFIED_TIER_B, VERIFIED_TIER_C, VERIFIED_TIER_D];
@@ -242,9 +242,12 @@ export function hasValidVerifiedProjection(prop = {}) {
   if (projection == null || projection <= VERIFIED_MIN_PROJECTION) return false;
   if (prop.projectionUnavailable || prop.unverifiedGradeBlocked || prop.isFallbackProjection) return false;
   if (isFallbackProjectionProp(prop)) return false;
-  if (!hasVerifiedHistoricalAttachment(prop)) return false;
   if (prop.projectionFormulaError || prop.projectionFormulaValid === false) return false;
   if (!passesMlbProjectionFormulaValidation(prop)) return false;
+  const probability = Number(prop.probabilityScore ?? prop.verifiedProbability);
+  const confidence = Number(prop.finalConfidence ?? prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence);
+  if (Number.isFinite(probability) && probability < VERIFIED_BASE_MIN_PROBABILITY) return false;
+  if (Number.isFinite(confidence) && confidence < VERIFIED_BASE_MIN_CONFIDENCE) return false;
   return true;
 }
 
@@ -254,8 +257,11 @@ export function passesVerifiedTierFilter(prop = {}) {
   if (isBlockedNonMlbPipelineProp(prop)) return false;
   if (!isSupportedMlbMarket(prop)) return false;
   if (isFallbackProjectionProp(prop)) return false;
-  if (!hasVerifiedHistoricalAttachment(prop)) return false;
   if (!hasValidVerifiedProjection(prop)) return false;
+  const probability = Number(prop.probabilityScore ?? prop.verifiedProbability);
+  const confidence = Number(prop.finalConfidence ?? prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence);
+  if (!Number.isFinite(probability) || probability < VERIFIED_BASE_MIN_PROBABILITY) return false;
+  if (!Number.isFinite(confidence) || confidence < VERIFIED_BASE_MIN_CONFIDENCE) return false;
   return classifyVerifiedTier(prop) != null;
 }
 

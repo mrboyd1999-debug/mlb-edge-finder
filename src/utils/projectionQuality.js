@@ -13,7 +13,7 @@ import {
 import { validatePropSanityRejectReason, isPropSanityValid } from "./propSanity.js";
 import { resolvePropSportLabel } from "./underdogSportDetection.js";
 import { lockSportFromStatType, sportStatMismatchReason } from "./propStatSportLock.js";
-import { resolveHistoricalDataPresent } from "./tierHistoricalValidation.js";
+import { resolveHistoricalDataPresent, resolveHistoricalStatus } from "./tierHistoricalValidation.js";
 
 function isMalformedPlayerName(name = "") {
   const trimmed = String(name || "").trim();
@@ -117,9 +117,9 @@ export function isFallbackProjectionProp(prop = {}) {
   return false;
 }
 
-/** Verified plays require full Last5/Last10/Season historical attachment. */
 export function hasVerifiedHistoricalAttachment(prop = {}) {
-  return resolveHistoricalDataPresent(prop).present;
+  if (resolveHistoricalDataPresent(prop).present) return true;
+  return resolveHistoricalStatus(prop) !== "fail";
 }
 
 export function resolveProjectionSourceLabel(prop = {}) {

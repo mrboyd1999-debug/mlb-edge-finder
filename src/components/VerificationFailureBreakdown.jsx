@@ -158,12 +158,28 @@ const HISTORICAL_PIPELINE_COLUMNS = [
   { key: "last10", label: "Last10" },
   { key: "seasonAverage", label: "Season Avg" },
   { key: "gameLogCount", label: "Game Logs" },
+  { key: "matchedProfile", label: "Matched Profile" },
+  { key: "playerId", label: "Player ID" },
   { key: "historicalSource", label: "Historical Source" },
+  { key: "historicalStatus", label: "Status" },
   {
     key: "dropTrace",
     label: "Drop Trace",
     render: (row) => row.dropTrace || (row.historicalPresent ? "OK" : "—"),
   },
+];
+
+const TOP_PROJECTED_DEBUG_COLUMNS = [
+  { key: "player", label: "Player" },
+  { key: "market", label: "Market" },
+  { key: "projection", label: "Projection" },
+  { key: "probability", label: "Probability", suffix: "%" },
+  { key: "confidence", label: "Confidence", suffix: "%" },
+  { key: "tier", label: "Tier" },
+  { key: "matchedProfile", label: "Matched Profile" },
+  { key: "playerId", label: "Player ID" },
+  { key: "historicalSource", label: "Historical Source" },
+  { key: "historicalStatus", label: "Status" },
 ];
 
 function VerificationFailureBreakdown({ filterDiagnostics = null, heavyAuditEnabled = false }) {
@@ -177,6 +193,7 @@ function VerificationFailureBreakdown({ filterDiagnostics = null, heavyAuditEnab
   const scoreCloneAudit = dashboard?.scoreCloneAudit || null;
   const historicalCoverageAudit = dashboard?.historicalCoverageAudit || null;
   const historicalSampleRows = safeArray(historicalCoverageAudit?.sampleRows);
+  const topProjectedDebugPlays = safeArray(filterDiagnostics?.topProjectedDebugPlays);
 
   const projectedProps =
     breakdown?.propsWithProjections ??
@@ -320,6 +337,14 @@ function VerificationFailureBreakdown({ filterDiagnostics = null, heavyAuditEnab
         rows={historicalSampleRows}
         columns={HISTORICAL_PIPELINE_COLUMNS}
         emptyMessage="No projected props available for historical audit."
+        scrollable
+      />
+
+      <AuditTable
+        title="Top 10 Highest Projected Plays (debug — all tiers)"
+        rows={topProjectedDebugPlays}
+        columns={TOP_PROJECTED_DEBUG_COLUMNS}
+        emptyMessage="No projected props available yet."
         scrollable
       />
 
