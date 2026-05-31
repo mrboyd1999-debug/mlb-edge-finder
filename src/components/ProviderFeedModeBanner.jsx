@@ -1,21 +1,9 @@
 import { memo } from "react";
-import { healthStateStyle } from "../services/sourceHealth.js";
 import {
-  buildUserFacingProviderStatusRows,
-  resolveCoreLiveDataAvailable,
-  resolveStatsVerificationStatus,
-} from "../utils/providerStatusHelper.js";
-
-function providerStatusStyle(status = "") {
-  const key = String(status || "").toLowerCase();
-  if (key === "live" || key === "connected") return healthStateStyle("Connected");
-  if (key === "cached") return healthStateStyle("Warning");
-  if (key === "temporarily unavailable" || key === "not configured" || key === "not tested") {
-    return healthStateStyle("Warning");
-  }
-  if (key.includes("partial")) return healthStateStyle("Warning");
-  return healthStateStyle("Failed");
-}
+  getApiHealthStatus,
+  apiStatusStyle,
+  API_STATUS_COLOR,
+} from "../utils/apiHealth.js";
 
 function ProviderFeedModeBanner({
   apiHealth = {},
@@ -26,24 +14,23 @@ function ProviderFeedModeBanner({
   pipelineProjectionStats = null,
   loading = false,
 }) {
-  const liveAvailable = resolveCoreLiveDataAvailable({
+  const health = getApiHealthStatus({
     apiHealth,
     connectionReport,
-    audit,
-    renderSourceAudit,
-  });
-  const statsVerification = resolveStatsVerificationStatus({ connectionReport, mlbPipelineStatus });
-  const providerRows = buildUserFacingProviderStatusRows({
-    apiHealth,
-    connectionReport,
+    mlbPipelineStatus,
     pipelineProjectionStats,
   });
-  const headline = loading ? "Loading feeds…" : liveAvailable ? "Live Data Available" : "Cached Data";
+
+  const liveAvailable =
+    health.overall.color === API_STATUS_COLOR.GREEN ||
+    Number(renderSourceAudit?.liveProviderCount ?? audit?.liveProviderCount ?? 0) > 0;
+
+  const headline = loading ? "Loading feeds…" : health.overall.status;
   const headlineStyle = loading
-    ? healthStateStyle("Refreshing")
-    : liveAvailable
-      ? healthStateStyle("Connected")
-      : healthStateStyle("Warning");
+    ? apiStatusStyle(API_STATUS_COLOR.YELLOW)
+    : apiStatusStyle(health.overall.color);
+
+  const bannerRows = health.providerRows;
 
   return (
     <section
@@ -52,18 +39,18 @@ function ProviderFeedModeBanner({
     >
       <div className="provider-feed-mode-banner__head">
         <strong className="provider-feed-mode-banner__title">{headline}</strong>
-        {!loading ? <span style={headlineStyle}>{liveAvailable ? "Live" : "Cached"}</span> : null}
+        {!loading ? <span style={headlineStyle}>{liveAvailable ? "Live" : "Limited"}</span> : null}
       </div>
       {!loading ? (
         <>
           <p className="provider-feed-mode-banner__stats">
-            Stats Verification: <strong>{statsVerification.status}</strong>
+            Stats Verification: <strong>{health.statsVerification.status}</strong>
           </p>
           <ul className="provider-feed-mode-banner__providers">
-            {providerRows.map((row) => (
+            {bannerRows.map((row) => (
               <li key={row.provider}>
                 <span className="provider-feed-mode-banner__provider-name">{row.provider}</span>
-                <span style={providerStatusStyle(row.status)}>{row.status}</span>
+                <span style={apiStatusStyle(row.color)}>{row.status}</span>
               </li>
             ))}
           </ul>

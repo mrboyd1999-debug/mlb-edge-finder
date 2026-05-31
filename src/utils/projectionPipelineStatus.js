@@ -78,20 +78,20 @@ export function resolveProjectionEngineStatus({
 
   if (fetchFailed) {
     return {
-      status: "Failed",
+      status: "No projections generated",
       detail: lastError || "Projection fetch failed",
     };
   }
 
   if (normalized > 0 && coverage < COVERAGE_LIMITED_THRESHOLD) {
     return {
-      status: "Limited",
+      status: "No projections generated",
       detail: `Low projection coverage (${Math.round(coverage * 100)}% of ${normalized} props)`,
     };
   }
 
   return {
-    status: "Limited",
+    status: "No projections generated",
     detail: normalized > 0 ? "No projections on current props" : "No projections generated",
   };
 }

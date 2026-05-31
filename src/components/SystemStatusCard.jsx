@@ -1,21 +1,9 @@
 import { memo, useState, useCallback } from "react";
 import { formatDateTime } from "../utils/formatters.js";
-import { readSettingsMeta, getOddsApiKey, getSportsDataApiKey, writeSettingsMeta } from "../services/runtimeSettings.js";
-import { healthStateStyle, CONNECTION_TIERS } from "../services/sourceHealth.js";
-import { isPrizePicksFeedNotConfigured, PRIZEPICKS_NOT_CONFIGURED_DETAIL } from "../utils/providerProxy.js";
+import { readSettingsMeta, writeSettingsMeta } from "../services/runtimeSettings.js";
 import { testAllApiConnections } from "../services/apiConnectionTest.js";
 import { testMlbStatsApiConnection } from "../services/mlbStatsApiTest.js";
-import { resolveProjectionEngineStatus } from "../utils/projectionPipelineStatus.js";
-import {
-  resolveStrictLineFeedStatus,
-  resolveStrictOddsStatus,
-  resolveStrictSportsDataStatus,
-  resolveStrictMlbStatsStatus,
-} from "../utils/providerStatusHelper.js";
-
-function findProviderRow(results = [], name) {
-  return results.find((row) => String(row.provider || "").toLowerCase().includes(name.toLowerCase())) || null;
-}
+import { getApiHealthStatus, apiStatusStyle, API_STATUS_COLOR } from "../utils/apiHealth.js";
 
 function formatCheckedAt(value) {
   if (!value) return "—";
@@ -25,110 +13,20 @@ function formatCheckedAt(value) {
   return timePart || formatted;
 }
 
-function statusTier(status) {
-  const key = String(status || "").toLowerCase();
-  if (key === "connected") return CONNECTION_TIERS.CONNECTED;
-  if (key.startsWith("connected (cached)")) return CONNECTION_TIERS.WARNING;
-  if (key === "refreshing") return CONNECTION_TIERS.REFRESHING;
-  if (key === "warning") return CONNECTION_TIERS.WARNING;
-  if (key === "degraded" || key === "not configured" || key === "not tested" || key === "limited") {
-    return CONNECTION_TIERS.DEGRADED;
-  }
-  return CONNECTION_TIERS.FAILED;
-}
-
-function indicatorTier(status) {
-  const key = String(status || "").toLowerCase();
-  if (key === "connected") return "ok";
-  if (key.startsWith("connected (cached)")) return "warn";
-  if (key === "refreshing") return "info";
-  if (key === "warning" || key === "degraded" || key === "not configured" || key === "not tested" || key === "limited") {
-    return "warn";
-  }
-  return "fail";
-}
-
-function resolveOddsStatus(row, keyConfigured, tested) {
-  return resolveStrictOddsStatus(row, keyConfigured, tested);
-}
-
-function resolveKeyProviderStatus(row, keyConfigured, tested) {
-  return resolveStrictSportsDataStatus(row, keyConfigured, tested);
-}
-
-function resolveLineFeedStatus(feed = {}) {
-  return resolveStrictLineFeedStatus(feed);
-}
-
-function resolveMlbStatsStatus(stats = {}, attachmentAudit = null, testResult = null) {
-  if (testResult) {
-    return resolveStrictMlbStatsStatus({ testResult });
-  }
-  const coverage = Math.max(
-    Number(stats.historicalCoveragePercent) || 0,
-    Number(attachmentAudit?.historicalCoveragePercent) || 0
-  );
-  const profilesMatched = Math.max(
-    Number(stats.profilesMatched ?? stats.playersReturned) || 0,
-    Number(attachmentAudit?.profilesFound) || 0
-  );
-  const gameLogsAttached = Math.max(
-    Number(stats.gameLogsAttached) || 0,
-    Number(attachmentAudit?.gameLogsAttached) || 0
-  );
-  const usingCache = Boolean(stats.usingCache);
-  const hasAttachment =
-    stats.attachmentConfirmed ||
-    coverage > 0 ||
-    profilesMatched > 0 ||
-    gameLogsAttached > 0 ||
-    Number(attachmentAudit?.historicalAttached) > 0;
-
-  if (hasAttachment) {
-    return resolveStrictMlbStatsStatus({
-      pipelineStats: {
-        ...stats,
-        usingCache,
-        profilesMatched,
-        gameLogsAttached,
-      },
-      attachmentAudit,
-    });
-  }
-
-  return resolveStrictMlbStatsStatus({
-    pipelineStats: stats,
-    attachmentAudit,
-  });
-}
-
-function resolveProjectionStatus(projection = {}, pipelineStats = {}) {
-  const fetchFailed =
-    /failed/i.test(String(projection.status || "")) &&
-    !Number(pipelineStats.projectionCount);
-  const resolved = resolveProjectionEngineStatus({
-    projectionCount: pipelineStats.projectionCount,
-    normalizedCount: pipelineStats.normalizedCount,
-    projectionCoverage: pipelineStats.projectionCoverage,
-    fetchFailed,
-    lastError: projection.lastError || projection.failureReason || "",
-  });
-  return {
-    ...resolved,
-    checkedAt: projection.lastProjectionGeneratedAt || projection.lastSuccessAt,
-  };
-}
-
-function StatusTableRow({ provider, status, checkedAt, detail }) {
-  const tier = indicatorTier(status);
+function StatusTableRow({ provider, status, color, checkedAt, detail }) {
   return (
     <tr className="system-status-card__table-row">
       <td className="system-status-card__table-provider">
-        <span className={`system-status-card__dot system-status-card__dot--${tier}`} aria-hidden="true" />
+        <span
+          className={`system-status-card__dot system-status-card__dot--${
+            color === API_STATUS_COLOR.GREEN ? "ok" : color === API_STATUS_COLOR.YELLOW ? "warn" : "fail"
+          }`}
+          aria-hidden="true"
+        />
         {provider}
       </td>
       <td>
-        <span style={healthStateStyle(statusTier(status))}>{status}</span>
+        <span style={apiStatusStyle(color)}>{status}</span>
       </td>
       <td className="system-status-card__table-time">{formatCheckedAt(checkedAt)}</td>
       <td className="system-status-card__table-detail">{detail || "—"}</td>
@@ -147,9 +45,6 @@ function SystemStatusCard({
   const meta = readSettingsMeta();
   const reportRows = connectionReport?.results || meta.lastConnectionReport || [];
   const testedAt = connectionReport?.testedAt || meta.lastTestedAt || "";
-  const hasBeenTested = Boolean(testedAt);
-  const oddsRow = findProviderRow(reportRows, "Odds API");
-  const sdRow = findProviderRow(reportRows, "SportsDataIO");
 
   const [retesting, setRetesting] = useState(false);
   const [testingMlbStats, setTestingMlbStats] = useState(false);
@@ -198,31 +93,30 @@ function SystemStatusCard({
     }
   }, [feedHealthContext, onConnectionReportChange]);
 
-  const pp = apiHealth?.PrizePicks || {};
-  const ud = apiHealth?.Underdog || {};
-  const ppResolved = isPrizePicksFeedNotConfigured(pp)
-    ? { status: "Not configured", detail: PRIZEPICKS_NOT_CONFIGURED_DETAIL }
-    : resolveLineFeedStatus(pp);
-  const udResolved = resolveLineFeedStatus(ud);
-  const oddsResolved = resolveOddsStatus(oddsRow, Boolean(getOddsApiKey()), hasBeenTested);
-  const sdResolved = resolveKeyProviderStatus(sdRow, Boolean(getSportsDataApiKey()), hasBeenTested);
+  const health = getApiHealthStatus({
+    apiHealth,
+    connectionReport: connectionReport || { testedAt, results: reportRows },
+    mlbPipelineStatus,
+    pipelineProjectionStats,
+    mlbStatsTest,
+  });
 
-  const stats = mlbPipelineStatus?.mlbStatsApi || {};
-  const projection = mlbPipelineStatus?.projectionApi || {};
-  const statsResolved = resolveMlbStatsStatus(stats, feedHealthContext?.statsAttachmentAudit, mlbStatsTest);
-  const projectionResolved = resolveProjectionStatus(projection, pipelineProjectionStats || {});
+  const ppFeed = apiHealth?.PrizePicks || {};
+  const udFeed = apiHealth?.Underdog || {};
+  const projectionCheckedAt =
+    mlbPipelineStatus?.projectionApi?.lastProjectionGeneratedAt ||
+    mlbPipelineStatus?.projectionApi?.lastSuccessAt;
 
   const rows = [
-    { provider: "Odds API", ...oddsResolved, checkedAt: testedAt },
-    { provider: "PrizePicks", ...ppResolved, checkedAt: pp.lastFetchAt || testedAt },
-    { provider: "Underdog", ...udResolved, checkedAt: ud.lastFetchAt || testedAt },
-    { provider: "SportsDataIO", ...sdResolved, checkedAt: testedAt },
-    { provider: "MLB Stats API", ...statsResolved, checkedAt: mlbStatsTest?.testedAt || stats.lastSuccessAt },
+    { provider: "Odds API", ...health.oddsApi, checkedAt: testedAt },
+    { provider: "SportsDataIO", ...health.sportsDataIO, checkedAt: testedAt },
+    { provider: "Underdog", ...health.underdog, checkedAt: udFeed.lastFetchAt || testedAt },
+    { provider: "PrizePicks", ...health.prizePicks, checkedAt: ppFeed.lastFetchAt || testedAt },
+    { provider: "MLB Stats API", ...health.mlbStats, checkedAt: mlbStatsTest?.testedAt || testedAt },
     {
       provider: "Projection Engine",
-      status: projectionResolved.status,
-      detail: projectionResolved.detail,
-      checkedAt: projectionResolved.checkedAt || projection.lastProjectionGeneratedAt || projection.lastSuccessAt,
+      ...health.projectionEngine,
+      checkedAt: projectionCheckedAt || testedAt,
     },
   ];
 
@@ -249,11 +143,13 @@ function SystemStatusCard({
           </button>
         </div>
       </div>
+      <p className="system-status-card__meta">
+        Overall: <span style={apiStatusStyle(health.overall.color)}>{health.overall.status}</span>
+      </p>
       {mlbStatsTest ? (
         <p className="system-status-card__meta">
           MLB Stats test: {mlbStatsTest.searchEndpoint || "search"} · HTTP {mlbStatsTest.searchStatus ?? "?"} ·{" "}
           {mlbStatsTest.responseTimeMs}ms · {mlbStatsTest.playerCount} players · {mlbStatsTest.gameLogCount} game logs
-          {mlbStatsTest.searchResponseBody ? ` · ${mlbStatsTest.searchResponseBody.slice(0, 120)}` : ""}
         </p>
       ) : null}
       <div className="system-status-card__table-wrap">

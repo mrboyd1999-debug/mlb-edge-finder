@@ -6,6 +6,7 @@ import PipelineCoverageAuditPanel from "./PipelineCoverageAuditPanel.jsx";
 import ProviderCoverageAuditPanel from "./ProviderCoverageAuditPanel.jsx";
 import VerificationDashboard from "./VerificationDashboard.jsx";
 import ApiHealthPanel from "./ApiHealthPanel.jsx";
+import ApiStatusDebugPanel from "./ApiStatusDebugPanel.jsx";
 import MlbPipelineStatusPanel from "./MlbPipelineStatusPanel.jsx";
 import UnderdogDebugPanel from "./UnderdogDebugPanel.jsx";
 import ParsedUnderdogDebugCard from "./ParsedUnderdogDebugCard.jsx";
@@ -59,6 +60,11 @@ function DeveloperDebugPanel({
         </label>
       ) : null}
       <SectionErrorBoundary name="Developer Debug">
+        <ApiStatusDebugPanel
+          apiHealth={apiHealth}
+          connectionReport={connectionReport}
+          mlbPipelineStatus={mlbPipelineStatus}
+        />
         <ApiHealthPanel connectionReport={connectionReport} lastTestedAt={lastTestedAt} />
         <MlbPipelineStatusPanel pipelineStatus={mlbPipelineStatus} apiHealth={apiHealth} compact />
         <details className="settings-advanced-config compact-settings-details">
