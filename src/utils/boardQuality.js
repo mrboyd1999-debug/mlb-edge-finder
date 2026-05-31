@@ -57,18 +57,18 @@ export const FALLBACK_RANK_WEIGHTS = {
   playability: 0.2,
   sanity: 0.1,
 };
-export const TIER_A_MIN_CONFIDENCE = 75;
-export const TIER_A_MIN_PLAYABILITY = 75;
+/** Temporary emergency tier thresholds — confidence + probability + playability. */
+export const TIER_A_MIN_CONFIDENCE = 70;
+export const TIER_A_MIN_PLAYABILITY = 70;
+export const TIER_A_MIN_PROBABILITY = 65;
+export const TIER_B_MIN_CONFIDENCE = 60;
+export const TIER_B_MIN_PLAYABILITY = 65;
+export const TIER_B_MIN_PROBABILITY = 60;
+/** Legacy edge gates — not used for A/B/C tier classification. */
 export const TIER_A_MIN_EDGE = 0.5;
-export const TIER_B_MIN_CONFIDENCE = 65;
-export const TIER_B_MIN_PLAYABILITY = 70;
 export const TIER_B_MIN_EDGE = 0.3;
-/** Legacy — not used for A/B/C tier gates. */
 export const TIER_A_MIN_LAST10_HIT_RATE = 60;
 export const TIER_B_MIN_LAST10_HIT_RATE = 50;
-/** Legacy probability gates — not used for A/B/C tier classification. */
-export const TIER_A_MIN_PROBABILITY = 65;
-export const TIER_B_MIN_PROBABILITY = 55;
 export const TIER_REVIEW_MIN_CONFIDENCE = TIER_B_MIN_CONFIDENCE;
 export const TIER_REVIEW_MIN_PROBABILITY = TIER_B_MIN_PROBABILITY;
 export const TIER_REVIEW_MIN_PLAYABILITY = TIER_B_MIN_PLAYABILITY;
@@ -406,17 +406,17 @@ function formatTierMetric(value) {
 export function getTierAFailures(prop = {}) {
   const failures = [];
   const confidence = resolvePropConfidence(prop);
+  const probability = resolvePropProbability(prop);
   const playability = resolvePropPlayability(prop);
-  const edge = resolvePropEdge(prop);
 
   if (!Number.isFinite(confidence) || confidence < TIER_A_MIN_CONFIDENCE) {
     failures.push(`confidence ${formatTierMetric(confidence)} < ${TIER_A_MIN_CONFIDENCE}`);
   }
+  if (!Number.isFinite(probability) || probability < TIER_A_MIN_PROBABILITY) {
+    failures.push(`probability ${formatTierMetric(probability)} < ${TIER_A_MIN_PROBABILITY}`);
+  }
   if (!Number.isFinite(playability) || playability < TIER_A_MIN_PLAYABILITY) {
     failures.push(`playability ${formatTierMetric(playability)} < ${TIER_A_MIN_PLAYABILITY}`);
-  }
-  if (!Number.isFinite(edge) || edge < TIER_A_MIN_EDGE) {
-    failures.push(`edge ${formatTierMetric(edge)} < ${TIER_A_MIN_EDGE}`);
   }
   return failures;
 }
@@ -424,17 +424,17 @@ export function getTierAFailures(prop = {}) {
 export function getTierBFailures(prop = {}) {
   const failures = [];
   const confidence = resolvePropConfidence(prop);
+  const probability = resolvePropProbability(prop);
   const playability = resolvePropPlayability(prop);
-  const edge = resolvePropEdge(prop);
 
   if (!Number.isFinite(confidence) || confidence < TIER_B_MIN_CONFIDENCE) {
     failures.push(`confidence ${formatTierMetric(confidence)} < ${TIER_B_MIN_CONFIDENCE}`);
   }
+  if (!Number.isFinite(probability) || probability < TIER_B_MIN_PROBABILITY) {
+    failures.push(`probability ${formatTierMetric(probability)} < ${TIER_B_MIN_PROBABILITY}`);
+  }
   if (!Number.isFinite(playability) || playability < TIER_B_MIN_PLAYABILITY) {
     failures.push(`playability ${formatTierMetric(playability)} < ${TIER_B_MIN_PLAYABILITY}`);
-  }
-  if (!Number.isFinite(edge) || edge < TIER_B_MIN_EDGE) {
-    failures.push(`edge ${formatTierMetric(edge)} < ${TIER_B_MIN_EDGE}`);
   }
   return failures;
 }
@@ -532,6 +532,32 @@ export function resolveBestPlayThresholdMissReason(prop = {}) {
   return resolveBestPlayExclusionReason(prop);
 }
 
+export function buildTierPropAuditRow(prop = {}) {
+  const audit = explainTierClassification(prop);
+  return {
+    player: prop.playerName || prop.player || "Unknown",
+    market: prop.statType || prop.market || prop.propType || "—",
+    confidence: Math.round(resolvePropConfidence(prop)),
+    probability: Math.round(resolvePropProbability(prop)),
+    playability: Math.round(resolvePropPlayability(prop)),
+    tier: audit.tier,
+    tierReason: audit.reason,
+    sortScore: computeSortScore(prop),
+  };
+}
+
+export function buildTop10ScoreDiagnostics(pool = [], limit = 10) {
+  return [...(pool || [])]
+    .map((prop) => buildTierPropAuditRow(prop))
+    .sort((a, b) => (b.sortScore ?? 0) - (a.sortScore ?? 0))
+    .slice(0, limit)
+    .map(({ sortScore, ...row }) => ({
+      ...row,
+      score: sortScore,
+      reason: row.tierReason,
+    }));
+}
+
 export function buildBestPlayFilterDiagnostics(pool = []) {
   const counts = {
     totalProjected: (pool || []).length,
@@ -551,7 +577,6 @@ export function buildBestPlayFilterDiagnostics(pool = []) {
     tierBDisplayed: 0,
     tierCDisplayed: 0,
     activeTier: "A",
-    // legacy aliases for existing UI
     tierAFullData: 0,
     tierBFullData: 0,
     tierCFullData: 0,
@@ -560,6 +585,8 @@ export function buildBestPlayFilterDiagnostics(pool = []) {
     missingProjection: 0,
     missingStats: 0,
     tierRejectionLog: [],
+    tierPropLog: [],
+    top10ByScore: [],
   };
 
   for (const prop of pool || []) {
@@ -567,6 +594,17 @@ export function buildBestPlayFilterDiagnostics(pool = []) {
     else counts.partialData += 1;
 
     const audit = explainTierClassification(prop);
+    const row = buildTierPropAuditRow(prop);
+    counts.tierPropLog.push(row);
+    console.info("[Tier Filter Audit]", {
+      player: row.player,
+      confidence: row.confidence,
+      probability: row.probability,
+      playability: row.playability,
+      tier: row.tier,
+      tierReason: row.tierReason,
+    });
+
     if (audit.tier === "A") {
       counts.tierA += 1;
       counts.tierAFullData += 1;
@@ -579,24 +617,25 @@ export function buildBestPlayFilterDiagnostics(pool = []) {
       counts.tierC += 1;
       counts.tierCFullData += 1;
       counts.rejectedByTierC += 1;
-      if (audit.tierAFailures.some((row) => row.startsWith("confidence"))) counts.rejectedByConfidence += 1;
-      if (audit.tierAFailures.some((row) => row.startsWith("playability"))) counts.rejectedByPlayability += 1;
-      if (audit.tierBFailures.some((row) => row.startsWith("edge"))) counts.rejectedByEdge += 1;
+      if (audit.tierAFailures.some((entry) => entry.startsWith("confidence"))) counts.rejectedByConfidence += 1;
+      if (audit.tierAFailures.some((entry) => entry.startsWith("playability"))) counts.rejectedByPlayability += 1;
+      if (audit.tierBFailures.some((entry) => entry.startsWith("probability"))) counts.rejectedByProbability += 1;
       counts.tierRejectionLog.push({
-        player: prop.playerName || prop.player || "Unknown",
-        market: prop.statType || prop.market || prop.propType || "—",
+        player: row.player,
+        market: row.market,
         tier: audit.tier,
         reason: audit.reason,
-        confidence: Math.round(resolvePropConfidence(prop)),
-        playability: Math.round(resolvePropPlayability(prop)),
+        confidence: row.confidence,
+        probability: row.probability,
+        playability: row.playability,
         edge: formatTierMetric(resolvePropEdge(prop)),
         last10HitRate: formatTierMetric(resolveLast10HitRate(prop)),
       });
-      console.info(
-        `[Tier Filter] ${prop.playerName || prop.player || "Unknown"} rejected: ${audit.reason}`
-      );
     }
   }
+
+  counts.top10ByScore = buildTop10ScoreDiagnostics(pool);
+  console.info("[Tier Filter Audit] Top 10 by score", counts.top10ByScore);
 
   return counts;
 }
@@ -739,7 +778,19 @@ export function buildTopBestPlaysPicks(
     });
   }
 
+  if (picks.length === 0 && eligible.length > 0) {
+    picks = [...eligible].sort(compareSortScore).slice(0, limit);
+  }
+
+  if (picks.length === 0 && tierB.length > 0) {
+    picks = [...tierB].sort(compareSortScore).slice(0, limit);
+  }
+
   picks = applyBestPlayRankConstraints(picks.slice(0, limit), { limit });
+
+  if (picks.length === 0 && eligible.length > 0) {
+    picks = [...eligible].sort(compareSortScore).slice(0, limit);
+  }
 
   diagnostics.activeTier = activeTier;
   diagnostics.tierADisplayed = picks.filter((prop) => classifyPropTier(prop) === "A").length;

@@ -47,7 +47,23 @@ export function buildConfidenceAuditLog(prop = {}, projection = null, options = 
 
 export function logPropConfidenceAudit(prop = {}, audit = {}) {
   console.info("[Confidence Audit]", audit);
+  console.info("[Confidence Suppression]", {
+    player: audit.player,
+    base_confidence: audit.confidence_before_penalties,
+    season_penalty: audit.season_penalty,
+    pitcher_penalty: audit.pitcher_penalty,
+    integrity_penalty: audit.integrity_penalty,
+    final_confidence: audit.final_confidence,
+  });
   return audit;
+}
+
+export function logConfidenceSuppressionBatch(pool = []) {
+  return (pool || []).map((prop) => {
+    const audit = buildConfidenceAuditLog(prop);
+    logPropConfidenceAudit(prop, audit);
+    return audit;
+  });
 }
 
 export function buildTierAuditEntry(prop = {}, options = {}) {

@@ -65,7 +65,7 @@ import {
   buildOverallPlayExplanation,
   buildTopBestPlaysPicks,
 } from "./boardQuality.js";
-import { buildTierAuditBatch } from "./tierAudit.js";
+import { buildTierAuditBatch, logConfidenceSuppressionBatch } from "./tierAudit.js";
 import {
   selectStartupProjectionCandidates,
 } from "./startupPerformance.js";
@@ -461,7 +461,10 @@ export function resolveTopMlbPlaySections(
   filterDiagnostics.bestPlayQualifiedStrict = bestPlaysResult.qualifiedStrict;
   filterDiagnostics.bestPlayProjectedCount = projectedCount;
   filterDiagnostics.bestPlayUsedFallback = bestPlaysResult.usedFallback;
-  filterDiagnostics.tierAuditBatch = buildTierAuditBatch(topBestPlayPicks);
+  filterDiagnostics.top10ByScore = bestPlaysResult.diagnostics?.top10ByScore || [];
+  filterDiagnostics.tierPropLog = bestPlaysResult.diagnostics?.tierPropLog || [];
+  filterDiagnostics.tierAuditBatch = buildTierAuditBatch(boardQualityPool);
+  filterDiagnostics.confidenceSuppressionLog = logConfidenceSuppressionBatch(boardQualityPool);
   filterDiagnostics.tierAProbabilityAudit = auditTierAProbabilityPool(boardQualityPool);
 
   const overallPlayCandidate = selectOverallPlay(boardQualityPool);
@@ -526,7 +529,7 @@ export function resolveTopMlbPlaySections(
       title: "Best Plays",
       eyebrow: "Top 10 · Tier A → B → C · Sort score ranked",
       emptyMessage:
-        topBestPlayPicks.length || (bestPlaysResult.diagnostics?.fullData ?? 0) > 0
+        topBestPlayPicks.length || projectedCount > 0
           ? ""
           : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE,
       fallbackNotice: bestPlaysResult.fallbackNotice || "",

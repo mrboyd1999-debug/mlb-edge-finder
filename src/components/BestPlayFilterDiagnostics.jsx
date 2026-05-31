@@ -13,6 +13,7 @@ function Metric({ label, value }) {
 function BestPlayFilterDiagnostics({ filterDiagnostics = null }) {
   const audit = filterDiagnostics?.bestPlayFilterAudit;
   const samples = safeArray(filterDiagnostics?.bestPlayRejectionSamples);
+  const top10 = safeArray(filterDiagnostics?.top10ByScore ?? audit?.top10ByScore);
 
   if (!audit) return null;
 
@@ -33,17 +34,46 @@ function BestPlayFilterDiagnostics({ filterDiagnostics = null }) {
         <Metric label="Tier C (shown)" value={audit.tierCDisplayed} />
         <Metric label="Qualified A/B" value={filterDiagnostics?.bestPlayQualifiedStrict ?? audit.qualifiedStrict} />
       </div>
+      {top10.length ? (
+        <div className="verification-diagnostics__table-wrap">
+          <h4 className="verification-diagnostics__subtitle">Top 10 by score</h4>
+          <table className="verification-diagnostics__table">
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>Conf</th>
+                <th>Prob</th>
+                <th>Play</th>
+                <th>Tier</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {top10.map((row, index) => (
+                <tr key={`${row.player}-${row.market}-${index}`}>
+                  <td>{row.player}</td>
+                  <td>{row.confidence ?? "—"}%</td>
+                  <td>{row.probability ?? "—"}%</td>
+                  <td>{row.playability ?? "—"}</td>
+                  <td>{row.tier ?? "—"}</td>
+                  <td>{row.reason ?? row.tierReason ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
       {samples.length ? (
         <div className="verification-diagnostics__table-wrap">
+          <h4 className="verification-diagnostics__subtitle">Tier C rejections (sample)</h4>
           <table className="verification-diagnostics__table">
             <thead>
               <tr>
                 <th>Player</th>
                 <th>Market</th>
                 <th>Conf</th>
+                <th>Prob</th>
                 <th>Play</th>
-                <th>Edge</th>
-                <th>L10</th>
                 <th>Reason</th>
               </tr>
             </thead>
@@ -53,9 +83,8 @@ function BestPlayFilterDiagnostics({ filterDiagnostics = null }) {
                   <td>{row.player}</td>
                   <td>{row.market}</td>
                   <td>{row.confidence ?? "—"}%</td>
+                  <td>{row.probability ?? "—"}%</td>
                   <td>{row.playability ?? "—"}</td>
-                  <td>{row.edge ?? "—"}</td>
-                  <td>{row.last10HitRate ?? "—"}%</td>
                   <td>{row.reason}</td>
                 </tr>
               ))}
