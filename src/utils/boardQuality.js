@@ -29,6 +29,7 @@ import {
   DATA_STATUS,
   NO_VERIFIED_PLAYS_MESSAGE,
   NO_TIER_AB_RESEARCH_MESSAGE,
+  NO_MLB_PROPS_LOADED_MESSAGE,
   TIER_A_RULES,
   TIER_B_RULES,
   BEST_PLAYS_MIN,
@@ -38,6 +39,7 @@ import {
   passesBestPlayBoardGate,
   normalizeBoardProp,
 } from "./mlbBoardPipeline.js";
+import { attachPropDisplayFields } from "./propDisplayFields.js";
 
 export { classifyPropTier, getTierAFailures, getTierBFailures, buildTierDebugSummary, hasPositiveEdge, hasAllowedVerification, passesResearchPlayThresholds } from "./tierClassification.js";
 import {
@@ -513,7 +515,20 @@ export function compareBestPlaysDisplayRank(a = {}, b = {}) {
   return edgeB - edgeA;
 }
 
-export { NO_VERIFIED_PLAYS_MESSAGE, NO_TIER_AB_RESEARCH_MESSAGE, passesBestPlayBoardGate, isResearchCandidate, DATA_STATUS };
+export { NO_VERIFIED_PLAYS_MESSAGE, NO_TIER_AB_RESEARCH_MESSAGE, NO_MLB_PROPS_LOADED_MESSAGE, passesBestPlayBoardGate, isResearchCandidate, DATA_STATUS };
+
+export function resolveVerifiedPlaysEmptyMessage({
+  loadedPropCount = 0,
+  boardPoolCount = 0,
+} = {}) {
+  if (loadedPropCount === 0 && boardPoolCount === 0) {
+    return NO_MLB_PROPS_LOADED_MESSAGE;
+  }
+  if (loadedPropCount > 0 || boardPoolCount > 0) {
+    return NO_VERIFIED_PLAYS_MESSAGE;
+  }
+  return NO_MLB_PROPS_LOADED_MESSAGE;
+}
 
 /** Single source of truth — read stored tier on enriched props, compute otherwise. */
 export function resolveFinalTier(prop = {}) {
@@ -1252,24 +1267,26 @@ export function attachBoardQualityFields(prop = {}) {
   const fullData = normalized.dataStatus === DATA_STATUS.FULL_MLB_DATA;
   const dataQualityBadge = resolveBoardDataQualityBadge({ ...normalized, isFullData: fullData, partialData: !fullData });
   const propTier = classifyPropTier(normalized);
-  return attachFinalTierFields(
-    attachVerificationStatusFields({
-      ...normalized,
-      ...edgeLabels,
-      rawEdgeLabel: edgeLabels.rawEdgeLabel,
-      displayEdgeLabel: edgeLabels.displayEdgeLabel,
-      edgePercent: edgeLabels.edgePercent ?? withPitcherPenalty.edgePercent,
-      projectionConfidenceLevel: resolveProjectionConfidenceLevel(normalized),
-      fullDataReason,
-      isFullData: fullData,
-      partialData: !fullData,
-      reviewNeeded:
-        hasIntegrityReviewFlags(withIntegrityAudit) ||
-        propTier === TIER_REVIEW_NEEDED_LABEL ||
-        normalized.cardPlayLabel === "Review Needed",
-      dataQualityBadge,
-      dataQualityLabel: dataQualityBadge.label,
-    })
+  return attachPropDisplayFields(
+    attachFinalTierFields(
+      attachVerificationStatusFields({
+        ...normalized,
+        ...edgeLabels,
+        rawEdgeLabel: edgeLabels.rawEdgeLabel,
+        displayEdgeLabel: edgeLabels.displayEdgeLabel,
+        edgePercent: edgeLabels.edgePercent ?? withPitcherPenalty.edgePercent,
+        projectionConfidenceLevel: resolveProjectionConfidenceLevel(normalized),
+        fullDataReason,
+        isFullData: fullData,
+        partialData: !fullData,
+        reviewNeeded:
+          hasIntegrityReviewFlags(withIntegrityAudit) ||
+          propTier === TIER_REVIEW_NEEDED_LABEL ||
+          normalized.cardPlayLabel === "Review Needed",
+        dataQualityBadge,
+        dataQualityLabel: dataQualityBadge.label,
+      })
+    )
   );
 }
 

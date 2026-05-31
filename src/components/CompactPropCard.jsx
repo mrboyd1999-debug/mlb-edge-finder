@@ -3,6 +3,8 @@ import DataSourceTag from "./DataSourceTag.jsx";
 import { formatNumber, formatSignedNumber } from "../utils/formatters.js";
 import { displayMarketLabel } from "../utils/propLabels.js";
 import { formatRecommendationLabel, recommendationPalette, resolvePickSide } from "../utils/pickRecommendation.js";
+import { resolveNormalizedConfidence } from "../utils/propDisplayFields.js";
+import { resolveRiskExplanation } from "../utils/risk.js";
 
 function riskPalette(level = "") {
   const key = String(level || "").toLowerCase();
@@ -29,6 +31,7 @@ function CompactPropCard({
   rank,
   defaultExpanded = false,
   showSave = true,
+  isSaved = false,
   qualifyReason = "",
   cacheStatus = "",
 }) {
@@ -45,12 +48,13 @@ function CompactPropCard({
     : "—";
   const edge = Number(prop.edge);
   const edgeLabel = Number.isFinite(edge) ? formatSignedNumber(edge) : "—";
-  const conf = Number(prop.confidenceScore ?? prop.confidence);
-  const confLabel = Number.isFinite(conf) ? `${Math.round(conf)}%` : "—";
-  const risk = prop.riskLevel || "Medium";
+  const conf = resolveNormalizedConfidence(prop);
+  const confLabel = conf != null ? `${conf}%` : "—";
+  const risk = String(prop.riskLevel || "HIGH").toUpperCase();
   const riskStyle = riskPalette(risk);
   const payout = payoutMeta(prop);
   const explanation =
+    prop.cardDescription ||
     qualifyReason ||
     prop.whyThisPick ||
     prop.qualificationReason ||
@@ -139,6 +143,9 @@ function CompactPropCard({
               {risk}
             </strong>
           </div>
+          {prop.riskExplanation || resolveRiskExplanation(risk) ? (
+            <p className="compact-prop-card__qualify">{prop.riskExplanation || resolveRiskExplanation(risk)}</p>
+          ) : null}
           {explanation ? <p className="compact-prop-card__explain">{explanation}</p> : null}
           <div className="compact-prop-card__actions">
             {onOpen ? (
@@ -147,8 +154,13 @@ function CompactPropCard({
               </button>
             ) : null}
             {showSave && onSave ? (
-              <button type="button" className="compact-prop-card__btn compact-prop-card__btn--primary" onClick={() => onSave(prop)}>
-                Save Pick
+              <button
+                type="button"
+                className="compact-prop-card__btn compact-prop-card__btn--primary"
+                onClick={() => onSave(prop)}
+                disabled={isSaved}
+              >
+                {isSaved ? "Saved" : "Save"}
               </button>
             ) : null}
             {onDelete ? (

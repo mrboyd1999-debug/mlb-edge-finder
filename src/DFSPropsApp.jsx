@@ -4372,6 +4372,7 @@ export default function DFSPropsApp() {
         liveFetchFailed: loadedPropCount === 0,
         fetchTimedOut: /timed?\s*out|board fetch timed out/i.test(String(error || "")),
         allSourcesEmpty: loadedPropCount === 0,
+        loadedPropCount,
         lightweight: !debugPanelsVisible,
       });
       board.loadedPropCount = loadedPropCount;

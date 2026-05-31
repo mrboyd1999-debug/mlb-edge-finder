@@ -14,7 +14,7 @@ import { getPropVolatilityTier, meetsVolatilityTierRequirements, PROP_VOLATILITY
 import { getMlbMinEdgeForTier, isMlbQualityTierS, MLB_ONLY_MODE } from "../utils/mlbOnlyMode.js";
 import { applyPropCalibrationBundle } from "../utils/propCalibration.js";
 import { calibrateRealisticConfidence } from "../utils/mlbConfidenceEngine.js";
-import { resolveTierDisplayLabel } from "../utils/boardQuality.js";
+import { buildCardDescription } from "../utils/propDisplayFields.js";
 
 export { CONFIDENCE_THRESHOLDS };
 
@@ -474,17 +474,18 @@ export function enrichPropDecision(prop = {}, context = {}) {
   const researchOnly = shouldRouteResearchOnly(prop) || decisionTier === "research";
 
   let qualificationReason = prop.qualificationReason || "";
-  const parts = [];
-  if (Number.isFinite(prop.projectedValue ?? prop.projection)) parts.push(`Projects ${round(prop.projectedValue ?? prop.projection)}`);
-  if (bookDisagreement.sportsbookLine != null) parts.push(`book ${bookDisagreement.sportsbookLine}`);
-  if (Number(prop.edge) > 0) parts.push(`${prop.bestPick} +${round(prop.edge)} edge`);
-  const displayConf = Number(prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence);
-  if (Number.isFinite(displayConf)) parts.push(`${Math.round(displayConf)}% conf`);
-  if (expectedValueScore >= 55) parts.push(`EV score ${expectedValueScore}`);
-  if (volatilityScore >= 70) parts.push("stable volatility");
-  const tierLabel = resolveTierDisplayLabel(prop);
-  if (tierLabel) parts.push(tierLabel);
-  if (parts.length) qualificationReason = parts.join(" · ");
+  const cardDescription = buildCardDescription(prop);
+  if (cardDescription) {
+    qualificationReason = cardDescription;
+  } else {
+    const parts = [];
+    if (Number.isFinite(prop.projectedValue ?? prop.projection)) parts.push(`Projects ${round(prop.projectedValue ?? prop.projection)}`);
+    if (bookDisagreement.sportsbookLine != null) parts.push(`book ${bookDisagreement.sportsbookLine}`);
+    if (Number(prop.edge) > 0) parts.push(`${prop.bestPick} +${round(prop.edge)} edge`);
+    const displayConf = Number(prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence);
+    if (Number.isFinite(displayConf)) parts.push(`${Math.round(displayConf)}% confidence`);
+    if (parts.length) qualificationReason = parts.join(" · ");
+  }
 
   const sportsbookEdge = computeSportsbookEdge(prop, bookDisagreement);
 

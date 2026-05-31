@@ -12,6 +12,8 @@ import { resolveProjectionValue } from "../utils/projectionQuality.js";
 import { formatEdgeDisplay } from "../utils/conservativeProjection.js";
 import { validatePickDirectionBeforeRender } from "../utils/pickDirectionAudit.js";
 import { resolveRecommendedSide, resolveTierDisplayLabel } from "../utils/boardQuality.js";
+import { resolveNormalizedConfidence, resolveNormalizedProbability } from "../utils/propDisplayFields.js";
+import ProviderLabel from "./ProviderLabel.jsx";
 
 function resolveLeanSideLabel(prop = {}, recommendedSide = "PASS") {
   if (recommendedSide === "UNDER") return "Lower";
@@ -55,13 +57,12 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
   const market = enriched.propType || enriched.statType || enriched.market || displayFullMarketLabel(enriched);
   const matchup = formatMatchup(enriched);
   const line = formatNumber(enriched.line);
-  const probability = enriched.probabilityScore ?? enriched.verifiedProbability ?? 0;
-  const probLabel = Number.isFinite(Number(probability)) ? `${Math.round(Number(probability))}%` : "—";
+  const confidenceValue = resolveNormalizedConfidence(enriched);
+  const confidenceLabel = confidenceValue != null ? `${confidenceValue}%` : "—";
+  const probabilityValue = resolveNormalizedProbability(enriched);
+  const probLabel = probabilityValue != null ? `${probabilityValue}%` : "—";
   const tierLabel = resolveTierDisplayLabel(enriched);
-  const displayConfidenceScore = enriched.displayConfidenceScore ?? enriched.confidenceScore ?? enriched.confidence;
-  const confidenceLabel = Number.isFinite(Number(displayConfidenceScore))
-    ? `${Math.round(Number(displayConfidenceScore))}%`
-    : "—";
+  const riskLevel = String(enriched.riskLevel || "HIGH").toUpperCase();
   const edgeLabels = enriched.rawEdgeLabel
     ? { displayEdgeLabel: enriched.displayEdgeLabel }
     : formatEdgeDisplay(enriched);
@@ -100,6 +101,10 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
           <p style={styles.bestPlayRowSubline}>
             {matchup} · {market} · Line {line}
           </p>
+          <ProviderLabel prop={enriched} compact />
+          {enriched.cardDescription ? (
+            <p className="best-play-row-description">{enriched.cardDescription}</p>
+          ) : null}
           <div className="prop-card-core-metrics prop-card-core-metrics--mobile" style={{ marginTop: 4 }}>
             <span>
               Side <strong>{leanSideLabel !== "Pass" ? leanSideLabel : sideLabel}</strong>
@@ -115,6 +120,9 @@ function BestPlayRowCard({ prop, onOpen, rank }) {
             </span>
             <span>
               Confidence <strong>{confidenceLabel}</strong>
+            </span>
+            <span>
+              Risk <strong>{riskLevel}</strong>
             </span>
           </div>
         </div>

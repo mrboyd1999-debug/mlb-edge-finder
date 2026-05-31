@@ -12,6 +12,7 @@ import { riskAccentStyle } from "../utils/displayPropScoring.js";
 import MlbPipelineFailureBlock from "./MlbPipelineFailureBlock.jsx";
 import { isManualAnalyzerProp } from "../utils/manualPropBuilder.js";
 import { shouldShowMlbPipelineFailure } from "../utils/mlbPipelineFailureDisplay.js";
+import { resolveNormalizedConfidence } from "../utils/propDisplayFields.js";
 import { resolveProjectionLeanDisplay } from "../utils/pickDirectionAudit.js";
 import {
   AWAITING_PROJECTION_STATUS,
@@ -188,10 +189,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
   const confRaw =
     noVerifiedPlay || passPlay
       ? null
-      : prop.displayConfidenceScore ??
-        (prop.calibratedConfidence != null && prop.calibratedConfidence !== prop.confidenceScore
-          ? prop.calibratedConfidence
-          : prop.confidenceScore ?? prop.confidence ?? null);
+      : resolveNormalizedConfidence(prop);
   const confDisplay =
     confRaw != null && Number(confRaw) > 0 ? Math.round(Number(confRaw)) : null;
   const confDisplayLabel = confDisplay != null ? `${confDisplay}%` : "Unavailable";
@@ -417,9 +415,9 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
                 ) : null}
                 <span style={{ ...styles.scoreBadge, ...payoutBadgeStyle(prop) }}>{payoutLabel}</span>
               </div>
-              {prop.whyThisPick || prop.qualificationReason ? (
+              {prop.cardDescription || prop.whyThisPick || prop.qualificationReason ? (
                 <p className="prop-card-volatility-secondary" style={{ ...styles.manualVolatilityLine, marginTop: "2px" }}>
-                  {prop.whyThisPick || prop.qualificationReason}
+                  {prop.cardDescription || prop.whyThisPick || prop.qualificationReason}
                 </p>
               ) : projVsLine ? (
                 <p className="prop-card-volatility-secondary" style={styles.manualVolatilityLine}>

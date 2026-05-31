@@ -1,7 +1,16 @@
 import { memo } from "react";
 import CompactPropCard from "./CompactPropCard.jsx";
+import { isPropSaved } from "../utils/savedPicksStorage.js";
 
-function PlatformFeedTab({ platformLabel = "Feed", picks = [], loading = false, onOpen, onSave, cacheStatus = "" }) {
+function PlatformFeedTab({
+  platformLabel = "Feed",
+  picks = [],
+  loading = false,
+  onOpen,
+  onSave,
+  cacheStatus = "",
+  savedPicks = [],
+}) {
   if (loading && !picks.length) {
     return <p className="compact-tab-empty">Loading {platformLabel} props…</p>;
   }
@@ -20,8 +29,9 @@ function PlatformFeedTab({ platformLabel = "Feed", picks = [], loading = false, 
             rank={index + 1}
             onOpen={onOpen}
             onSave={onSave}
+            isSaved={isPropSaved(prop, savedPicks)}
             cacheStatus={cacheStatus}
-            qualifyReason={prop.projectionUnavailable ? "Live line — projection pending" : prop.qualificationReason || ""}
+            qualifyReason={prop.projectionUnavailable ? "Live line — projection pending" : prop.cardDescription || prop.qualificationReason || ""}
           />
         ))}
       </div>

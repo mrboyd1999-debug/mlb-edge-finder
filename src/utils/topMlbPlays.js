@@ -67,6 +67,11 @@ import {
   resolveFinalTier,
   logFinalTierTable,
   NO_VERIFIED_PLAYS_MESSAGE,
+  resolveVerifiedPlaysEmptyMessage,
+  passesResearchPlayThresholds,
+  hasAllowedVerification,
+  hasPositiveEdge,
+  classifyPropTier,
   countFinalTierPool,
 } from "./boardQuality.js";
 import { countVerificationStatuses } from "./verificationStatus.js";
@@ -441,9 +446,21 @@ export function resolveTopMlbPlaySections(
   highestPicks = dedupeByPlayerMarketBestScore(highestPicks);
 
   const enrichedForBoard = historicalPool.map((prop) => enrichBestPlayRankingFields(prop));
-  const boardQualityPool = dedupeByPlayerMarketBestScore(
+  let boardQualityPool = dedupeByPlayerMarketBestScore(
     enrichedForBoard.filter(passesPlayboardPoolFilter)
   );
+  if (!boardQualityPool.length) {
+    boardQualityPool = dedupeByPlayerMarketBestScore(
+      enrichedForBoard.filter(
+        (prop) =>
+          hasAllowedVerification(prop) &&
+          hasPositiveEdge(prop) &&
+          (classifyPropTier(prop) === "A" ||
+            classifyPropTier(prop) === "B" ||
+            passesResearchPlayThresholds(prop))
+      )
+    );
+  }
   const verificationCounts = countVerificationStatuses(boardQualityPool);
   const tierCounts = countFinalTierPool(boardQualityPool);
 
@@ -536,12 +553,22 @@ export function resolveTopMlbPlaySections(
     ? ""
     : NO_HIGH_QUALITY_VERIFIED_PLAYS_MESSAGE;
 
+  const loadedPropCount =
+    Number(options.loadedPropCount ?? 0) ||
+    displayProps.length ||
+    mergedInput.length;
+
   const sections = [
     {
       id: "top-10-best-plays",
       title: "Best Plays",
-      eyebrow: "Top 10 · Tier A → B → projected · Full or partial verification",
-      emptyMessage: topBestPlayPicks.length ? "" : NO_VERIFIED_PLAYS_MESSAGE,
+      eyebrow: "Top 10 · Tier A → B → Research · Full or partial verification",
+      emptyMessage: topBestPlayPicks.length
+        ? ""
+        : resolveVerifiedPlaysEmptyMessage({
+            loadedPropCount,
+            boardPoolCount: boardQualityPool.length,
+          }),
       fallbackNotice: bestPlaysResult.fallbackNotice || "",
       picks: topBestPlayPicks,
     },

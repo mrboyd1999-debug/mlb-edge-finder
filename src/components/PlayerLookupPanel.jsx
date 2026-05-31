@@ -1,11 +1,10 @@
 import { memo, useMemo, useState } from "react";
 import { formatNumber } from "../utils/formatters.js";
+import { resolveNormalizedConfidence, resolveNormalizedProbability, resolveProviderDisplayLabel } from "../utils/propDisplayFields.js";
 import { resolveRecommendedSide, resolveTierDisplayLabel } from "../utils/boardQuality.js";
-import { resolveVerificationStatus } from "../utils/verificationStatus.js";
 import { resolveProjectionValue } from "../utils/projectionQuality.js";
 import { formatEdgeDisplay } from "../utils/conservativeProjection.js";
 import { displayFullMarketLabel } from "../utils/propLabels.js";
-import { formatHitRatePercent } from "../utils/pickDirectionAudit.js";
 
 function normalizeSearch(value = "") {
   return String(value || "").trim().toLowerCase();
@@ -38,8 +37,8 @@ function PlayerLookupPanel({ boardProps = [], loading = false, onOpenProp }) {
       return name.includes(needle);
     });
     return rows.sort((a, b) => {
-      const confA = Number(a.displayConfidenceScore ?? a.confidenceScore ?? 0);
-      const confB = Number(b.displayConfidenceScore ?? b.confidenceScore ?? 0);
+      const confA = resolveNormalizedConfidence(a) ?? 0;
+      const confB = resolveNormalizedConfidence(b) ?? 0;
       if (confB !== confA) return confB - confA;
       const probA = Number(a.probabilityScore ?? a.verifiedProbability ?? 0);
       const probB = Number(b.probabilityScore ?? b.verifiedProbability ?? 0);
@@ -104,9 +103,9 @@ function PlayerLookupPanel({ boardProps = [], loading = false, onOpenProp }) {
               {props.map((prop, index) => {
                 const projection = resolveProjectionValue(prop);
                 const edge = formatEdgeDisplay(prop);
-                const probability = prop.probabilityScore ?? prop.verifiedProbability;
-                const confidence = prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence;
-                const verification = prop.verificationStatus || resolveVerificationStatus(prop);
+                const probability = resolveNormalizedProbability(prop);
+                const confidence = resolveNormalizedConfidence(prop);
+                const providerLabel = resolveProviderDisplayLabel(prop);
                 return (
                   <button
                     key={prop.id || `${playerName}-${index}`}
@@ -126,7 +125,7 @@ function PlayerLookupPanel({ boardProps = [], loading = false, onOpenProp }) {
                       <span>Prob {Number.isFinite(Number(probability)) ? `${Math.round(Number(probability))}%` : "—"}</span>
                       <span>Conf {Number.isFinite(Number(confidence)) ? `${Math.round(Number(confidence))}%` : "—"}</span>
                       <span>{resolveTierDisplayLabel(prop)}</span>
-                      <span>{verification}</span>
+                      {providerLabel ? <span>{providerLabel}</span> : null}
                     </div>
                   </button>
                 );

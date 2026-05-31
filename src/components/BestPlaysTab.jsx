@@ -3,7 +3,6 @@ import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
 import BestPlayFilterDiagnostics from "./BestPlayFilterDiagnostics.jsx";
 import TierAuditPanel from "./TierAuditPanel.jsx";
-import { applyBestPlayRankConstraints } from "../utils/bestPlayRankingScore.js";
 import { NO_VERIFIED_PLAYS_MESSAGE } from "../utils/mlbBoardPipeline.js";
 import { safeArray } from "../utils/safeStats.js";
 import { liveBoardLoadingMessage } from "../utils/liveBoardLoading.js";
@@ -23,9 +22,7 @@ function BestPlaysTab({
 }) {
   const topBestPlaysSection = useMemo(() => findSection(sections, "top-10-best-plays"), [sections]);
 
-  const topBestPlays = useMemo(() => {
-    return applyBestPlayRankConstraints(safeArray(topBestPlaysSection?.picks), { limit: 10 });
-  }, [topBestPlaysSection]);
+  const topBestPlays = useMemo(() => safeArray(topBestPlaysSection?.picks).slice(0, 10), [topBestPlaysSection]);
 
   const fallbackNotice = topBestPlaysSection?.fallbackNotice || "";
   const tierDebug = filterDiagnostics?.bestPlayFilterAudit?.tierDebugSummary || filterDiagnostics?.tierDebugSummary;

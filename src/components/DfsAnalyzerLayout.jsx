@@ -126,6 +126,7 @@ function DfsAnalyzerLayout({
             onOpen={onOpenProp}
             onSave={onSavePick}
             cacheStatus={cacheStatus}
+            savedPicks={savedDisplayPicks || []}
           />
         </SectionErrorBoundary>
       ) : null}

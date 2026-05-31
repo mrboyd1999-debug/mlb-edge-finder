@@ -4,6 +4,7 @@ import { resolveVerificationStatus } from "./verificationStatus.js";
 import { resolveProjectionValue } from "./projectionQuality.js";
 import { formatEdgeDisplay } from "./conservativeProjection.js";
 import { displayFullMarketLabel } from "./propLabels.js";
+import { attachPropDisplayFields, resolveNormalizedConfidence, resolveNormalizedProbability } from "./propDisplayFields.js";
 
 export const SAVED_PICKS_STORAGE_KEY = "mlb_pick_finder_saved_picks";
 
@@ -38,42 +39,47 @@ export function buildSavedPickDedupKey(pick = {}) {
 }
 
 export function buildSavedPickFromProp(prop = {}) {
-  const edgeLabels = prop.rawEdgeLabel
-    ? { displayEdgeLabel: prop.displayEdgeLabel }
-    : formatEdgeDisplay(prop);
-  const projection = resolveProjectionValue(prop);
-  const recommended = resolveRecommendedSide(prop);
+  const enriched = attachPropDisplayFields(prop);
+  const edgeLabels = enriched.rawEdgeLabel
+    ? { displayEdgeLabel: enriched.displayEdgeLabel }
+    : formatEdgeDisplay(enriched);
+  const projection = resolveProjectionValue(enriched);
+  const recommended = resolveRecommendedSide(enriched);
   const side =
     recommended === "OVER"
       ? "Higher"
       : recommended === "UNDER"
         ? "Lower"
-        : prop.bestPick || prop.side || prop.lean || "";
-  const gameTime = prop.startTime || prop.gameTime || prop.eventTime || "";
-  const matchup = prop.matchup || (prop.team && prop.opponent ? `${prop.team} @ ${prop.opponent}` : "");
+        : enriched.bestPick || enriched.side || enriched.lean || "";
+  const gameTime = enriched.startTime || enriched.gameTime || enriched.eventTime || "";
+  const matchup = enriched.matchup || (enriched.team && enriched.opponent ? `${enriched.team} @ ${enriched.opponent}` : "");
+  const confidence = resolveNormalizedConfidence(enriched);
+  const probability = resolveNormalizedProbability(enriched);
 
   return {
-    id: prop.id || `${buildSavedPickDedupKey({ ...prop, gameTime })}|${Date.now()}`,
+    id: enriched.id || `${buildSavedPickDedupKey({ ...enriched, gameTime })}|${Date.now()}`,
     savedAt: new Date().toISOString(),
-    playerName: prop.playerName || prop.player || "Unknown",
-    team: prop.team || prop.playerTeam || "",
-    opponent: prop.opponent || prop.opponentTeam || "",
+    playerName: enriched.playerName || enriched.player || "Unknown",
+    team: enriched.team || enriched.playerTeam || "",
+    opponent: enriched.opponent || enriched.opponentTeam || "",
     matchup,
     gameTime,
-    market: prop.statType || prop.propType || prop.market || displayFullMarketLabel(prop),
+    market: enriched.statType || enriched.propType || enriched.market || displayFullMarketLabel(enriched),
     recommendedSide: side,
-    line: prop.line,
-    projection: projection ?? prop.projection ?? prop.projectedValue ?? null,
-    edge: prop.edge ?? edgeLabels?.displayEdgeLabel ?? null,
-    probability: prop.probabilityScore ?? prop.verifiedProbability ?? null,
-    confidence: prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence ?? null,
-    tier: resolveFinalTier(prop),
-    verificationStatus: prop.verificationStatus || resolveVerificationStatus(prop),
-    dataSource: prop.platform || prop.source || prop.dataSource || "",
+    line: enriched.line,
+    projection: projection ?? enriched.projection ?? enriched.projectedValue ?? null,
+    edge: enriched.edge ?? edgeLabels?.displayEdgeLabel ?? null,
+    probability,
+    confidence,
+    risk: enriched.riskLevel || "HIGH",
+    tier: resolveFinalTier(enriched),
+    verificationStatus: enriched.verificationStatus || resolveVerificationStatus(enriched),
+    providerLabel: enriched.providerLabel || "",
+    dataSource: enriched.providerLabel || enriched.platform || enriched.source || enriched.dataSource || "",
     resultStatus: "pending",
     actualResult: "",
     gradedAt: null,
-    propSnapshot: prop,
+    propSnapshot: enriched,
   };
 }
 

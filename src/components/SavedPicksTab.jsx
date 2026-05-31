@@ -32,6 +32,8 @@ function SavedPickRow({ pick, onOpen, onDelete, onGrade }) {
           <span>Prob {Number.isFinite(Number(pick.probability)) ? `${Math.round(Number(pick.probability))}%` : "—"}</span>
           <span>Conf {Number.isFinite(Number(pick.confidence)) ? `${Math.round(Number(pick.confidence))}%` : "—"}</span>
           <span>{formatSavedTierLabel(pick.tier)}</span>
+          <span>{pick.risk || "—"}</span>
+          {pick.providerLabel ? <span>{pick.providerLabel}</span> : null}
           <span className={`saved-pick-row__status saved-pick-row__status--${pick.resultStatus || "pending"}`}>
             {formatGradeLabel(pick.resultStatus)}
           </span>
@@ -97,7 +99,7 @@ function SavedPicksTab({ picks = [], onOpen, onDelete, onClearAll, onGrade }) {
       </div>
 
       <section className="outcome-tracker-panel">
-        <h3>Outcome Tracker</h3>
+        <h3>Outcome Tracker Summary</h3>
         <div className="saved-pick-summary">
           <span>Total <strong>{summary.total}</strong></span>
           <span>Pending <strong>{summary.pending}</strong></span>
@@ -112,7 +114,7 @@ function SavedPicksTab({ picks = [], onOpen, onDelete, onClearAll, onGrade }) {
         <div className="outcome-tracker-tier-records">
           <span>Tier A Record: <strong>{summary.tierARecord.label}</strong></span>
           <span>Tier B Record: <strong>{summary.tierBRecord.label}</strong></span>
-          <span>Tier C Record: <strong>{summary.tierCRecord.label}</strong></span>
+          <span>Tier C / Research Record: <strong>{summary.tierCRecord.label}</strong></span>
           <span>
             Last 50 win rate:{" "}
             <strong>

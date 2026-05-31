@@ -35,6 +35,7 @@ export const TIER_B_RULES = {
 };
 
 export const NO_VERIFIED_PLAYS_MESSAGE = "No verified MLB plays meet today's safety threshold.";
+export const NO_MLB_PROPS_LOADED_MESSAGE = "No MLB props loaded yet.";
 export const NO_TIER_AB_RESEARCH_MESSAGE =
   "No Tier A/B verified plays today — showing research candidates.";
 

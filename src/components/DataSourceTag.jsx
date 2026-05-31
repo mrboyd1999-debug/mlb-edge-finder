@@ -1,16 +1,14 @@
 import { memo } from "react";
-import { formatDataSourceLabel, resolvePropDataSourceTag } from "../utils/renderDataSourceAudit.js";
+import ProviderLabel from "./ProviderLabel.jsx";
 
 function DataSourceTag({ prop = null, tag = "", cacheStatus = "", compact = false }) {
-  const resolved =
-    tag ||
-    prop?.dataSourceTag ||
-    (prop ? resolvePropDataSourceTag(prop, { cacheStatus }) : "");
-  const label = formatDataSourceLabel(resolved);
-  if (!label) return null;
+  const label = prop?.providerLabel || tag || "";
+  if (!label || /live_provider|cache_provider|null|undefined/i.test(String(label))) {
+    return <ProviderLabel prop={prop} cacheStatus={cacheStatus} compact={compact} />;
+  }
   return (
-    <span className={`data-source-tag${compact ? " data-source-tag--compact" : ""}`} data-source={label}>
-      Data Source: {label}
+    <span className={`data-source-tag${compact ? " data-source-tag--compact" : ""}`}>
+      {label}
     </span>
   );
 }

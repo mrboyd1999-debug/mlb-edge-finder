@@ -34,14 +34,16 @@ import {
 } from "../utils/pickAnalysis.js";
 import { buildHistoricalPerformance } from "../utils/historicalPropAnalytics.js";
 import { safeArray } from "../utils/safeStats.js";
-import {
-  attachBoardQualityFields,
+import { attachBoardQualityFields,
   resolveBoardDataQualityBadge,
   resolveBoardDataQualityLabel,
   resolveFinalTier,
   resolveRecommendedSide,
   resolveTierDisplayLabel,
 } from "../utils/boardQuality.js";
+import { resolveNormalizedConfidence, resolveNormalizedProbability } from "../utils/propDisplayFields.js";
+import { resolveRiskExplanation } from "../utils/risk.js";
+import ProviderLabel from "./ProviderLabel.jsx";
 import { resolveVerificationStatus } from "../utils/verificationStatus.js";
 import { buildHitRateSnapshot } from "../utils/modelValidation.js";
 import { resolveSeasonHitRateBundle, formatSeasonHitRateSource } from "../utils/seasonHitRate.js";
@@ -263,7 +265,8 @@ export default function PickDetailModal({
 
   const whyText = manualProp
     ? prop.whyThisPick || prop.premiumWhySummary || prop.qualificationReason || ""
-    : prop.premiumWhySummary ||
+    : prop.cardDescription ||
+      prop.premiumWhySummary ||
       prop.whyThisPick?.compact ||
       prop.confidenceExplanation ||
       prop.qualificationReason ||
@@ -285,19 +288,22 @@ export default function PickDetailModal({
   const propLabel = prop.statType || prop.propType || prop.market || null;
   const verificationLabel = prop.verificationStatus || resolveVerificationStatus(prop);
   const probabilityAuditRows = buildProbabilityAuditRows(prop, hitRateSnapshot, seasonHitRate);
-  const probabilityLabel = prop.probabilityScore != null
-    ? `${Math.round(Number(prop.probabilityScore))}%`
-    : prop.calibratedProbability != null
-      ? `${Math.round(Number(prop.calibratedProbability))}%`
-      : prop.impliedHitChance != null
-        ? `${prop.impliedHitChance}%`
-        : prop.hitChanceLabel || null;
-  const confidenceLabel =
-    prop.displayConfidenceScore != null
-      ? `${Math.round(Number(prop.displayConfidenceScore))}%`
-      : prop.confidenceScore != null && prop.confidenceScore > 0
-        ? `${prop.confidenceScore}%`
-        : null;
+  const probabilityLabel = (() => {
+    const normalized = resolveNormalizedProbability(prop);
+    if (normalized != null) return `${normalized}%`;
+    if (prop.probabilityScore != null) return `${Math.round(Number(prop.probabilityScore))}%`;
+    if (prop.calibratedProbability != null) return `${Math.round(Number(prop.calibratedProbability))}%`;
+    if (prop.impliedHitChance != null) return `${prop.impliedHitChance}%`;
+    return prop.hitChanceLabel || null;
+  })();
+  const confidenceLabel = (() => {
+    const normalized = resolveNormalizedConfidence(prop);
+    if (normalized != null) return `${normalized}%`;
+    return null;
+  })();
+  const riskLevel = String(prop.riskLevel || "HIGH").toUpperCase();
+  const riskDetail = prop.riskExplanation || resolveRiskExplanation(riskLevel);
+  const providerLabel = prop.providerLabel || null;
   const edgeLabel =
     Number.isFinite(Number(prop.edge)) && Number(prop.edge) !== 0
       ? formatSignedNumber(prop.edge)
@@ -402,8 +408,10 @@ export default function PickDetailModal({
                 <SummaryMetric label="Edge" value={edgeLabel} strong />
                 <SummaryMetric label="Probability" value={probabilityLabel} strong />
                 <SummaryMetric label="Confidence" value={confidenceLabel} strong />
+                <SummaryMetric label="Risk" value={riskLevel} strong />
                 {breakdownMode ? <SummaryMetric label="Tier" value={tierBadgeLabel} strong /> : null}
                 {breakdownMode ? <SummaryMetric label="Verification status" value={verificationLabel} /> : null}
+                {providerLabel ? <SummaryMetric label="Provider" value={providerLabel} /> : null}
               </>
             )}
           </div>
@@ -420,8 +428,8 @@ export default function PickDetailModal({
                   </p>
                 ) : null}
                 <p>{whyText}</p>
-                {!manualProp && riskExplanation(prop) ? (
-                  <p style={{ marginTop: "6px", fontSize: "11px" }}>{riskExplanation(prop)}</p>
+                {!manualProp && riskDetail ? (
+                  <p style={{ marginTop: "6px", fontSize: "11px" }}>{riskDetail}</p>
                 ) : null}
               </>
             )}
