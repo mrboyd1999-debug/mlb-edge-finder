@@ -20,6 +20,7 @@ export const EXACT_FAILURE_CODES = {
   FORBIDDEN: "403 forbidden",
   NOT_FOUND: "404 endpoint changed",
   JSON_PARSE: "JSON parse failure",
+  PARSER: "Parser failure",
   NORMALIZATION: "Normalization failure",
   FILTER: "Filter removing everything",
   FETCH: "Fetch failure",
@@ -107,19 +108,41 @@ export function resolveExactFailureReason({
 
   const err = String(lastError || "").toLowerCase();
   if (nonJson || /non-json|invalid json|json parse|unexpected token|malformed json/i.test(err)) {
-    return { code: "JSON_PARSE", label: EXACT_FAILURE_CODES.JSON_PARSE };
+    return { code: "JSON_PARSE", label: lastError || EXACT_FAILURE_CODES.JSON_PARSE };
   }
   if (fetched > 0 && parsed === 0) {
-    return { code: "JSON_PARSE", label: EXACT_FAILURE_CODES.JSON_PARSE };
+    const parserDetail =
+      lastError && !/fetch failure|json parse failure/i.test(lastError)
+        ? lastError
+        : "Parser failure — projection rows present but line_score/stat_type/player linkage missing";
+    return { code: "PARSER", label: parserDetail };
   }
   if (parsed > 0 && normalized === 0) {
-    return { code: "NORMALIZATION", label: EXACT_FAILURE_CODES.NORMALIZATION };
+    return {
+      code: "NORMALIZATION",
+      label:
+        lastError && /normalization|missing playerName|statType|line|team|league/i.test(lastError)
+          ? lastError
+          : EXACT_FAILURE_CODES.NORMALIZATION,
+    };
   }
   if (normalized > 0 && filtered === 0) {
-    return { code: "FILTER", label: EXACT_FAILURE_CODES.FILTER };
+    return {
+      code: "FILTER",
+      label:
+        lastError && /filter/i.test(lastError)
+          ? lastError
+          : "Filter failure — normalized props removed by sport/market filters",
+    };
   }
   if (fetched === 0 && (liveFetchFailed || !usedCache)) {
-    return { code: "FETCH", label: EXACT_FAILURE_CODES.FETCH };
+    if (Number.isFinite(status) && status >= 200 && status < 300) {
+      return {
+        code: "FETCH",
+        label: lastError || "Response JSON parsed but data array is empty",
+      };
+    }
+    return { code: "FETCH", label: lastError || EXACT_FAILURE_CODES.FETCH };
   }
   if (lastError) {
     return { code: "UNKNOWN", label: lastError };

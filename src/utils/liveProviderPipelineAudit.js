@@ -12,6 +12,7 @@ import {
   detectEndpointDeprecated,
   resolveExactFailureReason,
 } from "./liveFeedFailureAnalysis.js";
+import { resolvePrizePicksPipelineStages } from "./prizePicksPipelineCounts.js";
 
 /** @deprecated use LIVE_STAGE_LABELS for ingestion diagnostics display */
 export const PIPELINE_STAGE_LABELS = LIVE_STAGE_LABELS;
@@ -121,7 +122,7 @@ function buildProviderPipelineRow(
   );
   const notConfigured = Boolean(result?.notConfigured || fetchDiag.notConfigured || result?.status === "Not configured");
 
-  const fetched = liveFetchFailed
+  let fetched = liveFetchFailed
     ? finiteCount(fetchDiag.rawPropCount)
     : finiteCount(
         fetchDiag.rawPropCount ??
@@ -130,7 +131,7 @@ function buildProviderPipelineRow(
           result?.pipelineAudit?.fetched ??
           0
       );
-  const parsed = liveFetchFailed
+  let parsed = liveFetchFailed
     ? finiteCount(fetchDiag.parsedPropsCount)
     : finiteCount(
         fetchDiag.parsedPropsCount ??
@@ -139,14 +140,32 @@ function buildProviderPipelineRow(
           props.length
       );
   const platformDisplay = filterPlatformProps(displayProps, platformKey);
-  const filtered = countUsableProps(props.length ? props : platformDisplay);
-  const normalized = liveFetchFailed
+  let filtered = countUsableProps(props.length ? props : platformDisplay);
+  let normalized = liveFetchFailed
     ? finiteCount(fetchDiag.finalPropsCount || fetchDiag.parsedPropsCount)
     : finiteCount(
         sourceMeta.propsAfterParsing ??
           result?.debug?.propsAfterParsing ??
           parsed
       );
+
+  let ppStages = null;
+  if (platformKey === "prizepicks") {
+    ppStages = resolvePrizePicksPipelineStages({
+      prizePicksResult: result,
+      prizePicksProps: props,
+      pipelinePropCountAudit: result?.pipelineAudit,
+      debugInfo: { sources: { PrizePicks: sourceMeta } },
+      httpStatus: fetchDiag.httpStatus,
+      lastError: fetchDiag.lastError || fetchDiag.failureReason || sourceMeta.message || result?.warnings?.[0] || "",
+      usedCache,
+      liveFetchFailed,
+    });
+    fetched = ppStages.raw;
+    parsed = ppStages.parsed;
+    normalized = ppStages.normalized;
+    filtered = ppStages.usable;
+  }
   const projected = countMergedProjections(platformDisplay.length ? platformDisplay : props);
   const verified = countVerifiedProps(platformDisplay);
 
@@ -156,20 +175,28 @@ function buildProviderPipelineRow(
     endpointsTried: sourceMeta.endpointsTried || result?.debug?.endpointsTried,
   });
 
-  const exactFailure = resolveExactFailureReason({
-    httpStatus: fetchDiag.httpStatus,
-    timedOut,
-    notConfigured,
-    lastError: fetchDiag.lastError || fetchDiag.failureReason || sourceMeta.message || result?.warnings?.[0] || "",
-    fetched,
-    parsed,
-    normalized,
-    filtered,
-    endpointDeprecated,
-    nonJson: Boolean(fetchDiag.blockedPayloadDetected || /non-json|invalid json/i.test(String(fetchDiag.lastError || ""))),
-    usedCache,
-    liveFetchFailed,
-  });
+  const exactFailure =
+    ppStages?.exactFailure ||
+    resolveExactFailureReason({
+      httpStatus: fetchDiag.httpStatus,
+      timedOut,
+      notConfigured,
+      lastError:
+        ppStages?.failureReason ||
+        fetchDiag.lastError ||
+        fetchDiag.failureReason ||
+        sourceMeta.message ||
+        result?.warnings?.[0] ||
+        "",
+      fetched,
+      parsed,
+      normalized,
+      filtered,
+      endpointDeprecated,
+      nonJson: Boolean(fetchDiag.blockedPayloadDetected || /non-json|invalid json/i.test(String(fetchDiag.lastError || ""))),
+      usedCache,
+      liveFetchFailed,
+    });
 
   const stages = {
     [LIVE_STAGE_LABELS.FETCHED]: fetched,

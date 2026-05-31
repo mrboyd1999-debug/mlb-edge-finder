@@ -70,7 +70,12 @@ import {
   logPrizePicksRawSample,
   normalizePrizePicksResponse,
   parsePrizePicksProjections,
+  unwrapPrizePicksProxyPayload,
 } from "../utils/prizepicksParse.js";
+import {
+  logPrizePicksPipelineStages,
+  resolvePrizePicksPipelineStages,
+} from "../utils/prizePicksPipelineCounts.js";
 import {
   logFeedFetchError,
   logFeedFetchStart,
@@ -466,6 +471,22 @@ async function fetchPrizePicksPropsInternal({ sport = "all", statType = "all", s
       logPipelineAudit(isFallback ? "PrizePicks-cached" : "PrizePicks", audit);
       const apiSucceeded = !parsed.payload?.error;
       const rawCount = rawPrizePicksRecordCount(parsed.payload);
+      logPrizePicksPipelineStages(
+        "PP_PIPELINE",
+        resolvePrizePicksPipelineStages({
+          payload: parsed.payload,
+          normalizedProps: normalizedProps,
+          prizePicksResult: {
+            props: normalizedProps,
+            pipelineAudit: audit,
+            debug: {
+              rawPropsLoaded: rawCount,
+              propsAfterParsing: normalizedProps.length,
+              usablePropsCount: usableCount,
+            },
+          },
+        })
+      );
       logFeedStageTrace("PP", "prizepicks", {
         url: parsed.attempt?.url || absoluteUrl(endpoint),
         httpStatus: parsed.attempt?.status ?? null,
@@ -749,6 +770,35 @@ export function logPrizePicksFetchSummary({
   console.log("[PrizePicks] cache count", cacheCount);
   console.log("[PrizePicks] final count", finalCount);
   console.log("[PrizePicks] status", status);
+}
+
+/** Full pipeline stage audit — same counting rules as board ingestion + system status. */
+export function auditPrizePicksPipelineStages(
+  payload,
+  { sport = "MLB", statType = "all", lineSourceBadge = "LIVE" } = {}
+) {
+  if (!payload) {
+    const empty = resolvePrizePicksPipelineStages({ payload: null, lastError: "Empty payload" });
+    logPrizePicksPipelineStages("PP_PROBE", empty);
+    return empty;
+  }
+
+  const { props, audit } = normalizePrizePicksPayload(payload, sport, statType, lineSourceBadge);
+  const stages = resolvePrizePicksPipelineStages({
+    payload,
+    normalizedProps: props,
+    prizePicksResult: {
+      props,
+      pipelineAudit: audit,
+      debug: {
+        rawPropsLoaded: audit.fetched,
+        propsAfterParsing: props.length,
+        usablePropsCount: countUsableProps(props),
+      },
+    },
+  });
+  logPrizePicksPipelineStages("PP_PROBE", stages);
+  return stages;
 }
 
 async function fetchPrizePicksEndpoint(
@@ -1139,18 +1189,11 @@ function buildDebug(apiUrl, apiStatus, rawPropsLoaded, propsAfterParsing, messag
 function rawPrizePicksRecordCount(payload) {
   if (!payload || typeof payload !== "object") return 0;
   if (Array.isArray(payload.props)) return payload.props.length;
-  if (Array.isArray(payload.data?.data)) return payload.data.data.length;
-  const normalizedPayload = unwrapProxyPayload(payload);
-  if (normalizedPayload?.blocked) return 0;
-  return countPrizePicksRawRecords(normalizedPayload);
+  return countPrizePicksRawRecords(payload);
 }
 
-function absoluteUrl(endpoint) {
-  try {
-    return new URL(endpoint, window.location.origin).toString();
-  } catch {
-    return endpoint;
-  }
+function unwrapProxyPayload(payload, depth = 0) {
+  return unwrapPrizePicksProxyPayload(payload, depth);
 }
 
 function normalizePrizePicksPayload(payload, sport, statType, lineSourceBadge = "LIVE") {
@@ -1220,24 +1263,6 @@ function normalizePrizePicksPayloadInternal(payload, sport, statType, lineSource
     console.warn("[PrizePicks] normalize payload failed; returning empty audit-safe result", error);
     return { props: [], audit: coercePipelineAudit(audit) };
   }
-}
-
-function unwrapProxyPayload(payload, depth = 0) {
-  if (depth > 5 || !payload || typeof payload !== "object") return normalizePrizePicksResponse(null);
-  if (Array.isArray(payload)) return normalizePrizePicksResponse(payload);
-
-  if (payload?.source === "PrizePicks") {
-    if (payload.data?.data && Array.isArray(payload.data.data)) {
-      return normalizePrizePicksResponse({ data: payload.data.data, included: payload.data.included || [] });
-    }
-    if (Array.isArray(payload.props) && payload.props.length) {
-      return normalizePrizePicksResponse({ data: payload.props, included: payload.data?.included || [] });
-    }
-    if (payload.data && !Array.isArray(payload.data)) return unwrapProxyPayload(payload.data, depth + 1);
-    if (Array.isArray(payload.data)) return normalizePrizePicksResponse(payload);
-  }
-
-  return normalizePrizePicksResponse(payload);
 }
 
 function setupWarningFromPayload(payload, source) {

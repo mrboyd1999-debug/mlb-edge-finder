@@ -22,6 +22,35 @@ export function normalizePrizePicksResponse(raw) {
   return { ...EMPTY_PRIZEPICKS_PAYLOAD };
 }
 
+/** Unwrap proxy envelope `{ source, data: { data, included } }` to JSON:API shape. */
+export function unwrapPrizePicksProxyPayload(payload, depth = 0) {
+  if (depth > 5 || !payload || typeof payload !== "object") {
+    return normalizePrizePicksResponse(null);
+  }
+  if (Array.isArray(payload)) return normalizePrizePicksResponse(payload);
+
+  if (payload?.source === "PrizePicks") {
+    if (Array.isArray(payload.data?.data)) {
+      return normalizePrizePicksResponse({
+        data: payload.data.data,
+        included: payload.data.included || [],
+      });
+    }
+    if (Array.isArray(payload.props) && payload.props.length) {
+      return normalizePrizePicksResponse({
+        data: payload.props,
+        included: payload.data?.included || [],
+      });
+    }
+    if (payload.data && !Array.isArray(payload.data)) {
+      return unwrapPrizePicksProxyPayload(payload.data, depth + 1);
+    }
+    if (Array.isArray(payload.data)) return normalizePrizePicksResponse(payload);
+  }
+
+  return normalizePrizePicksResponse(payload);
+}
+
 export function buildIncludedRecordMap(included = []) {
   const map = new Map();
   if (!Array.isArray(included)) return map;
@@ -112,8 +141,47 @@ export function logPrizePicksRawSample(payload, { label = "PRIZEPICKS RAW" } = {
 
 export function countPrizePicksRawRecords(payload) {
   if (!payload || typeof payload !== "object") return 0;
-  if (isPrizePicksBlockPayload(payload)) return 0;
-  if (Array.isArray(payload)) return payload.length;
-  const rows = payload.data || payload.items || payload.results || payload.props || [];
-  return Array.isArray(rows) ? rows.length : 0;
+  const shape = unwrapPrizePicksProxyPayload(payload);
+  if (shape.blocked) return 0;
+  return Array.isArray(shape.data) ? shape.data.length : 0;
+}
+
+/** Lightweight parse-stage audit (raw + JSON:API parse preview). */
+export function auditPrizePicksParseStages(payload) {
+  const shape = unwrapPrizePicksProxyPayload(payload);
+  if (shape.blocked || isPrizePicksBlockPayload(payload)) {
+    return {
+      raw: 0,
+      parsed: 0,
+      blocked: true,
+      failureReason: "Bot-protection payload — no projections array",
+    };
+  }
+  const raw = Array.isArray(shape.data) ? shape.data.length : 0;
+  const parsedRows = parsePrizePicksProjections(shape);
+  const parsed = parsedRows.length;
+  let failureReason = "";
+  if (raw === 0) {
+    failureReason = "Response JSON parsed but data array is empty";
+  } else if (parsed === 0) {
+    failureReason =
+      "Parser extracted 0 props — verify attributes.line_score, stat_type, and included player records";
+  }
+  return { raw, parsed, parsedRows, failureReason, blocked: false };
+}
+
+export function validatePrizePicksNormalizedProp(prop = {}) {
+  const playerName = String(prop.playerName || prop.player || "").trim();
+  const statType = String(prop.statType || prop.market || prop.propType || "").trim();
+  const line = Number(prop.line);
+  const team = String(prop.team || "").trim();
+  const league = String(prop.league || prop.sport || "").trim();
+  return (
+    playerName.length >= 2 &&
+    statType.length >= 1 &&
+    Number.isFinite(line) &&
+    line > 0 &&
+    team.length >= 1 &&
+    league.length >= 1
+  );
 }

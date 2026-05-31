@@ -2,16 +2,16 @@
  * Isolated live feed probes — HTTP + parse counts only, no board pipeline.
  */
 
-import { getProxyUrl } from "../config/apiConfig.js";
 import { lineFeedJsonHeaders, resilientFetch } from "../services/fetchUtil.js";
+import { auditPrizePicksPipelineStages } from "../services/prizepicks.js";
 import { PRIZEPICKS_RETRY_TIMEOUTS_MS, UNDERDOG_RETRY_TIMEOUTS_MS } from "../utils/apiTimeout.js";
-import { countPrizePicksRawRecords } from "../utils/prizepicksParse.js";
 import { extractRawUnderdogRecords, parseUnderdogPayloadDedicated } from "../utils/parseUnderdogProp.js";
 import {
   getPrizePicksEndpointInventory,
   getUnderdogEndpointInventory,
   resolveExactFailureReason,
 } from "../utils/liveFeedFailureAnalysis.js";
+import { resolvePrizePicksPipelineStages } from "../utils/prizePicksPipelineCounts.js";
 
 function absoluteUrl(endpoint) {
   try {
@@ -83,15 +83,6 @@ async function probeUrl(url, { timeoutMs = 5000, signal } = {}) {
   }
 }
 
-function countPrizePicksProps(payload) {
-  if (!payload) return 0;
-  try {
-    return countPrizePicksRawRecords(payload);
-  } catch {
-    return Array.isArray(payload?.data) ? payload.data.length : 0;
-  }
-}
-
 function countUnderdogProps(payload) {
   if (!payload) return { raw: 0, parsed: 0 };
   const raw = extractRawUnderdogRecords(payload).length;
@@ -101,6 +92,47 @@ function countUnderdogProps(payload) {
   } catch {
     return { raw, parsed: 0 };
   }
+}
+
+function resolvePrizePicksProbeStages(lastAttempt) {
+  if (lastAttempt?.payload) {
+    return auditPrizePicksPipelineStages(lastAttempt.payload);
+  }
+  return resolvePrizePicksPipelineStages({
+    payload: null,
+    httpStatus: lastAttempt?.httpStatus ?? null,
+    lastError: lastAttempt?.error || "",
+    liveFetchFailed: !lastAttempt?.ok,
+  });
+}
+
+function resolveProbeFailure(lastAttempt, stages) {
+  if (lastAttempt?.nonJson) {
+    return resolveExactFailureReason({
+      httpStatus: lastAttempt.httpStatus,
+      lastError: lastAttempt.error,
+      nonJson: true,
+    });
+  }
+  if (lastAttempt?.timedOut) {
+    return resolveExactFailureReason({
+      httpStatus: lastAttempt.httpStatus,
+      timedOut: true,
+      lastError: lastAttempt.error,
+    });
+  }
+  if (stages?.exactFailure?.label) {
+    return stages.exactFailure;
+  }
+  return resolveExactFailureReason({
+    httpStatus: lastAttempt?.httpStatus,
+    lastError: stages?.failureReason || lastAttempt?.error,
+    fetched: stages?.raw ?? 0,
+    parsed: stages?.parsed ?? 0,
+    normalized: stages?.normalized ?? 0,
+    filtered: stages?.usable ?? 0,
+    liveFetchFailed: !lastAttempt?.ok,
+  });
 }
 
 export async function testPrizePicksFeedProbe({ signal } = {}) {
@@ -117,6 +149,7 @@ export async function testPrizePicksFeedProbe({ signal } = {}) {
       status: "Not configured",
       ok: false,
       failure: resolveExactFailureReason({ notConfigured: true }),
+      failureReason: "Not configured",
       stages: { FETCHED: 0, PARSED: 0, NORMALIZED: 0, FILTERED: 0 },
     };
   }
@@ -125,24 +158,18 @@ export async function testPrizePicksFeedProbe({ signal } = {}) {
   for (let i = 0; i < PRIZEPICKS_RETRY_TIMEOUTS_MS.length; i += 1) {
     if (signal?.aborted) break;
     lastAttempt = await probeUrl(endpoint, { timeoutMs: PRIZEPICKS_RETRY_TIMEOUTS_MS[i], signal });
-    const fetched = lastAttempt.ok ? countPrizePicksProps(lastAttempt.payload) : 0;
-    if (lastAttempt.ok && fetched > 0) break;
+    if (lastAttempt.ok && lastAttempt.payload) {
+      const preview = resolvePrizePicksProbeStages(lastAttempt);
+      if (preview.raw > 0) break;
+    }
     if (i < PRIZEPICKS_RETRY_TIMEOUTS_MS.length - 1) {
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
   }
 
-  const fetched = lastAttempt?.ok ? countPrizePicksProps(lastAttempt.payload) : 0;
-  const failure = resolveExactFailureReason({
-    httpStatus: lastAttempt?.httpStatus,
-    timedOut: Boolean(lastAttempt?.timedOut),
-    lastError: lastAttempt?.error,
-    fetched,
-    parsed: fetched,
-    normalized: fetched,
-    filtered: fetched,
-    nonJson: lastAttempt?.nonJson,
-  });
+  const stages = resolvePrizePicksProbeStages(lastAttempt);
+  const failure = resolveProbeFailure(lastAttempt, stages);
+  const ok = Boolean(lastAttempt?.ok && stages.usable > 0);
 
   return {
     provider: "PrizePicks",
@@ -150,17 +177,14 @@ export async function testPrizePicksFeedProbe({ signal } = {}) {
     httpStatus: lastAttempt?.httpStatus ?? null,
     responseBytes: lastAttempt?.responseBytes ?? 0,
     responseTimeMs: lastAttempt?.responseTimeMs ?? 0,
-    propCount: fetched,
-    status: lastAttempt?.ok && fetched > 0 ? "Connected" : failure.label || "Failed",
-    ok: Boolean(lastAttempt?.ok && fetched > 0),
+    propCount: stages.usable,
+    status: ok ? "Connected" : failure.label || "Failed",
+    ok,
     failure,
-    stages: {
-      FETCHED: fetched,
-      PARSED: fetched,
-      NORMALIZED: fetched,
-      FILTERED: fetched,
-    },
-    message: lastAttempt?.error || "",
+    failureReason: stages.failureReason || failure.label || lastAttempt?.error || "",
+    stages: stages.stages,
+    sample: stages.sample,
+    message: stages.failureReason || lastAttempt?.error || "",
   };
 }
 
@@ -219,6 +243,7 @@ export async function testUnderdogFeedProbe({ signal } = {}) {
     status: best ? "Connected" : failure.label || "Failed",
     ok: Boolean(best),
     failure,
+    failureReason: failure.label || attempt?.error || "",
     endpointDeprecated,
     stages: {
       FETCHED: counts.raw,
