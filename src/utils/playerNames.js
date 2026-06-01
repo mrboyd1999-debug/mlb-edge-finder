@@ -1,5 +1,4 @@
-import { canonicalMarketKey } from "./marketNormalization.js";
-import { marketsMatchForHistoricalAttach } from "./mlbHistoricalStatMapping.js";
+import { marketsMatchForHistoricalAttach, resolveMlbHistoricalMarketKey } from "./mlbHistoricalStatMapping.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
 import { mlbTeamsMatch } from "./mlbTeamMatch.js";
 
@@ -151,7 +150,7 @@ export function playerNamesMatch(a, b) {
 }
 
 export function statProfileKey(prop) {
-  const stat = canonicalMarketKey(prop?.statType || prop?.market || prop?.propType || "");
+  const stat = resolveMlbHistoricalMarketKey(prop?.statType || prop?.market || prop?.propType || "");
   const player = normalizePlayerName(resolvePropPlayerName(prop));
   const sport = String(prop?.sport || resolvePropSport(prop) || "").toLowerCase();
   return [sport, player, stat].filter(Boolean).join("|");
@@ -164,11 +163,11 @@ export function playerProfileKey(prop = {}) {
 }
 
 function propStatCanonical(prop = {}) {
-  return canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
+  return resolveMlbHistoricalMarketKey(prop.statType || prop.market || prop.propType || "");
 }
 
 function profileStatCanonical(profile = {}) {
-  return canonicalMarketKey(profile.statType || profile.market || "");
+  return resolveMlbHistoricalMarketKey(profile.statType || profile.market || "");
 }
 
 function resolvePropPlayerId(prop = {}) {
@@ -218,8 +217,23 @@ function findProfileByPlayerId(statsMap, prop, { exactStat = true } = {}) {
   const playerId = resolvePropPlayerId(prop);
   if (!playerId || !(statsMap instanceof Map)) return null;
 
-  const idKey = `id:${playerId}`;
-  const directId = statsMap.get(idKey);
+  const propStatKey = propStatCanonical(prop);
+  const sport = String(prop.sport || resolvePropSport(prop) || "mlb").toLowerCase();
+
+  if (propStatKey) {
+    const idStatKey = [sport, `id:${playerId}`, propStatKey].filter(Boolean).join("|");
+    const directStat = statsMap.get(idStatKey);
+    if (
+      directStat &&
+      isHistoricalAttachProfile(directStat) &&
+      (!exactStat || marketsMatchForHistoricalAttach(directStat.statType || profileStatCanonical(directStat), prop.statType))
+    ) {
+      return directStat;
+    }
+  }
+
+  const bareIdKey = `id:${playerId}`;
+  const directId = statsMap.get(bareIdKey);
   if (
     directId &&
     isHistoricalAttachProfile(directId) &&
@@ -319,39 +333,47 @@ export function findStatProfile(statsMap, prop) {
   const propStatKey = propStatCanonical(prop);
   if (!propStatKey) return null;
 
-  const playerName = resolvePropPlayerName(prop);
-  if (!playerName) return null;
-
-  const byId = findProfileByPlayerId(statsMap, { ...prop, playerName }, { exactStat: true });
+  const byId = findProfileByPlayerId(statsMap, prop, { exactStat: true });
   if (byId) return byId;
 
-  const primary = statProfileKey({ ...prop, playerName, sport: prop.sport || resolvePropSport(prop) || "MLB" });
+  const playerName = resolvePropPlayerName(prop);
+  if (!playerName && !resolvePropPlayerId(prop)) return null;
+
+  const primary = statProfileKey({
+    ...prop,
+    playerName: playerName || resolvePropPlayerName(prop),
+    sport: prop.sport || resolvePropSport(prop) || "MLB",
+  });
   const direct = statsMap.get(primary);
   if (direct && isHistoricalAttachProfile(direct) && marketsMatchForHistoricalAttach(direct.statType || propStatKey, prop.statType)) {
     return direct;
   }
 
-  for (const key of buildPlayerMatchKeys(playerName)) {
-    const byPlayerStat = statsMap.get(
-      [String(prop.sport || resolvePropSport(prop) || "mlb").toLowerCase(), key, propStatKey]
-        .filter(Boolean)
-        .join("|")
-    );
-    if (
-      byPlayerStat &&
-      isHistoricalAttachProfile(byPlayerStat) &&
-      marketsMatchForHistoricalAttach(byPlayerStat.statType || propStatKey, prop.statType)
-    ) {
-      return byPlayerStat;
+  if (playerName) {
+    for (const key of buildPlayerMatchKeys(playerName)) {
+      const byPlayerStat = statsMap.get(
+        [String(prop.sport || resolvePropSport(prop) || "mlb").toLowerCase(), key, propStatKey]
+          .filter(Boolean)
+          .join("|")
+      );
+      if (
+        byPlayerStat &&
+        isHistoricalAttachProfile(byPlayerStat) &&
+        marketsMatchForHistoricalAttach(byPlayerStat.statType || propStatKey, prop.statType)
+      ) {
+        return byPlayerStat;
+      }
     }
   }
 
-  const fuzzy = findBestProfileMatch(statsMap, { ...prop, playerName, sport: prop.sport || resolvePropSport(prop) || "MLB" }, {
-    exactStat: true,
-  });
+  const fuzzy = findBestProfileMatch(
+    statsMap,
+    { ...prop, playerName: playerName || resolvePropPlayerName(prop), sport: prop.sport || resolvePropSport(prop) || "MLB" },
+    { exactStat: true }
+  );
   if (fuzzy) return fuzzy;
 
-  return findTeamFallbackProfile(statsMap, { ...prop, playerName });
+  return playerName ? findTeamFallbackProfile(statsMap, { ...prop, playerName }) : findProfileByPlayerId(statsMap, prop, { exactStat: false });
 }
 
 /** Same-player profile fallback when exact market profile is missing (season / recent averages). */

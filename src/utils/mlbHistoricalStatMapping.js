@@ -4,15 +4,29 @@
 
 import { canonicalMarketKey } from "./marketNormalization.js";
 
-/** PrizePicks / DFS label → canonical market key used in stats profiles. */
+/** Normalize market text before historical lookup. */
+export function normalizeMarketForHistoricalLookup(statType = "") {
+  return String(statType || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\s+]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** PrizePicks / DFS label compact key → canonical market key used in stats profiles. */
 export const MLB_HISTORICAL_MARKET_ALIASES = {
   hitsrunsrbis: "hrr",
+  hitsrunsandrbis: "hrr",
   hrr: "hrr",
   "hits+runs+rbis": "hrr",
+  "hits runs rbis": "hrr",
   totalbases: "totalBases",
   tb: "totalBases",
   strikeouts: "strikeouts",
   pitcherstrikeouts: "strikeouts",
+  k: "strikeouts",
+  ks: "strikeouts",
   earnedrunsallowed: "earnedRuns",
   earnedruns: "earnedRuns",
   hitsallowed: "hitsAllowed",
@@ -21,12 +35,26 @@ export const MLB_HISTORICAL_MARKET_ALIASES = {
   outsrecorded: "outs",
   walks: "batterWalks",
   batterwalks: "batterWalks",
+  bb: "batterWalks",
   singles: "singles",
+  single: "singles",
+  "1b": "singles",
   doubles: "doubles",
+  double: "doubles",
+  "2b": "doubles",
   homeruns: "homeRuns",
+  hr: "homeRuns",
   hits: "hits",
+  hit: "hits",
+  h: "hits",
   runs: "runs",
+  run: "runs",
+  r: "runs",
   rbis: "rbis",
+  rbi: "rbis",
+  stolenbases: "stolenBases",
+  stolenbase: "stolenBases",
+  sb: "stolenBases",
   fantasyscore: "fantasyScore",
 };
 
@@ -45,16 +73,20 @@ export const MLB_HISTORICAL_SEASON_FIELDS = {
   singles: ["Singles"],
   doubles: ["Doubles"],
   homeRuns: ["HomeRuns"],
+  stolenBases: ["StolenBases"],
   fantasyScore: ["FantasyPoints", "FantasyPointsDraftKings"],
 };
 
 export function resolveMlbHistoricalMarketKey(statType = "") {
-  const key = canonicalMarketKey(statType);
-  if (key) return key;
-  const compact = String(statType || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9+]/g, "");
-  return MLB_HISTORICAL_MARKET_ALIASES[compact] || "";
+  const normalized = normalizeMarketForHistoricalLookup(statType);
+  const compact = normalized.replace(/[^a-z0-9+]/g, "");
+  if (MLB_HISTORICAL_MARKET_ALIASES[compact]) return MLB_HISTORICAL_MARKET_ALIASES[compact];
+  if (MLB_HISTORICAL_MARKET_ALIASES[normalized]) return MLB_HISTORICAL_MARKET_ALIASES[normalized];
+
+  const fromCanonical = canonicalMarketKey(statType) || canonicalMarketKey(normalized);
+  if (fromCanonical) return fromCanonical;
+
+  return compact || "";
 }
 
 export function marketsMatchForHistoricalAttach(statA = "", statB = "") {
@@ -73,6 +105,13 @@ export function resolveMlbHistoricalMarketLabel(statType = "") {
   if (key === "hitsAllowed") return "Hits Allowed";
   if (key === "outs") return "Pitching Outs";
   if (key === "batterWalks") return "Walks";
+  if (key === "homeRuns") return "Home Runs";
+  if (key === "stolenBases") return "Stolen Bases";
+  if (key === "singles") return "Singles";
+  if (key === "doubles") return "Doubles";
+  if (key === "hits") return "Hits";
+  if (key === "runs") return "Runs";
+  if (key === "rbis") return "RBIs";
   if (key === "fantasyScore") return "Fantasy Score";
   return String(statType || "").trim();
 }

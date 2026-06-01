@@ -87,10 +87,12 @@ export function resolveMaximumTier({ playability, sanityFail = false } = {}) {
 
 /** Small confidence adjustment when history is incomplete — neutral, not a rejection gate. */
 export function applyMissingHistoricalConfidencePenalty(confidence, prop = {}) {
-  void prop;
   const base = Number(confidence);
   if (!Number.isFinite(base)) return confidence;
-  return Math.round(base);
+  if (resolveHistoricalDataPresent(prop).present && !prop.historicalNeutralFallback && !prop.usesNeutralHistoricalFallback) {
+    return Math.round(base);
+  }
+  return Math.round(Math.max(0, base - 5));
 }
 
 export function resolveHistoricalStatus(prop = {}) {

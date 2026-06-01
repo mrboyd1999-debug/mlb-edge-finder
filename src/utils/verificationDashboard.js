@@ -31,6 +31,7 @@ import {
   resolvePlayabilityScore,
 } from "./bestPlayRankingScore.js";
 import { TIER_C_MIN_SANITY_SCORE, resolveHistoricalDataPresent } from "./tierHistoricalValidation.js";
+import { getHistoricalLookupDiagnostics } from "./historicalLookupDiagnostics.js";
 import {
   computeStandardEdge,
   computeStandardEdgePercent,
@@ -263,21 +264,35 @@ export function buildTopVerifiedPlaysRows(projectedPool = [], limit = 20) {
 function countHistoricalDiagnostics(projectedPool = []) {
   let propsMissingHistoricalData = 0;
   let propsUsingNeutralHistoricalFallback = 0;
+  const lookupDiag = getHistoricalLookupDiagnostics();
 
   for (const prop of projectedPool || []) {
     const historical = resolveHistoricalDataPresent(prop);
     if (!historical.present) {
       propsMissingHistoricalData += 1;
-      propsUsingNeutralHistoricalFallback += 1;
+      if (prop.usesNeutralHistoricalFallback || prop.historicalNeutralFallback) {
+        propsUsingNeutralHistoricalFallback += 1;
+      }
       continue;
     }
-    if (prop.historicalStatsAttached || prop.hasGameLogs) continue;
+    if (prop.historicalStatsAttached || prop.hasGameLogs) {
+      if (prop.historicalNeutralFallback || prop.usesNeutralHistoricalFallback) {
+        propsUsingNeutralHistoricalFallback += 1;
+      }
+      continue;
+    }
     if (!historical.last5Present || !historical.last10Present || !historical.seasonPresent) {
       propsUsingNeutralHistoricalFallback += 1;
     }
   }
 
-  return { propsMissingHistoricalData, propsUsingNeutralHistoricalFallback };
+  return {
+    propsMissingHistoricalData,
+    propsUsingNeutralHistoricalFallback,
+    historicalMatched: lookupDiag.historicalMatched,
+    historicalMissing: lookupDiag.historicalMissing,
+    fallbackUsed: lookupDiag.fallbackUsed,
+  };
 }
 
 function failsTierGate(prop = {}) {
@@ -353,6 +368,9 @@ export function buildVerificationFailureBreakdown(projectedPool = [], options = 
   breakdown.propsMissingHistoricalData = historicalDiagnostics.propsMissingHistoricalData;
   breakdown.propsUsingNeutralHistoricalFallback =
     historicalDiagnostics.propsUsingNeutralHistoricalFallback;
+  breakdown.historicalMatched = historicalDiagnostics.historicalMatched;
+  breakdown.historicalMissing = historicalDiagnostics.historicalMissing;
+  breakdown.fallbackUsed = historicalDiagnostics.fallbackUsed;
   breakdown.historicalDataCoveragePercent = options.historicalCoverageAudit?.coveragePercent ?? 0;
 
   if (breakdown.passedTierGate > 0) {

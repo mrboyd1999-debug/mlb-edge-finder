@@ -8,7 +8,7 @@ import {
   filterMlbPipelineSupportedMarkets,
   isBlockedNonMlbPipelineProp,
 } from "./mlbAllowedMarkets.js";
-import { findPlayerHistoricalProfile } from "./playerNames.js";
+import { attachHistoricalStatsFromProfile } from "./historicalStatsLoader.js";
 import { resolveHistoricalDataPresent } from "./tierHistoricalValidation.js";
 
 export const PROJECTION_COVERAGE_TARGET = 0.7;
@@ -30,19 +30,40 @@ export function countMergedProjections(props = []) {
   }).length;
 }
 
-export function summarizeHistoricalMatchCounts(props = [], statsMap = null) {
+export function summarizeHistoricalMatchCounts(props = [], statsMap = null, context = {}) {
   let historicalMatches = 0;
   let historicalMissing = 0;
+  let historicalMatched = 0;
+  let fallbackUsed = 0;
 
   for (const prop of props || []) {
-    if (prop?.historicalCoverage === true || prop?.hasGameLogs || prop?.hasVerifiedStats) {
+    if (prop?.historicalStatsAttached && !prop?.historicalNeutralFallback && !prop?.usesNeutralHistoricalFallback) {
+      historicalMatched += 1;
       historicalMatches += 1;
       continue;
     }
 
-    const profile =
-      statsMap instanceof Map ? findPlayerHistoricalProfile(statsMap, prop) : null;
-    const enriched = profile ? { ...prop, ...profile } : prop;
+    const enriched = attachHistoricalStatsFromProfile(prop, {
+      statsMap,
+      seasonStats: context.seasonStats || [],
+    });
+
+    if (enriched.historicalStatsAttached && !enriched.historicalNeutralFallback && !enriched.usesNeutralHistoricalFallback) {
+      historicalMatched += 1;
+      historicalMatches += 1;
+      continue;
+    }
+
+    if (enriched.historicalNeutralFallback || enriched.usesNeutralHistoricalFallback) {
+      fallbackUsed += 1;
+      if (resolveHistoricalDataPresent(enriched).present) {
+        historicalMatches += 1;
+      } else {
+        historicalMissing += 1;
+      }
+      continue;
+    }
+
     if (resolveHistoricalDataPresent(enriched).present) {
       historicalMatches += 1;
     } else {
@@ -50,7 +71,7 @@ export function summarizeHistoricalMatchCounts(props = [], statsMap = null) {
     }
   }
 
-  return { historicalMatches, historicalMissing };
+  return { historicalMatches, historicalMissing, historicalMatched, fallbackUsed };
 }
 
 /**
@@ -71,6 +92,7 @@ export function buildProjectionCoverageAudit({
   marketFilteredProps = [],
   projectedProps = [],
   statsMap = null,
+  seasonStats = [],
   matchedPlayers = 0,
   gameLogsFound = 0,
 } = {}) {
@@ -85,9 +107,10 @@ export function buildProjectionCoverageAudit({
   const coverageBase = normalized > 0 ? normalized : afterSportFilter;
   const projectionCoveragePercent =
     coverageBase > 0 ? Math.round((projected / coverageBase) * 1000) / 10 : 0;
-  const { historicalMatches, historicalMissing } = summarizeHistoricalMatchCounts(
+  const { historicalMatches, historicalMissing, historicalMatched, fallbackUsed } = summarizeHistoricalMatchCounts(
     projectedProps,
-    statsMap
+    statsMap,
+    { seasonStats }
   );
 
   const firstRejectionStage =
@@ -114,6 +137,8 @@ export function buildProjectionCoverageAudit({
     projectedProps: projected,
     historicalMatches,
     historicalMissing,
+    historicalMatched,
+    fallbackUsed,
     projectionCoveragePercent,
     meetsCoverageTarget: projectionCoveragePercent >= PROJECTION_COVERAGE_TARGET * 100,
     firstRejectionStage,
@@ -131,7 +156,9 @@ export function logProjectionCoverageAudit(audit = {}) {
   console.log("AFTER PLAYER MATCH", audit.matchedPlayers ?? 0);
   console.log("AFTER PROJECTION GENERATION", audit.projectedProps ?? 0);
   console.log("Historical Matches", audit.historicalMatches ?? 0);
+  console.log("Historical Matched (profiles)", audit.historicalMatched ?? 0);
   console.log("Historical Missing", audit.historicalMissing ?? 0);
+  console.log("Historical Fallback Used", audit.fallbackUsed ?? 0);
   console.log("Projection Coverage %", audit.projectionCoveragePercent ?? 0);
   if (audit.firstRejectionStage) {
     console.log("First rejection point", audit.firstRejectionStage);

@@ -110,6 +110,7 @@ function resolveSanityScore(prop = {}) {
 function qualifiesTierA({ probability, confidence, playability, sanity, historicalPresent, hitRateValidated, audit, prop = {} }) {
   const integrity = prop.integrityAudit || buildIntegrityAudit(prop);
   if (!historicalPresent) return false;
+  if (prop.historicalNeutralFallback || prop.usesNeutralHistoricalFallback) return false;
   if (!hitRateValidated) return false;
   if (audit?.blocksTierA) return false;
   if (integrity.hitRateInvalid || integrity.probabilityMismatch || integrity.dataIntegrityWarning) return false;
@@ -226,13 +227,17 @@ export function classifyVerifiedTier(prop = {}) {
 }
 
 export function hasIncompleteSupportingData(prop = {}) {
+  const historicalGap =
+    !hasVerifiedHistoricalAttachment(prop) &&
+    !prop.historicalNeutralFallback &&
+    !prop.usesNeutralHistoricalFallback;
   return (
     isLowMatchupProp(prop) ||
     hasMajorResearchGaps(prop) ||
     prop.projectionUnavailable ||
     prop.isFallbackProjection ||
     isFallbackProjectionProp(prop) ||
-    !hasVerifiedHistoricalAttachment(prop) ||
+    historicalGap ||
     prop.unverifiedGradeBlocked
   );
 }

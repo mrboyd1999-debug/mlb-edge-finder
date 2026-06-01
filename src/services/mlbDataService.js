@@ -3,6 +3,7 @@ import { readSmartCacheIfFresh, writeSmartCache, CACHE_TTL } from "./smartCache.
 import { SOURCE_LABELS } from "./statEnrichment.js";
 import { normalizePlayerName, statProfileKey, resolvePropPlayerName, buildPlayerMatchKeys } from "../utils/playerNames.js";
 import { canonicalMarketKey } from "../utils/marketNormalization.js";
+import { resolveMlbHistoricalMarketKey } from "../utils/mlbHistoricalStatMapping.js";
 import { resolvePropSport } from "../utils/mlbOnlyMode.js";
 import { mlbTeamsMatch } from "../utils/mlbTeamMatch.js";
 import {
@@ -976,12 +977,12 @@ export async function buildMlbPropDataPackage(prop = {}, { buildProfile = null, 
 
 function indexMlbStatProfile(stats, prop, profile) {
   const playerName = resolvePropPlayerName(prop);
-  const statKey = canonicalMarketKey(prop.statType || prop.market || prop.propType || "");
+  const statKey = resolveMlbHistoricalMarketKey(prop.statType || prop.market || prop.propType || "");
   const sport = String(profile.sport || prop.sport || resolvePropSport(prop) || "MLB").toLowerCase();
   const enriched = {
     ...profile,
     sport: profile.sport || prop.sport || resolvePropSport(prop) || "MLB",
-    statType: profile.statType || prop.statType || prop.market,
+    statType: resolveMlbHistoricalMarketKey(profile.statType || prop.statType || prop.market || "") || statKey,
     playerName: profile.playerName || playerName,
     playerId:
       profile.playerId ??
@@ -999,6 +1000,7 @@ function indexMlbStatProfile(stats, prop, profile) {
   const playerId = enriched.playerId;
   if (playerId != null && playerId !== "") {
     keys.add([sport, `id:${String(playerId)}`, statKey].filter(Boolean).join("|"));
+    keys.add(`id:${String(playerId)}`);
   }
   for (const key of keys) {
     stats.set(key, enriched);

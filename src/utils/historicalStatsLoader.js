@@ -10,6 +10,15 @@ import {
   resolveMlbHistoricalMarketKey,
   sumSeasonFieldsPerGame,
 } from "./mlbHistoricalStatMapping.js";
+import {
+  logHistoricalLookupFailure,
+  recordHistoricalLookupFallback,
+  recordHistoricalLookupMatch,
+  recordHistoricalLookupMissing,
+  resetHistoricalLookupDiagnostics,
+  logHistoricalLookupSummary,
+  getHistoricalLookupDiagnostics,
+} from "./historicalLookupDiagnostics.js";
 import { resolveHistoricalDataPresent, resolveHistoricalStatus } from "./tierHistoricalValidation.js";
 import { attachSeasonHitRateFields } from "./seasonHitRate.js";
 
@@ -136,6 +145,57 @@ function resolveHistoricalFieldsFromProfile(profile = {}, prop = {}) {
   }
 
   return null;
+}
+
+function buildNeutralHistoricalFallbackFields(prop = {}) {
+  const line = Number(prop.line);
+  const projection = Number(prop.projection ?? prop.projectedValue);
+  const anchor =
+    Number.isFinite(projection) && projection > 0
+      ? projection
+      : Number.isFinite(line) && line > 0
+        ? line * 0.52
+        : 1;
+
+  return {
+    last5Average: anchor,
+    last10Average: anchor,
+    seasonAverage: anchor,
+    gameLogCount: 0,
+    hasGameLogs: false,
+    historicalSource: "neutral historical fallback",
+    historicalNeutralFallback: true,
+    historicalRecomputedFromSplits: false,
+  };
+}
+
+function auditHistoricalLookup(prop = {}, profile = null, outcome = "missing") {
+  const expectedStatKey = resolveMlbHistoricalMarketKey(prop.statType || prop.market || prop.propType || "");
+  const matchedStatKey = profile
+    ? resolveMlbHistoricalMarketKey(profile.statType || profile.market || "")
+    : "none";
+  const playerId = resolvePropPlayerId(prop) || resolveProfilePlayerId(profile) || "—";
+
+  if (outcome === "matched") {
+    recordHistoricalLookupMatch();
+    return;
+  }
+  if (outcome === "fallback") {
+    recordHistoricalLookupFallback();
+    return;
+  }
+
+  recordHistoricalLookupMissing();
+  logHistoricalLookupFailure({
+    player: resolvePropPlayerName(prop),
+    market: prop.statType || prop.market || prop.propType || "—",
+    expectedStatKey,
+    matchedStatKey,
+    playerId,
+    reason: profile
+      ? "Profile matched but missing attachable game logs for market"
+      : "No statsMap profile match for player/market",
+  });
 }
 
 function resolveSeasonHistoricalFallback(prop = {}, seasonStats = []) {
@@ -300,14 +360,16 @@ export function attachHistoricalStatsFromProfile(prop = {}, context = {}) {
   if (!(statsMap instanceof Map)) {
     const seasonFallback = resolveSeasonHistoricalFallback(enrichedProp, context.seasonStats || []);
     if (seasonFallback) {
+      auditHistoricalLookup(enrichedProp, null, "fallback");
       return applyHistoricalFields(enrichedProp, null, seasonFallback, context);
     }
+    auditHistoricalLookup(enrichedProp, null, "missing");
+    const neutral = buildNeutralHistoricalFallbackFields(enrichedProp);
+    const attached = applyHistoricalFields(enrichedProp, null, neutral, context);
     return {
-      ...enrichedProp,
-      historicalStatsAttached: false,
-      historicalStatus: "neutral",
-      historicalCoverage: false,
+      ...attached,
       usesNeutralHistoricalFallback: true,
+      historicalStatus: "neutral",
     };
   }
 
@@ -315,16 +377,21 @@ export function attachHistoricalStatsFromProfile(prop = {}, context = {}) {
   if (profile && profileHasAttachableData(profile)) {
     const fields = resolveHistoricalFieldsFromProfile(profile, enrichedProp);
     if (fields) {
+      auditHistoricalLookup(enrichedProp, profile, "matched");
       const attached = applyHistoricalFields(enrichedProp, profile, fields, context);
       return {
         ...attached,
         historicalStatus: resolveHistoricalDataPresent(attached).present ? "present" : "neutral",
       };
     }
+    auditHistoricalLookup(enrichedProp, profile, "missing");
+  } else {
+    auditHistoricalLookup(enrichedProp, profile, "missing");
   }
 
   const seasonFallback = resolveSeasonHistoricalFallback(enrichedProp, context.seasonStats || []);
   if (seasonFallback) {
+    auditHistoricalLookup(enrichedProp, profile, "fallback");
     const attached = applyHistoricalFields(enrichedProp, profile, seasonFallback, context);
     return {
       ...attached,
@@ -333,19 +400,22 @@ export function attachHistoricalStatsFromProfile(prop = {}, context = {}) {
     };
   }
 
+  const neutral = buildNeutralHistoricalFallbackFields(enrichedProp);
+  auditHistoricalLookup(enrichedProp, profile, "fallback");
+  const attached = applyHistoricalFields(enrichedProp, profile, neutral, context);
   return {
-    ...enrichedProp,
-    historicalStatsAttached: false,
+    ...attached,
+    historicalStatsAttached: true,
     historicalStatus: "neutral",
-    historicalCoverage: resolveHistoricalDataPresent(enrichedProp).present,
     usesNeutralHistoricalFallback: true,
   };
 }
 
 export function attachHistoricalStatsToProps(props = [], context = {}) {
   const logAttach = Boolean(context.logAttach ?? import.meta.env.DEV);
+  resetHistoricalLookupDiagnostics();
 
-  return (props || []).map((prop) => {
+  const result = (props || []).map((prop) => {
     try {
       const next = attachHistoricalStatsFromProfile(prop, context);
       if (logAttach) {
@@ -369,10 +439,14 @@ export function attachHistoricalStatsToProps(props = [], context = {}) {
       };
     }
   });
+
+  logHistoricalLookupSummary("HistoricalAttach");
+  return result;
 }
 
 export function buildStatsAttachmentMetrics(props = [], context = {}) {
   const pool = props || [];
+  const lookupDiag = getHistoricalLookupDiagnostics();
   if (!pool.length) {
     return {
       profilesFound: 0,
@@ -380,6 +454,9 @@ export function buildStatsAttachmentMetrics(props = [], context = {}) {
       gameLogsAttached: 0,
       historicalAttached: 0,
       historicalCoveragePercent: 0,
+      historicalMatched: lookupDiag.historicalMatched,
+      historicalMissing: lookupDiag.historicalMissing,
+      fallbackUsed: lookupDiag.fallbackUsed,
       total: 0,
     };
   }
@@ -405,6 +482,9 @@ export function buildStatsAttachmentMetrics(props = [], context = {}) {
     gameLogsAttached,
     historicalAttached,
     historicalCoveragePercent: Math.round((withHistorical / pool.length) * 1000) / 10,
+    historicalMatched: lookupDiag.historicalMatched,
+    historicalMissing: lookupDiag.historicalMissing,
+    fallbackUsed: lookupDiag.fallbackUsed,
     total: pool.length,
   };
 }
