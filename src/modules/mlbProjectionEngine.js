@@ -568,6 +568,9 @@ export function projectMlbHitterProp(prop = {}, profile = {}, context = {}) {
   if (key === "fantasyScore") return projectHitterFantasyScore(prop, profile, context);
   if (key === "hrr") return projectHitterHrr(prop, profile, context);
   if (key === "totalBases") return projectHitterTotalBases(prop, profile, context);
+  if (MLB_HITTER_PHASE2_MARKETS.includes(key)) {
+    return projectVerifiedHitterMarket(prop, profile, context, key);
+  }
   return null;
 }
 

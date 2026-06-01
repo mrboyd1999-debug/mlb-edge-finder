@@ -2,7 +2,17 @@ import { canonicalMarketKey } from "../utils/marketNormalization.js";
 import { isMlbVerifiedSource } from "./mlbPitcherData.js";
 
 /** Phase 2 verified hitter markets. */
-export const MLB_HITTER_PHASE2_MARKETS = ["fantasyScore", "hrr", "totalBases"];
+export const MLB_HITTER_PHASE2_MARKETS = [
+  "fantasyScore",
+  "hrr",
+  "totalBases",
+  "hits",
+  "runs",
+  "rbis",
+  "homeRuns",
+  "stolenBases",
+  "batterWalks",
+];
 
 function round(value, digits = 2) {
   const factor = 10 ** digits;
@@ -69,6 +79,12 @@ function statValueFromHitterRow(row = {}, marketKey = "") {
     return round((hits || 0) + (runs || 0) + (rbi || 0), 2);
   }
   if (marketKey === "totalBases") return finiteNumber(stat.totalBases);
+  if (marketKey === "hits") return finiteNumber(stat.hits);
+  if (marketKey === "runs") return finiteNumber(stat.runs);
+  if (marketKey === "rbis") return finiteNumber(stat.rbi ?? stat.rbis);
+  if (marketKey === "homeRuns") return finiteNumber(stat.homeRuns);
+  if (marketKey === "stolenBases") return finiteNumber(stat.stolenBases);
+  if (marketKey === "batterWalks") return finiteNumber(stat.baseOnBalls ?? stat.walks);
   return null;
 }
 

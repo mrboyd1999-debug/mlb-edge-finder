@@ -41,7 +41,7 @@ const APPROVED_MARKET_KEYS = MLB_ONLY_MODE
   : FULL_APPROVED_MARKET_KEYS;
 
 export const SPORT_PROCESSING_LIMITS = MLB_ONLY_MODE
-  ? { MLB: 150 }
+  ? { MLB: 2500 }
   : {
       MLB: 80,
       NBA: 80,

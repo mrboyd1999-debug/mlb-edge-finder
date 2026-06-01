@@ -36,6 +36,12 @@ const MLB_VOLATILITY = {
   fantasyScore: { tier: "MEDIUM", score: 0.56, label: "Medium variance" },
   hrr: { tier: "HIGH", score: 0.82, label: "High variance" },
   totalBases: { tier: "MEDIUM", score: 0.55, label: "Medium variance" },
+  hits: { tier: "MEDIUM", score: 0.58, label: "Medium variance" },
+  runs: { tier: "MEDIUM", score: 0.6, label: "Medium variance" },
+  rbis: { tier: "MEDIUM", score: 0.62, label: "Medium variance" },
+  homeRuns: { tier: "HIGH", score: 0.78, label: "High variance" },
+  stolenBases: { tier: "HIGH", score: 0.74, label: "High variance" },
+  batterWalks: { tier: "MEDIUM", score: 0.57, label: "Medium variance" },
 };
 
 function getVolatility(statType = "") {

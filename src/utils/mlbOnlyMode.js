@@ -21,16 +21,28 @@ export const MLB_ONLY_MODE = true;
 export const MLB_SPORT = APP_SPORTS.MLB;
 
 /** S-tier — elite projection markets. */
-export const MLB_QUALITY_S_KEYS = new Set(["hrr", "totalBases", "strikeouts"]);
+export const MLB_QUALITY_S_KEYS = new Set([
+  "hrr",
+  "totalBases",
+  "strikeouts",
+  "hits",
+  "runs",
+  "rbis",
+]);
 
 /** A-tier — strong secondary markets. */
-export const MLB_QUALITY_A_KEYS = new Set(["hitsAllowed", "earnedRuns"]);
+export const MLB_QUALITY_A_KEYS = new Set(["hitsAllowed", "earnedRuns", "outs"]);
 
 /** B-tier — supported but lower signal. */
 export const MLB_QUALITY_B_KEYS = new Set(["singles", "doubles"]);
 
 /** C-tier — volatile / requires stronger edge. */
-export const MLB_QUALITY_C_KEYS = new Set(["homeRuns", "stolenBases", "fantasyScore", "batterWalks"]);
+export const MLB_QUALITY_C_KEYS = new Set([
+  "homeRuns",
+  "stolenBases",
+  "fantasyScore",
+  "batterWalks",
+]);
 
 /** @deprecated — use MLB_QUALITY_S_KEYS for elite picks */
 export const MLB_TIER1_MARKET_KEYS = MLB_QUALITY_S_KEYS;
@@ -59,14 +71,25 @@ export const MLB_ACTIVE_MARKET_KEYS = new Set([
 ]);
 
 export const MLB_PRIMARY_MARKET_LABELS = [
+  "Hits",
+  "Runs",
+  "RBIs",
   "Hits+Runs+RBIs",
   "Total Bases",
   "Pitcher Strikeouts",
+  "Pitcher Outs",
 ];
 
-export const MLB_TIER2_MARKET_LABELS = ["Hits Allowed", "Earned Runs Allowed", "Fantasy Score", "Singles"];
+export const MLB_TIER2_MARKET_LABELS = [
+  "Hits Allowed",
+  "Earned Runs Allowed",
+  "Fantasy Score",
+  "Singles",
+  "Walks",
+  "Stolen Bases",
+];
 
-export const MLB_RESEARCH_MARKET_LABELS = ["Doubles", "Home Runs", "Stolen Bases"];
+export const MLB_RESEARCH_MARKET_LABELS = ["Doubles", "Home Runs"];
 
 const DISABLED_SPORTS = new Set([
   APP_SPORTS.NBA,

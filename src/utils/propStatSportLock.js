@@ -52,6 +52,9 @@ export function isMlbOnlyStatType(statType = "") {
   if (/\brbis?\b/.test(text)) return true;
   if (/\bhits?\b/.test(text)) return true;
   if (/\bruns?\b/.test(text) && !/\brebounds?\b/.test(text)) return true;
+  if (/\bwalks?\b/.test(text) && !/\ballowed\b/.test(text)) return true;
+  if (/pitching\s*outs?|\bouts?\s*recorded\b/.test(text)) return true;
+  if (/fantasy\s*(score|points?)/.test(text)) return true;
 
   const compact = compactMarketKey(statType);
   return (
@@ -61,9 +64,14 @@ export function isMlbOnlyStatType(statType = "") {
     compact.includes("homerun") ||
     compact.includes("strikeout") ||
     compact.includes("earnedrun") ||
+    compact.includes("stolenbase") ||
+    compact.includes("batterwalk") ||
     compact === "hits" ||
+    compact === "runs" ||
     compact === "rbis" ||
-    compact === "rbi"
+    compact === "rbi" ||
+    compact === "outs" ||
+    compact === "walks"
   );
 }
 

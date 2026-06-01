@@ -3,7 +3,7 @@
  */
 
 import { normalizePropShape } from "../utils/propShape.js";
-import { filterResolvedSportProps } from "../utils/underdogSportDetection.js";
+import { attachSportInference, filterResolvedSportProps } from "../utils/underdogSportDetection.js";
 import { MLB_ONLY_MODE } from "../utils/mlbOnlyMode.js";
 
 export const PRIZEPICKS_RATE_LIMIT_OTHERS_MESSAGE = "PrizePicks rate limited, using other sources";
@@ -19,9 +19,10 @@ export function mergeProviderRawProps({ underdogProps = [], prizePicksProps = []
   const merged = [];
 
   [...underdogProps, ...prizePicksProps].forEach((prop) => {
-    const shaped = normalizePropShape(prop, {
-      platform: prop.platform || prop.source,
-      source: prop.source || prop.platform,
+    const inferred = attachSportInference(prop, { selectedSportTab: "MLB" });
+    const shaped = normalizePropShape(inferred, {
+      platform: inferred.platform || inferred.source,
+      source: inferred.source || inferred.platform,
     });
     const key = shaped.id || `${shaped.playerName}|${shaped.statType}|${shaped.line}|${shaped.source}`;
     if (seen.has(key)) return;
