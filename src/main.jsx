@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import { validateOddsApiKeyOnce } from "./services/oddsApiClient.js";
+import { logEnvStartupDiagnostics } from "./utils/envStartupDiagnostics.js";
 import "./styles.css";
 
 function installGlobalErrorHandlers() {
@@ -34,6 +35,7 @@ function installGlobalErrorHandlers() {
 }
 
 installGlobalErrorHandlers();
+logEnvStartupDiagnostics();
 void validateOddsApiKeyOnce();
 
 ReactDOM.createRoot(document.getElementById("root")).render(

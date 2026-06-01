@@ -221,6 +221,7 @@ import {
 import { logPipelineStage } from "./utils/mlbPipelineDebug.js";
 import {
   mergeProviderRawProps,
+  resolveEffectiveMergedProviderProps,
   buildUnderdogParserFailureMessage,
   hasAnyProviderProps,
   resolveProviderResultProps,
@@ -2049,7 +2050,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   console.log("PrizePicks count", prizePicksProps.length);
   console.log("Underdog count", underdogProps.length);
 
-  const mergedProviderProps = mergeProviderRawProps({
+  const mergedProviderProps = resolveEffectiveMergedProviderProps({
     underdogProps,
     prizePicksProps,
   });
@@ -2065,6 +2066,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     rawUnderdog: underdogProps.length,
     combinedRaw: mergedProviderProps.length,
     afterCacheMerge: 0,
+    prizePicksUsable: prizePicksProps.length,
+    underdogUsable: underdogProps.length,
+    lastFetchAt: new Date().toISOString(),
   };
   debugInfo.providerFetchDiagnostics = {
     prizepicks: buildProviderEntryDiagnostics(ppEntry, prizePicksResult || ppEntry.result),
@@ -2073,6 +2077,20 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   if (mergedProviderProps.length) {
     rawProps.length = 0;
     rawProps.push(...ensureMlbSportOnProps(mergedProviderProps));
+  } else if (underdogProps.length || prizePicksProps.length) {
+    const partial = resolveEffectiveMergedProviderProps({
+      underdogProps: underdogProps.length ? underdogProps : [],
+      prizePicksProps: prizePicksProps.length ? prizePicksProps : [],
+    });
+    if (partial.length) {
+      rawProps.length = 0;
+      rawProps.push(...ensureMlbSportOnProps(partial));
+      pipelineFallback = true;
+      debugInfo.ingestionFallback = debugInfo.ingestionFallback || "single-provider-merge";
+    } else if (rawProps.length) {
+      pipelineFallback = true;
+      debugInfo.ingestionFallback = debugInfo.ingestionFallback || "partial-provider-raw";
+    }
   } else if (rawProps.length) {
     pipelineFallback = true;
     debugInfo.ingestionFallback = debugInfo.ingestionFallback || "partial-provider-raw";

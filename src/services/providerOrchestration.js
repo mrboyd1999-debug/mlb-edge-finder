@@ -36,6 +36,20 @@ export function mergeProviderRawProps({ underdogProps = [], prizePicksProps = []
   return merged;
 }
 
+/** Merge with single-provider fallback when combined MLB filter yields zero rows. */
+export function resolveEffectiveMergedProviderProps({ underdogProps = [], prizePicksProps = [] } = {}) {
+  const combined = mergeProviderRawProps({ underdogProps, prizePicksProps });
+  if (combined.length) return combined;
+
+  const underdogOnly = mergeProviderRawProps({ underdogProps, prizePicksProps: [] });
+  if (underdogOnly.length) return underdogOnly;
+
+  const prizePicksOnly = mergeProviderRawProps({ underdogProps: [], prizePicksProps });
+  if (prizePicksOnly.length) return prizePicksOnly;
+
+  return combined;
+}
+
 export function hasAnyProviderProps({ rawProps = [], allDisplayProps = [], usableProps = [] } = {}) {
   return Boolean(rawProps.length || allDisplayProps.length || usableProps.length);
 }

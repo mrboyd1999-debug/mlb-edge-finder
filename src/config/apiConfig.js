@@ -1,21 +1,16 @@
 /**
  * Centralized API configuration loader.
  *
- * This is a thin wrapper over `runtimeSettings.js` so every piece of code that
- * needs an API key or proxy URL has a single import surface. The actual
- * resolution order is preserved:
- *   1. `localStorage` (runtime override from the Settings panel)
- *   2. Vite build-time env (`import.meta.env.VITE_*`)
+ * Resolution order (see runtimeSettings.js):
+ *   1. Vite build-time env (`import.meta.env.VITE_*`)
+ *   2. `localStorage` (Settings panel backup / override when env blank)
  *   3. Legacy storage keys
  *
  * Required environment variables:
  *   VITE_ODDS_API_KEY
- *   VITE_SPORTSDATA_API_KEY
- *   VITE_PRIZEPICKS_PROXY (aliased to VITE_PRIZEPICKS_PROXY_URL)
- *   VITE_UNDERDOG_PROXY   (aliased to VITE_UNDERDOG_PROXY_URL)
- *
- * Missing keys never crash the app — `validateApiConfig()` returns warnings the
- * frontend can surface.
+ *   VITE_SPORTSDATA_API_KEY or VITE_SPORTSDATAIO_API_KEY
+ *   VITE_PRIZEPICKS_PROXY_URL (optional — blank uses /api/prizepicks)
+ *   VITE_UNDERDOG_PROXY_URL (optional — blank uses /api/underdog)
  */
 
 import {
@@ -28,6 +23,7 @@ import {
   getSportsDataApiKey,
   getStatmuseApiKey,
   isSettingConfigured,
+  resolveSettingSource,
 } from "../services/runtimeSettings.js";
 
 /** Symbolic identifiers used across the app. */
@@ -48,6 +44,7 @@ export {
   getSportsDataApiKey,
   getStatmuseApiKey,
   isSettingConfigured,
+  resolveSettingSource,
   RUNTIME_SETTING_DEFS,
   USER_SETTING_DEFS,
 };
@@ -60,12 +57,14 @@ export function describeApiConfig() {
   return USER_SETTING_DEFS.map((def) => {
     const value = getEffectiveSetting(def.key);
     const configured = Boolean(value);
+    const source = resolveSettingSource(def.key);
     return {
       key: def.key,
       label: def.label,
       type: def.type,
       configured,
       missing: !configured,
+      source,
       placeholder: def.placeholder || "",
     };
   });

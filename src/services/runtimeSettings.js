@@ -1,4 +1,4 @@
-/** Runtime API keys and proxy URLs — env vars + localStorage (dev overrides). */
+/** Runtime API keys and proxy URLs — build-time env first, localStorage as backup override. */
 
 import { clearSourceAuthBlock, SOURCE_IDS } from "./sourceRateLimit.js";
 import { resetOddsApiStartupValidation } from "./oddsApiClient.js";
@@ -20,14 +20,14 @@ export const USER_SETTING_DEFS = [
     label: "SportsDataIO API Key",
     type: "secret",
     placeholder: "Paste your SportsDataIO MLB subscription key",
-    envKeys: ["VITE_SPORTSDATA_API_KEY", "SPORTSDATA_API_KEY"],
+    envKeys: ["VITE_SPORTSDATA_API_KEY", "VITE_SPORTSDATAIO_API_KEY", "SPORTSDATA_API_KEY"],
     legacyStorageKeys: [],
   },
   {
     key: "VITE_PRIZEPICKS_PROXY_URL",
     label: "PrizePicks Proxy URL",
     type: "url",
-    placeholder: "https://your-provider.example/prizepicks",
+    placeholder: "Leave blank to use built-in /api/prizepicks",
     envKeys: [
       "VITE_PRIZEPICKS_PROXY_URL",
       "VITE_PRIZEPICKS_PROXY",
@@ -52,7 +52,7 @@ export const HIDDEN_SETTING_DEFS = [
     key: "VITE_UNDERDOG_PROXY_URL",
     label: "Underdog Proxy URL",
     type: "url",
-    placeholder: "https://your-provider.example/underdog",
+    placeholder: "Leave blank to use built-in /api/underdog",
     envKeys: ["VITE_UNDERDOG_PROXY_URL", "VITE_UNDERDOG_PROXY", "UNDERDOG_PROXY_URL"],
     legacyStorageKeys: ["UNDERDOG_PROXY_URL"],
   },
@@ -94,29 +94,34 @@ export function getSettingDef(key) {
   return RUNTIME_SETTING_DEFS.find((def) => def.key === key) || { key, label: key };
 }
 
-/** Effective value: localStorage override, then build-time env, then legacy keys. */
+/** Where the effective value came from — env, localStorage, legacy, or null. */
+export function resolveSettingSource(key) {
+  const def = getSettingDef(key);
+  if (readEnvValue(def)) return "env";
+  if (readStorageValue(key)) return "localStorage";
+  if (readLegacyValue(def)) return "legacy";
+  return null;
+}
+
+/** Effective value: build-time env first, then localStorage backup, then legacy keys. */
 export function getEffectiveSetting(key) {
   const def = getSettingDef(key);
-  const stored = readStorageValue(key);
-  if (stored) return stored;
   const fromEnv = readEnvValue(def);
   if (fromEnv) return fromEnv;
+  const stored = readStorageValue(key);
+  if (stored) return stored;
   return readLegacyValue(def);
 }
 
+/** Settings panel + runtime snapshot — shows what the app will actually use. */
 export function readRuntimeSettings() {
-  return Object.fromEntries(
-    RUNTIME_SETTING_KEYS.map((key) => {
-      const def = getSettingDef(key);
-      return [key, readStorageValue(key) || readEnvValue(def) || readLegacyValue(def)];
-    })
-  );
+  return Object.fromEntries(RUNTIME_SETTING_KEYS.map((key) => [key, getEffectiveSetting(key)]));
 }
 
 export function writeRuntimeSettings(settings = {}) {
   RUNTIME_SETTING_KEYS.forEach((key) => {
     const def = getSettingDef(key);
-    let value = String(settings[key] || "").trim();
+    let value = String(settings[key] ?? "").trim();
     if (key === "VITE_ODDS_API_KEY" || key === "VITE_SPORTSDATA_API_KEY") {
       value = cleanApiKey(value);
     }
@@ -200,10 +205,16 @@ export function getRawProxyUrl(platform = "") {
 }
 
 export function getOddsApiKey() {
+  const fromEnv = cleanApiKey(import.meta.env?.VITE_ODDS_API_KEY || "");
+  if (fromEnv) return fromEnv;
   return cleanApiKey(getEffectiveSetting("VITE_ODDS_API_KEY"));
 }
 
 export function getSportsDataApiKey() {
+  const fromEnv = cleanApiKey(
+    import.meta.env?.VITE_SPORTSDATA_API_KEY || import.meta.env?.VITE_SPORTSDATAIO_API_KEY || ""
+  );
+  if (fromEnv) return fromEnv;
   return cleanApiKey(getEffectiveSetting("VITE_SPORTSDATA_API_KEY"));
 }
 

@@ -3,12 +3,13 @@ import { formatDateTime } from "../utils/formatters.js";
 import { getDebugFeedEvidence } from "../utils/feedHardEvidence.js";
 import { resolvePrizePicksPropCounts, resolveUnderdogPropCounts } from "../utils/providerStatus.js";
 import {
+  getMergedProviderPropCount,
   getPrizePicksUsableCount,
   getUnderdogUsableCount,
-  getMergedProviderPropCount,
   resolvePrizePicksConnectionStatus,
   resolveUnderdogConnectionStatus,
 } from "../utils/providerCounts.js";
+import { buildLiveFeedDiagnosticsSummary } from "../utils/liveFeedDiagnostics.js";
 
 function formatCacheAgeHours(ms) {
   if (ms == null || !Number.isFinite(ms)) return "—";
@@ -96,6 +97,12 @@ function LivePropIngestionCountsPanel({ audit = null, liveFeedDiagnostics = null
       ? formatCacheAgeHours(Date.now() - new Date(audit.boardCacheTimestamp).getTime())
       : null;
 
+  const feedDiagnostics = buildLiveFeedDiagnosticsSummary({
+    audit,
+    pipelinePropCountAudit: pipeline,
+    debugInfo: audit?.debugInfo,
+  });
+
   return (
     <section className="live-prop-ingestion-counts" aria-label="Live prop ingestion counts">
       <div className="live-prop-ingestion-counts__head">
@@ -146,6 +153,20 @@ function LivePropIngestionCountsPanel({ audit = null, liveFeedDiagnostics = null
         <p className="live-prop-ingestion-counts__line">
           mergedProps: {mergedProps} · projectedProps: {pipeline.projectedProps ?? audit?.projected ?? 0} · verifiedProps:{" "}
           {pipeline.verifiedProps ?? audit?.verified ?? 0} · displayedProps: {pipeline.displayedProps ?? 0}
+        </p>
+        <p className="live-prop-ingestion-counts__line">
+          PP raw/parsed/normalized/usable: {feedDiagnostics.prizePicks.raw}/{feedDiagnostics.prizePicks.parsed}/
+          {feedDiagnostics.prizePicks.normalized}/{feedDiagnostics.prizePicks.usable} · source:{" "}
+          {feedDiagnostics.prizePicks.source} · route: {feedDiagnostics.prizePicks.route || "—"}
+        </p>
+        <p className="live-prop-ingestion-counts__line">
+          UD raw/parsed/normalized/usable: {feedDiagnostics.underdog.raw}/{feedDiagnostics.underdog.parsed}/
+          {feedDiagnostics.underdog.normalized}/{feedDiagnostics.underdog.usable} · source:{" "}
+          {feedDiagnostics.underdog.source} · route: {feedDiagnostics.underdog.route || "—"}
+        </p>
+        <p className="live-prop-ingestion-counts__line">
+          last fetch: {feedDiagnostics.lastFetchAt ? formatDateTime(feedDiagnostics.lastFetchAt) : "—"} · odds key:{" "}
+          {feedDiagnostics.oddsKeySource || "none"} · sportsdata key: {feedDiagnostics.sportsDataKeySource || "none"}
         </p>
       </div>
 

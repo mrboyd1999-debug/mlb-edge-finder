@@ -16,6 +16,12 @@ export const PRIZEPICKS_BUILTIN_ENDPOINTS = [
   `/api/prizepicks?league_id=${PRIZEPICKS_MLB_LEAGUE_ID}`,
 ];
 
+/** Same-origin Underdog routes — always available via Vite/dev server. */
+export const UNDERDOG_BUILTIN_ENDPOINTS = [
+  "/api/underdog/beta/v5/over_under_lines",
+  "/api/underdog",
+];
+
 const LEGACY_LOCAL_PRIZEPICKS_PROXY = /^https?:\/\/(localhost|127\.0\.0\.1):4000/i;
 
 /** Validate and normalize external provider proxy URLs (PrizePicks / Underdog). */
@@ -94,14 +100,14 @@ export function inspectPrizePicksProxyConfig() {
   };
 }
 
-/** Resolve PrizePicks fetch URLs — built-in /api route only when legacy :4000 proxy is configured. */
+/** Resolve PrizePicks fetch URLs — built-in route first; external proxy optional fallback. */
 export function resolvePrizePicksFetchEndpoints() {
   const proxyUrl = getProxyUrl("prizepicks");
   const builtin = [...PRIZEPICKS_BUILTIN_ENDPOINTS];
   if (!proxyUrl || LEGACY_LOCAL_PRIZEPICKS_PROXY.test(proxyUrl)) {
     return builtin;
   }
-  return [proxyUrl, ...builtin];
+  return [...builtin, proxyUrl];
 }
 
 export function hasPrizePicksFetchRoute() {
@@ -164,6 +170,53 @@ export function isPrizePicksFeedNotConfigured(feed = {}) {
 
 export const PRIZEPICKS_NOT_CONFIGURED_DETAIL = "PrizePicks fetch route unavailable";
 
+/** Resolve Underdog fetch URLs — built-in route first; external proxy optional fallback. */
+export function resolveUnderdogFetchEndpoints() {
+  const proxyUrl = getProxyUrl("underdog");
+  const builtin = [...UNDERDOG_BUILTIN_ENDPOINTS];
+  if (!proxyUrl) return builtin;
+  return [...builtin, proxyUrl];
+}
+
+export function hasUnderdogFetchRoute() {
+  return resolveUnderdogFetchEndpoints().length > 0;
+}
+
+/** Underdog: invalid URL blocks fetch; missing URL uses built-in /api routes. */
+export function getUnderdogPreflight() {
+  const assessment = assessProxyUrl(getRawProxyUrl("Underdog"));
+  const endpoints = resolveUnderdogFetchEndpoints();
+
+  if (assessment.invalid) {
+    return {
+      skip: false,
+      notConfigured: false,
+      useDirect: true,
+      proxyUrl: "",
+      endpoints,
+      reason: "Invalid Underdog proxy URL ignored — using built-in /api/underdog",
+    };
+  }
+
+  if (!endpoints.length) {
+    return {
+      skip: true,
+      notConfigured: true,
+      status: "Not configured",
+      reason: "No Underdog fetch route available",
+      endpoints: [],
+    };
+  }
+
+  return {
+    skip: false,
+    notConfigured: false,
+    useDirect: !assessment.configured,
+    proxyUrl: assessment.normalized || "",
+    endpoints,
+  };
+}
+
 /** Underdog: invalid URL blocks fetch; missing URL uses direct /api route. */
 export function getLineProviderPreflight(platform = "") {
   const key = String(platform || "").toLowerCase();
@@ -171,19 +224,7 @@ export function getLineProviderPreflight(platform = "") {
     return getPrizePicksPreflight();
   }
 
-  const envKeys = ["VITE_UNDERDOG_PROXY_URL", "UNDERDOG_PROXY_URL"];
-  const label = "Underdog";
-  const assessment = assessProxyUrl(getRawProxyUrl(label));
-
-  if (assessment.invalid) {
-    return {
-      skip: true,
-      status: "Not configured",
-      reason: `${label} proxy URL is invalid. Set ${envKeys[0]} in Settings or .env.local.`,
-    };
-  }
-
-  return { skip: false, useDirect: !assessment.configured, proxyUrl: assessment.normalized };
+  return getUnderdogPreflight();
 }
 
 export async function fetchWithProxyTimeout(url, init = {}, timeoutMs = PROVIDER_PROXY_FETCH_TIMEOUT_MS) {

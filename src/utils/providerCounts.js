@@ -303,13 +303,17 @@ export function resolveUnderdogConnectionStatus(source = {}) {
 export function getMergedProviderPropCount(source = {}) {
   const audit = source.audit || {};
   const pipeline = source.pipelinePropCountAudit || audit.pipelinePropCountAudit || {};
+  const providerRaw = audit.debugInfo?.pipelineProviderRaw || source.debugInfo?.pipelineProviderRaw || {};
+
+  const combinedRaw = finite(pipeline.combinedRaw);
+  const providerMerged = finite(providerRaw.combinedRaw);
   const prizePicksUsable = getPrizePicksUsableCount(source);
   const underdogUsable = getUnderdogUsableCount(source);
 
-  return maxCount(
-    pipeline.combinedRaw,
-    audit.combinedUsable,
-    audit.combinedProps,
-    prizePicksUsable + underdogUsable
-  );
+  if (combinedRaw > 0) return combinedRaw;
+  if (providerMerged > 0) return providerMerged;
+  if (underdogUsable > 0 || prizePicksUsable > 0) {
+    return Math.max(underdogUsable, prizePicksUsable);
+  }
+  return 0;
 }
