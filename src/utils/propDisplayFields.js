@@ -4,6 +4,8 @@
 
 import { normalizeSource } from "./normalizeSource.js";
 import { attachLineSourceFields } from "./normalizeProp.js";
+import { attachPayoutCategoryFields } from "./payoutCategory.js";
+import { formatPitcherLabel } from "./pitcherDisplay.js";
 import {
   classifyPropTier,
   hasPositiveEdge,
@@ -111,14 +113,15 @@ function hasUnderdogLine(prop = {}) {
 }
 
 export function resolveProviderDisplayLabel(prop = {}, context = {}) {
+  const withLines = attachLineSourceFields(prop);
   const sportsDataConnected = Boolean(
     context.sportsDataConnected ??
       (hasSportsDataIoData(prop) || /sportsdata/i.test(String(prop.projectionSource || "")))
   );
-  const oddsConnected = Boolean(context.oddsApiConnected ?? hasOddsApiLine(prop));
-  const hasPp = hasPrizePicksLine(prop);
-  const hasUd = hasUnderdogLine(prop);
-  const src = normalizeSource(prop);
+  const oddsConnected = Boolean(context.oddsApiConnected ?? hasOddsApiLine(withLines));
+  const hasPp = hasPrizePicksLine(withLines);
+  const hasUd = hasUnderdogLine(withLines);
+  const providers = Array.isArray(withLines.providers) ? withLines.providers : [];
   const cached = Boolean(
     prop.fromCache ||
       prop.cacheLayer ||
@@ -127,17 +130,20 @@ export function resolveProviderDisplayLabel(prop = {}, context = {}) {
       /cached/i.test(String(prop.statusLabel || ""))
   );
 
-  const lineParts = [];
-  if (hasPp || src === "prizepicks") lineParts.push("PrizePicks");
-  if (hasUd || src === "underdog") lineParts.push("Underdog");
-  if (oddsConnected) lineParts.push("Odds API");
+  const lineParts = providers.length
+    ? providers
+    : (() => {
+        const parts = [];
+        if (hasPp) parts.push("PrizePicks");
+        if (hasUd) parts.push("Underdog");
+        if (oddsConnected) parts.push("Odds API");
+        return parts;
+      })();
 
   if (lineParts.length >= 2) return `Verified via ${lineParts.join(" + ")}`;
+  if (hasPp) return "Verified via PrizePicks";
+  if (hasUd) return cached ? "Line from Underdog cache" : "Verified via Underdog";
   if (oddsConnected) return "Line verified via Odds API";
-  if (hasPp || src === "prizepicks") return "Verified via PrizePicks";
-  if (hasUd || src === "underdog") {
-    return cached ? "Line from Underdog cache" : "Verified via Underdog";
-  }
 
   if (sportsDataConnected && oddsConnected) return "Verified via SportsDataIO + Odds API";
   if (sportsDataConnected) return "Verified via SportsDataIO";
@@ -182,23 +188,19 @@ export function resolveProviderLineFields(prop = {}) {
 }
 
 export function resolvePitcherCardLabel(prop = {}) {
-  const raw = String(
-    prop.opposingPitcher || prop.opponentStarterNote || prop.pitcherName || prop.matchupAudit?.pitcher || ""
-  ).trim();
-  if (!raw || raw === "—") return "Pitcher: Pending";
-  if (/probable starter pending|pitcher pending|starter pending|opponent pitcher unavailable/i.test(raw)) {
-    return "Pitcher: Pending";
-  }
-  return `Pitcher: ${raw}`;
+  return formatPitcherLabel(prop);
 }
+
+export { formatPitcherLabel } from "./pitcherDisplay.js";
 
 export function attachPropDisplayFields(prop = {}, context = {}) {
   const withLines = attachLineSourceFields(prop);
-  const confidenceNormalized = resolveNormalizedConfidence(withLines);
-  const probabilityNormalized = resolveNormalizedProbability(withLines);
-  const riskLevel = computePropRiskLevel(withLines);
-  const providerLabel = resolveProviderDisplayLabel(withLines, context);
-  const lineFields = resolveProviderLineFields(withLines);
+  const withPayout = attachPayoutCategoryFields(withLines);
+  const confidenceNormalized = resolveNormalizedConfidence(withPayout);
+  const probabilityNormalized = resolveNormalizedProbability(withPayout);
+  const riskLevel = computePropRiskLevel(withPayout);
+  const providerLabel = resolveProviderDisplayLabel(withPayout, context);
+  const lineFields = resolveProviderLineFields(withPayout);
   const cardDescription = buildCardDescription({
     ...prop,
     displayConfidenceScore: confidenceNormalized,
@@ -206,9 +208,9 @@ export function attachPropDisplayFields(prop = {}, context = {}) {
   });
 
   return {
-    ...withLines,
+    ...withPayout,
     ...lineFields,
-    lineUsed: withLines.lineUsed ?? lineFields.activeLine,
+    lineUsed: withPayout.lineUsed ?? lineFields.activeLine,
     lineUsedLabel: lineFields.activeLineLabel,
     confidenceNormalized,
     confidence: confidenceNormalized,
@@ -217,7 +219,7 @@ export function attachPropDisplayFields(prop = {}, context = {}) {
     riskLevel,
     riskExplanation: resolveRiskExplanation(riskLevel),
     providerLabel,
-    pitcherCardLabel: resolvePitcherCardLabel(prop),
+    pitcherCardLabel: formatPitcherLabel(withPayout),
     cardDescription,
     qualificationReason: cardDescription || prop.qualificationReason || "",
   };

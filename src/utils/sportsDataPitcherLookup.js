@@ -12,8 +12,15 @@ function finite(value) {
 
 function readPitcherName(game = {}, side = "Home") {
   const prefix = side === "Home" ? "Home" : "Away";
+  const objectPitcher = game[`${prefix}ProbablePitcher`];
+  if (objectPitcher && typeof objectPitcher === "object") {
+    return objectPitcher.Name || objectPitcher.FullName || objectPitcher.FirstName
+      ? `${objectPitcher.FirstName || ""} ${objectPitcher.LastName || ""}`.trim() || objectPitcher.Name
+      : null;
+  }
   return (
     game[`${prefix}ProbablePitcherName`] ||
+    game[`${prefix}StartingPitcherName`] ||
     game[`${prefix}StartingPitcher`] ||
     game[`${prefix}TeamStartingPitcher`] ||
     game[`${prefix}ProbablePitcher`] ||
@@ -71,6 +78,61 @@ export function findSportsDataGameForTeam(games = [], team = "") {
   );
 }
 
+/** Match a slate row by player team and opponent when both are known. */
+export function findSportsDataGameForMatchup(games = [], team = "", opponent = "") {
+  const teamNeedle = String(team || "").trim();
+  const opponentNeedle = String(opponent || "").trim();
+  if (!games?.length) return null;
+  if (teamNeedle && opponentNeedle) {
+    const matched = games.find(
+      (g) =>
+        (mlbTeamsMatch(teamNeedle, g.HomeTeam || g.HomeTeamAbbreviation) &&
+          mlbTeamsMatch(opponentNeedle, g.AwayTeam || g.AwayTeamAbbreviation)) ||
+        (mlbTeamsMatch(teamNeedle, g.AwayTeam || g.AwayTeamAbbreviation) &&
+          mlbTeamsMatch(opponentNeedle, g.HomeTeam || g.HomeTeamAbbreviation))
+    );
+    if (matched) return matched;
+  }
+  return teamNeedle ? findSportsDataGameForTeam(games, teamNeedle) : null;
+}
+
+/** Attach opposing probable starter from SportsDataIO slate to each prop. */
+export function attachSportsDataSlateToProps(props = [], { games = [], seasonRows = [] } = {}) {
+  if (!Array.isArray(props) || !props.length || !Array.isArray(games) || !games.length) {
+    return props;
+  }
+  return props.map((prop) => {
+    const team = prop.team || prop.playerTeam || "";
+    const opponent = prop.opponent || prop.opponentTeam || "";
+    const game =
+      prop.sportsDataGame ||
+      findSportsDataGameForMatchup(games, team, opponent) ||
+      findSportsDataGameForTeam(games, team);
+    if (!game) {
+      return {
+        ...prop,
+        sportsDataSlateGames: games,
+        sportsDataSeasonRows: seasonRows,
+        pitcherStatus: prop.pitcherStatus || (team && opponent ? "unavailable" : "pending"),
+      };
+    }
+    return attachSportsDataPitcherFields(
+      {
+        ...prop,
+        sportsDataSlateGames: games,
+        sportsDataSeasonRows: seasonRows,
+        sportsDataGame: game,
+        opponent:
+          prop.opponent ||
+          (mlbTeamsMatch(team, game.HomeTeam || game.HomeTeamAbbreviation)
+            ? game.AwayTeam || game.AwayTeamAbbreviation
+            : game.HomeTeam || game.HomeTeamAbbreviation),
+      },
+      { game, seasonRows }
+    );
+  });
+}
+
 /** Score 35–88 from opposing pitcher season rates (WHIP, K/9, BB/9). */
 export function computeOpposingPitcherMatchupScore(prop = {}, pitcherStats = {}) {
   const line = finite(prop.line);
@@ -126,7 +188,13 @@ export function attachSportsDataPitcherFields(prop = {}, { game = null, seasonRo
   if (!resolvedGame || !team) return prop;
 
   const lookup = resolveOpposingPitcherFromSportsDataGame(resolvedGame, team);
-  if (!lookup?.name) return prop;
+  if (!lookup?.name) {
+    return {
+      ...prop,
+      sportsDataGame: resolvedGame,
+      pitcherStatus: prop.pitcherStatus || "pending",
+    };
+  }
 
   const pitcherRow = findPitcherSeasonRow(seasonRows, lookup.playerId, lookup.name);
   const matchupScore = computeOpposingPitcherMatchupScore(prop, pitcherRow || {});
@@ -136,12 +204,16 @@ export function attachSportsDataPitcherFields(prop = {}, { game = null, seasonRo
     sportsDataGame: resolvedGame,
     sportsDataProbablePitcher: lookup.name,
     opponentStarterFromSportsData: lookup.name,
+    opposingPitcherName: lookup.name,
+    probablePitcherName: lookup.name,
     opposingPitcher: lookup.name,
     opposingPitcherDisplay: lookup.name,
     opponentStarterNote: lookup.name,
+    opposingPitcherId: lookup.playerId,
     opposingPitcherTeam: lookup.pitcherTeam || prop.opponent,
     sportsDataPitcherPlayerId: lookup.playerId,
     sportsDataPitcherSource: lookup.source,
+    pitcherStatus: "confirmed",
     probablePitchers: {
       ...(prop.probablePitchers || {}),
       sportsDataStarter: lookup.name,

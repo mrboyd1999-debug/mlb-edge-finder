@@ -4,6 +4,7 @@
 
 import { mlbTeamsMatch, normalizeMlbTeamKey } from "./mlbTeamMatch.js";
 import { isSportsDataPitcherConnected } from "./sportsDataPitcherLookup.js";
+import { formatPitcherLabel } from "./pitcherDisplay.js";
 
 export const STARTER_PENDING_LABEL = "Pitcher Pending";
 export const OPPONENT_PITCHER_UNAVAILABLE_LABEL = "Opponent pitcher unavailable";
@@ -19,6 +20,11 @@ function isUnavailablePitcherLabel(value = "") {
 
 /** User-facing opposing pitcher — never returns pending when a probable starter name exists. */
 export function resolveOpposingPitcherDisplayLabel(prop = {}) {
+  const directName = prop.opposingPitcherName || prop.probablePitcherName || prop.sportsDataProbablePitcher;
+  if (directName && !isUnavailablePitcherLabel(directName)) {
+    return String(directName).replace(/^Pitcher:\s*/i, "").trim();
+  }
+
   const partial = resolvePartialPitcherName(prop);
   if (partial) return partial;
 
@@ -205,19 +211,26 @@ export function resolvePitcherVerification(prop = {}) {
 export function normalizePropPitcherFields(prop = {}, probablePitchers = null) {
   const audit = buildPitcherMatchupAudit(prop, probablePitchers);
   const verification = resolvePitcherVerification({ ...prop, probablePitchers: probablePitchers || prop.probablePitchers, pitcherMatchupAudit: audit });
-  const displayPitcher = resolveOpposingPitcherDisplayLabel({
-    ...prop,
-    probablePitchers: probablePitchers || prop.probablePitchers,
-    pitcherMatchupAudit: audit,
-    opposingPitcher: verification.pitcher,
-    opponentStarterNote: verification.pitcher,
-  });
-  return {
+  const pitcherName =
+    verification.pitcher && !isUnavailablePitcherLabel(verification.pitcher)
+      ? String(verification.pitcher).replace(/^Pitcher:\s*/i, "").trim()
+      : prop.opposingPitcherName || prop.probablePitcherName || "";
+  const gameMatched = Boolean(audit.starterLookup?.matchedGame || audit.gameId);
+  let pitcherStatus = prop.pitcherStatus || "pending";
+  if (pitcherName) pitcherStatus = "confirmed";
+  else if (gameMatched) pitcherStatus = "pending";
+  else if (prop.team && prop.opponent) pitcherStatus = "unavailable";
+
+  const enriched = {
     ...prop,
     probablePitchers: probablePitchers || prop.probablePitchers || null,
-    opposingPitcher: displayPitcher,
-    opposingPitcherDisplay: displayPitcher,
-    opponentStarterNote: displayPitcher,
+    opposingPitcherName: pitcherName || prop.opposingPitcherName || "",
+    probablePitcherName: pitcherName || prop.probablePitcherName || "",
+    opposingPitcherId: prop.opposingPitcherId ?? prop.sportsDataPitcherPlayerId ?? null,
+    opposingPitcher: pitcherName || "",
+    opposingPitcherDisplay: pitcherName || "",
+    opponentStarterNote: pitcherName || "",
+    pitcherStatus,
     pitcherVerification: verification.pitcherVerification,
     pitcherVerificationLevel: verification.pitcherVerificationLevel,
     pitcherMatchupAudit: {
@@ -231,6 +244,10 @@ export function normalizePropPitcherFields(prop = {}, probablePitchers = null) {
     gameId: audit.gameId ?? prop.gameId ?? null,
     teamId: audit.teamId ?? prop.teamId ?? null,
     opponentTeamId: audit.opponentTeamId ?? prop.opponentTeamId ?? null,
+  };
+  return {
+    ...enriched,
+    pitcherCardLabel: formatPitcherLabel(enriched),
   };
 }
 

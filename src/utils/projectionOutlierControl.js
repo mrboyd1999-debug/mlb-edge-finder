@@ -41,10 +41,10 @@ export function applyProjectionOutlierControl(prop = {}) {
   let confidencePenalty = 0;
   let probabilityPenalty = 0;
 
-  if (!prop.projectionCapApplied && isHrrMarket(prop) && Math.abs(line - 1.5) < 0.01 && projection > 2.7) {
+  if (!prop.projectionCapApplied && isHrrMarket(prop) && Math.abs(line - 1.5) < 0.01 && projection > 2.8) {
     const last10Avg = resolveLast10Average(prop);
     if (last10Avg == null || last10Avg < projection) {
-      projection = 2.7;
+      projection = 2.8;
       projectionCapped = true;
       capNote = "Projection capped for line-scale safety.";
     }

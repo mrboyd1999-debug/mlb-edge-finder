@@ -42,10 +42,9 @@ import { attachBoardQualityFields,
   resolveTierDisplayLabel,
 } from "../utils/boardQuality.js";
 import { withPlayerImageUrl } from "../utils/playerImageFields.js";
-import { resolveNormalizedConfidence, resolveNormalizedProbability, resolveProviderDisplayLabel, resolveProviderLineFields } from "../utils/propDisplayFields.js";
+import { resolveNormalizedConfidence, resolveNormalizedProbability, resolveProviderDisplayLabel, resolveProviderLineFields, formatPitcherLabel } from "../utils/propDisplayFields.js";
+import { resolvePayoutCategoryLabel } from "../utils/payoutCategory.js";
 import { resolveRiskExplanation } from "../utils/risk.js";
-import { resolveOpposingPitcherDisplayLabel } from "../utils/opponentStarter.js";
-import { resolvePitcherCardLabel } from "../utils/propDisplayFields.js";
 import ProviderLabel from "./ProviderLabel.jsx";
 import { resolveVerificationStatus } from "../utils/verificationStatus.js";
 import { buildHitRateSnapshot } from "../utils/modelValidation.js";
@@ -340,7 +339,8 @@ export default function PickDetailModal({
   const probabilityAuditRows = buildSimpleProbabilityAuditRows(prop, hitRateSnapshot);
   const confidenceExplanationRows = buildConfidenceExplanationRows(prop);
   const advancedProbabilityAuditRows = buildAdvancedProbabilityAuditRows(prop);
-  const opposingPitcherLabel = resolvePitcherCardLabel(prop);
+  const opposingPitcherLabel = formatPitcherLabel(prop);
+  const payoutCategoryLabel = resolvePayoutCategoryLabel(prop);
   const probabilityLabel = (() => {
     const normalized = resolveNormalizedProbability(prop);
     if (normalized != null) return `${normalized}%`;
@@ -368,11 +368,17 @@ export default function PickDetailModal({
       ? formatSignedNumber(prop.edge)
       : null;
   const projectionLabel =
-    prop.projectedValue != null
-      ? formatNumber(prop.projectedValue)
-      : prop.projection != null
-        ? formatNumber(prop.projection)
-        : null;
+    prop.adjustedProjection != null
+      ? formatNumber(prop.adjustedProjection)
+      : prop.projectedValue != null
+        ? formatNumber(prop.projectedValue)
+        : prop.projection != null
+          ? formatNumber(prop.projection)
+          : null;
+  const rawProjectionLabel =
+    prop.rawProjection != null && prop.rawProjection !== prop.adjustedProjection
+      ? formatNumber(prop.rawProjection)
+      : null;
 
   const headerActions = (
     <div className="pick-detail-modal-header__actions">
@@ -414,6 +420,11 @@ export default function PickDetailModal({
                 <p className="pick-detail-modal-sport">{sportLabel}</p>
                 <h2 style={{ ...styles.modalTitle, fontSize: "16px", margin: 0 }}>{prop.playerName}</h2>
                 {matchupLine ? <p className="pick-detail-modal-matchup">{matchupLine}</p> : null}
+                {breakdownMode && payoutCategoryLabel ? (
+                  <span className={`payout-badge payout-badge--${payoutCategoryLabel.toLowerCase()}`}>
+                    {payoutCategoryLabel}
+                  </span>
+                ) : null}
                 {manualProp ? (
                   <div className="pick-detail-modal-badges">
                     {noVerifiedPlay ? (
@@ -473,16 +484,18 @@ export default function PickDetailModal({
                 <SummaryMetric label="Edge" value={edgeLabel} strong />
                 <SummaryMetric label="Probability" value={probabilityLabel} strong />
                 <SummaryMetric label="Confidence" value={confidenceLabel} strong />
-                <SummaryMetric label="Risk" value={riskLevel} strong />
-                {breakdownMode ? <SummaryMetric label="Tier" value={tierBadgeLabel} strong /> : null}
-                {breakdownMode ? <SummaryMetric label="Opposing pitcher" value={opposingPitcherLabel} /> : null}
-                {breakdownMode ? <SummaryMetric label="Verification status" value={verificationLabel} /> : null}
+                {showDebugPanels ? <SummaryMetric label="Risk" value={riskLevel} strong /> : null}
+                {showDebugPanels && breakdownMode ? <SummaryMetric label="Tier" value={tierBadgeLabel} strong /> : null}
+                {breakdownMode ? <SummaryMetric label="Pitcher" value={opposingPitcherLabel} /> : null}
+                {showDebugPanels && breakdownMode ? (
+                  <SummaryMetric label="Verification status" value={verificationLabel} />
+                ) : null}
                 {providerLabel ? <SummaryMetric label="Provider" value={providerLabel} /> : null}
               </>
             )}
           </div>
 
-          {!manualProp && projectionSafetyNotes.length ? (
+          {!manualProp && showDebugPanels && projectionSafetyNotes.length ? (
             <div className="pick-detail-modal-section">
               {projectionSafetyNotes.map((note) => (
                 <p key={note} className="pick-detail-modal-tier-warning">
@@ -492,24 +505,26 @@ export default function PickDetailModal({
             </div>
           ) : null}
 
-          <div className="pick-detail-modal-section">
-            <strong>{breakdownMode ? "Why it qualifies" : manualProp ? "Grade summary" : "Why this pick"}</strong>
-            {manualProp && noVerifiedPlay ? (
-              <p>{prop.statusMessage || AWAITING_PROJECTION_STATUS}</p>
-            ) : (
-              <>
-                {manualProp && (prop.dataStatus || prop.projectionLabel) && !noVerifiedPlay ? (
-                  <p style={{ color: "#86efac", marginBottom: "6px" }}>
-                    {prop.isVerifiedProjection ? "Verified MLB projection" : prop.dataStatus || prop.projectionLabel}
-                  </p>
-                ) : null}
-                <p>{whyText}</p>
-                {!manualProp && riskDetail ? (
-                  <p style={{ marginTop: "6px", fontSize: "11px" }}>{riskDetail}</p>
-                ) : null}
-              </>
-            )}
-          </div>
+          {showDebugPanels ? (
+            <div className="pick-detail-modal-section">
+              <strong>{breakdownMode ? "Why it qualifies" : manualProp ? "Grade summary" : "Why this pick"}</strong>
+              {manualProp && noVerifiedPlay ? (
+                <p>{prop.statusMessage || AWAITING_PROJECTION_STATUS}</p>
+              ) : (
+                <>
+                  {manualProp && (prop.dataStatus || prop.projectionLabel) && !noVerifiedPlay ? (
+                    <p style={{ color: "#86efac", marginBottom: "6px" }}>
+                      {prop.isVerifiedProjection ? "Verified MLB projection" : prop.dataStatus || prop.projectionLabel}
+                    </p>
+                  ) : null}
+                  <p>{whyText}</p>
+                  {!manualProp && riskDetail ? (
+                    <p style={{ marginTop: "6px", fontSize: "11px" }}>{riskDetail}</p>
+                  ) : null}
+                </>
+              )}
+            </div>
+          ) : null}
 
           {breakdownMode && showDebugPanels && prop.probabilityAudit ? (
             <>
@@ -666,6 +681,11 @@ export default function PickDetailModal({
               <div className="pick-detail-modal-section">
                 <strong>{manualProp ? "More info" : "More breakdown"}</strong>
                 <div className="compact-prop-grid" style={{ marginTop: "8px" }}>
+                  {rawProjectionLabel ? <MetricIf label="Raw projection" value={rawProjectionLabel} /> : null}
+                  <MetricIf label="Adjusted projection" value={projectionLabel} />
+                  {prop.projectionCapReason || prop.projectionWarning ? (
+                    <MetricIf label="Sanity note" value={prop.projectionCapReason || prop.projectionWarning} />
+                  ) : null}
                   <MetricIf label="Projection Source" value={projectionSourceLabel} />
                   <MetricIf label="Last 10 Hit Rate" value={last10HitRate !== "—" ? last10HitRate : null} />
                   <MetricIf label="Season Hit Rate" value={seasonHitRate !== "—" && seasonHitRate !== "0%" ? seasonHitRate : null} />

@@ -3111,7 +3111,7 @@ body,
 .pick-detail-modal {
   width: calc(100% - 32px);
   max-width: 900px;
-  max-height: 85vh;
+  max-height: 90vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -3298,6 +3298,7 @@ body,
   .pick-detail-backdrop {
     align-items: flex-end;
     padding: 0;
+    overflow-x: hidden;
   }
 
   .pick-detail-modal {
@@ -3306,12 +3307,88 @@ body,
     max-height: 90vh;
     margin: 0;
     border-radius: 14px 14px 0 0;
+    overflow-x: hidden;
+  }
+
+  .pick-detail-modal-body {
+    padding: 10px 12px 14px;
+    overflow-x: hidden;
+  }
+
+  .pick-detail-modal-header__actions button {
+    min-height: 40px;
+    min-width: 40px;
   }
 
   .pick-detail-modal-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
   }
+
+  .pick-detail-metric span {
+    font-size: 10px;
+  }
+
+  .pick-detail-metric strong {
+    font-size: 13px;
+  }
+}
+
+.payout-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.payout-badge--goblin {
+  border: 1px solid #166534;
+  background: #052e16;
+  color: #86efac;
+}
+
+.payout-badge--standard {
+  border: 1px solid #1d4ed8;
+  background: #172554;
+  color: #93c5fd;
+}
+
+.payout-badge--demon {
+  border: 1px solid #c2410c;
+  background: #431407;
+  color: #fdba74;
+}
+
+.best-play-row-card .payout-badge {
+  margin-left: 4px;
+}
+
+.payout-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+
+.payout-filter-btn {
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #cbd5e1;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.payout-filter-btn--active {
+  border-color: #2563eb;
+  background: #172554;
+  color: #93c5fd;
 }
 
 .probability-audit__title {

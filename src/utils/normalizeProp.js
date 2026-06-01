@@ -57,9 +57,13 @@ export function mergeNormalizedProp(prop = {}) {
   return { ...prop, ...normalizeProp(prop) };
 }
 
-function resolveMlbLineUsed(prop = {}, { prizePicksLine, underdogLine } = {}) {
+function resolveMlbLineUsed(prop = {}, { prizePicksLine, underdogLine, oddsApiLine } = {}) {
   const oddsLine = finiteOrNull(
-    prop.oddsApiLine ?? prop.sportsbookLine ?? prop.bestAvailableLine ?? prop.lineComparison?.oddsApiLine
+    oddsApiLine ??
+      prop.oddsApiLine ??
+      prop.sportsbookLine ??
+      prop.bestAvailableLine ??
+      prop.lineComparison?.oddsApiLine
   );
   if (prizePicksLine != null) {
     return { lineUsed: prizePicksLine, lineSource: "PrizePicks" };
@@ -103,14 +107,37 @@ export function attachLineSourceFields(prop = {}) {
   const comparison = prop.lineComparison || {};
   const prizePicksLine = finiteOrNull(comparison.prizePicksLine ?? prop.prizePicksLine ?? prop.ppLine);
   const underdogLine = finiteOrNull(comparison.underdogLine ?? prop.underdogLine ?? prop.udLine);
-  const { lineUsed, lineSource: primarySource } = resolveMlbLineUsed(prop, { prizePicksLine, underdogLine });
+  const oddsApiLine = finiteOrNull(
+    comparison.oddsApiLine ??
+      prop.oddsApiLine ??
+      prop.sportsbookLine ??
+      prop.bestAvailableLine
+  );
+  const { lineUsed, lineSource: primarySource } = resolveMlbLineUsed(prop, {
+    prizePicksLine,
+    underdogLine,
+    oddsApiLine,
+  });
   const lineSource = resolveLineSourceLabel(prop, { prizePicksLine, underdogLine, lineSource: primarySource });
+  const providers = [];
+  if (prizePicksLine != null) providers.push("PrizePicks");
+  if (underdogLine != null) providers.push("Underdog");
+  if (
+    oddsApiLine != null ||
+    prop.sportsbookLine != null ||
+    prop.bestAvailableLine != null ||
+    Number(prop.sportsbookBooksCount) > 0
+  ) {
+    providers.push("Odds API");
+  }
 
   return {
     ...prop,
     prizePicksLine,
     underdogLine,
+    oddsApiLine,
     lineUsed,
     lineSource,
+    providers,
   };
 }

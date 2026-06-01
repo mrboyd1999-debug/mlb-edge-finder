@@ -12,7 +12,7 @@ import { fetchSportsbookComparison } from "./services/sportsbookOdds";
 import { fetchOddsApiDisplayProps } from "./services/oddsApiPlayerProps.js";
 import { isOddsApiKeyUsable, ODDS_API_INVALID_KEY_MESSAGE, sanitizeOddsApiUiMessage } from "./services/oddsApiClient.js";
 import { fetchPlayerStats, findStatProfile, statProfileKey, buildMlbStatProfileFromLogs, pickUniquePropsForStatsFetch, readCachedMlbStatsMap } from "./services/playerStats";
-import { fetchPlayerSeasonStats } from "./services/sportsDataService.js";
+import { fetchPlayerSeasonStats, fetchGamesByDate } from "./services/sportsDataService.js";
 import { playerNamesMatch } from "./utils/playerNames.js";
 import { PRIZEPICKS_HTML_BANNER } from "./services/prizepicks";
 import { fetchInjuryNews } from "./services/injuryNews";
@@ -271,6 +271,7 @@ import {
   buildProjectedHistoricalMatchLog,
   buildStatsAttachmentMetrics,
 } from "./utils/historicalStatsLoader.js";
+import { attachSportsDataSlateToProps } from "./utils/sportsDataPitcherLookup.js";
 import { computeTopPlayFinalScore } from "./utils/bestPlayRankingScore.js";
 import { enrichMlbPropsBatch } from "./services/mlb/mlbEnrichmentPipeline.js";
 import {
@@ -1629,16 +1630,29 @@ function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderd
       }),
   });
 
+  const gamesFetch = fetchProviderIsolated({
+    label: "GamesByDate",
+    timeoutMs: getSportsDataTimeoutMs(),
+    fetchFn: () => fetchGamesByDate(),
+    emptyResult: ({ timedOut, message }) => ({
+      data: [],
+      error: true,
+      timedOut,
+      warnings: [message || (timedOut ? "Games by date timed out" : "Games by date fetch failed")],
+    }),
+  });
+
   return {
     ppFetch,
     udFetch,
     oddsFetch,
     seasonFetch,
+    gamesFetch,
     awaitLineProviders: () => Promise.allSettled([ppFetch, udFetch]),
     awaitCoreFeeds: () => Promise.allSettled([ppFetch, udFetch, oddsFetch]),
     awaitCoreFeedsLineOnly: () => Promise.allSettled([ppFetch, udFetch]),
-    awaitEnrichmentFeeds: () => Promise.allSettled([seasonFetch]),
-    awaitAllForPerf: () => Promise.allSettled([ppFetch, udFetch, oddsFetch, seasonFetch]),
+    awaitEnrichmentFeeds: () => Promise.allSettled([seasonFetch, gamesFetch]),
+    awaitAllForPerf: () => Promise.allSettled([ppFetch, udFetch, oddsFetch, seasonFetch, gamesFetch]),
   };
 }
 
@@ -1716,6 +1730,28 @@ function applySeasonStatsProviderResult(seasonEntry, debugInfo) {
     });
   }
   return seasonStatsData;
+}
+
+function applyGamesByDateProviderResult(gamesEntry, debugInfo) {
+  const gamesResult = gamesEntry?.result || {};
+  const slateGames = Array.isArray(gamesResult.data) ? gamesResult.data : [];
+  const gamesFailed = Boolean(gamesEntry?.error || gamesResult.error) && !slateGames.length;
+
+  debugInfo.sportsDataSlateGames = slateGames;
+  debugInfo.sportsDataSlateGamesCount = slateGames.length;
+  debugInfo.gamesByDateEnrichmentFailed = gamesFailed;
+  debugInfo.gamesByDateEnrichmentError = gamesFailed
+    ? gamesResult.warnings?.[0] ||
+      (gamesEntry?.timedOut ? "Games by date timed out" : "SportsDataIO games unavailable")
+    : "";
+
+  if (gamesFailed) {
+    console.warn("[MLB Projection] games by date unavailable", {
+      timedOut: gamesEntry?.timedOut,
+      warnings: gamesResult.warnings,
+    });
+  }
+  return slateGames;
 }
 
 async function fetchMlbProjectionStatsBlocking(props, debugInfo) {
@@ -2548,8 +2584,11 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
     const enrichmentSettled = await providerWave.awaitEnrichmentFeeds();
     const seasonEntry = unwrapProviderSettled(enrichmentSettled[0]);
+    const gamesEntry = unwrapProviderSettled(enrichmentSettled[1]);
     let seasonStatsData = applySeasonStatsProviderResult(seasonEntry, debugInfo);
+    const slateGames = applyGamesByDateProviderResult(gamesEntry, debugInfo);
     background.sportsDataSeasonStats = seasonStatsData;
+    background.sportsDataSlateGames = slateGames;
 
     const statsFetchProps = pickUniquePropsForStatsFetch(
       projectionCandidates.length ? projectionCandidates : allDisplayProps.length ? allDisplayProps : workingNormalProps
@@ -2680,6 +2719,20 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       allDisplayProps = attachHistoricalStatsToProps(allDisplayProps, historicalContext);
       workingNormalProps = attachHistoricalStatsToProps(workingNormalProps, historicalContext);
       workingActiveProps = attachHistoricalStatsToProps(workingActiveProps, historicalContext);
+      if (slateGames.length) {
+        allDisplayProps = attachSportsDataSlateToProps(allDisplayProps, {
+          games: slateGames,
+          seasonRows: seasonStatsData,
+        });
+        workingNormalProps = attachSportsDataSlateToProps(workingNormalProps, {
+          games: slateGames,
+          seasonRows: seasonStatsData,
+        });
+        workingActiveProps = attachSportsDataSlateToProps(workingActiveProps, {
+          games: slateGames,
+          seasonRows: seasonStatsData,
+        });
+      }
       debugInfo.historicalMatchLog = buildProjectedHistoricalMatchLog(allDisplayProps, historicalContext);
       debugInfo.topProjectedDebugPlays = [...allDisplayProps]
         .filter((prop) => Number(prop.projection ?? prop.projectedValue) > 0)
@@ -4235,7 +4288,15 @@ export default function DFSPropsApp() {
   );
   const boardDisplayProps = useMemo(() => {
     const base = acceptedPropsForRender.length ? acceptedPropsForRender : liveRenderBoard.props;
-    return preferLiveProviderBoardProps(base, {
+    const slateGames = debugInfo?.sportsDataSlateGames || [];
+    const withSlate =
+      slateGames.length && base?.length
+        ? attachSportsDataSlateToProps(base, {
+            games: slateGames,
+            seasonRows: debugInfo?.sportsDataSeasonStats || [],
+          })
+        : base;
+    return preferLiveProviderBoardProps(withSlate, {
       cacheStatus,
       debugInfo,
       lastUpdated,

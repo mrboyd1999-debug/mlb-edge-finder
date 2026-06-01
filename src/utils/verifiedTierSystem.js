@@ -50,15 +50,16 @@ export {
 
 export const VERIFIED_TIER_A = {
   id: "A",
-  minProbability: 65,
-  minConfidence: 65,
+  minProbability: 70,
+  minConfidence: 72,
   minPlayability: 65,
   minSanity: TIER_A_MIN_SANITY_SCORE,
   rank: 0,
 };
 export const VERIFIED_TIER_B = {
   id: "B",
-  minProbability: 58,
+  minProbability: 65,
+  minConfidence: 68,
   minPlayability: 45,
   minSanity: TIER_B_MIN_SANITY_SCORE,
   rank: 1,
@@ -75,8 +76,8 @@ export const VERIFIED_TIER_D = {
   label: "Research",
 };
 
-export const VERIFIED_BASE_MIN_PROBABILITY = 55;
-export const VERIFIED_BASE_MIN_CONFIDENCE = 60;
+export const VERIFIED_BASE_MIN_PROBABILITY = 60;
+export const VERIFIED_BASE_MIN_CONFIDENCE = 62;
 export const VERIFIED_MIN_DATA_QUALITY = 50;
 
 export const VERIFIED_TIERS = [VERIFIED_TIER_A, VERIFIED_TIER_B, VERIFIED_TIER_C, VERIFIED_TIER_D];
@@ -125,9 +126,10 @@ function qualifiesTierA({ probability, confidence, playability, sanity, historic
   );
 }
 
-function qualifiesTierB({ probability, playability, sanity, audit }) {
+function qualifiesTierB({ probability, confidence, playability, sanity, audit }) {
   if (audit?.sanityFail) return false;
   if (sanity != null && sanity < TIER_B_MIN_SANITY_SCORE) return false;
+  if (!Number.isFinite(confidence) || confidence < VERIFIED_TIER_B.minConfidence) return false;
   return probability >= VERIFIED_TIER_B.minProbability && playability >= VERIFIED_TIER_B.minPlayability;
 }
 
@@ -196,7 +198,15 @@ export function classifyVerifiedTier(prop = {}) {
     tier = VERIFIED_TIER_C.id;
   }
 
-  if (qualifiesTierB({ probability, playability, sanity, audit })) {
+  if (
+    qualifiesTierB({
+      probability,
+      confidence,
+      playability,
+      sanity,
+      audit,
+    })
+  ) {
     tier = VERIFIED_TIER_B.id;
   }
 

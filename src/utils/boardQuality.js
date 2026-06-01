@@ -22,7 +22,7 @@ import {
 } from "./integrityAudit.js";
 import { resolveVerifiedHitRateSnapshot } from "./verifiedHitRates.js";
 import { STARTER_PENDING_LABEL, normalizePropPitcherFields, PITCHER_VERIFICATION, resolvePitcherVerification, OPPONENT_PITCHER_UNAVAILABLE_LABEL, PROBABLE_STARTER_PENDING_LABEL, resolveOpposingPitcherDisplayLabel } from "./opponentStarter.js";
-import { attachSportsDataPitcherFields, findSportsDataGameForTeam } from "./sportsDataPitcherLookup.js";
+import { attachSportsDataPitcherFields, findSportsDataGameForMatchup, findSportsDataGameForTeam } from "./sportsDataPitcherLookup.js";
 import { computePropIntegrityScore, isInflatedProbabilityProp } from "./probabilityIntegrity.js";
 import {
   allowFallbackVerification,
@@ -48,7 +48,7 @@ import {
 } from "./mlbBoardPipeline.js";
 import { attachPropDisplayFields, resolveNormalizedConfidence, resolveNormalizedProbability } from "./propDisplayFields.js";
 import { passesVerifiedBestPlaysFilter } from "./bestPlaysPipelineDebug.js";
-import { applyProjectionOutlierControl } from "./projectionOutlierControl.js";
+import { applyProjectionSanity } from "./projectionSanity.js";
 import { passesStrongMetricBestPlayGate } from "./verificationBreakdown.js";
 
 export { classifyPropTier, getTierAFailures, getTierBFailures, buildTierDebugSummary, hasPositiveEdge, hasAllowedVerification, passesResearchPlayThresholds, passesBestPlayDisplayGate, isMissingSeasonSource, BEST_PLAYS_BOARD_MIN, ELITE_TIER_METRICS, resolvePlayCategory, resolvePlayCategoryLabel } from "./tierClassification.js";
@@ -481,6 +481,9 @@ export function isPitcherPendingPlay(prop = {}) {
 }
 
 export function applyPitcherPendingConfidencePenalty(prop = {}) {
+  if (prop.opposingPitcherName || prop.probablePitcherName || prop.sportsDataProbablePitcher) {
+    return prop;
+  }
   if (!isPitcherPendingPlay(prop)) return prop;
   const displayPitcher = resolveOpposingPitcherDisplayLabel(prop);
   return {
@@ -1422,7 +1425,7 @@ export function resolveProjectionConfidenceLevel(prop = {}) {
 }
 
 export function attachBoardQualityFields(prop = {}) {
-  prop = applyProjectionOutlierControl(prop);
+  prop = applyProjectionSanity(prop);
   if (isMissingSeasonSource(prop) && (prop.last10HitRate != null || prop.recentHitRate != null)) {
     prop = {
       ...prop,
@@ -1433,8 +1436,12 @@ export function attachBoardQualityFields(prop = {}) {
   }
   const sportsDataGame =
     prop.sportsDataGame ||
-    (Array.isArray(prop.sportsDataSlateGames) && prop.team
-      ? findSportsDataGameForTeam(prop.sportsDataSlateGames, prop.team)
+    (Array.isArray(prop.sportsDataSlateGames) && (prop.team || prop.opponent)
+      ? findSportsDataGameForMatchup(
+          prop.sportsDataSlateGames,
+          prop.team || prop.playerTeam,
+          prop.opponent || prop.opponentTeam
+        )
       : null);
   const withSportsDataPitcher =
     prop.team && sportsDataGame

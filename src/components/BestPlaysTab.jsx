@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
 import BestPlayRowCard from "./BestPlayRowCard.jsx";
 import BestPlayFilterDiagnostics from "./BestPlayFilterDiagnostics.jsx";
@@ -7,6 +7,21 @@ import { NO_BEST_PLAYS_STANDARDS_MESSAGE } from "../utils/mlbBoardPipeline.js";
 import { safeArray } from "../utils/safeStats.js";
 import { liveBoardLoadingMessage } from "../utils/liveBoardLoading.js";
 import { getUniquePlayerTopPlays } from "../utils/ranking.js";
+import { resolvePayoutCategory, PAYOUT_DEMON, PAYOUT_GOBLIN, PAYOUT_STANDARD } from "../utils/payoutCategory.js";
+
+function filterPlaysByPayout(plays = [], payoutFilter = "all") {
+  if (payoutFilter === "all") return plays;
+  const target =
+    payoutFilter === "goblin"
+      ? PAYOUT_GOBLIN
+      : payoutFilter === "standard"
+        ? PAYOUT_STANDARD
+        : payoutFilter === "demon"
+          ? PAYOUT_DEMON
+          : null;
+  if (!target) return plays;
+  return plays.filter((prop) => resolvePayoutCategory(prop) === target);
+}
 
 function findSection(sections, id) {
   return (sections || []).find((row) => row.id === id) || null;
@@ -21,16 +36,17 @@ function BestPlaysTab({
   filterDiagnostics = null,
   showDebugPanels = false,
 }) {
+  const [payoutFilter, setPayoutFilter] = useState("all");
   const topBestPlaysSection = useMemo(() => findSection(sections, "top-10-best-plays"), [sections]);
   const morePlaysSection = useMemo(() => findSection(sections, "more-plays"), [sections]);
 
   const topBestPlays = useMemo(
-    () => getUniquePlayerTopPlays(safeArray(topBestPlaysSection?.picks), 3),
-    [topBestPlaysSection]
+    () => filterPlaysByPayout(getUniquePlayerTopPlays(safeArray(topBestPlaysSection?.picks), 3), payoutFilter),
+    [topBestPlaysSection, payoutFilter]
   );
   const morePlays = useMemo(
-    () => getUniquePlayerTopPlays(safeArray(morePlaysSection?.picks), 10),
-    [morePlaysSection]
+    () => filterPlaysByPayout(getUniquePlayerTopPlays(safeArray(morePlaysSection?.picks), 10), payoutFilter),
+    [morePlaysSection, payoutFilter]
   );
 
   const fallbackNotice = topBestPlaysSection?.fallbackNotice || "";
@@ -55,6 +71,26 @@ function BestPlaysTab({
         <div className="compact-section__head">
           <h2>Best Plays</h2>
           {fallbackNotice ? <p className="compact-form-notice">{fallbackNotice}</p> : null}
+        </div>
+
+        <div className="payout-filter-row" role="tablist" aria-label="Payout category filter">
+          {[
+            { id: "all", label: "All" },
+            { id: "goblin", label: "Goblins" },
+            { id: "standard", label: "Standard" },
+            { id: "demon", label: "Demons" },
+          ].map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              role="tab"
+              aria-selected={payoutFilter === option.id}
+              className={`payout-filter-btn${payoutFilter === option.id ? " payout-filter-btn--active" : ""}`}
+              onClick={() => setPayoutFilter(option.id)}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
 
         {showDebugPanels ? (

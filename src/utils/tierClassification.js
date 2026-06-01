@@ -9,16 +9,17 @@ import {
   VERIFICATION_STATUS,
 } from "./verificationStatus.js";
 
-export const TIER_A_METRICS = { confidence: 75, probability: 72 };
-export const ELITE_TIER_METRICS = { confidence: 75, probability: 72 };
-/** Playable tier — probability >= 67, confidence >= 70 */
-export const TIER_B_METRICS = { confidence: 70, probability: 67 };
-export const TIER_C_METRICS = { confidence: 60, probability: 62 };
-export const RESEARCH_TIER_METRICS = { confidence: 65 };
-/** Best Plays board — same thresholds as Tier B; tier priority handles A vs B vs C */
-export const BEST_PLAYS_BOARD_MIN = { ...TIER_B_METRICS };
+export const TIER_A_METRICS = { confidence: 72, probability: 70 };
+export const ELITE_TIER_METRICS = { confidence: 72, probability: 70 };
+/** Playable tier — probability >= 65, confidence >= 68 */
+export const TIER_B_METRICS = { confidence: 68, probability: 65 };
+export const TIER_C_METRICS = { confidence: 62, probability: 60 };
+export const RESEARCH_TIER_METRICS = { confidence: 62 };
+/** Best Plays board — same thresholds as Tier B */
+export const BEST_PLAYS_BOARD_MIN = { confidence: 68, probability: 65 };
 export const BEST_PLAY_DISPLAY_MIN = BEST_PLAYS_BOARD_MIN;
-export const PITCHER_PENDING_CONFIDENCE_PENALTY = 0;
+export const PITCHER_PENDING_CONFIDENCE_PENALTY = 1;
+export const PITCHER_UNAVAILABLE_CONFIDENCE_PENALTY = 2;
 
 function finite(value, fallback = NaN) {
   const num = Number(value);
@@ -82,10 +83,19 @@ export function attachFinalPlayMetrics(prop = {}, { confidence, probability } = 
 export function applyPitcherPendingMetricPenalty(prop = {}) {
   const verification =
     prop.pitcherVerification || resolvePitcherVerification(prop).pitcherVerification;
-  if (verification !== PITCHER_VERIFICATION.PENDING) return prop;
+  const status = String(prop.pitcherStatus || "").toLowerCase();
+  let penalty = 0;
+  if (status === "unavailable" || status === "unknown") {
+    penalty = PITCHER_UNAVAILABLE_CONFIDENCE_PENALTY;
+  } else if (status === "pending" || verification === PITCHER_VERIFICATION.PENDING) {
+    penalty = PITCHER_PENDING_CONFIDENCE_PENALTY;
+  } else if (verification === PITCHER_VERIFICATION.PENDING) {
+    penalty = PITCHER_PENDING_CONFIDENCE_PENALTY;
+  }
+  if (!penalty) return prop;
   const confidence = resolvePropConfidence(prop);
   if (!Number.isFinite(confidence)) return prop;
-  const penalized = Math.max(0, confidence - PITCHER_PENDING_CONFIDENCE_PENALTY);
+  const penalized = Math.max(0, confidence - penalty);
   return attachFinalPlayMetrics(prop, { confidence: penalized });
 }
 

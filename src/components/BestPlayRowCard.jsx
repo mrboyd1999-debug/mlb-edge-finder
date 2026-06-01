@@ -12,7 +12,8 @@ import { resolveProjectionValue } from "../utils/projectionQuality.js";
 import { formatEdgeDisplay } from "../utils/conservativeProjection.js";
 import { validatePickDirectionBeforeRender } from "../utils/pickDirectionAudit.js";
 import { resolveRecommendedSide, resolveTierDisplayLabel } from "../utils/boardQuality.js";
-import { resolveNormalizedConfidence, resolveNormalizedProbability } from "../utils/propDisplayFields.js";
+import { resolveNormalizedConfidence, resolveNormalizedProbability, formatPitcherLabel } from "../utils/propDisplayFields.js";
+import { resolvePayoutCategoryLabel } from "../utils/payoutCategory.js";
 import ProviderLabel from "./ProviderLabel.jsx";
 
 function resolveLeanSideLabel(prop = {}, recommendedSide = "PASS") {
@@ -69,6 +70,8 @@ function BestPlayRowCard({ prop, onOpen, rank, rankLabel, compact = false }) {
   const probabilityValue = resolveNormalizedProbability(enriched);
   const probLabel = probabilityValue != null ? `${probabilityValue}%` : "—";
   const tierLabel = resolveTierLabel(enriched);
+  const payoutLabel = resolvePayoutCategoryLabel(enriched);
+  const pitcherLabel = formatPitcherLabel(enriched);
   const edgeLabels = enriched.rawEdgeLabel
     ? { displayEdgeLabel: enriched.displayEdgeLabel }
     : formatEdgeDisplay(enriched);
@@ -115,6 +118,9 @@ function BestPlayRowCard({ prop, onOpen, rank, rankLabel, compact = false }) {
                 {tierLabel}
               </span>
             ) : null}
+            {payoutLabel ? (
+              <span className={`payout-badge payout-badge--${payoutLabel.toLowerCase()}`}>{payoutLabel}</span>
+            ) : null}
           </div>
           <p style={styles.bestPlayRowSubline}>
             {matchup} · {market}
@@ -126,6 +132,9 @@ function BestPlayRowCard({ prop, onOpen, rank, rankLabel, compact = false }) {
             <> · Line Used: <strong>{activeLine}</strong></>
           </p>
           <ProviderLabel prop={enriched} compact />
+          <p className="best-play-row-subline" style={{ marginTop: 4, fontSize: 12 }}>
+            {pitcherLabel}
+          </p>
           <div className="prop-card-core-metrics prop-card-core-metrics--mobile" style={{ marginTop: 6 }}>
             <span>
               Projection <strong>{projectionLabel}</strong>
