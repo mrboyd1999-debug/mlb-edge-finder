@@ -12,7 +12,9 @@ import { resolveProjectionValue } from "../utils/projectionQuality.js";
 import { formatEdgeDisplay } from "../utils/conservativeProjection.js";
 import { validatePickDirectionBeforeRender } from "../utils/pickDirectionAudit.js";
 import { resolveRecommendedSide, resolveTierDisplayLabel } from "../utils/boardQuality.js";
-import { resolveNormalizedConfidence, resolveNormalizedProbability, formatPitcherLabel } from "../utils/propDisplayFields.js";
+import { resolveNormalizedConfidence, resolveNormalizedProbability } from "../utils/propDisplayFields.js";
+import { formatPitcherLabel } from "../utils/pitcherDisplay.js";
+import { resolveRecommendationBadgeLabel } from "../utils/mlbQualityPass.js";
 import { resolvePayoutCategoryLabel } from "../utils/payoutCategory.js";
 import ProviderLabel from "./ProviderLabel.jsx";
 
@@ -71,6 +73,9 @@ function BestPlayRowCard({ prop, onOpen, rank, rankLabel, compact = false }) {
   const probLabel = probabilityValue != null ? `${probabilityValue}%` : "—";
   const tierLabel = resolveTierLabel(enriched);
   const payoutLabel = resolvePayoutCategoryLabel(enriched);
+  const recommendationBadge = enriched.recommendationBadge || "";
+  const recommendationBadgeLabel =
+    enriched.recommendationBadgeLabel || resolveRecommendationBadgeLabel(enriched);
   const pitcherLabel = formatPitcherLabel(enriched);
   const edgeLabels = enriched.rawEdgeLabel
     ? { displayEdgeLabel: enriched.displayEdgeLabel }
@@ -84,7 +89,6 @@ function BestPlayRowCard({ prop, onOpen, rank, rankLabel, compact = false }) {
     enriched.bestPlayFilterReason ||
     enriched.probabilityExplanation ||
     "";
-  const displayRankLabel = rankLabel || (rank != null ? `#${rank}` : null);
 
   function openDetails(event) {
     event?.stopPropagation?.();
@@ -118,6 +122,11 @@ function BestPlayRowCard({ prop, onOpen, rank, rankLabel, compact = false }) {
             ) : null}
             {payoutLabel ? (
               <span className={`payout-badge payout-badge--${payoutLabel.toLowerCase()}`}>{payoutLabel}</span>
+            ) : null}
+            {recommendationBadge ? (
+              <span className={`recommendation-badge recommendation-badge--${recommendationBadge.toLowerCase()}`}>
+                {recommendationBadgeLabel}
+              </span>
             ) : null}
           </div>
           <p style={styles.bestPlayRowSubline}>

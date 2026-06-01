@@ -267,8 +267,15 @@ export function attachSportsDataPitcherFields(prop = {}, { game = null, seasonRo
     };
   }
 
-  const pitcherRow = findPitcherSeasonRow(seasonRows, lookup.playerId, lookup.name);
+  const pitcherRow = findPitcherSeasonRow(rows, lookup.playerId, lookup.name);
   const matchupScore = computeOpposingPitcherMatchupScore(prop, pitcherRow || {});
+  const era = finite(pitcherRow?.ERA ?? pitcherRow?.EarnedRunAverage);
+  const whip = finite(pitcherRow?.WHIP ?? pitcherRow?.PitchingWHIP);
+  const hand =
+    pitcherRow?.Throws ||
+    pitcherRow?.PitchingHand ||
+    pitcherRow?.Hand ||
+    null;
 
   return {
     ...prop,
@@ -277,6 +284,7 @@ export function attachSportsDataPitcherFields(prop = {}, { game = null, seasonRo
     opponentStarterFromSportsData: lookup.name,
     opposingPitcherName: lookup.name,
     probablePitcherName: lookup.name,
+    pitcherName: lookup.name,
     opposingPitcher: lookup.name,
     opposingPitcherDisplay: lookup.name,
     opponentStarterNote: lookup.name,
@@ -285,6 +293,10 @@ export function attachSportsDataPitcherFields(prop = {}, { game = null, seasonRo
     sportsDataPitcherPlayerId: lookup.playerId,
     sportsDataPitcherSource: lookup.source,
     pitcherStatus: "confirmed",
+    pitcherHand: hand ? String(hand).trim().toUpperCase().charAt(0) : "",
+    pitcherERA: era,
+    pitcherWHIP: whip,
+    opposingPitcherSeasonRow: pitcherRow || null,
     probablePitchers: {
       ...(prop.probablePitchers || {}),
       sportsDataStarter: lookup.name,

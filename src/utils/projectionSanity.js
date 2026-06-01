@@ -78,11 +78,11 @@ export function applyProjectionSanity(prop = {}) {
   const market = resolvePropMarketKey(prop);
   const last10Avg = resolveLast10Average(prop);
 
-  if (isHrrMarket(prop) && Math.abs(line - 1.5) < 0.01 && adjusted > 2.8) {
+  if (isHrrMarket(prop) && Math.abs(line - 1.5) < 0.01 && adjusted > 2.2) {
     if (last10Avg == null || last10Avg < adjusted) {
-      adjusted = 2.8;
+      adjusted = 2.2;
       projectionSanityStatus = "capped";
-      capReason = "HRR line 1.5 capped at 2.8 unless last10 supports projection";
+      capReason = "HRR line 1.5 capped at 2.2 unless last10 supports projection";
       projectionWarning = projectionWarning || "HRR projection capped for line-scale safety";
     }
   }

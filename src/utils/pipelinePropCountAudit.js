@@ -10,6 +10,7 @@ import {
 } from "./mlbAllowedMarkets.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
 import { resolveHistoricalDataPresent } from "./tierHistoricalValidation.js";
+import { countMlbQualityMetrics } from "./mlbQualityPass.js";
 
 function finiteCount(value) {
   const num = Number(value);
@@ -222,6 +223,7 @@ export function buildPipelinePropCountAudit({
   afterProjectionFilter = 0,
   afterProjectionMerge = 0,
   afterVerificationFilter = 0,
+  boardProps = [],
 } = {}) {
   const rawPP = finiteCount(rawPrizePicks);
   const rawUD = finiteCount(rawUnderdog);
@@ -302,6 +304,7 @@ export function buildPipelinePropCountAudit({
     dropOffStage,
     dropOffDetail,
     coverageWarning: null,
+    mlbQualityMetrics: countMlbQualityMetrics(boardProps),
     updatedAt: new Date().toISOString(),
   };
 
@@ -324,6 +327,9 @@ export function logPipelineCoverageAudit(audit = {}) {
   console.log("[Pipeline] After projection eligibility", audit.projectionCandidates ?? audit.afterProjectionFilter ?? 0);
   console.log("[Pipeline] Projected props", audit.projectedProps ?? audit.afterProjectionMerge ?? 0);
   console.log("[Pipeline] Verified props", audit.verifiedProps ?? audit.afterVerificationFilter ?? 0);
+  if (audit.mlbQualityMetrics) {
+    console.log("[Pipeline] MLB quality metrics", audit.mlbQualityMetrics);
+  }
 
   if (audit.rejections && Object.values(audit.rejections).some((n) => Number(n) > 0)) {
     console.log("[Pipeline] Rejected by reason", audit.rejections);

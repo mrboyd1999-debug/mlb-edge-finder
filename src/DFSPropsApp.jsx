@@ -3391,6 +3391,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     verifiedProps: countVerifiedFilterProps(verificationPool),
     displayedProps: acceptedPropsForRender.length || liveRenderResult.counts?.rendered || displayProps.length || 0,
     rejections: pipelinePropCountSnapshot.rejections || {},
+    boardProps: verificationPool,
   });
   logPipelinePropCountAudit(debugInfo.pipelinePropCountAudit);
   logPipelineStageTrace({

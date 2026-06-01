@@ -23,6 +23,7 @@ import {
 import { resolveVerifiedHitRateSnapshot } from "./verifiedHitRates.js";
 import { STARTER_PENDING_LABEL, normalizePropPitcherFields, PITCHER_VERIFICATION, resolvePitcherVerification, OPPONENT_PITCHER_UNAVAILABLE_LABEL, PROBABLE_STARTER_PENDING_LABEL, resolveOpposingPitcherDisplayLabel } from "./opponentStarter.js";
 import { attachSportsDataPitcherFields, attachSportsDataSlateToProps, findSportsDataGameForMatchup, findSportsDataGameForTeam } from "./sportsDataPitcherLookup.js";
+import { attachMlbQualityPassFields } from "./mlbQualityPass.js";
 import { computePropIntegrityScore, isInflatedProbabilityProp } from "./probabilityIntegrity.js";
 import {
   allowFallbackVerification,
@@ -1474,10 +1475,11 @@ export function attachBoardQualityFields(prop = {}) {
   const fullData = normalized.dataStatus === DATA_STATUS.FULL_MLB_DATA;
   const dataQualityBadge = resolveBoardDataQualityBadge({ ...normalized, isFullData: fullData, partialData: !fullData });
   const propTier = classifyPropTier(normalized);
+  const withMlbQuality = attachMlbQualityPassFields(normalized);
   return attachPropDisplayFields(
     attachVerificationStatusFields(
       attachFinalTierFields({
-        ...normalized,
+        ...withMlbQuality,
         ...edgeLabels,
         rawEdgeLabel: edgeLabels.rawEdgeLabel,
         displayEdgeLabel: edgeLabels.displayEdgeLabel,

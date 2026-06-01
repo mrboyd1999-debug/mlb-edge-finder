@@ -42,7 +42,12 @@ import { attachBoardQualityFields,
   resolveTierDisplayLabel,
 } from "../utils/boardQuality.js";
 import { withPlayerImageUrl } from "../utils/playerImageFields.js";
-import { resolveNormalizedConfidence, resolveNormalizedProbability, resolveProviderLineFields, formatPitcherLabel } from "../utils/propDisplayFields.js";
+import {
+  resolveNormalizedConfidence,
+  resolveNormalizedProbability,
+  resolveProviderLineFields,
+} from "../utils/propDisplayFields.js";
+import { formatPitcherMatchupDetail } from "../utils/pitcherDisplay.js";
 import { resolvePayoutCategoryLabel } from "../utils/payoutCategory.js";
 import { resolveRiskExplanation } from "../utils/risk.js";
 import ProviderLabel from "./ProviderLabel.jsx";
@@ -339,7 +344,13 @@ export default function PickDetailModal({
   const probabilityAuditRows = buildSimpleProbabilityAuditRows(prop, hitRateSnapshot);
   const confidenceExplanationRows = buildConfidenceExplanationRows(prop);
   const advancedProbabilityAuditRows = buildAdvancedProbabilityAuditRows(prop);
-  const opposingPitcherLabel = formatPitcherLabel(prop);
+  const opposingPitcherLabel = formatPitcherMatchupDetail(prop);
+  const recommendationBadge = prop.recommendationBadge || "";
+  const recommendationBadgeLabel = prop.recommendationBadgeLabel || "";
+  const displayIntegrityScore =
+    prop.displayIntegrityScore ?? prop.mlbDisplayIntegrityScore ?? prop.integrityScore ?? null;
+  const matchupIntel = prop.matchupIntelligence || {};
+  const reasoningRows = prop.reasoningRows || [];
   const payoutCategoryLabel = resolvePayoutCategoryLabel(prop);
   const probabilityLabel = (() => {
     const normalized = resolveNormalizedProbability(prop);
@@ -424,6 +435,11 @@ export default function PickDetailModal({
                     {payoutCategoryLabel}
                   </span>
                 ) : null}
+                {breakdownMode && recommendationBadge ? (
+                  <span className={`recommendation-badge recommendation-badge--${recommendationBadge.toLowerCase()}`}>
+                    {recommendationBadgeLabel || recommendationBadge}
+                  </span>
+                ) : null}
                 {manualProp ? (
                   <div className="pick-detail-modal-badges">
                     {noVerifiedPlay ? (
@@ -497,6 +513,9 @@ export default function PickDetailModal({
                 <SummaryMetric label="Edge" value={edgeLabel} strong />
                 <SummaryMetric label="Probability" value={probabilityLabel} strong />
                 <SummaryMetric label="Confidence" value={confidenceLabel} strong />
+                {displayIntegrityScore != null ? (
+                  <SummaryMetric label="Integrity" value={`${Math.round(Number(displayIntegrityScore))}/100`} />
+                ) : null}
                 {showDebugPanels ? <SummaryMetric label="Risk" value={riskLevel} strong /> : null}
                 {showDebugPanels && breakdownMode ? <SummaryMetric label="Tier" value={tierBadgeLabel} strong /> : null}
                 {breakdownMode ? <SummaryMetric label="Pitcher" value={opposingPitcherLabel} /> : null}
@@ -510,6 +529,72 @@ export default function PickDetailModal({
           {!manualProp ? (
             <div className="pick-detail-modal-provider-lines">
               <ProviderLabel prop={prop} />
+            </div>
+          ) : null}
+
+          {breakdownMode && !manualProp ? (
+            <div className="pick-detail-modal-section">
+              <strong>Matchup</strong>
+              <div className="compact-prop-grid" style={{ marginTop: "8px" }}>
+                <MetricIf label="Ballpark" value={matchupIntel.ballpark || prop.ballpark || prop.venue} />
+                <MetricIf label="Weather" value={matchupIntel.weather || prop.weatherLabel || prop.weatherNote} />
+                <MetricIf
+                  label="Opponent starter"
+                  value={matchupIntel.opponentStarter || prop.pitcherName || prop.opposingPitcherName}
+                />
+                <MetricIf label="Pitcher hand" value={matchupIntel.pitcherHand || prop.pitcherHand} />
+                <MetricIf
+                  label="ERA"
+                  value={
+                    matchupIntel.pitcherERA != null
+                      ? formatNumber(matchupIntel.pitcherERA)
+                      : prop.pitcherERA != null
+                        ? formatNumber(prop.pitcherERA)
+                        : null
+                  }
+                />
+                <MetricIf
+                  label="WHIP"
+                  value={
+                    matchupIntel.pitcherWHIP != null
+                      ? formatNumber(matchupIntel.pitcherWHIP)
+                      : prop.pitcherWHIP != null
+                        ? formatNumber(prop.pitcherWHIP)
+                        : null
+                  }
+                />
+                <MetricIf
+                  label="Batting order"
+                  value={matchupIntel.battingOrderSpot || prop.battingOrderSpot}
+                />
+              </div>
+              {opposingPitcherLabel && opposingPitcherLabel !== "Pitcher: Pending" ? (
+                <p style={{ marginTop: "8px", fontSize: "12px", color: "#94a3b8" }}>{opposingPitcherLabel}</p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {breakdownMode && !manualProp && reasoningRows.length ? (
+            <div className="pick-detail-modal-section">
+              <strong>Reasoning</strong>
+              <div className="compact-prop-grid" style={{ marginTop: "8px" }}>
+                {reasoningRows.map((row) => (
+                  <SummaryMetric key={row.label} label={row.label} value={row.value} />
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {breakdownMode && !manualProp && recommendationBadge ? (
+            <div className="pick-detail-modal-recommendation">
+              <strong>Recommendation · {recommendationBadgeLabel || recommendationBadge}</strong>
+              <p>
+                {recommendationBadge === "SAFE"
+                  ? "Stable projection with strong confidence and probability."
+                  : recommendationBadge === "AGGRESSIVE"
+                    ? "Higher variance — projection or risk flags warrant caution."
+                    : "Balanced play with standard confidence and projection stability."}
+              </p>
             </div>
           ) : null}
 
