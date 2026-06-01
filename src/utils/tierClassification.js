@@ -4,6 +4,7 @@
 
 import { PITCHER_VERIFICATION, resolvePitcherVerification } from "./opponentStarter.js";
 import { isInflatedProbabilityProp } from "./probabilityIntegrity.js";
+import { hasAggressiveProjectionWarning } from "./projectionSanity.js";
 import {
   resolveVerificationStatus,
   VERIFICATION_STATUS,
@@ -139,7 +140,7 @@ export function isMissingSeasonSource(prop = {}) {
 }
 
 export function applyTierCaps(prop = {}, tier = "C") {
-  void prop;
+  if (tier === "A" && hasAggressiveProjectionWarning(prop)) return "B";
   return tier;
 }
 
@@ -199,6 +200,9 @@ export function classifyPropTier(prop = {}) {
 
   if (confidence >= TIER_A_METRICS.confidence && probability >= TIER_A_METRICS.probability) {
     if (status === VERIFICATION_STATUS.FULL || status === VERIFICATION_STATUS.PARTIAL) {
+      if (hasAggressiveProjectionWarning(prop)) {
+        return applyTierCaps(prop, "B");
+      }
       return applyTierCaps(prop, "A");
     }
   }

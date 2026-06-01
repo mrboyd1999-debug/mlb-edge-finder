@@ -272,6 +272,7 @@ import {
   buildStatsAttachmentMetrics,
 } from "./utils/historicalStatsLoader.js";
 import { attachSportsDataSlateToProps } from "./utils/sportsDataPitcherLookup.js";
+import { attachMergedLineComparisons } from "./utils/lineComparisonMerge.js";
 import { computeTopPlayFinalScore } from "./utils/bestPlayRankingScore.js";
 import { enrichMlbPropsBatch } from "./services/mlb/mlbEnrichmentPipeline.js";
 import {
@@ -4296,13 +4297,14 @@ export default function DFSPropsApp() {
             seasonRows: debugInfo?.sportsDataSeasonStats || [],
           })
         : base;
-    return preferLiveProviderBoardProps(withSlate, {
+    const withLines = attachMergedLineComparisons(withSlate, allDisplayProps);
+    return preferLiveProviderBoardProps(withLines, {
       cacheStatus,
       debugInfo,
       lastUpdated,
       ingestionFallback: debugInfo?.ingestionFallback || "",
     });
-  }, [acceptedPropsForRender, liveRenderBoard, cacheStatus, debugInfo, lastUpdated]);
+  }, [acceptedPropsForRender, liveRenderBoard, cacheStatus, debugInfo, lastUpdated, allDisplayProps]);
 
   const prizePicksFeedProps = useMemo(() => {
     const research = (boardDisplayProps || []).filter((prop) => {

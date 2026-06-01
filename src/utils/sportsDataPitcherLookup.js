@@ -4,28 +4,83 @@
 
 import { mlbTeamsMatch } from "./mlbTeamMatch.js";
 import { getSportsDataApiKey } from "../config/apiConfig.js";
+import { enrichPropWithTeamLookup } from "./teamEnrichment.js";
 
 function finite(value) {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
 }
 
-function readPitcherName(game = {}, side = "Home") {
-  const prefix = side === "Home" ? "Home" : "Away";
-  const objectPitcher = game[`${prefix}ProbablePitcher`];
-  if (objectPitcher && typeof objectPitcher === "object") {
-    return objectPitcher.Name || objectPitcher.FullName || objectPitcher.FirstName
-      ? `${objectPitcher.FirstName || ""} ${objectPitcher.LastName || ""}`.trim() || objectPitcher.Name
-      : null;
+/** Parse team/opponent from matchup text like "vs Marlins @ Mets". */
+export function parseTeamsFromProp(prop = {}) {
+  let team = String(prop.team || prop.playerTeam || "").trim();
+  let opponent = String(prop.opponent || prop.opponentTeam || "").trim();
+  const matchup = String(prop.matchup || "").trim();
+
+  if (team && opponent) return { team, opponent };
+
+  const cleaned = matchup.replace(/^vs\.?\s*/i, "").trim();
+  const atSplit = cleaned.match(/^(.+?)\s*@\s*(.+)$/);
+  if (atSplit) {
+    opponent = opponent || atSplit[1].trim();
+    team = team || atSplit[2].trim();
   }
-  return (
+
+  const vsSplit = cleaned.match(/^(.+?)\s+vs\.?\s+(.+)$/i);
+  if (vsSplit && !team) {
+    team = vsSplit[1].trim();
+    opponent = opponent || vsSplit[2].trim();
+  }
+
+  return { team, opponent };
+}
+
+function resolvePitcherIdentity(game = {}, side = "Home", seasonRows = []) {
+  const prefix = side === "Home" ? "Home" : "Away";
+  const teamPrefix = side === "Home" ? "HomeTeam" : "AwayTeam";
+  const objectPitcher = game[`${prefix}ProbablePitcher`] || game[`${teamPrefix}ProbablePitcher`];
+  if (objectPitcher && typeof objectPitcher === "object") {
+    const name =
+      objectPitcher.Name ||
+      objectPitcher.FullName ||
+      `${objectPitcher.FirstName || ""} ${objectPitcher.LastName || ""}`.trim() ||
+      null;
+    const playerId =
+      objectPitcher.PlayerID ||
+      objectPitcher.ID ||
+      readPitcherId(game, side) ||
+      game[`${teamPrefix}ProbablePitcherID`] ||
+      null;
+    if (name) return { name: String(name).trim(), playerId };
+  }
+
+  const name =
+    game[`${teamPrefix}ProbablePitcherName`] ||
     game[`${prefix}ProbablePitcherName`] ||
+    game[`${teamPrefix}StartingPitcherName`] ||
     game[`${prefix}StartingPitcherName`] ||
+    game[`${teamPrefix}StartingPitcher`] ||
     game[`${prefix}StartingPitcher`] ||
-    game[`${prefix}TeamStartingPitcher`] ||
+    game[`${teamPrefix}ProbablePitcher`] ||
     game[`${prefix}ProbablePitcher`] ||
-    null
-  );
+    null;
+
+  let playerId =
+    game[`${teamPrefix}ProbablePitcherID`] ||
+    readPitcherId(game, side) ||
+    game[`${teamPrefix}StartingPitcherID`] ||
+    null;
+
+  if ((!name || String(name).trim().length === 0) && playerId != null && seasonRows.length) {
+    const row = seasonRows.find((entry) => String(entry.PlayerID) === String(playerId));
+    if (row?.Name) return { name: String(row.Name).trim(), playerId };
+  }
+
+  if (name && String(name).trim()) {
+    return { name: String(name).trim(), playerId };
+  }
+
+  return { name: null, playerId };
 }
 
 function readPitcherId(game = {}, side = "Home") {
@@ -39,30 +94,36 @@ function readPitcherId(game = {}, side = "Home") {
 }
 
 /** Opposing probable starter from a SportsDataIO GamesByDate row. */
-export function resolveOpposingPitcherFromSportsDataGame(game = {}, team = "") {
+export function resolveOpposingPitcherFromSportsDataGame(game = {}, team = "", seasonRows = []) {
   const teamNeedle = String(team || "").trim();
   if (!game || !teamNeedle) return null;
 
-  const homeTeam = String(game.HomeTeam || game.HomeTeamAbbreviation || "").trim();
-  const awayTeam = String(game.AwayTeam || game.AwayTeamAbbreviation || "").trim();
+  const homeTeam = String(game.HomeTeam || game.HomeTeamAbbreviation || game.HomeTeamName || "").trim();
+  const awayTeam = String(game.AwayTeam || game.AwayTeamAbbreviation || game.AwayTeamName || "").trim();
   const onHome = mlbTeamsMatch(teamNeedle, homeTeam);
   const onAway = mlbTeamsMatch(teamNeedle, awayTeam);
 
   if (onHome) {
-    return {
-      name: readPitcherName(game, "Away"),
-      playerId: readPitcherId(game, "Away"),
-      pitcherTeam: awayTeam,
-      source: "sportsdataio-game",
-    };
+    const identity = resolvePitcherIdentity(game, "Away", seasonRows);
+    return identity.name
+      ? {
+          name: identity.name,
+          playerId: identity.playerId,
+          pitcherTeam: awayTeam,
+          source: "sportsdataio-game",
+        }
+      : null;
   }
   if (onAway) {
-    return {
-      name: readPitcherName(game, "Home"),
-      playerId: readPitcherId(game, "Home"),
-      pitcherTeam: homeTeam,
-      source: "sportsdataio-game",
-    };
+    const identity = resolvePitcherIdentity(game, "Home", seasonRows);
+    return identity.name
+      ? {
+          name: identity.name,
+          playerId: identity.playerId,
+          pitcherTeam: homeTeam,
+          source: "sportsdataio-game",
+        }
+      : null;
   }
 
   return null;
@@ -102,28 +163,34 @@ export function attachSportsDataSlateToProps(props = [], { games = [], seasonRow
     return props;
   }
   return props.map((prop) => {
-    const team = prop.team || prop.playerTeam || "";
-    const opponent = prop.opponent || prop.opponentTeam || "";
+    const withTeam = enrichPropWithTeamLookup(prop, { seasonStats: seasonRows });
+    const parsedTeams = parseTeamsFromProp(withTeam);
+    const team = parsedTeams.team || withTeam.team || withTeam.playerTeam || "";
+    const opponent = parsedTeams.opponent || withTeam.opponent || withTeam.opponentTeam || "";
     const game =
-      prop.sportsDataGame ||
+      withTeam.sportsDataGame ||
       findSportsDataGameForMatchup(games, team, opponent) ||
       findSportsDataGameForTeam(games, team);
     if (!game) {
       return {
-        ...prop,
+        ...withTeam,
+        team,
+        opponent,
         sportsDataSlateGames: games,
         sportsDataSeasonRows: seasonRows,
-        pitcherStatus: prop.pitcherStatus || (team && opponent ? "unavailable" : "pending"),
+        pitcherStatus: withTeam.pitcherStatus || (team && opponent ? "unavailable" : "pending"),
       };
     }
     return attachSportsDataPitcherFields(
       {
-        ...prop,
+        ...withTeam,
+        team,
+        opponent,
         sportsDataSlateGames: games,
         sportsDataSeasonRows: seasonRows,
         sportsDataGame: game,
         opponent:
-          prop.opponent ||
+          opponent ||
           (mlbTeamsMatch(team, game.HomeTeam || game.HomeTeamAbbreviation)
             ? game.AwayTeam || game.AwayTeamAbbreviation
             : game.HomeTeam || game.HomeTeamAbbreviation),
@@ -183,14 +250,18 @@ export function findPitcherSeasonRow(seasonRows = [], playerId = null, name = ""
 }
 
 export function attachSportsDataPitcherFields(prop = {}, { game = null, seasonRows = [] } = {}) {
-  const team = prop.team || prop.playerTeam || "";
+  const parsed = parseTeamsFromProp(prop);
+  const team = parsed.team || prop.team || prop.playerTeam || "";
   const resolvedGame = game || prop.sportsDataGame || null;
   if (!resolvedGame || !team) return prop;
 
-  const lookup = resolveOpposingPitcherFromSportsDataGame(resolvedGame, team);
+  const rows = seasonRows.length ? seasonRows : prop.sportsDataSeasonRows || [];
+  const lookup = resolveOpposingPitcherFromSportsDataGame(resolvedGame, team, rows);
   if (!lookup?.name) {
     return {
       ...prop,
+      team,
+      opponent: parsed.opponent || prop.opponent,
       sportsDataGame: resolvedGame,
       pitcherStatus: prop.pitcherStatus || "pending",
     };

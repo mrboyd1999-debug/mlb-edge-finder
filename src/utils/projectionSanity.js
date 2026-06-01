@@ -5,6 +5,15 @@
 import { resolvePropMarketKey } from "./marketNormalization.js";
 import { applyProjectionOutlierControl } from "./projectionOutlierControl.js";
 
+export function hasAggressiveProjectionWarning(prop = {}) {
+  return Boolean(
+    prop.projectionAggressiveWarning ||
+      prop.projectionLargeEdgeWarning ||
+      (prop.projectionSanityStatus === "outlier" &&
+        /aggressive|large relative edge/i.test(String(prop.projectionWarning || "")))
+  );
+}
+
 function finite(value) {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
@@ -110,6 +119,13 @@ export function applyProjectionSanity(prop = {}) {
     }
   }
 
+  if (adjusted > line * 1.75) {
+    projectionSanityStatus = projectionSanityStatus === "ok" ? "outlier" : projectionSanityStatus;
+    projectionWarning = projectionWarning || "Aggressive projection";
+    confidencePenalty = Math.max(confidencePenalty, 4);
+    probabilityPenalty = Math.max(probabilityPenalty, 3);
+  }
+
   let next = {
     ...prop,
     rawProjection,
@@ -118,6 +134,10 @@ export function applyProjectionSanity(prop = {}) {
     projectedValue: adjusted,
     projectionSanityStatus,
     projectionWarning: projectionWarning || "",
+    projectionAggressiveWarning: adjusted > line * 1.75,
+    projectionLargeEdgeWarning:
+      prop.projectionLargeEdgeWarning ||
+      (adjusted > line * 1.75 ? "Projection exceeds 1.75x line without full historical support" : ""),
     projectionCapReason: capReason || prop.projectionCapReason || "",
     projectionConfidence: prop.projectionConfidence || projectionSanityStatus,
   };

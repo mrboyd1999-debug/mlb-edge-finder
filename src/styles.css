@@ -3311,18 +3311,30 @@ body,
   }
 
   .pick-detail-modal-body {
-    padding: 10px 12px 14px;
+    padding: 10px 12px max(14px, env(safe-area-inset-bottom));
     overflow-x: hidden;
+    overscroll-behavior: contain;
+  }
+
+  .pick-detail-modal-header {
+    position: sticky;
+    top: 0;
+  }
+
+  .pick-detail-modal-header__actions {
+    position: sticky;
+    top: 0;
   }
 
   .pick-detail-modal-header__actions button {
-    min-height: 40px;
-    min-width: 40px;
+    min-height: 44px;
+    min-width: 44px;
   }
 
   .pick-detail-modal-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
+    overflow: hidden;
   }
 
   .pick-detail-metric span {
@@ -3365,6 +3377,55 @@ body,
 
 .best-play-row-card .payout-badge {
   margin-left: 4px;
+}
+
+.provider-line-display {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 10px;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  background: #0b1220;
+}
+
+.provider-line-display--compact {
+  margin-top: 4px;
+  padding: 4px 6px;
+}
+
+.provider-line-display__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.provider-line-display__label {
+  font-size: 10px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.provider-line-display__value {
+  font-size: 11px;
+  color: #e2e8f0;
+}
+
+.provider-line-display__detail {
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+.pick-detail-modal-provider-lines {
+  margin-top: 8px;
+}
+
+.pick-detail-modal-provider-lines .provider-line-display {
+  grid-template-columns: 1fr;
 }
 
 .payout-filter-row {

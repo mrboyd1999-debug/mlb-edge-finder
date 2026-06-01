@@ -22,7 +22,7 @@ import {
 } from "./integrityAudit.js";
 import { resolveVerifiedHitRateSnapshot } from "./verifiedHitRates.js";
 import { STARTER_PENDING_LABEL, normalizePropPitcherFields, PITCHER_VERIFICATION, resolvePitcherVerification, OPPONENT_PITCHER_UNAVAILABLE_LABEL, PROBABLE_STARTER_PENDING_LABEL, resolveOpposingPitcherDisplayLabel } from "./opponentStarter.js";
-import { attachSportsDataPitcherFields, findSportsDataGameForMatchup, findSportsDataGameForTeam } from "./sportsDataPitcherLookup.js";
+import { attachSportsDataPitcherFields, attachSportsDataSlateToProps, findSportsDataGameForMatchup, findSportsDataGameForTeam } from "./sportsDataPitcherLookup.js";
 import { computePropIntegrityScore, isInflatedProbabilityProp } from "./probabilityIntegrity.js";
 import {
   allowFallbackVerification,
@@ -1425,6 +1425,13 @@ export function resolveProjectionConfidenceLevel(prop = {}) {
 }
 
 export function attachBoardQualityFields(prop = {}) {
+  if (Array.isArray(prop.sportsDataSlateGames) && prop.sportsDataSlateGames.length) {
+    const [withSlate] = attachSportsDataSlateToProps([prop], {
+      games: prop.sportsDataSlateGames,
+      seasonRows: prop.sportsDataSeasonRows || [],
+    });
+    prop = withSlate || prop;
+  }
   prop = applyProjectionSanity(prop);
   if (isMissingSeasonSource(prop) && (prop.last10HitRate != null || prop.recentHitRate != null)) {
     prop = {

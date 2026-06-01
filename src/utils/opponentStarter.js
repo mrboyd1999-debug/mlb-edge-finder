@@ -151,6 +151,16 @@ export const PITCHER_VERIFICATION = {
 };
 
 function resolvePartialPitcherName(prop = {}) {
+  const direct =
+    prop.opposingPitcherName ||
+    prop.probablePitcherName ||
+    prop.sportsDataProbablePitcher ||
+    prop.opponentStarterFromSportsData ||
+    null;
+  if (direct && !isUnavailablePitcherLabel(direct)) {
+    return String(direct).replace(/^Pitcher:\s*/i, "").trim();
+  }
+
   const probable = prop.probablePitchers || {};
   const fromSchedule =
     probable.opponentStarter ||
@@ -209,13 +219,30 @@ export function resolvePitcherVerification(prop = {}) {
 }
 
 export function normalizePropPitcherFields(prop = {}, probablePitchers = null) {
+  const existingName =
+    prop.opposingPitcherName ||
+    prop.probablePitcherName ||
+    prop.sportsDataProbablePitcher ||
+    "";
+  const cleanedExisting =
+    existingName && !isUnavailablePitcherLabel(existingName)
+      ? String(existingName).replace(/^Pitcher:\s*/i, "").trim()
+      : "";
+
   const audit = buildPitcherMatchupAudit(prop, probablePitchers);
-  const verification = resolvePitcherVerification({ ...prop, probablePitchers: probablePitchers || prop.probablePitchers, pitcherMatchupAudit: audit });
+  const verification = resolvePitcherVerification({
+    ...prop,
+    probablePitchers: probablePitchers || prop.probablePitchers,
+    pitcherMatchupAudit: audit,
+  });
   const pitcherName =
-    verification.pitcher && !isUnavailablePitcherLabel(verification.pitcher)
+    cleanedExisting ||
+    (verification.pitcher && !isUnavailablePitcherLabel(verification.pitcher)
       ? String(verification.pitcher).replace(/^Pitcher:\s*/i, "").trim()
-      : prop.opposingPitcherName || prop.probablePitcherName || "";
-  const gameMatched = Boolean(audit.starterLookup?.matchedGame || audit.gameId);
+      : "");
+  const gameMatched = Boolean(
+    audit.starterLookup?.matchedGame || audit.gameId || prop.sportsDataGame
+  );
   let pitcherStatus = prop.pitcherStatus || "pending";
   if (pitcherName) pitcherStatus = "confirmed";
   else if (gameMatched) pitcherStatus = "pending";
@@ -290,7 +317,12 @@ export function validatePitcherForMatchup(prop = {}) {
     prop.opposingPitcherTeam || prop.pitcherTeam || prop.matchupAudit?.pitcherTeam || ""
   ).trim();
   const rawPitcher = String(
-    prop.opposingPitcher || prop.opponentStarterNote || prop.matchupAudit?.pitcher || ""
+    prop.opposingPitcherName ||
+      prop.probablePitcherName ||
+      prop.opposingPitcher ||
+      prop.opponentStarterNote ||
+      prop.matchupAudit?.pitcher ||
+      ""
   ).trim();
   const game = prop.probablePitchers?.game || prop.game || null;
 

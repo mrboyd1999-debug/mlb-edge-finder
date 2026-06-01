@@ -42,7 +42,7 @@ import { attachBoardQualityFields,
   resolveTierDisplayLabel,
 } from "../utils/boardQuality.js";
 import { withPlayerImageUrl } from "../utils/playerImageFields.js";
-import { resolveNormalizedConfidence, resolveNormalizedProbability, resolveProviderDisplayLabel, resolveProviderLineFields, formatPitcherLabel } from "../utils/propDisplayFields.js";
+import { resolveNormalizedConfidence, resolveNormalizedProbability, resolveProviderLineFields, formatPitcherLabel } from "../utils/propDisplayFields.js";
 import { resolvePayoutCategoryLabel } from "../utils/payoutCategory.js";
 import { resolveRiskExplanation } from "../utils/risk.js";
 import ProviderLabel from "./ProviderLabel.jsx";
@@ -356,7 +356,6 @@ export default function PickDetailModal({
   })();
   const riskLevel = String(prop.riskLevel || "HIGH").toUpperCase();
   const riskDetail = prop.riskExplanation || resolveRiskExplanation(riskLevel);
-  const providerLabel = prop.providerLabel || resolveProviderDisplayLabel(prop) || null;
   const lineFields = resolveProviderLineFields(prop);
   const projectionSafetyNotes = [
     prop.projectionCapNote,
@@ -479,7 +478,21 @@ export default function PickDetailModal({
                 {lineFields.underdogLineLabel ? (
                   <SummaryMetric label="Underdog Line" value={lineFields.underdogLineLabel} />
                 ) : null}
-                <SummaryMetric label="Line Used" value={lineFields.activeLineLabel ?? formatNumber(prop.line)} strong />
+                {prop.consensusLine != null || prop.lineComparison?.consensusLine != null ? (
+                  <SummaryMetric
+                    label="Consensus Line"
+                    value={formatNumber(prop.consensusLine ?? prop.lineComparison?.consensusLine)}
+                  />
+                ) : null}
+                <SummaryMetric
+                  label="Line Used"
+                  value={
+                    prop.lineSource
+                      ? `${prop.lineSource}${lineFields.activeLineLabel ? ` (${lineFields.activeLineLabel})` : ""}`
+                      : lineFields.activeLineLabel ?? formatNumber(prop.line)
+                  }
+                  strong
+                />
                 <SummaryMetric label="Projection" value={projectionLabel} strong />
                 <SummaryMetric label="Edge" value={edgeLabel} strong />
                 <SummaryMetric label="Probability" value={probabilityLabel} strong />
@@ -490,10 +503,15 @@ export default function PickDetailModal({
                 {showDebugPanels && breakdownMode ? (
                   <SummaryMetric label="Verification status" value={verificationLabel} />
                 ) : null}
-                {providerLabel ? <SummaryMetric label="Provider" value={providerLabel} /> : null}
               </>
             )}
           </div>
+
+          {!manualProp ? (
+            <div className="pick-detail-modal-provider-lines">
+              <ProviderLabel prop={prop} />
+            </div>
+          ) : null}
 
           {!manualProp && showDebugPanels && projectionSafetyNotes.length ? (
             <div className="pick-detail-modal-section">

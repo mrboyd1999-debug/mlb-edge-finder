@@ -84,9 +84,7 @@ function BestPlayRowCard({ prop, onOpen, rank, rankLabel, compact = false }) {
     enriched.bestPlayFilterReason ||
     enriched.probabilityExplanation ||
     "";
-  const ppLine = enriched.prizePicksLineLabel;
-  const udLine = enriched.underdogLineLabel;
-  const activeLine = enriched.activeLineLabel ?? (enriched.line != null ? formatNumber(enriched.line) : "—");
+  const displayRankLabel = rankLabel || (rank != null ? `#${rank}` : null);
 
   function openDetails(event) {
     event?.stopPropagation?.();
@@ -127,9 +125,6 @@ function BestPlayRowCard({ prop, onOpen, rank, rankLabel, compact = false }) {
           </p>
           <p className="best-play-row-subline" style={{ marginTop: 2 }}>
             Recommended: <strong>{leanSideLabel !== "Pass" ? leanSideLabel : sideLabel}</strong>
-            {ppLine ? <> · PrizePicks: <strong>{ppLine}</strong></> : null}
-            {udLine ? <> · Underdog: <strong>{udLine}</strong></> : null}
-            <> · Line Used: <strong>{activeLine}</strong></>
           </p>
           <ProviderLabel prop={enriched} compact />
           <p className="best-play-row-subline" style={{ marginTop: 4, fontSize: 12 }}>

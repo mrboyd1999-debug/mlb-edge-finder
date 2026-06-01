@@ -113,6 +113,16 @@ export function attachLineSourceFields(prop = {}) {
       prop.sportsbookLine ??
       prop.bestAvailableLine
   );
+  const consensusLine = finiteOrNull(
+    comparison.consensusLine ??
+      prop.consensusLine ??
+      (prizePicksLine != null &&
+      underdogLine != null &&
+      Math.abs(prizePicksLine - underdogLine) < 0.01
+        ? prizePicksLine
+        : null)
+  );
+  const safeConsensus = consensusLine != null && consensusLine > 0 ? consensusLine : null;
   const { lineUsed, lineSource: primarySource } = resolveMlbLineUsed(prop, {
     prizePicksLine,
     underdogLine,
@@ -136,6 +146,7 @@ export function attachLineSourceFields(prop = {}) {
     prizePicksLine,
     underdogLine,
     oddsApiLine,
+    consensusLine: safeConsensus,
     lineUsed,
     lineSource,
     providers,
