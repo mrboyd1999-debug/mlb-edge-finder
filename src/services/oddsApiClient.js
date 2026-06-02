@@ -1,4 +1,4 @@
-import { getOddsApiKey as getRuntimeOddsApiKey } from "../config/apiConfig.js";
+import { getOddsApiKey as getRuntimeOddsApiKey, testOddsApiKey } from "../lib/oddsApiHealth.js";
 import { cleanApiKey } from "../utils/cleanApiKey.js";
 import { clearSourceAuthBlock, isSourceAuthBlocked, recordSourceAuthFailure, SOURCE_IDS } from "./sourceRateLimit.js";
 
@@ -99,26 +99,13 @@ export async function validateOddsApiKeyOnce() {
   if (oddsKeyStartupValidated || typeof window === "undefined") return;
   oddsKeyStartupValidated = true;
   const key = getTrimmedOddsApiKey();
-  if (!key || isPlaceholderOddsApiKey(key) || isSourceAuthBlocked(SOURCE_IDS.ODDS_API)) return;
+  if (!key || isPlaceholderOddsApiKey(key)) return;
 
   try {
-    const url = buildOddsApiProxyUrl("/v4/sports/");
-    const response = await fetch(`${url.pathname}${url.search}`, { cache: "no-store" });
-    const text = await response.text();
-    let data = null;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = null;
-    }
-    const authFailure = parseOddsApiAuthFailure({
-      data,
-      status: response.status,
-      text,
-    });
-    if (authFailure) {
-      recordSourceAuthFailure(SOURCE_IDS.ODDS_API, authFailure);
-    } else if (response.ok && Array.isArray(data) && data.length > 0) {
+    const result = await testOddsApiKey();
+    if (result.unauthorized) {
+      recordSourceAuthFailure(SOURCE_IDS.ODDS_API, ODDS_API_INVALID_KEY_MESSAGE);
+    } else if (result.ok) {
       clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
     }
   } catch {

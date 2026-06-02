@@ -14,7 +14,12 @@ import {
   getOddsApiKeySource,
   getSportsDataApiKeySource,
   maskApiKeyPreview,
+  saveOddsApiKey,
+  clearOddsApiKey,
 } from "../services/runtimeSettings.js";
+import { testOddsApiKey } from "../lib/oddsApiHealth.js";
+import { clearSourceAuthBlock, SOURCE_IDS } from "../services/sourceRateLimit.js";
+import { resetOddsApiStartupValidation } from "../services/oddsApiClient.js";
 import {
   testOddsAPI,
   testSportsDataIO,
@@ -78,6 +83,13 @@ export default function SettingsPanel({
 
   function persistDraft() {
     const cleaned = cleanUserDraft(draft);
+    if (cleaned.VITE_ODDS_API_KEY) {
+      saveOddsApiKey(cleaned.VITE_ODDS_API_KEY);
+    } else {
+      clearOddsApiKey();
+    }
+    clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
+    resetOddsApiStartupValidation();
     setDraft(cleaned);
     const merged = { ...readRuntimeSettings(), ...cleaned };
     writeRuntimeSettings(merged);
@@ -123,10 +135,26 @@ export default function SettingsPanel({
     }
   }
 
+  async function handleClearOddsKey() {
+    clearOddsApiKey();
+    clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
+    resetOddsApiStartupValidation();
+    const cleared = { ...draft, VITE_ODDS_API_KEY: "" };
+    setDraft(cleared);
+    writeRuntimeSettings({ ...readRuntimeSettings(), VITE_ODDS_API_KEY: "" });
+    setSaved(readRuntimeSettings());
+    setNotice("Odds API key cleared from localStorage. Paste a new key and Save Keys.");
+    onClearCaches?.();
+  }
+
   async function handleTestOdds() {
     setTestingOdds(true);
     try {
       const { cleaned } = persistDraft();
+      const direct = await testOddsApiKey();
+      if (!direct.ok && cleaned.VITE_ODDS_API_KEY) {
+        setNotice(direct.message || "Odds API test failed.");
+      }
       const report = await testOddsAPI();
       setConnectionReport((current) => {
         const merged = mergeProviderResult(current, report, "Odds API");
@@ -268,6 +296,9 @@ export default function SettingsPanel({
           </label>
           <button type="button" style={styles.secondaryButton} onClick={handleTestOdds} disabled={testingOdds}>
             {testingOdds ? "Testing…" : "Test Odds API"}
+          </button>
+          <button type="button" style={styles.secondaryButton} onClick={handleClearOddsKey}>
+            Clear Odds Key
           </button>
         </div>
 

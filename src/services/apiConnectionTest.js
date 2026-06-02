@@ -1,4 +1,4 @@
-import { getOddsApiKey, getProxyUrl, getRawProxyUrl, getSportsDataApiKey, getStatmuseApiKey } from "../config/apiConfig.js";
+import { getProxyUrl, getRawProxyUrl, getSportsDataApiKey, getStatmuseApiKey } from "../config/apiConfig.js";
 import {
   getOddsApiKeySource,
   getSportsDataApiKeySource,
@@ -6,12 +6,12 @@ import {
 } from "../services/runtimeSettings.js";
 import { resolvePrizePicksFetchEndpoints } from "../utils/providerProxy.js";
 import {
-  buildOddsApiProxyUrl,
   logOddsApiExchange,
   ODDS_API_INVALID_KEY_MESSAGE,
   parseOddsApiAuthFailure,
   redactOddsApiUrl,
 } from "./oddsApiClient.js";
+import { getOddsApiKey, testOddsApiKey } from "../lib/oddsApiHealth.js";
 import {
   ENRICHMENT_TIMEOUT_MESSAGE,
   getApiTimeoutMs,
@@ -322,13 +322,14 @@ async function probeOddsApiForTest() {
   const key = getOddsApiKey();
   const keyLength = key.length;
   const keyLengthWarning = getOddsKeyLengthWarning(key);
+  const startedAt = Date.now();
 
   if (!key) {
     return {
       ok: false,
       status: CONNECTION_STATUS.NOT_CONFIGURED,
       httpStatus: 0,
-      responseBody: "No VITE_ODDS_API_KEY configured",
+      responseBody: "Odds API key missing",
       keyLength: 0,
       keyLengthWarning: "",
       unauthorized: false,
@@ -339,85 +340,50 @@ async function probeOddsApiForTest() {
     };
   }
 
-  const url = buildOddsApiProxyUrl("/v4/sports/");
-  const route = url.pathname + url.search;
-  const startedAt = Date.now();
-  const probeTimeoutMs = getApiTimeoutMs({ enrichment: true });
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), probeTimeoutMs);
+  const result = await testOddsApiKey();
+  const httpStatus = result.status === "network_error" || result.status === "missing" ? 0 : Number(result.status) || 0;
+  const payload = result.data ?? null;
+  const sportsList = parseOddsSportsPayload(payload);
+  const sportsCount = result.sportsCount ?? sportsList.length;
+  const sportsListOk = Boolean(result.ok && (result.sportsListOk ?? sportsCount > 0));
+  const responseBody = formatResponseBody(
+    typeof payload === "string" ? payload : "",
+    payload,
+    result.message
+  );
+  const unauthorized = Boolean(result.unauthorized);
 
-  try {
-    const response = await fetch(route, { cache: "no-store", signal: controller.signal });
-    const text = await response.text();
-    const remainingRequests =
-      response.headers.get("x-requests-remaining") || response.headers.get("X-Requests-Remaining");
-    const trimmed = text.trim();
-    let payload = null;
-    try {
-      payload = trimmed ? JSON.parse(trimmed) : null;
-    } catch {
-      payload = null;
-    }
+  console.info("[Odds API Test] Request URL:", redactOddsApiUrl(result.route || "https://api.the-odds-api.com/v4/sports/?apiKey=[REDACTED]"));
+  console.info("[Odds API Test] Key length:", keyLength);
+  console.info("[Odds API Test] HTTP status:", httpStatus);
+  console.info("[Odds API Test] Response body:", responseBody);
+  if (result.via) console.info("[Odds API Test] Via:", result.via);
 
-    const upstreamStatus = Number(payload?.upstreamStatus ?? payload?.responseCode ?? response.status ?? 0);
-    const httpStatus = upstreamStatus || response.status;
-    const responseBody = formatResponseBody(text, payload);
-    const sportsList = extractOddsSportsList(payload);
-    const valid = isOddsSportsListValid(response, payload);
-    const sportsListOk = valid;
-    const unauthorized = httpStatus === 401 || httpStatus === 403 || Boolean(payload?.error && /invalid|unauthorized|subscription/i.test(responseBody));
+  logOddsApiExchange({
+    url: result.route || "https://api.the-odds-api.com/v4/sports/?apiKey=[REDACTED]",
+    status: httpStatus,
+    text: typeof payload === "string" ? payload : JSON.stringify(payload || {}),
+    data: payload,
+    label: "Odds API key test",
+  });
 
-    console.info("[Odds API Test] Request URL:", redactOddsApiUrl(route));
-    console.info("[Odds API Test] Key length:", keyLength);
-    console.info("[Odds API Test] HTTP status:", httpStatus);
-    console.info("[Odds API Test] Response body:", responseBody);
-    if (remainingRequests != null) console.info("[Odds API Test] Requests remaining:", remainingRequests);
-
-    logOddsApiExchange({
-      url: route,
-      status: httpStatus,
-      text,
-      data: payload,
-      label: "Odds API key test",
-    });
-
-    return {
-      ok: valid,
-      status: valid ? CONNECTION_STATUS.LIVE : CONNECTION_STATUS.FAILED,
-      httpStatus,
-      responseBody,
-      keyLength,
-      keyLengthWarning,
-      unauthorized,
-      remainingRequests: remainingRequests != null ? Number(remainingRequests) : null,
-      route: "https://api.the-odds-api.com/v4/sports/?apiKey=[REDACTED]",
-      durationMs: Date.now() - startedAt,
-      payload,
-      sportsCount: sportsList.length,
-      sportsListOk: valid,
-      preview: responseBody,
-    };
-  } catch (error) {
-    const timedOut = isAbortOrTimeoutError(error);
-    const message = timedOut ? ENRICHMENT_TIMEOUT_MESSAGE : error?.message || "Failed to fetch";
-    return {
-      ok: false,
-      status: CONNECTION_STATUS.FAILED,
-      httpStatus: timedOut ? "timeout" : "?",
-      responseBody: message,
-      keyLength,
-      keyLengthWarning,
-      unauthorized: false,
-      remainingRequests: null,
-      route: "https://api.the-odds-api.com/v4/sports/?apiKey=[REDACTED]",
-      durationMs: Date.now() - startedAt,
-      payload: null,
-      timedOut,
-      preview: message,
-    };
-  } finally {
-    window.clearTimeout(timer);
-  }
+  return {
+    ok: sportsListOk || (result.ok && sportsCount === 0),
+    status: result.ok ? CONNECTION_STATUS.LIVE : CONNECTION_STATUS.FAILED,
+    httpStatus,
+    responseBody: result.message || responseBody,
+    keyLength,
+    keyLengthWarning,
+    unauthorized,
+    remainingRequests: null,
+    route: "https://api.the-odds-api.com/v4/sports/?apiKey=[REDACTED]",
+    durationMs: Date.now() - startedAt,
+    payload,
+    sportsCount,
+    sportsListOk: result.ok ? sportsListOk || sportsCount === 0 : false,
+    preview: result.message || responseBody,
+    timedOut: result.status === "network_error" && /timeout|aborted/i.test(String(result.message || "")),
+  };
 }
 
 async function testOddsApi() {
@@ -441,7 +407,10 @@ async function testOddsApi() {
 
   if (probe.ok || probe.sportsListOk) {
     clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
-    const sportsLabel = `Connected — ${probe.sportsCount} sports listed`;
+    const sportsLabel =
+      probe.sportsCount > 0
+        ? `Connected — ${probe.sportsCount} sports listed`
+        : probe.responseBody || "Connected — OK";
     return {
       provider: "Odds API",
       route: probe.route,
@@ -453,8 +422,8 @@ async function testOddsApi() {
       remainingRequests: probe.remainingRequests,
       status: CONNECTION_STATUS.LIVE,
       message: sportsLabel,
-      settingsLine: "Connected",
-      settingsStatus: "Connected",
+      settingsLine: probe.sportsCount > 0 ? "Connected" : "Connected — OK",
+      settingsStatus: probe.sportsCount > 0 ? "Connected" : "Connected — OK",
       sportsListOk: true,
       sportsCount: probe.sportsCount,
       ...probe,

@@ -1,8 +1,14 @@
-/** Runtime API keys and proxy URLs — build-time env first, localStorage as backup override. */
+/** Runtime API keys and proxy URLs — Odds API: localStorage first, then env. */
 
 import { clearSourceAuthBlock, SOURCE_IDS } from "./sourceRateLimit.js";
 import { resetOddsApiStartupValidation } from "./oddsApiClient.js";
 import { cleanApiKey } from "../utils/cleanApiKey.js";
+import {
+  clearOddsApiKey as clearOddsApiKeyStorage,
+  getOddsApiKey as resolveOddsApiKey,
+  getOddsApiKeySource as resolveOddsApiKeySource,
+  saveOddsApiKey as persistOddsApiKey,
+} from "../lib/oddsApiHealth.js";
 import { normalizeProxyUrl } from "../utils/providerProxy.js";
 
 /** User-facing keys shown in Settings — live feeds (PP/UD) use built-in routes, not user keys. */
@@ -12,8 +18,9 @@ export const ODDS_ENV_KEYS = [
   "THE_ODDS_API_KEY",
 ];
 export const ODDS_STORAGE_KEYS = [
-  "VITE_ODDS_API_KEY",
   "odds_api_key",
+  "oddsApiKey",
+  "VITE_ODDS_API_KEY",
   "odds-api-key",
   "the-odds-api-key",
 ];
@@ -123,9 +130,7 @@ export function maskApiKeyPreview(key = "") {
 }
 
 export function getOddsApiKeySource() {
-  if (readEnvKeys(ODDS_ENV_KEYS)) return "env";
-  if (readStorageKeys(ODDS_STORAGE_KEYS)) return "localStorage";
-  return "missing";
+  return resolveOddsApiKeySource();
 }
 
 export function getSportsDataApiKeySource() {
@@ -175,9 +180,13 @@ export function formatSettingSourceLabel(source = null) {
   return "Not configured";
 }
 
-/** Effective value: build-time env first, then localStorage backup, then legacy keys. */
+/** Effective value — Odds key uses localStorage-first resolution; other keys env then storage. */
 export function getEffectiveSetting(key) {
   const def = getSettingDef(key);
+  if (key === "VITE_ODDS_API_KEY") {
+    const odds = getOddsApiKey();
+    if (odds) return odds;
+  }
   const fromEnv = readEnvValue(def);
   if (fromEnv) return fromEnv;
   const stored = readStorageValue(key);
@@ -204,19 +213,8 @@ export function writeRuntimeSettings(settings = {}) {
       // ignore private-mode storage errors
     }
     if (key === "VITE_ODDS_API_KEY") {
-      try {
-        if (value) {
-          window.localStorage.setItem("odds_api_key", value);
-          window.localStorage.setItem("odds-api-key", value);
-          window.localStorage.setItem("the-odds-api-key", value);
-        } else {
-          window.localStorage.removeItem("odds_api_key");
-          window.localStorage.removeItem("odds-api-key");
-          window.localStorage.removeItem("the-odds-api-key");
-        }
-      } catch {
-        // ignore
-      }
+      if (value) persistOddsApiKey(value);
+      else clearOddsApiKeyStorage();
       clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
       resetOddsApiStartupValidation();
     }
@@ -292,12 +290,13 @@ export function getRawProxyUrl(platform = "") {
 }
 
 export function getOddsApiKey() {
-  const fromEnv = cleanApiKey(readEnvKeys(ODDS_ENV_KEYS));
-  if (isUsableEnvValue(fromEnv)) return fromEnv;
-  const fromStorage = cleanApiKey(readStorageKeys(ODDS_STORAGE_KEYS));
-  if (isUsableEnvValue(fromStorage)) return fromStorage;
+  const resolved = resolveOddsApiKey();
+  if (isUsableEnvValue(resolved)) return resolved;
   return cleanApiKey(readLegacyValue(getSettingDef("VITE_ODDS_API_KEY")));
 }
+
+export { clearOddsApiKeyStorage as clearOddsApiKey, persistOddsApiKey as saveOddsApiKey };
+export { testOddsApiKey } from "../lib/oddsApiHealth.js";
 
 export function getSportsDataApiKey() {
   const fromEnv = cleanApiKey(readEnvKeys(SPORTSDATA_ENV_KEYS));
