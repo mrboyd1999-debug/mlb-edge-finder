@@ -23,10 +23,11 @@ function finite(value) {
   return Number.isFinite(num) ? num : null;
 }
 
-export function applyConfidenceSanityCap(confidence, probability) {
+export function applyConfidenceSanityCap(confidence, probability, prop = {}) {
   void probability;
   if (!Number.isFinite(confidence)) return confidence;
-  return Math.round(Math.max(60, Math.min(95, confidence)));
+  const min = prop.isEmergencyPlay ? 25 : 60;
+  return Math.round(Math.max(min, Math.min(95, confidence)));
 }
 
 export function resolveNormalizedConfidence(prop = {}) {
@@ -36,16 +37,40 @@ export function resolveNormalizedConfidence(prop = {}) {
       prop.confidenceScore ??
       prop.confidence
   );
-  if (!Number.isFinite(raw)) return null;
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return prop.isEmergencyPlay ? 25 : null;
+  }
   const probability = resolveNormalizedProbability(prop);
-  const capped = applyConfidenceSanityCap(raw, probability);
-  return Math.round(Math.max(0, Math.min(100, capped)));
+  const capped = applyConfidenceSanityCap(raw, probability, prop);
+  return Math.round(Math.max(prop.isEmergencyPlay ? 25 : 1, Math.min(100, capped)));
 }
 
 export function resolveNormalizedProbability(prop = {}) {
-  const value = finite(prop.finalProbability ?? prop.probabilityScore ?? prop.verifiedProbability);
+  const value = finite(
+    prop.finalProbability ??
+      prop.probabilityScore ??
+      prop.verifiedProbability ??
+      prop.probability ??
+      prop.displayProbability
+  );
   if (!Number.isFinite(value)) return null;
   return Math.round(Math.max(0, Math.min(100, value)));
+}
+
+export function hasRenderableRankingMetrics(prop = {}) {
+  const projection = resolveProjectionValue(prop);
+  const probability = resolveNormalizedProbability(prop);
+  const confidence = resolveNormalizedConfidence(prop);
+  const edgeLabels = prop.displayEdgeLabel
+    ? { displayEdgeLabel: prop.displayEdgeLabel }
+    : formatEdgeDisplay(prop);
+  const edgeLabel = edgeLabels?.displayEdgeLabel;
+
+  if (projection == null || projection <= 0) return false;
+  if (probability == null) return false;
+  if (confidence == null || confidence <= 0) return false;
+  if (!edgeLabel || edgeLabel === "—") return false;
+  return true;
 }
 
 export function computePropRiskLevel(prop = {}) {

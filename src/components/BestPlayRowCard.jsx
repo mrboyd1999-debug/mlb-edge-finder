@@ -12,7 +12,11 @@ import { resolveProjectionValue } from "../utils/projectionQuality.js";
 import { formatEdgeDisplay } from "../utils/conservativeProjection.js";
 import { validatePickDirectionBeforeRender } from "../utils/pickDirectionAudit.js";
 import { resolveRecommendedSide, resolveTierDisplayLabel } from "../utils/boardQuality.js";
-import { resolveNormalizedConfidence, resolveNormalizedProbability } from "../utils/propDisplayFields.js";
+import {
+  hasRenderableRankingMetrics,
+  resolveNormalizedConfidence,
+  resolveNormalizedProbability,
+} from "../utils/propDisplayFields.js";
 import { formatPitcherLabel } from "../utils/pitcherDisplay.js";
 import { resolveRecommendationBadgeLabel } from "../utils/mlbQualityPass.js";
 import { resolvePayoutCategoryLabel } from "../utils/payoutCategory.js";
@@ -50,6 +54,10 @@ function BestPlayRowCard({ prop, onOpen, rank, rankLabel, compact = false }) {
   useEffect(() => {
     validatePickDirectionBeforeRender(prop, "BestPlayRowCard");
   }, [prop]);
+
+  if (!hasRenderableRankingMetrics(enriched)) {
+    return null;
+  }
 
   const recommendedSide = resolveRecommendedSide(enriched);
   const leanSideLabel = resolveLeanSideLabel(enriched, recommendedSide);
