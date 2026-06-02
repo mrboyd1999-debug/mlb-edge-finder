@@ -61,6 +61,10 @@ function CompactPropCard({
     prop.analyticsReason ||
     prop.statusMessage ||
     "";
+  const rejectionHover =
+    prop.displayRejectionReason ||
+    prop.verificationRejectionReason ||
+    (prop.isEmergencyDebugDisplay ? "Emergency debug display — relaxed verification thresholds" : "");
   const fallbackNote = prop.projectionUnavailable
     ? "Projection unavailable"
     : prop.isFallbackProjection || prop.projectionSource === "manual-fallback"
@@ -80,6 +84,7 @@ function CompactPropCard({
   return (
     <article
       className={`compact-prop-card${payout ? ` compact-prop-card--${payout.tone}` : ""}`}
+      title={rejectionHover || undefined}
       onClick={toggle}
       role="button"
       tabIndex={0}

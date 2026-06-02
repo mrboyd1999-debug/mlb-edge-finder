@@ -263,6 +263,14 @@ import {
   buildPipelineStageCounts,
   logPipelineStageDiagnostics,
 } from "./utils/pipelineStageDiagnostics.js";
+import {
+  applyEmergencyDisplayPipeline,
+  attachDisplayRejectionFields,
+  auditPropDisplayRejections,
+  buildEmergencyProjectedDisplayFallback,
+  isVerificationEmergencyMode,
+  passesEmergencyDisplayFilter,
+} from "./utils/propDisplayRejectionAudit.js";
 import { persistStartupBoardSlices, readInstantStartupBoard } from "./services/startupBoardCache.js";
 import {
   mergeBoardRefreshResult,
@@ -3304,7 +3312,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     liveRenderResult = buildLiveRenderBoard(allDisplayProps, { allowFallbackProps: allowFallbackRender });
     const projectedOnBoard = countMergedProjections(allDisplayProps);
     if (!liveRenderResult.props.length && projectedOnBoard > 0) {
-      const fallbackProps = buildProjectedDisplayFallback(allDisplayProps, 100);
+      const emergencyFallback = buildEmergencyProjectedDisplayFallback(allDisplayProps, 25);
+      const fallbackProps =
+        emergencyFallback.length > 0 ? emergencyFallback : buildProjectedDisplayFallback(allDisplayProps, 25);
       liveRenderResult = {
         props: fallbackProps,
         counts: {
@@ -3321,11 +3331,45 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     }
   }
   let acceptedPropsForRender = liveRenderResult.props;
-  const verifiedForTrace = countVerifiedFilterProps(
+  const projectedForTrace =
+    pipelinePropCountSnapshot.projectedProps || countMergedProjections(allDisplayProps) || 0;
+  let verifiedForTrace = countVerifiedFilterProps(
     acceptedPropsForRender.length ? acceptedPropsForRender : allDisplayProps
   );
-  if (countMergedProjections(allDisplayProps) > 0 && verifiedForTrace === 0 && acceptedPropsForRender.length < 20) {
-    const projectedFallback = buildProjectedDisplayFallback(allDisplayProps, 100);
+  if (isVerificationEmergencyMode(projectedForTrace, verifiedForTrace)) {
+    const emergencyVerified = (allDisplayProps || []).filter((prop) => passesEmergencyDisplayFilter(prop)).length;
+    console.warn("[Pipeline Trace] emergency debug verification thresholds active", {
+      strictVerified: verifiedForTrace,
+      emergencyVerified,
+    });
+  }
+  const emergencyDisplay = applyEmergencyDisplayPipeline({
+    allDisplayProps,
+    acceptedPropsForRender,
+    projectedCount: projectedForTrace,
+    verifiedCount: verifiedForTrace,
+  });
+  if (emergencyDisplay.emergencyApplied) {
+    acceptedPropsForRender = emergencyDisplay.acceptedPropsForRender;
+    liveRenderResult = {
+      ...liveRenderResult,
+      props: acceptedPropsForRender,
+      counts: {
+        ...liveRenderResult.counts,
+        rendered: acceptedPropsForRender.length,
+      },
+    };
+    console.warn("[Pipeline Trace] emergency projected display fallback", {
+      rendered: acceptedPropsForRender.length,
+      projected: projectedForTrace,
+      strictVerified: verifiedForTrace,
+    });
+  } else if (
+    projectedForTrace > 0 &&
+    verifiedForTrace === 0 &&
+    acceptedPropsForRender.length < 25
+  ) {
+    const projectedFallback = buildProjectedDisplayFallback(allDisplayProps, 25);
     if (projectedFallback.length > acceptedPropsForRender.length) {
       acceptedPropsForRender = projectedFallback;
       liveRenderResult = {
@@ -3339,6 +3383,20 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       console.warn("[Pipeline Trace] verified=0 projected fallback", { rendered: projectedFallback.length });
     }
   }
+  debugInfo.propDisplayRejectionAudit =
+    emergencyDisplay.rejectionAudit || auditPropDisplayRejections(allDisplayProps, {
+      projectedCount: projectedForTrace,
+      verifiedCount: verifiedForTrace,
+    });
+  verifiedForTrace = countVerifiedFilterProps(
+    acceptedPropsForRender.length ? acceptedPropsForRender : allDisplayProps
+  );
+  allDisplayProps = attachDisplayRejectionFields(allDisplayProps, {
+    emergencyMode: debugInfo.propDisplayRejectionAudit?.emergencyMode,
+  });
+  acceptedPropsForRender = attachDisplayRejectionFields(acceptedPropsForRender, {
+    emergencyMode: debugInfo.propDisplayRejectionAudit?.emergencyMode,
+  });
   debugInfo.pipelineRenderCounts = liveRenderResult.counts;
   debugInfo.pipelineStageCounts = buildPipelineStageCounts({
     raw: rawProps.length,
@@ -3598,6 +3656,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       ...(pipelinePropCountSnapshot.rejections || {}),
       ...(debugInfo.projectionGenerationAudit?.rejectionReasons || {}),
     },
+    propDisplayRejectionSummary: debugInfo.propDisplayRejectionAudit?.summary || null,
+    propDisplayRejectionAudit: debugInfo.propDisplayRejectionAudit || null,
     projectionGenerationAudit: debugInfo.projectionGenerationAudit || null,
     boardProps: verificationPool,
   });
@@ -4658,17 +4718,42 @@ export default function DFSPropsApp() {
       lastUpdated,
       ingestionFallback: debugInfo?.ingestionFallback || "",
     });
+    const projectedOnBoard = countMergedProjections(allDisplayProps);
+    const verifiedOnBoard = countVerifiedFilterProps(allDisplayProps);
+    if (
+      projectedOnBoard > 0 &&
+      verifiedOnBoard === 0 &&
+      preferred.length === 0
+    ) {
+      const emergency = applyEmergencyDisplayPipeline({
+        allDisplayProps,
+        acceptedPropsForRender: preferred,
+        projectedCount: projectedOnBoard,
+        verifiedCount: verifiedOnBoard,
+      });
+      if (emergency.acceptedPropsForRender.length) {
+        preferred = emergency.acceptedPropsForRender;
+        if (import.meta.env.DEV) {
+          console.warn("[Pipeline Stage] emergency projected display fallback", {
+            count: preferred.length,
+          });
+        }
+      }
+    }
     if (!preferred.length && allDisplayProps.length) {
-      preferred = buildProjectedDisplayFallback(allDisplayProps, 100);
+      preferred = buildProjectedDisplayFallback(allDisplayProps, 25);
       if (import.meta.env.DEV && preferred.length) {
         console.warn("[Pipeline Stage] projected display fallback", { count: preferred.length });
       }
-    } else if (preferred.length < 20 && countMergedProjections(allDisplayProps) > 0) {
-      const projectedFallback = buildProjectedDisplayFallback(allDisplayProps, 100);
+    } else if (preferred.length < 25 && projectedOnBoard > 0 && verifiedOnBoard === 0) {
+      const projectedFallback = buildProjectedDisplayFallback(allDisplayProps, 25);
       if (projectedFallback.length > preferred.length) {
         preferred = projectedFallback;
       }
     }
+    preferred = attachDisplayRejectionFields(preferred, {
+      emergencyMode: isVerificationEmergencyMode(projectedOnBoard, verifiedOnBoard),
+    });
     return preferred;
   }, [acceptedPropsForRender, liveRenderBoard, cacheStatus, debugInfo, lastUpdated, allDisplayProps, liveBoard]);
 

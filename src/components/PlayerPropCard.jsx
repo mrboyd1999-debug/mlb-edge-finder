@@ -225,6 +225,10 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
   const showDynamicTier = dynamicTier && String(dynamicTier).toUpperCase() !== "RESEARCH";
   const riskAccent = riskAccentStyle(prop.riskLevel);
   const fallbackBadge = prop.displayFallback || prop.fallbackLabel;
+  const rejectionHover =
+    prop.displayRejectionReason ||
+    prop.verificationRejectionReason ||
+    (prop.isEmergencyDebugDisplay ? "Emergency debug display — relaxed verification thresholds" : "");
 
   function openDetails(event) {
     event?.stopPropagation?.();
@@ -240,6 +244,7 @@ function PlayerPropCard({ prop, onOpen, rank, compact = true, topPick = false, c
             ? `prop-card-compact prop-card-manual${weakPick ? " prop-card-manual-weak" : ""}`
             : "prop-card-compact"
       }
+      title={rejectionHover || undefined}
       style={{
         ...styles.card,
         ...(compact ? styles.cardMobileTight : null),

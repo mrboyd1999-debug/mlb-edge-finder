@@ -35,6 +35,10 @@ import { isSupportedMlbMarket, isBlockedNonMlbPipelineProp } from "./mlbAllowedM
 import { hasVerifiedHistoricalAttachment, isFallbackProjectionProp } from "./projectionQuality.js";
 import { buildIntegrityAudit } from "./integrityAudit.js";
 import {
+  isVerificationEmergencyDebugActive,
+  EMERGENCY_DEBUG_THRESHOLDS,
+} from "./propDisplayRejectionAudit.js";
+import {
   selectOverallPlay,
   compareOverallPlayRank,
   buildOverallPlayExplanation,
@@ -78,6 +82,18 @@ export const VERIFIED_TIER_D = {
 
 export const VERIFIED_BASE_MIN_PROBABILITY = 60;
 export const VERIFIED_BASE_MIN_CONFIDENCE = 62;
+
+function resolveActiveMinProbability() {
+  return isVerificationEmergencyDebugActive()
+    ? EMERGENCY_DEBUG_THRESHOLDS.MIN_PROBABILITY
+    : VERIFIED_BASE_MIN_PROBABILITY;
+}
+
+function resolveActiveMinConfidence() {
+  return isVerificationEmergencyDebugActive()
+    ? EMERGENCY_DEBUG_THRESHOLDS.MIN_CONFIDENCE
+    : VERIFIED_BASE_MIN_CONFIDENCE;
+}
 export const VERIFIED_MIN_DATA_QUALITY = 50;
 
 export const VERIFIED_TIERS = [VERIFIED_TIER_A, VERIFIED_TIER_B, VERIFIED_TIER_C, VERIFIED_TIER_D];
@@ -261,8 +277,18 @@ export function hasValidVerifiedProjection(prop = {}) {
   if (!passesMlbProjectionFormulaValidation(prop)) return false;
   const probability = Number(prop.probabilityScore ?? prop.verifiedProbability);
   const confidence = Number(prop.finalConfidence ?? prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence);
-  if (Number.isFinite(probability) && probability < VERIFIED_BASE_MIN_PROBABILITY) return false;
-  if (Number.isFinite(confidence) && confidence < VERIFIED_BASE_MIN_CONFIDENCE) return false;
+  if (Number.isFinite(probability) && probability < resolveActiveMinProbability()) return false;
+  if (Number.isFinite(confidence) && confidence < resolveActiveMinConfidence()) return false;
+  if (isVerificationEmergencyDebugActive()) {
+    const line = Number(prop.line);
+    const projection = Number(prop.projection ?? prop.projectedValue);
+    const edge =
+      Number.isFinite(line) && line > 0 && Number.isFinite(projection)
+        ? Math.abs(projection - line) / line
+        : NaN;
+    if (!Number.isFinite(edge) || edge < EMERGENCY_DEBUG_THRESHOLDS.MIN_EDGE) return false;
+    return true;
+  }
   return true;
 }
 
@@ -275,8 +301,17 @@ export function passesVerifiedTierFilter(prop = {}) {
   if (!hasValidVerifiedProjection(prop)) return false;
   const probability = Number(prop.probabilityScore ?? prop.verifiedProbability);
   const confidence = Number(prop.finalConfidence ?? prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence);
-  if (!Number.isFinite(probability) || probability < VERIFIED_BASE_MIN_PROBABILITY) return false;
-  if (!Number.isFinite(confidence) || confidence < VERIFIED_BASE_MIN_CONFIDENCE) return false;
+  if (!Number.isFinite(probability) || probability < resolveActiveMinProbability()) return false;
+  if (!Number.isFinite(confidence) || confidence < resolveActiveMinConfidence()) return false;
+  if (isVerificationEmergencyDebugActive()) {
+    const line = Number(prop.line);
+    const projection = Number(prop.projection ?? prop.projectedValue);
+    const edge =
+      Number.isFinite(line) && line > 0 && Number.isFinite(projection)
+        ? Math.abs(projection - line) / line
+        : NaN;
+    return Number.isFinite(edge) && edge >= EMERGENCY_DEBUG_THRESHOLDS.MIN_EDGE;
+  }
   return classifyVerifiedTier(prop) != null;
 }
 

@@ -12,6 +12,8 @@ function PipelineCoverageAuditPanel({ audit = null }) {
   if (!audit) return null;
 
   const rejections = Object.entries(audit.rejections || {}).filter(([, count]) => Number(count) > 0);
+  const displayRejection = audit.propDisplayRejectionSummary || null;
+  const topDisplayRejections = audit.propDisplayRejectionAudit?.topRejectionReasons || [];
   const projectionAudit = audit.projectionGenerationAudit || null;
   const projectionRejections = projectionAudit?.rejectionRows || [];
   const warning = audit.coverageWarning;
@@ -45,6 +47,38 @@ function PipelineCoverageAuditPanel({ audit = null }) {
 
         {audit.dropOffDetail ? (
           <p className="prop-pipeline-counters prop-pipeline-counters--meta">{audit.dropOffDetail}</p>
+        ) : null}
+
+        {displayRejection ? (
+          <div>
+            <p className="prop-pipeline-counters prop-pipeline-counters--meta" style={{ marginTop: 8, marginBottom: 4 }}>
+              Display rejection summary{displayRejection.emergencyMode ? " (emergency debug)" : ""}:
+            </p>
+            <p className="prop-pipeline-counters prop-pipeline-counters--meta">
+              total {displayRejection.totalProps ?? 0} · missing projection {displayRejection.rejectedMissingProjection ?? 0}{" "}
+              · low probability {displayRejection.rejectedLowProbability ?? 0} · low confidence{" "}
+              {displayRejection.rejectedLowConfidence ?? 0} · low edge {displayRejection.rejectedLowEdge ?? 0} · missing
+              player {displayRejection.rejectedMissingPlayer ?? 0} · accepted {displayRejection.accepted ?? 0}
+            </p>
+            {topDisplayRejections.length ? (
+              <table className="pipeline-coverage-audit__table">
+                <thead>
+                  <tr>
+                    <th scope="col">Top display rejection</th>
+                    <th scope="col">Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topDisplayRejections.map((row) => (
+                    <tr key={row.reason}>
+                      <td>{row.reason}</td>
+                      <td>{row.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : null}
+          </div>
         ) : null}
 
         {rejections.length ? (

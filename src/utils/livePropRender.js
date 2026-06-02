@@ -71,10 +71,13 @@ export function buildProjectedDisplayFallback(props = [], limit = 25) {
       return player && Number.isFinite(line) && line > 0 && Number.isFinite(projection) && projection > 0;
     })
     .sort((a, b) => {
-      const evA = Number(a.evScore ?? a.edge ?? 0);
-      const evB = Number(b.evScore ?? b.edge ?? 0);
-      if (evB !== evA) return evB - evA;
-      return Number(b.confidenceScore ?? b.confidence ?? 0) - Number(a.confidenceScore ?? a.confidence ?? 0);
+      const confA = Number(a.confidenceScore ?? a.confidence ?? 0);
+      const confB = Number(b.confidenceScore ?? b.confidence ?? 0);
+      if (confB !== confA) return confB - confA;
+      const probA = Number(a.probabilityScore ?? a.verifiedProbability ?? 0);
+      const probB = Number(b.probabilityScore ?? b.verifiedProbability ?? 0);
+      if (probB !== probA) return probB - probA;
+      return Number(b.edge ?? b.evScore ?? 0) - Number(a.edge ?? a.evScore ?? 0);
     })
     .slice(0, limit)
     .map(preparePropForRender);

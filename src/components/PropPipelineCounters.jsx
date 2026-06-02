@@ -51,6 +51,8 @@ function PropPipelineCounters({
   const coverageAudit = projectionCoverageAudit || counts?.projectionCoverageAudit || null;
   const attachAudit = statsAttachmentAudit || counts?.statsAttachmentAudit || null;
   const stageAudit = pipelinePropCountAudit || counts?.pipelinePropCountAudit || null;
+  const displayRejection =
+    stageAudit?.propDisplayRejectionSummary || counts?.propDisplayRejectionSummary || null;
   const coverageLine = coverageAudit
     ? `Coverage: ${coverageAudit.projectedProps ?? projected} projected · ${coverageAudit.historicalMatches ?? 0} historical · ${coverageAudit.historicalMissing ?? 0} missing · ${coverageAudit.projectionCoveragePercent ?? 0}%`
     : "";
@@ -100,6 +102,21 @@ function PropPipelineCounters({
         </>
       ) : null}
       <RejectionLines rejections={stageAudit?.rejections} />
+      {displayRejection ? (
+        <div aria-label="Display rejection summary">
+          <p className="prop-pipeline-counters prop-pipeline-counters--meta" style={{ marginBottom: 4 }}>
+            Display rejection summary{displayRejection.emergencyMode ? " (emergency debug mode)" : ""}:
+          </p>
+          <p className="prop-pipeline-counters prop-pipeline-counters--meta">
+            total: {displayRejection.totalProps ?? 0} · missing projection:{" "}
+            {displayRejection.rejectedMissingProjection ?? 0} · low probability:{" "}
+            {displayRejection.rejectedLowProbability ?? 0} · low confidence:{" "}
+            {displayRejection.rejectedLowConfidence ?? 0} · low edge: {displayRejection.rejectedLowEdge ?? 0} · missing
+            player: {displayRejection.rejectedMissingPlayer ?? 0} · accepted: {displayRejection.accepted ?? 0}
+            {(displayRejection.other ?? 0) > 0 ? ` · other: ${displayRejection.other}` : ""}
+          </p>
+        </div>
+      ) : null}
       {dropOffLine ? (
         <p className="compact-form-notice prop-pipeline-counters__failure" role="status">
           {dropOffLine}

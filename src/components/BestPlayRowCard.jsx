@@ -112,10 +112,16 @@ function BestPlayRowCard({ prop, onOpen, rank, rankLabel, compact = false }) {
     onOpen?.(enriched);
   }
 
+  const rejectionHover =
+    enriched.displayRejectionReason ||
+    enriched.verificationRejectionReason ||
+    (enriched.isEmergencyDebugDisplay ? "Emergency debug display — relaxed verification thresholds" : "");
+
   return (
     <article
       className="best-play-row-card best-play-row-card--compact"
       style={styles.bestPlayRowCard}
+      title={rejectionHover || undefined}
       role="button"
       tabIndex={0}
       onClick={openDetails}
