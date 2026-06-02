@@ -193,6 +193,7 @@ import {
   resolveUnderdogStreakEmptyMessage,
 } from "./utils/underdogPickPool.js";
 import { resolveTopMlbPlaySections, auditTopMlbPlayPool } from "./utils/topMlbPlays.js";
+import { buildEmergencyMlbBoard } from "./utils/emergencyMlbBoard.js";
 import {
   readSavedPicks,
   savePickToStorage,
@@ -4558,7 +4559,7 @@ export default function DFSPropsApp() {
 
   const devEnvironment = isDevEnvironment();
   const debugModeEnabled = isDebugModeEnabled();
-  const debugPanelsVisible = showDebugPanels;
+  const debugPanelsVisible = false;
 
   const scoredDisplayProps = useMemo(() => allDisplayProps, [allDisplayProps]);
 
@@ -4813,30 +4814,14 @@ export default function DFSPropsApp() {
   const topMlbPlayBoard = useMemo(() => {
     try {
       const displayPool = boardDisplayProps.length ? boardDisplayProps : allDisplayProps;
-      const board = resolveTopMlbPlayBoard(displayPool);
-      board.loadedPropCount = Math.max(
-        allDisplayProps.length,
-        (boardDisplayProps || []).filter((p) => !p.isDemoData).length
-      );
-      if (board.pipelineDebug) {
-        board.pipelineDebug.apiKeys = {
-          PrizePicks: "configured",
-          Underdog: "configured",
-          OddsAPI: getOddsApiKey() ? "detected" : "missing",
-          SportsDataIO: getSportsDataApiKey() ? "detected" : "missing",
-        };
-      }
+      const board = buildEmergencyMlbBoard(displayPool);
+      board.loadedPropCount = Math.max(board.loadedPropCount || 0, displayPool.length);
       return board;
     } catch (boardError) {
-      console.error("[Best Plays] board render failed", boardError);
-      return {
-        sections: [],
-        filterDiagnostics: { error: boardError?.message || "Best Plays board failed" },
-        pipelineDebug: null,
-        loadedPropCount: 0,
-      };
+      console.error("[Best Plays] emergency board render failed", boardError);
+      return buildEmergencyMlbBoard(allDisplayProps);
     }
-  }, [boardDisplayProps, allDisplayProps, resolveTopMlbPlayBoard]);
+  }, [boardDisplayProps, allDisplayProps]);
   const verificationFilterDiagnostics = useMemo(() => {
     if (!debugPanelsVisible) return topMlbPlayBoard?.filterDiagnostics || null;
 

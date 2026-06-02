@@ -146,8 +146,16 @@ export function passesPartialBestPlaysFilter(prop = {}) {
   return true;
 }
 
-/** Board pool — FULL strict path, PARTIAL fallback, or strong metric override. */
+/** Board pool — emergency mode: playable MLB props with projection, no historical block. */
 export function passesPlayboardPoolFilter(prop = {}) {
+  const player = String(prop?.playerName || prop?.player || "").trim();
+  const line = Number(prop?.line);
+  const market = String(prop?.statType || prop?.market || prop?.propType || "").trim();
+  const projection = Number(prop?.projection ?? prop?.projectedValue);
+  if (player && market && Number.isFinite(line) && line > 0 && Number.isFinite(projection) && projection > 0) {
+    return true;
+  }
+
   if (passesStrongMetricBestPlayGate(prop) && hasPositiveEdge(prop)) {
     return passesVerifiedBestPlaysFilter(prop) || passesPartialBestPlaysFilter(prop);
   }

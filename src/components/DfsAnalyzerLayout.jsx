@@ -113,7 +113,7 @@ function DfsAnalyzerLayout({
         showProviderDetails={debugPanelsVisible}
       />
 
-      {!debugPanelsVisible ? <BoardSummaryCard summary={boardSummary} /> : null}
+      {!debugPanelsVisible ? null : <BoardSummaryCard summary={boardSummary} />}
 
       <CompactAppTabs activeTab={appView} onChange={setAppView} />
 
@@ -128,11 +128,6 @@ function DfsAnalyzerLayout({
             loadError={loadError}
             onOpen={onOpenProp}
             filterDiagnostics={topMlbPlayBoard?.filterDiagnostics}
-            showDebugPanels={debugPanelsVisible}
-            staleDataActive={Boolean(boardFreshness?.stale)}
-            showStaleCache={showStaleCache}
-            onShowStaleCache={onShowStaleCache}
-            boardUpdatedAt={boardFreshness?.boardUpdatedAt || lastUpdatedLabel}
           />
         </SectionErrorBoundary>
       ) : null}
