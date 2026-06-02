@@ -308,13 +308,13 @@ export default function SettingsPanel({
   const ppProxySaved = Boolean(saved[ppProxyDef.key]?.trim());
   const oddsKeyWarning = getOddsKeyLengthWarning(cleanedOddsDraft);
   const sdRow = findProviderRow(connectionReport?.results || [], "SportsDataIO");
+  const oddsRow = findProviderRow(connectionReport?.results || [], "Odds API");
+  const oddsKeyDebug = getOddsKeyDebugMeta();
   const oddsKeySource = oddsKeyDebug.source || getOddsApiKeySource();
   const sdKeySource = getSportsDataApiKeySource();
   const ppProxySource = resolveSettingSource(ppProxyDef.key);
   const oddsKeyPreview = maskApiKeyPreview(getOddsApiKey());
-  const oddsKeyDebug = getOddsKeyDebugMeta();
   const sdKeyPreview = maskApiKeyPreview(getSportsDataApiKey());
-  const oddsRow = findProviderRow(connectionReport?.results || [], "Odds API");
 
   return (
     <details id="section-settings" ref={panelRef} className="settings-panel compact-settings-details">
