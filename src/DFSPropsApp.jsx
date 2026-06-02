@@ -323,6 +323,9 @@ import {
   getLineFeedTimeoutMs,
   getMlbStatsFetchTimeoutMs,
   getSportsDataTimeoutMs,
+  BOARD_LOAD_TIMEOUT_MS,
+  BOARD_PROVIDER_TIMEOUT_MS,
+  withTimeout,
   isAbortOrTimeoutError,
   withFetchTimeout,
 } from "./utils/apiTimeout.js";
@@ -1537,11 +1540,12 @@ async function injectSportsDataIfProvidersEmpty({ mergedCount = 0, sourceStatus,
 const MLB_STATS_ENRICHMENT_FAILED = "MLB projection stats failed to load";
 
 function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderdog, fetchUnderdogFlag }) {
+  const providerCapMs = BOARD_PROVIDER_TIMEOUT_MS;
   const ppFetch = wantsPrizePicks
     ? fetchProviderIsolated({
         label: "PrizePicks",
         sourceId: "PrizePicks",
-        timeoutMs: PRIZEPICKS_PROVIDER_TIMEOUT_MS,
+        timeoutMs: Math.min(PRIZEPICKS_PROVIDER_TIMEOUT_MS, providerCapMs),
         preflight: () => getLineProviderPreflight("PrizePicks"),
         fetchFn: ({ signal }) => fetchPrizePicksProps({ sport: fetchSport, statType: "all", signal }),
         emptyResult: ({ timedOut, message, notConfigured }) => {
@@ -1591,7 +1595,7 @@ function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderd
     ? fetchProviderIsolated({
         label: "Underdog",
         sourceId: "Underdog",
-        timeoutMs: UNDERDOG_PROVIDER_TIMEOUT_MS,
+        timeoutMs: Math.min(UNDERDOG_PROVIDER_TIMEOUT_MS, providerCapMs),
         preflight: () => getLineProviderPreflight("Underdog"),
         fetchFn: ({ signal }) => fetchUnderdogProviderProps({ sport: fetchSport, statType: "all", signal }),
         emptyResult: ({ timedOut, message, notConfigured }) =>
@@ -1612,7 +1616,7 @@ function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderd
   const oddsFetch = isOddsApiKeyUsable()
     ? fetchProviderIsolated({
         label: "Odds API",
-        timeoutMs: getLineFeedTimeoutMs(),
+        timeoutMs: Math.min(getLineFeedTimeoutMs(), providerCapMs),
         fetchFn: () =>
           fetchOddsApiDisplayProps({ sport: fetchSport }).catch((error) =>
             emptyOddsApiResult({
@@ -1631,7 +1635,7 @@ function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderd
 
   const seasonFetch = fetchProviderIsolated({
     label: "SeasonStats",
-    timeoutMs: getSportsDataTimeoutMs(),
+    timeoutMs: Math.min(getSportsDataTimeoutMs(), providerCapMs),
     fetchFn: () => fetchPlayerSeasonStats(),
     emptyResult: ({ timedOut, message }) =>
       emptySeasonStatsProviderResult({
@@ -1642,7 +1646,7 @@ function beginParallelProviderFetches({ fetchSport, wantsPrizePicks, wantsUnderd
 
   const gamesFetch = fetchProviderIsolated({
     label: "GamesByDate",
-    timeoutMs: getSportsDataTimeoutMs(),
+    timeoutMs: Math.min(getSportsDataTimeoutMs(), providerCapMs),
     fetchFn: () => fetchGamesByDate(),
     emptyResult: ({ timedOut, message }) => ({
       data: [],
@@ -2103,12 +2107,16 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     pipelineFallback = true;
     debugInfo.ingestionFallback = debugInfo.ingestionFallback || "partial-provider-raw";
   } else {
-    const sdioImmediate = await injectSportsDataIfProvidersEmpty({
-      mergedCount: 0,
-      fetchSport,
-      sourceStatus,
-      debugInfo,
-    });
+    const sdioImmediate = await withFetchTimeout(
+      () =>
+        injectSportsDataIfProvidersEmpty({
+          mergedCount: 0,
+          sourceStatus,
+          debugInfo,
+        }),
+      BOARD_PROVIDER_TIMEOUT_MS,
+      { label: "SportsDataIO-immediate", fallback: () => null }
+    );
     if (sdioImmediate) {
       rawProps.length = 0;
       rawProps.push(...normalizePropsWithSource(sdioImmediate.rawProps));
@@ -2152,7 +2160,6 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
   if (
     typeof onCoreReady === "function" &&
-    !MLB_ONLY_MODE &&
     (coreDisplayProps.length || scopedCoreRawProps.length)
   ) {
     try {
@@ -3802,6 +3809,9 @@ export default function DFSPropsApp() {
       const sourceCooldownRemaining = getMaxCooldownRemainingMs();
       const refreshCooldownRemaining = getRefreshCooldownMs() - (Date.now() - lastRefreshAtRef.current);
       const staleBoardActive = isBoardStale(lastUpdated || previousBoardEarly?.updatedAt || "");
+      const fetchStartedAt = Date.now();
+
+      try {
       if (
         force &&
         (sourceCooldownRemaining > 0 || refreshCooldownRemaining > 0) &&
@@ -3860,7 +3870,6 @@ export default function DFSPropsApp() {
       }
       setError("");
       setLearningSaveNotice("");
-      const fetchStartedAt = Date.now();
       const previousBoard = previousBoardEarly;
       try {
         if (force) {
@@ -3942,19 +3951,24 @@ export default function DFSPropsApp() {
           }
         }
 
-        const result = await fetchDFSProps({
-          platform: "both",
-          sport: MLB_ONLY_MODE ? "MLB" : "all",
-          statType: "all",
-          onProgress: (stage) => setLoadingStage(stage),
-          onCoreReady: (coreBoard) => {
-            const hasProps =
-              coreBoard.allDisplayProps?.length || coreBoard.props?.length || coreBoard.usableProps?.length;
-            if (!hasProps) return;
-            applyBoardState({ ...coreBoard, updatedAt: new Date().toISOString() }, "live");
-            if (!autoRefresh) setLoading(false);
-          },
-        });
+        const result = await withTimeout(
+          fetchDFSProps({
+            platform: "both",
+            sport: MLB_ONLY_MODE ? "MLB" : "all",
+            statType: "all",
+            onProgress: (stage) => setLoadingStage(stage),
+            onCoreReady: (coreBoard) => {
+              const hasProps =
+                coreBoard.allDisplayProps?.length || coreBoard.props?.length || coreBoard.usableProps?.length;
+              if (!hasProps) return;
+              applyBoardState({ ...coreBoard, updatedAt: new Date().toISOString() }, "live");
+              setLoading(false);
+              setRefreshingFeeds(false);
+            },
+          }),
+          BOARD_LOAD_TIMEOUT_MS,
+          "Feed load timeout"
+        );
         if (!result) {
           throw new Error("Board fetch returned no result");
         }
@@ -4169,6 +4183,7 @@ export default function DFSPropsApp() {
           setHistory(updatedHistory);
         }
       } catch (loadError) {
+        console.error("[BoardLoadError]", loadError);
         const staleBoard =
           readVerifiedCacheBoard(DEFAULT_SOURCE_STATUS, { allowExpired: true }) ||
           readCachedBoard(DEFAULT_SOURCE_STATUS, { allowExpired: true });
@@ -4205,8 +4220,11 @@ export default function DFSPropsApp() {
             error: errMsg,
           });
         } else if (!shouldSuppressCriticalUiMessage(errMsg, [], {})) {
-          setError(errMsg || NO_VERIFIED_AFTER_COOLDOWN_MESSAGE);
-          setCriticalWarnings(filterCriticalUiMessages([errMsg], [], {}));
+          const timeoutMessage = /feed load timeout/i.test(errMsg)
+            ? `${errMsg}. Underdog/PrizePicks may be slow — check API Health.`
+            : errMsg || NO_VERIFIED_AFTER_COOLDOWN_MESSAGE;
+          setError(timeoutMessage);
+          setCriticalWarnings(filterCriticalUiMessages([timeoutMessage], [], {}));
           setCacheStatus("");
           setApiHealth((current) => ({
             PrizePicks: {
@@ -4246,7 +4264,11 @@ export default function DFSPropsApp() {
           setError("");
           setCriticalWarnings([]);
         }
+      }
       } finally {
+        const attemptAt = new Date().toISOString();
+        setCurrentFetchTime(attemptAt);
+        setLastUpdated((prev) => prev || attemptAt);
         loadInFlightRef.current = false;
         setMlbPipelineRefreshing(false);
         setRefreshingFeeds(false);

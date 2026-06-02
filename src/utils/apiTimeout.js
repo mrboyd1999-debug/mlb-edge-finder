@@ -8,6 +8,10 @@ export const LINE_FEED_TIMEOUT_MS = 30_000;
 export const SPORTSDATA_TIMEOUT_MS = 8_000;
 /** MLB player stat profiles — fail fast and fall back to season merge + cache. */
 export const MLB_STATS_FETCH_TIMEOUT_MS = 8_000;
+/** Hard cap for board refresh — UI must exit loading within this window. */
+export const BOARD_LOAD_TIMEOUT_MS = 12_000;
+/** Per-provider cap during board load — do not block on slow PrizePicks retries. */
+export const BOARD_PROVIDER_TIMEOUT_MS = 8_000;
 /** Per-provider caps — independent; do not use global mobile/desktop caps. */
 /** Progressive per-attempt timeouts before declaring fetch failure. */
 export const PRIZEPICKS_FETCH_TIMEOUT_MS = 8_000;
@@ -107,6 +111,25 @@ export async function withFetchTimeout(promiseOrFn, timeoutMs, { fallback, label
   } finally {
     if (timer != null) window.clearTimeout(timer);
   }
+}
+
+/** Hard reject on timeout — use for board-level load guards. */
+export function withTimeout(
+  promise,
+  ms = BOARD_LOAD_TIMEOUT_MS,
+  message = "Feed load timeout"
+) {
+  let timer = null;
+  return Promise.race([
+    Promise.resolve(promise).finally(() => {
+      if (timer != null) window.clearTimeout(timer);
+    }),
+    new Promise((_, reject) => {
+      timer = window.setTimeout(() => {
+        reject(new Error(message));
+      }, ms);
+    }),
+  ]);
 }
 
 /** AbortController wrapper for probe-style fetches. */
