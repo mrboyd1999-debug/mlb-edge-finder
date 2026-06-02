@@ -1196,8 +1196,6 @@ function buildDebug(apiUrl, apiStatus, rawPropsLoaded, propsAfterParsing, messag
 }
 
 function rawPrizePicksRecordCount(payload) {
-  if (!payload || typeof payload !== "object") return 0;
-  if (Array.isArray(payload.props)) return payload.props.length;
   return countPrizePicksRawRecords(payload);
 }
 
@@ -1251,10 +1249,40 @@ function normalizePrizePicksPayloadInternal(payload, sport, statType, lineSource
     audit.fetched = scopedRows.length;
 
     let props = scopedRows
-      .map((item) =>
-        normalizePrizePicksProjection(item, includedRecords, lineSourceBadge, audit, playerAttributeMap)
-      )
+      .map((item) => {
+        if (!item?.attributes && !item?.relationships) {
+          return normalizeFlatPrizePicksItem(item, lineSourceBadge, audit);
+        }
+        return normalizePrizePicksProjection(
+          item,
+          includedRecords,
+          lineSourceBadge,
+          audit,
+          playerAttributeMap
+        );
+      })
       .filter(Boolean);
+
+    if (!props.length && parsedPreview.length) {
+      props = parsedPreview
+        .map((row) =>
+          normalizeFlatPrizePicksItem(
+            {
+              ...(row.raw?.attributes || {}),
+              ...(row.raw || {}),
+              id: row.id,
+              player_name: row.player,
+              stat_type: row.statType,
+              line_score: row.line,
+              start_time: row.startTime,
+              odds_type: row.oddsType,
+            },
+            lineSourceBadge,
+            audit
+          )
+        )
+        .filter(Boolean);
+    }
 
     audit.normalized = props.length;
     props.forEach((prop) => recordNormalizedSample(audit, prop));
@@ -1369,8 +1397,16 @@ function normalizePrizePicksProjection(
   if (rejectIngestionAtSource(buildPrizePicksProjectionIngestionContext(item, included), audit, recordFilterReason, item)) {
     return null;
   }
-  const line = Number(attributes.line_score ?? attributes.line ?? attributes.projection);
-  const statType = normalizeStatType(attributes.stat_type || attributes.stat_display_name || attributes.description);
+  const line = Number(
+    attributes.line_score ??
+      attributes.line ??
+      attributes.projection ??
+      attributes.stat_value ??
+      attributes.value
+  );
+  const statType = normalizeStatType(
+    attributes.stat_type || attributes.stat_display_name || attributes.stat || attributes.market
+  );
   const startTime = normalizeGameStartTime(
     attributes.start_time || attributes.board_time || attributes.game_time || game?.attributes?.start_time,
     { allowFallback: true }
@@ -1426,35 +1462,45 @@ function normalizePrizePicksProjection(
     gameAttributes.home_team ||
     gameAttributes.metadata?.home_team ||
     "";
-  const opponent =
+  const homeTeam = gameAttributes.home_team || gameAttributes.metadata?.home_team || "";
+  const awayTeam = gameAttributes.away_team || gameAttributes.metadata?.away_team || "";
+  const teamKey = String(team || "").trim().toUpperCase();
+  let opponent =
     attributes.opponent_abbr ||
     attributes.opponent ||
     attributes.opponent_team ||
-    gameAttributes.away_team ||
-    gameAttributes.metadata?.away_team ||
-    attributes.description ||
     gameAttributes.opponent ||
     "";
-  const leagueId = relationships.league?.data?.id;
-  const sport =
+  if (!opponent && teamKey && homeTeam && awayTeam) {
+    if (teamKey === String(homeTeam).trim().toUpperCase()) opponent = awayTeam;
+    else if (teamKey === String(awayTeam).trim().toUpperCase()) opponent = homeTeam;
+    else opponent = awayTeam || homeTeam;
+  }
+  if (!opponent) opponent = awayTeam || homeTeam || "";
+  const leagueId = relationships.league?.data?.id || (MLB_ONLY_MODE ? "2" : "");
+  let sport =
     sportFromPrizePicksLeague(league, leagueId) ||
+    (String(leagueId) === "2" ? "MLB" : "") ||
     normalizeSport(league?.attributes?.name || league?.attributes?.display_name || attributes.league || statType, {
       playerName,
       opponent,
       description: attributes.description,
     });
+  if (MLB_ONLY_MODE && !sport) sport = "MLB";
 
   return finalizeNormalizedProp(
     {
     platform: "PrizePicks",
+    provider: "PrizePicks",
     lineSourceBadge,
-    sport: sport || inferSportFromText(statType, { description: attributes.description }) || "",
-    league: league?.attributes?.name || attributes.league || sport,
+    sport,
+    league: league?.attributes?.name || attributes.league || sport || "MLB",
     playerName,
     playerId: playerRelId != null ? String(playerRelId) : "",
     platformPlayerId: playerRelId != null ? String(playerRelId) : "",
-    team,
-    opponent,
+    team: team || opponent?.split(/\s+/)[0] || "TBD",
+    opponent: opponent || "",
+    gameTime: startTime,
     playerImage,
     playerImageUrl: playerImage,
     headshot: playerImage,
@@ -1545,7 +1591,11 @@ function multiplierFromPrizePicks(attributes = {}) {
 function buildIncludedMap(records) {
   const map = new Map();
   records.forEach((record) => {
+    if (!record?.id) return;
     map.set(`${record.type}:${record.id}`, record);
+    if (record.type === "new_player" || record.type === "player" || record.type === "league") {
+      map.set(String(record.id), record);
+    }
   });
   return map;
 }
@@ -1555,7 +1605,7 @@ function relatedRecord(included, relationship) {
   if (!data) return null;
   const target = Array.isArray(data) ? data[0] : data;
   if (!target) return null;
-  return included.get(`${target.type}:${target.id}`) || null;
+  return included.get(`${target.type}:${target.id}`) || included.get(String(target.id)) || null;
 }
 
 function normalizeSport(value, context = {}) {

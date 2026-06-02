@@ -113,6 +113,13 @@ export function resolveSettingSource(key) {
   return null;
 }
 
+export function formatSettingSourceLabel(source = null) {
+  if (source === "env") return "From .env.local";
+  if (source === "localStorage") return "From browser storage";
+  if (source === "legacy") return "From legacy storage";
+  return "Not configured";
+}
+
 /** Effective value: build-time env first, then localStorage backup, then legacy keys. */
 export function getEffectiveSetting(key) {
   const def = getSettingDef(key);

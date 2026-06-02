@@ -11,7 +11,13 @@ export function normalizePrizePicksResponse(raw) {
   if (isPrizePicksBlockPayload(raw)) return { ...EMPTY_PRIZEPICKS_PAYLOAD, blocked: true };
   if (Array.isArray(raw)) return { data: raw, included: [] };
   if (Array.isArray(raw?.data?.data)) {
-    return { data: raw.data.data, included: raw.data.included || [] };
+    if (raw.data.data.length) {
+      return { data: raw.data.data, included: raw.data.included || raw.included || [] };
+    }
+    if (Array.isArray(raw.props) && raw.props.length) {
+      return { data: raw.props, included: raw.data.included || raw.included || [] };
+    }
+    return { data: raw.data.data, included: raw.data.included || raw.included || [] };
   }
   if (Array.isArray(raw.data)) {
     return { data: raw.data, included: raw.included || [] };
@@ -30,16 +36,19 @@ export function unwrapPrizePicksProxyPayload(payload, depth = 0) {
   if (Array.isArray(payload)) return normalizePrizePicksResponse(payload);
 
   if (payload?.source === "PrizePicks") {
+    const nestedRows = Array.isArray(payload.data?.data) ? payload.data.data : [];
+    const flatRows = Array.isArray(payload.props) ? payload.props : [];
+    const rows = nestedRows.length ? nestedRows : flatRows;
+    if (rows.length) {
+      return normalizePrizePicksResponse({
+        data: rows,
+        included: payload.data?.included || payload.included || [],
+      });
+    }
     if (Array.isArray(payload.data?.data)) {
       return normalizePrizePicksResponse({
         data: payload.data.data,
         included: payload.data.included || [],
-      });
-    }
-    if (Array.isArray(payload.props) && payload.props.length) {
-      return normalizePrizePicksResponse({
-        data: payload.props,
-        included: payload.data?.included || [],
       });
     }
     if (payload.data && !Array.isArray(payload.data)) {
@@ -57,7 +66,7 @@ export function buildIncludedRecordMap(included = []) {
   included.forEach((record) => {
     if (!record?.id) return;
     map.set(`${record.type}:${record.id}`, record);
-    if (record.type === "new_player" || record.type === "player") {
+    if (record.type === "new_player" || record.type === "player" || record.type === "game") {
       map.set(String(record.id), record);
     }
   });
@@ -101,15 +110,21 @@ export function parsePrizePicksProjections(payload = {}) {
     .map((item) => {
       const attrs = item?.attributes || {};
       const player = resolvePrizePicksPlayer(item, includedMap, playerMap);
-      const line = Number(attrs.line_score ?? attrs.line ?? attrs.projection);
-      const statType = attrs.stat_type || attrs.stat_display_name || attrs.description || "";
-      const playerName =
+      const line = Number(
+        attrs.line_score ?? attrs.line ?? attrs.projection ?? attrs.stat_value ?? attrs.value
+      );
+      const statType =
+        attrs.stat_type || attrs.stat_display_name || attrs.stat || attrs.market || "";
+      let playerName =
         player?.display_name ||
         player?.name ||
         player?.full_name ||
         attrs.player_name ||
-        attrs.description ||
         "";
+      if (!playerName && attrs.description) {
+        const descParts = String(attrs.description).split(/\s[-–—]\s/);
+        if (descParts[0]?.trim().length >= 2) playerName = descParts[0].trim();
+      }
 
       return {
         id: item?.id || "",
@@ -174,14 +189,12 @@ export function validatePrizePicksNormalizedProp(prop = {}) {
   const playerName = String(prop.playerName || prop.player || "").trim();
   const statType = String(prop.statType || prop.market || prop.propType || "").trim();
   const line = Number(prop.line);
-  const team = String(prop.team || "").trim();
-  const league = String(prop.league || prop.sport || "").trim();
+  const league = String(prop.league || prop.sport || prop.classifiedSport || "MLB").trim();
   return (
     playerName.length >= 2 &&
     statType.length >= 1 &&
     Number.isFinite(line) &&
     line > 0 &&
-    team.length >= 1 &&
     league.length >= 1
   );
 }

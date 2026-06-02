@@ -503,14 +503,19 @@ export function resolveTopMlbPlaySections(
   let topBestPlayPicks = uniqueBestPlays.slice(0, TOP_BEST_PLAYS_LIMIT).map((prop, idx) =>
     annotateHighestProbabilityPlay(annotateBestPlayRankingAudit(prop, idx + 1), idx + 1)
   );
-  if (!topBestPlayPicks.length && liveBestPlaysPools.liveNormalizedFallbackProps.length) {
-    topBestPlayPicks = buildProjectedDisplayFallback(liveBestPlaysPools.liveNormalizedFallbackProps, 20).map(
-      (prop, idx) =>
-        annotateHighestProbabilityPlay(annotateBestPlayRankingAudit(prop, idx + 1), idx + 1)
+  if (!topBestPlayPicks.length && liveBestPlaysPools.liveTotal > 0) {
+    const liveRankPool = [
+      ...liveBestPlaysPools.liveVerifiedProps,
+      ...liveBestPlaysPools.liveProjectedProps,
+      ...liveBestPlaysPools.liveNormalizedFallbackProps,
+    ];
+    topBestPlayPicks = buildProjectedDisplayFallback(liveRankPool, TOP_BEST_PLAYS_LIMIT).map((prop, idx) =>
+      annotateHighestProbabilityPlay(annotateBestPlayRankingAudit(prop, idx + 1), idx + 1)
     );
     filterDiagnostics.bestPlayUsedProjectedFallback = true;
-    filterDiagnostics.bestPlayFallbackNotice =
-      "Showing live normalized fallback projections — verification filters did not pass.";
+    filterDiagnostics.bestPlayFallbackNotice = liveBestPlaysPools.liveVerifiedProps.length
+      ? "Showing top live verified/projected plays."
+      : "Showing live normalized fallback projections — verification filters did not pass.";
   } else if (!topBestPlayPicks.length && engineProjectedPool.length) {
     topBestPlayPicks = buildProjectedDisplayFallback(enrichedPool, 20).map((prop, idx) =>
       annotateHighestProbabilityPlay(annotateBestPlayRankingAudit(prop, idx + 1), idx + 1)

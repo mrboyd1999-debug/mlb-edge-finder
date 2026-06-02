@@ -7,6 +7,8 @@ import {
   userSettingsDraftMatchesSaved,
   writeRuntimeSettings,
   writeSettingsMeta,
+  resolveSettingSource,
+  formatSettingSourceLabel,
 } from "../services/runtimeSettings.js";
 import {
   testOddsAPI,
@@ -201,6 +203,9 @@ export default function SettingsPanel({
   const ppProxySaved = Boolean(saved[ppProxyDef.key]?.trim());
   const oddsKeyWarning = getOddsKeyLengthWarning(cleanedOddsDraft);
   const sdRow = findProviderRow(connectionReport?.results || [], "SportsDataIO");
+  const oddsKeySource = resolveSettingSource(oddsDef.key);
+  const sdKeySource = resolveSettingSource(sdDef.key);
+  const ppProxySource = resolveSettingSource(ppProxyDef.key);
 
   return (
     <details id="section-settings" ref={panelRef} className="settings-panel compact-settings-details">
@@ -216,8 +221,9 @@ export default function SettingsPanel({
           <label className="settings-api-row__field" style={styles.selectLabel}>
             <span className="settings-api-row__head">
               <span>{oddsDef.label}</span>
+              <span className="settings-api-row__saved">{formatSettingSourceLabel(oddsKeySource)}</span>
               {oddsSaved ? (
-                <span className="settings-api-row__saved">Saved · {saved[oddsDef.key].length} chars</span>
+                <span className="settings-api-row__saved">Active · {saved[oddsDef.key].length} chars</span>
               ) : null}
             </span>
             <input
@@ -239,8 +245,9 @@ export default function SettingsPanel({
           <label className="settings-api-row__field" style={styles.selectLabel}>
             <span className="settings-api-row__head">
               <span>{sdDef.label}</span>
+              <span className="settings-api-row__saved">{formatSettingSourceLabel(sdKeySource)}</span>
               {sdSaved ? (
-                <span className="settings-api-row__saved">Saved · {saved[sdDef.key].length} chars</span>
+                <span className="settings-api-row__saved">Active · {saved[sdDef.key].length} chars</span>
               ) : null}
             </span>
             <input
@@ -271,7 +278,8 @@ export default function SettingsPanel({
           <label className="settings-api-row__field" style={styles.selectLabel}>
             <span className="settings-api-row__head">
               <span>{ppProxyDef.label}</span>
-              {ppProxySaved ? <span className="settings-api-row__saved">Saved</span> : null}
+              <span className="settings-api-row__saved">{formatSettingSourceLabel(ppProxySource)}</span>
+              {ppProxySaved ? <span className="settings-api-row__saved">Active</span> : null}
             </span>
             <input
               style={styles.textInput}

@@ -228,6 +228,7 @@ import {
 import { enrichPropsWithSportsData, generateMlbPropsFromSportsData } from "./services/propSportsDataEnrichment.js";
 import { mergeProjectionsOntoProps } from "./services/mlb/projectionMergePipeline.js";
 import { buildLiveRenderBoard, filterPlatformProps, isFakeOrFallbackProp, buildProjectedDisplayFallback } from "./utils/livePropRender.js";
+import { buildLiveBoardFromPipeline, pickLiveBoardRenderProps } from "./utils/liveBoard.js";
 import {
   buildBypassLiveRenderResult,
   buildLiveBoardPipelineTrace,
@@ -3235,7 +3236,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     pipelineTraceNormalizedPool.length,
     allDisplayProps.length
   )
-    ? prepareLiveBoardDirectRenderProps(pipelineTraceNormalizedPool, 120)
+    ? prepareLiveBoardDirectRenderProps(pipelineTraceNormalizedPool, STARTUP_NORMALIZED_PROP_LIMIT)
     : [];
   let liveRenderResult;
   if (bypassRenderProps.length) {
@@ -3333,7 +3334,6 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     rendered: liveRenderResult.props.length,
     cacheUsed: false,
   });
-  logLiveBoardPipelineTrace(debugInfo.liveBoardPipelineTrace);
   const modelSignalMap = buildModelSignalMap(filterVerifiedSportsbookProps(qualBoards.allDisplayable));
   let streakProps = [];
 
@@ -3625,6 +3625,28 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   endPerformanceTimer(PERFORMANCE_TIMERS.generateProjections);
   endPerformanceTimer(PERFORMANCE_TIMERS.verifyPlays);
   reportProgress("DONE");
+  const liveBoard = buildLiveBoardFromPipeline({
+    rawProps,
+    parsedProps: mergedProviderProps,
+    normalizedProps: pipelineTraceNormalizedPool.length ? pipelineTraceNormalizedPool : allDisplayProps,
+    allDisplayProps,
+    rankedProps: qualifiedReadyProps.length ? qualifiedReadyProps : displayProps,
+    renderedProps: acceptedPropsForRender,
+    cacheUsed: Boolean(pipelineFallback),
+    updatedAt: new Date().toISOString(),
+  });
+  debugInfo.liveBoard = liveBoard;
+  debugInfo.liveBoardPipelineTrace = buildLiveBoardPipelineTrace({
+    raw: rawProps.length,
+    normalized: liveBoard.counts.normalized,
+    provider: liveProviderPlayCount,
+    combined: allDisplayProps.length,
+    projected: liveBoard.counts.projected,
+    verified: verifiedForTrace,
+    rendered: liveBoard.counts.rendered,
+    cacheUsed: liveBoard.cacheUsed,
+  });
+  logLiveBoardPipelineTrace(debugInfo.liveBoardPipelineTrace);
   return {
     props: uiPayload.props,
     allDisplayProps,
@@ -3647,6 +3669,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     debugInfo,
     pipelineAudit: isHeavyDebugEnabled() ? pipelineAudit : debugInfo.pipelineAudit,
     scoringContext,
+    liveBoard,
   };
 }
 
@@ -3696,6 +3719,7 @@ export default function DFSPropsApp() {
   const [nearQualification, setNearQualification] = useState([]);
   const [qualifiedReadyProps, setQualifiedReadyProps] = useState([]);
   const [acceptedPropsForRender, setAcceptedPropsForRender] = useState([]);
+  const [liveBoard, setLiveBoard] = useState(null);
   const [streakProps, setStreakProps] = useState([]);
   const [streakSport, setStreakSport] = useState("MLB");
   const [parlayRiskMode, setParlayRiskMode] = useState("balanced");
@@ -3849,6 +3873,21 @@ export default function DFSPropsApp() {
           {},
       })
     );
+    const nextLiveBoard =
+      scopedBoard.liveBoard ||
+      scopedBoard.debugInfo?.liveBoard ||
+      buildLiveBoardFromPipeline({
+        rawProps: boardProps,
+        normalizedProps: masterProps,
+        allDisplayProps: masterProps,
+        rankedProps: scopedBoard.qualifiedReadyProps || renderAccepted,
+        renderedProps: renderAccepted,
+        cacheUsed: /cached|stale|expired|local/i.test(String(cacheLayer || "")),
+        updatedAt:
+          scopedBoard.updatedAt ||
+          (cacheLayer === "live" || cacheLayer === "fresh" ? new Date().toISOString() : ""),
+      });
+    setLiveBoard(nextLiveBoard);
     const health = buildApiHealthFromBoard(scopedBoard, cacheLayer);
     setApiHealth(health);
     try {
@@ -3961,6 +4000,7 @@ export default function DFSPropsApp() {
       try {
         if (force) {
           clearAllLiveDataCaches();
+          setLiveBoard(null);
           console.log("[Refresh] cache cleared");
         } else if (autoRefresh) {
           clearApiCache({ preserveLastGood: true });
@@ -4101,6 +4141,7 @@ export default function DFSPropsApp() {
           updatedAt: new Date().toISOString(),
         };
         board.debugInfo = { ...(board.debugInfo || {}), pipelineAudit: result.pipelineAudit || board.debugInfo?.pipelineAudit };
+        board.liveBoard = result.liveBoard || board.debugInfo?.liveBoard || null;
         if (boardProps.length) {
           const cacheMeta = buildBoardCacheMetaFromFetch(board);
           board.verifiedAt = cacheMeta.verifiedAt;
@@ -4540,10 +4581,15 @@ export default function DFSPropsApp() {
     [allDisplayProps, pipelineFallback, debugInfo?.ingestionFallback]
   );
   const boardDisplayProps = useMemo(() => {
-    const liveNormalized = Number(debugInfo?.liveBoardPipelineTrace?.normalized ?? 0);
-    let base = acceptedPropsForRender.length ? acceptedPropsForRender : liveRenderBoard.props;
+    const liveNormalized = Number(
+      liveBoard?.counts?.normalized ?? debugInfo?.liveBoardPipelineTrace?.normalized ?? 0
+    );
+    let base = pickLiveBoardRenderProps(liveBoard, []);
+    if (!base.length) {
+      base = acceptedPropsForRender.length ? acceptedPropsForRender : liveRenderBoard.props;
+    }
     if (liveNormalized > 0 && countMergedProjections(allDisplayProps) > countMergedProjections(base)) {
-      base = allDisplayProps;
+      base = liveBoard?.projectedProps?.length ? liveBoard.projectedProps : allDisplayProps;
     }
     if (!base.length && allDisplayProps.length) {
       base = liveRenderBoard.props.length ? liveRenderBoard.props : allDisplayProps;
@@ -4575,7 +4621,7 @@ export default function DFSPropsApp() {
       }
     }
     return preferred;
-  }, [acceptedPropsForRender, liveRenderBoard, cacheStatus, debugInfo, lastUpdated, allDisplayProps]);
+  }, [acceptedPropsForRender, liveRenderBoard, cacheStatus, debugInfo, lastUpdated, allDisplayProps, liveBoard]);
 
   const prizePicksFeedProps = useMemo(() => {
     const research = (boardDisplayProps || []).filter((prop) => {
@@ -5255,13 +5301,10 @@ export default function DFSPropsApp() {
     [boardDisplayProps, topMlbPlayBoard, providerCoverageAuditDisplay, lastUpdated, debugInfo]
   );
   const lastUpdatedMs = lastUpdated ? new Date(lastUpdated).getTime() : NaN;
-  const staleDataWarning = boardFreshness.stale
-    ? "Stale data warning: refresh today's picks before using these lines."
-    : Number(providerCoverageAuditDisplay?.liveProviderCount ?? 0) > 0
-      ? ""
-      : Number.isFinite(lastUpdatedMs) && Date.now() - lastUpdatedMs > BOARD_LIVE_FRESH_MAX_AGE_MS
-        ? "Stale data warning: refresh today's picks before using these lines."
-        : "";
+  const staleDataWarning =
+    boardFreshness.stale && !boardFreshness.liveEligible
+      ? "Stale data warning: refresh today's picks before using these lines."
+      : "";
   const historyResultByKey = useMemo(() => {
     const map = new Map();
     visibleHistory.forEach((pick) => {
@@ -5475,6 +5518,7 @@ export default function DFSPropsApp() {
   const handleRefresh = useCallback(async () => {
     console.log("[Refresh] started");
     clearAllLiveDataCaches();
+    setLiveBoard(null);
     setError("");
     setShowStaleCache(false);
     setRefreshCooldownSec(0);

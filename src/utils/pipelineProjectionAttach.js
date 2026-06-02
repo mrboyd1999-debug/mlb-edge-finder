@@ -102,7 +102,7 @@ export function buildNormalizedProjectionFallback(prop = {}) {
     finalConfidence: confidence,
     tier: "projected",
     finalTier: "C",
-    projectionSource: "normalized-fallback",
+    projectionSource: "fallback from live line",
     isNormalizedFallbackProjection: true,
     isLiveRenderProp: prop.isLiveRenderProp ?? true,
     lineSourceBadge: prop.lineSourceBadge || "LIVE",

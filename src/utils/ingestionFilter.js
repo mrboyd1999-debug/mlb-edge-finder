@@ -9,6 +9,7 @@ import {
 } from "./standardPropMetrics.js";
 import {
   PRIZEPICKS_LEAGUE_SPORTS,
+  PRIZEPICKS_MLB_LEAGUE_ID,
   inferSportFromText,
   sportFromPrizePicksLeague,
   sportFromUnderdogGame,
@@ -193,7 +194,12 @@ export function buildPrizePicksFlatIngestionContext(item = {}) {
 export function buildPrizePicksProjectionIngestionContext(item = {}, included = new Map()) {
   const relationships = item.relationships || {};
   const leagueRel = relationships.league?.data;
-  const leagueId = Array.isArray(leagueRel) ? leagueRel[0]?.id : leagueRel?.id;
+  const leagueIdRaw = Array.isArray(leagueRel) ? leagueRel[0]?.id : leagueRel?.id;
+  const leagueId =
+    leagueIdRaw ||
+    item.league_id ||
+    item.leagueId ||
+    (MLB_ONLY_MODE ? PRIZEPICKS_MLB_LEAGUE_ID : "");
   const leagueRecord = leagueId ? included.get(`league:${leagueId}`) : null;
   const leagueAttrs = leagueRecord?.attributes || {};
   const leagueName = [
@@ -211,11 +217,12 @@ export function buildPrizePicksProjectionIngestionContext(item = {}, included = 
 
   return {
     platform: "PrizePicks",
-    leagueId: leagueId || "",
+    leagueId: String(leagueId || ""),
     leagueName,
-    league: leagueName,
+    league: leagueName || (String(leagueId) === PRIZEPICKS_MLB_LEAGUE_ID ? "MLB" : ""),
     sport:
       sportFromPrizePicksLeague(leagueRecord, leagueId) ||
+      (String(leagueId) === PRIZEPICKS_MLB_LEAGUE_ID ? APP_SPORTS.MLB : "") ||
       inferSportFromText(`${leagueName} ${attributes.league || ""}`, {
         description: attributes.description,
         playerName: playerAttrs.display_name || playerAttrs.name,
@@ -291,7 +298,11 @@ function relatedIncludedRecord(included, relationship) {
   if (!data) return null;
   const target = Array.isArray(data) ? data[0] : data;
   if (!target) return null;
-  return included.get(`${target.type}:${target.id}`) || null;
+  return (
+    included.get(`${target.type}:${target.id}`) ||
+    included.get(String(target.id)) ||
+    null
+  );
 }
 
 export function shouldParseIngestionContext(context = {}) {

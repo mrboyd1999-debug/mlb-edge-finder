@@ -9,7 +9,7 @@ export const SPORTSDATA_TIMEOUT_MS = 8_000;
 /** MLB player stat profiles — fail fast and fall back to season merge + cache. */
 export const MLB_STATS_FETCH_TIMEOUT_MS = 8_000;
 /** Hard cap for board refresh — UI must exit loading within this window. */
-export const BOARD_LOAD_TIMEOUT_MS = 12_000;
+export const BOARD_LOAD_TIMEOUT_MS = 20_000;
 /** Per-provider cap during board load — do not block on slow PrizePicks retries. */
 export const BOARD_PROVIDER_TIMEOUT_MS = 8_000;
 /** Per-provider caps — independent; do not use global mobile/desktop caps. */

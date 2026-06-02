@@ -180,7 +180,10 @@ function LivePropIngestionCountsPanel({ audit = null, liveFeedDiagnostics = null
         </p>
         <p className="live-prop-ingestion-counts__line">
           <strong>Underdog</strong> — endpoint: {udEvidence?.url || udLive?.endpoint || "—"} · HTTP{" "}
-          {udEvidence?.httpStatus ?? udLive?.httpStatus ?? "—"} · parsed {underdogUsable} · usable {underdogUsable} · last fetch:{" "}
+          {udEvidence?.httpStatus ?? udLive?.httpStatus ?? "—"} · raw{" "}
+          {udCounts.rawUnderdogProps ?? udEvidence?.counts?.raw ?? udLive?.fetched ?? 0} · parsed{" "}
+          {udCounts.parsedUnderdogProps ?? udEvidence?.counts?.parsed ?? udLive?.parsed ?? 0} · usable{" "}
+          {underdogUsable} · last fetch:{" "}
           {udEvidence?.updatedAt ? formatDateTime(udEvidence.updatedAt) : "—"} · cache age:{" "}
           {underdogCacheOnly
             ? formatCacheAgeHours(

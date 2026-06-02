@@ -7,6 +7,8 @@ import {
 import {
   resolveLiveFeedHeadline,
   STALE_DATA_HEADLINE,
+  CACHE_DATA_HEADLINE,
+  LIVE_DATA_HEADLINE,
 } from "../utils/boardFreshness.js";
 import ApiStatusPanel from "./ApiStatusPanel.jsx";
 
@@ -41,7 +43,7 @@ function ProviderFeedModeBanner({
     audit?.boardFreshness ||
     null;
 
-  const liveAvailable = Boolean(freshness?.liveEligible) && !loading;
+  const usingLiveBoard = Boolean(freshness?.liveEligible) && !freshness?.cacheUsed && !freshness?.stale;
 
   const headline = resolveLiveFeedHeadline({
     loading,
@@ -51,25 +53,25 @@ function ProviderFeedModeBanner({
 
   const headlineStyle = loading
     ? apiStatusStyle(API_STATUS_COLOR.YELLOW)
-    : freshness?.stale
+    : freshness?.stale && !usingLiveBoard
       ? apiStatusStyle(API_STATUS_COLOR.YELLOW)
-      : liveAvailable
+      : usingLiveBoard
         ? apiStatusStyle(API_STATUS_COLOR.GREEN)
         : apiStatusStyle(health.overall.color);
 
   const modeLabel = loading
     ? "Loading…"
-    : freshness?.stale
-      ? STALE_DATA_HEADLINE
-      : liveAvailable
-        ? "Live Data Available"
+    : usingLiveBoard
+      ? LIVE_DATA_HEADLINE
+      : freshness?.stale
+        ? STALE_DATA_HEADLINE
         : freshness?.cacheUsed
-          ? "Cached Data"
+          ? CACHE_DATA_HEADLINE
           : "Limited";
 
   return (
     <section
-      className={`provider-feed-mode-banner provider-feed-mode-banner--${liveAvailable && !loading ? "live" : "cache"}`}
+      className={`provider-feed-mode-banner provider-feed-mode-banner--${usingLiveBoard && !loading ? "live" : "cache"}`}
       aria-label="Provider data mode"
     >
       <div className="provider-feed-mode-banner__head">

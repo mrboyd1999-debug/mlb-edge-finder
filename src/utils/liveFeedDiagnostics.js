@@ -36,6 +36,10 @@ export function buildLiveFeedDiagnosticsSummary({
   const ppEndpoints = resolvePrizePicksFetchEndpoints();
   const udEndpoints = resolveUnderdogFetchEndpoints();
 
+  const ppSources = debugInfo?.sources?.PrizePicks || {};
+  const udSources = debugInfo?.sources?.Underdog || {};
+  const ppAudit = debugInfo?.prizePicksPipelineAudit || {};
+
   return {
     lastFetchAt:
       providerRaw.lastFetchAt ||
@@ -45,10 +49,29 @@ export function buildLiveFeedDiagnosticsSummary({
       audit?.lastUpdated ||
       null,
     prizePicks: {
-      raw: finite(pipeline.rawPrizePicks ?? providerRaw.rawPrizePicks),
-      parsed: finite(ppEvidence.counts?.parsed ?? providerRaw.prizePicksUsable),
-      normalized: finite(ppEvidence.counts?.normalized),
-      usable: finite(providerRaw.prizePicksUsable ?? ppEvidence.counts?.usable),
+      raw: finite(
+        pipeline.rawPrizePicks ??
+          providerRaw.rawPrizePicks ??
+          ppSources.rawPropsLoaded ??
+          ppEvidence.counts?.raw
+      ),
+      parsed: finite(
+        ppAudit.parsedCount ??
+          ppSources.propsAfterParsing ??
+          ppEvidence.counts?.parsed ??
+          ppSources.propsAfterFilters
+      ),
+      normalized: finite(
+        ppEvidence.counts?.normalized ??
+          ppSources.usablePropsCount ??
+          ppAudit.normalizedCount ??
+          pipeline.normalizedPrizePicks
+      ),
+      usable: finite(
+        providerRaw.prizePicksUsable ??
+          ppSources.usablePropsCount ??
+          ppEvidence.counts?.usable
+      ),
       source: resolveFeedSource({
         usedCache: Boolean(audit?.prizepicksUsedCache),
         route: ppEndpoints[0],
@@ -58,10 +81,18 @@ export function buildLiveFeedDiagnosticsSummary({
       route: ppEndpoints[0] || null,
     },
     underdog: {
-      raw: finite(pipeline.rawUnderdog ?? providerRaw.rawUnderdog),
-      parsed: finite(udEvidence.counts?.parsed ?? providerRaw.underdogUsable),
-      normalized: finite(udEvidence.counts?.normalized),
-      usable: finite(providerRaw.underdogUsable ?? udEvidence.counts?.usable),
+      raw: finite(
+        pipeline.rawUnderdog ?? providerRaw.rawUnderdog ?? udSources.rawPropsLoaded ?? udEvidence.counts?.raw
+      ),
+      parsed: finite(
+        udSources.propsAfterParsing ?? udEvidence.counts?.parsed ?? udSources.propsAfterFilters
+      ),
+      normalized: finite(
+        udEvidence.counts?.normalized ?? udSources.usablePropsCount ?? pipeline.normalizedUnderdog
+      ),
+      usable: finite(
+        providerRaw.underdogUsable ?? udSources.usablePropsCount ?? udEvidence.counts?.usable
+      ),
       source: resolveFeedSource({
         usedCache: Boolean(audit?.underdogUsedCache),
         route: udEndpoints[0],

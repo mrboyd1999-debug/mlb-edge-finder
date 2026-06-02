@@ -6,6 +6,8 @@ import { formatDateTime } from "./formatters.js";
 
 export const BOARD_LIVE_FRESH_MAX_AGE_MS = 15 * 60 * 1000;
 export const STALE_DATA_HEADLINE = "STALE DATA — refresh required";
+export const CACHE_DATA_HEADLINE = "Cache Data";
+export const LIVE_DATA_HEADLINE = "Live Data Available";
 
 export function parseBoardTimestamp(value = "") {
   if (!value) return null;
@@ -81,7 +83,8 @@ export function resolveLiveFeedHeadline({
   apiHealthHeadline = "",
 } = {}) {
   if (loading) return "Loading feeds…";
+  if (boardFreshness?.liveEligible && !boardFreshness?.cacheUsed) return LIVE_DATA_HEADLINE;
   if (boardFreshness?.stale) return STALE_DATA_HEADLINE;
-  if (boardFreshness?.liveEligible) return "Live Data Available";
+  if (boardFreshness?.cacheUsed) return CACHE_DATA_HEADLINE;
   return apiHealthHeadline || "Limited";
 }

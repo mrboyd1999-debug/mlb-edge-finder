@@ -477,7 +477,7 @@ function resolveOverallHealth({
   }
 
   return {
-    status: boardFreshness?.cacheUsed ? "Cached Data" : "Limited Data",
+    status: boardFreshness?.cacheUsed ? "Cache Data" : "Limited Data",
     color: API_STATUS_COLOR.YELLOW,
     detail: "Usable data available but not live-fresh",
     debug: { failureReason: boardFreshness?.cacheUsed ? "Cache fallback active" : "Providers warming up" },
