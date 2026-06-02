@@ -52,15 +52,6 @@ const MARKET_PROJECTION_EDGE = {
   "hits allowed": 0.2,
 };
 
-function stablePropSeed(value = "") {
-  let hash = 0;
-  const text = String(value || "");
-  for (let index = 0; index < text.length; index += 1) {
-    hash = (hash * 31 + text.charCodeAt(index)) | 0;
-  }
-  return Math.abs(hash);
-}
-
 function resolveMarketProjectionEdge(market = "") {
   const key = String(market || "").trim().toLowerCase();
   if (MARKET_PROJECTION_EDGE[key] != null) return MARKET_PROJECTION_EDGE[key];
@@ -84,26 +75,16 @@ export function buildNormalizedProjectionFallback(prop = {}) {
   const projection = Number((line + edge).toFixed(2));
   if (!Number.isFinite(projection) || projection <= 0) return prop;
 
-  const seed = stablePropSeed(
-    `${prop.playerName || prop.player}|${market}|${line}|${prop.source || prop.platform || ""}`
-  );
-  const probability = 60 + (seed % 11);
-  const confidence = 60 + ((seed >> 4) % 16);
-
   return {
     ...prop,
     projection,
     projectedValue: projection,
     edge: Number(edge.toFixed(3)),
-    probability,
-    probabilityScore: probability,
-    confidence,
-    confidenceScore: confidence,
-    finalConfidence: confidence,
     tier: "projected",
     finalTier: "C",
     projectionSource: "fallback from live line",
     isNormalizedFallbackProjection: true,
+    isFallbackProjection: true,
     isLiveRenderProp: prop.isLiveRenderProp ?? true,
     lineSourceBadge: prop.lineSourceBadge || "LIVE",
     projectionMerged: false,

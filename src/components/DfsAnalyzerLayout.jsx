@@ -45,6 +45,7 @@ function DfsAnalyzerLayout({
   topMlbPlayBoard,
   verificationFilterDiagnostics = null,
   debugPanelsVisible = false,
+  boardStatusNotice = "",
   prizePicksFeedProps,
   pipelineRenderCounts,
   savedDisplayPicks,
@@ -128,6 +129,7 @@ function DfsAnalyzerLayout({
             loadError={loadError}
             onOpen={onOpenProp}
             filterDiagnostics={topMlbPlayBoard?.filterDiagnostics}
+            boardStatusNotice={boardStatusNotice}
           />
         </SectionErrorBoundary>
       ) : null}

@@ -18,6 +18,7 @@ function BestPlaysTab({
   loadError = "",
   onOpen,
   filterDiagnostics = null,
+  boardStatusNotice = "",
 }) {
   const mainSections = useMemo(
     () =>
@@ -26,6 +27,7 @@ function BestPlaysTab({
   );
 
   const fallbackNotice =
+    boardStatusNotice ||
     mainSections.find((section) => section.fallbackNotice)?.fallbackNotice ||
     (filterDiagnostics?.verifiedCount === 0 && filterDiagnostics?.poolCount > 0
       ? EMERGENCY_FALLBACK_NOTICE

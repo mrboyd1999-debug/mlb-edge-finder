@@ -41,6 +41,7 @@ function formatMatchup(prop = {}) {
 }
 
 function resolveTierLabel(prop = {}) {
+  if (prop.emergencyTierLabel) return prop.emergencyTierLabel;
   const tier = String(prop.finalTier || prop.tier || "").toUpperCase();
   if (tier === "A") return "Elite";
   if (tier === "B") return "Best Play";
@@ -89,7 +90,13 @@ function BestPlayRowCard({ prop, onOpen, rank, rankLabel, compact = false }) {
     ? { displayEdgeLabel: enriched.displayEdgeLabel }
     : formatEdgeDisplay(enriched);
   const projection = resolveProjectionValue(enriched);
-  const projectionLabel = projection != null && projection > 0 ? formatNumber(projection) : "—";
+  const projectionFallbackSuffix =
+    enriched.projectionLabelSuffix ||
+    (enriched.isFallbackProjection || enriched.projectionStatus === "normalized-fallback" ? " (fallback)" : "");
+  const projectionLabel =
+    projection != null && projection > 0
+      ? `${formatNumber(projection)}${projectionFallbackSuffix}`
+      : "—";
   const displayRankLabel = rankLabel || (rank != null ? `#${rank}` : null);
   const reasonText =
     enriched.qualificationReason ||

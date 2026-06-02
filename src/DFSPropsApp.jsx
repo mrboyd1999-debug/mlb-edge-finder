@@ -4559,7 +4559,7 @@ export default function DFSPropsApp() {
 
   const devEnvironment = isDevEnvironment();
   const debugModeEnabled = isDebugModeEnabled();
-  const debugPanelsVisible = false;
+  const debugPanelsVisible = showDebugPanels;
 
   const scoredDisplayProps = useMemo(() => allDisplayProps, [allDisplayProps]);
 
@@ -5250,6 +5250,16 @@ export default function DFSPropsApp() {
       }),
     [providerCoverageAuditDisplay, lastUpdated, currentFetchTime, cacheStatus, debugInfo?.liveBoardPipelineTrace?.normalized]
   );
+  const boardStatusNotice = useMemo(() => {
+    if (loading) return "";
+    if (boardFreshness.cacheUsed || /cached|stale|expired/i.test(String(cacheStatus || ""))) {
+      return "Cached board shown — click refresh for latest lines.";
+    }
+    if (boardFreshness.liveEligible && !boardFreshness.stale) {
+      return "Fresh board updated.";
+    }
+    return "";
+  }, [loading, boardFreshness, cacheStatus]);
   const refreshBlocked =
     loading ||
     (!devEnvironment &&
@@ -5696,6 +5706,7 @@ export default function DFSPropsApp() {
       topMlbPlayBoard={topMlbPlayBoard}
       verificationFilterDiagnostics={verificationFilterDiagnostics}
       debugPanelsVisible={debugPanelsVisible}
+      boardStatusNotice={boardStatusNotice}
       savedDisplayPicks={savedDisplayPicks}
       onRemoveSavedPick={removeSavedPick}
       onClearSavedPicks={clearSavedPicksList}
