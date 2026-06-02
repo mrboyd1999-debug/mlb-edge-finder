@@ -22,7 +22,8 @@ import LivePropIngestionCountsPanel from "./LivePropIngestionCountsPanel.jsx";
 import ProviderCoverageAuditSection from "./ProviderCoverageAuditSection.jsx";
 import LiveFeedTestPanel from "./LiveFeedTestPanel.jsx";
 import RenderingSourceDiagnosticsPanel from "./RenderingSourceDiagnosticsPanel.jsx";
-import { readSettingsMeta } from "../services/runtimeSettings.js";
+import { readSettingsMeta, writeSettingsMeta } from "../services/runtimeSettings.js";
+import { clearProviderHealthCache, testAllApiConnections } from "../services/apiConnectionTest.js";
 import { isDebugModeEnabled } from "../utils/devMode.js";
 
 function DfsAnalyzerLayout({
@@ -84,6 +85,29 @@ function DfsAnalyzerLayout({
     if (report) setConnectionReport(report);
   }, []);
 
+  const handleRefreshWithHealth = useCallback(async () => {
+    clearProviderHealthCache();
+    setConnectionReport(null);
+    await onRefresh?.();
+    try {
+      const report = await testAllApiConnections({
+        feedContext: feedHealthContext,
+        debugInfo,
+        allDisplayProps: debugInfo?.allDisplayProps || [],
+        sourceStatus: debugInfo?.sources || {},
+        lastUpdated: debugInfo?.lastUpdated || "",
+      });
+      writeSettingsMeta({
+        ...readSettingsMeta(),
+        lastTestedAt: report.testedAt,
+        lastConnectionReport: report.results,
+      });
+      setConnectionReport(report);
+    } catch (error) {
+      console.error("[DFS Refresh] provider health retest failed", error);
+    }
+  }, [onRefresh, feedHealthContext, debugInfo]);
+
   const debugModeEnabled = isDebugModeEnabled();
 
   return (
@@ -94,7 +118,7 @@ function DfsAnalyzerLayout({
         refreshBlocked={refreshBlocked}
         refreshCountdownSec={refreshCountdownSec}
         staleDataActive={staleDataActive}
-        onRefresh={onRefresh}
+        onRefresh={handleRefreshWithHealth}
         showDebugPanels={showDebugPanels}
         onToggleDebugPanels={onShowDebugPanelsChange ? () => onShowDebugPanelsChange(!showDebugPanels) : undefined}
         lastUpdated={lastUpdatedLabel}

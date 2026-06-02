@@ -17,7 +17,8 @@ import {
   saveOddsApiKey,
   clearOddsApiKey,
 } from "../services/runtimeSettings.js";
-import { testOddsApiKey } from "../lib/oddsApiHealth.js";
+import { testOddsApiHealth } from "../lib/oddsApiHealth.js";
+import { clearProviderHealthCache } from "../services/apiConnectionTest.js";
 import { clearSourceAuthBlock, SOURCE_IDS } from "../services/sourceRateLimit.js";
 import { resetOddsApiStartupValidation } from "../services/oddsApiClient.js";
 import {
@@ -135,25 +136,59 @@ export default function SettingsPanel({
     }
   }
 
-  async function handleClearOddsKey() {
+  function handleResetOddsKey() {
     clearOddsApiKey();
     clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
     resetOddsApiStartupValidation();
-    const cleared = { ...draft, VITE_ODDS_API_KEY: "" };
-    setDraft(cleared);
-    writeRuntimeSettings({ ...readRuntimeSettings(), VITE_ODDS_API_KEY: "" });
+    clearProviderHealthCache();
+    window.location.reload();
+  }
+
+  async function handleSaveOddsKey() {
+    const cleaned = cleanApiKey(draft.VITE_ODDS_API_KEY);
+    if (!cleaned) {
+      setNotice("Enter an Odds API key before saving.");
+      return;
+    }
+    saveOddsApiKey(cleaned);
+    clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
+    resetOddsApiStartupValidation();
+    setDraft((current) => ({ ...current, VITE_ODDS_API_KEY: cleaned }));
+    writeRuntimeSettings({ ...readRuntimeSettings(), VITE_ODDS_API_KEY: cleaned });
     setSaved(readRuntimeSettings());
-    setNotice("Odds API key cleared from localStorage. Paste a new key and Save Keys.");
-    onClearCaches?.();
+    setTestingOdds(true);
+    try {
+      const health = await testOddsApiHealth();
+      const report = await testOddsAPI();
+      setConnectionReport((current) => {
+        const merged = mergeProviderResult(current, report, "Odds API");
+        writeSettingsMeta({
+          ...readSettingsMeta(),
+          lastTestedAt: merged.testedAt,
+          lastConnectionReport: merged.results,
+        });
+        onConnectionReportChange?.(merged);
+        return merged;
+      });
+      setNotice(
+        health.ok
+          ? `Odds API connected. ${health.details || ""}`
+          : `${health.status}: ${health.details || "Test failed"}`
+      );
+    } catch (error) {
+      setNotice(error?.message || "Odds API save/test failed.");
+    } finally {
+      setTestingOdds(false);
+    }
   }
 
   async function handleTestOdds() {
     setTestingOdds(true);
     try {
       const { cleaned } = persistDraft();
-      const direct = await testOddsApiKey();
+      const direct = await testOddsApiHealth();
       if (!direct.ok && cleaned.VITE_ODDS_API_KEY) {
-        setNotice(direct.message || "Odds API test failed.");
+        setNotice(direct.details || direct.status || "Odds API test failed.");
       }
       const report = await testOddsAPI();
       setConnectionReport((current) => {
@@ -176,6 +211,8 @@ export default function SettingsPanel({
 
   async function handleRetestAll() {
     setTestingAll(true);
+    clearProviderHealthCache();
+    setConnectionReport(null);
     try {
       const { cleaned } = persistDraft();
       const report = await testAllApiConnections({ feedContext: feedHealthContext });
@@ -294,11 +331,14 @@ export default function SettingsPanel({
             />
             {oddsKeyWarning ? <span className="settings-api-row__warning">{oddsKeyWarning}</span> : null}
           </label>
+          <button type="button" style={styles.secondaryButton} onClick={handleSaveOddsKey} disabled={testingOdds}>
+            {testingOdds ? "Saving…" : "Save Odds Key"}
+          </button>
           <button type="button" style={styles.secondaryButton} onClick={handleTestOdds} disabled={testingOdds}>
             {testingOdds ? "Testing…" : "Test Odds API"}
           </button>
-          <button type="button" style={styles.secondaryButton} onClick={handleClearOddsKey}>
-            Clear Odds Key
+          <button type="button" style={styles.secondaryButton} onClick={handleResetOddsKey}>
+            Reset Odds Key
           </button>
         </div>
 

@@ -2,7 +2,11 @@
  * Live feed diagnostics — true stage counts and source attribution for ingestion UI.
  */
 
-import { resolveSettingSource } from "../services/runtimeSettings.js";
+import {
+  getOddsApiKeySource,
+  getSportsDataApiKeySource,
+  formatSettingSourceLabel,
+} from "../services/runtimeSettings.js";
 import { getDebugFeedEvidence } from "./feedHardEvidence.js";
 import {
   resolvePrizePicksFetchEndpoints,
@@ -77,7 +81,7 @@ export function buildLiveFeedDiagnosticsSummary({
         route: ppEndpoints[0],
         proxyUrl: resolveSettingSource("VITE_PRIZEPICKS_PROXY_URL") === "env" ? "env-proxy" : "",
       }),
-      oddsKeySource: resolveSettingSource("VITE_ODDS_API_KEY"),
+      oddsKeySource: formatSettingSourceLabel(getOddsApiKeySource()),
       route: ppEndpoints[0] || null,
     },
     underdog: {
@@ -103,7 +107,7 @@ export function buildLiveFeedDiagnosticsSummary({
     projectedProps: finite(pipeline.projectedProps ?? audit?.projected),
     displayedProps: finite(pipeline.displayedProps),
     verifiedProps: finite(pipeline.verifiedProps),
-    sportsDataKeySource: resolveSettingSource("VITE_SPORTSDATA_API_KEY"),
-    oddsKeySource: resolveSettingSource("VITE_ODDS_API_KEY"),
+    sportsDataKeySource: formatSettingSourceLabel(getSportsDataApiKeySource()),
+    oddsKeySource: formatSettingSourceLabel(getOddsApiKeySource()),
   };
 }

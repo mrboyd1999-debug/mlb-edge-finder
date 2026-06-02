@@ -8,7 +8,8 @@ import {
   getOddsApiKey as resolveOddsApiKey,
   getOddsApiKeySource as resolveOddsApiKeySource,
   saveOddsApiKey as persistOddsApiKey,
-} from "../lib/oddsApiHealth.js";
+} from "../lib/apiKeys.js";
+import { testOddsApiHealth, testOddsApiKey } from "../lib/oddsApiHealth.js";
 import { normalizeProxyUrl } from "../utils/providerProxy.js";
 
 /** User-facing keys shown in Settings — live feeds (PP/UD) use built-in routes, not user keys. */
@@ -134,8 +135,8 @@ export function getOddsApiKeySource() {
 }
 
 export function getSportsDataApiKeySource() {
-  if (readEnvKeys(SPORTSDATA_ENV_KEYS)) return "env";
   if (readStorageKeys(SPORTSDATA_STORAGE_KEYS)) return "localStorage";
+  if (readEnvKeys(SPORTSDATA_ENV_KEYS)) return "env";
   return "missing";
 }
 
@@ -163,21 +164,21 @@ export function getSettingDef(key) {
   return RUNTIME_SETTING_DEFS.find((def) => def.key === key) || { key, label: key };
 }
 
-/** Where the effective value came from — env, localStorage, legacy, or null. */
+/** Where the effective key came from — localStorage, env, or missing. */
 export function resolveSettingSource(key) {
+  if (key === "VITE_ODDS_API_KEY") return getOddsApiKeySource();
+  if (key === "VITE_SPORTSDATA_API_KEY") return getSportsDataApiKeySource();
   const def = getSettingDef(key);
+  if (readStorageValue(key) || readLegacyValue(def)) return "localStorage";
   if (readEnvValue(def)) return "env";
-  if (readStorageValue(key)) return "localStorage";
-  if (readLegacyValue(def)) return "legacy";
-  return null;
+  return "missing";
 }
 
 export function formatSettingSourceLabel(source = null) {
   if (source === "env") return "env";
-  if (source === "localStorage") return "localStorage";
-  if (source === "legacy") return "legacy";
-  if (source === "missing") return "missing";
-  return "Not configured";
+  if (source === "localStorage" || source === "legacy") return "localStorage";
+  if (source === "missing" || !source) return "missing";
+  return "missing";
 }
 
 /** Effective value — Odds key uses localStorage-first resolution; other keys env then storage. */
@@ -290,19 +291,17 @@ export function getRawProxyUrl(platform = "") {
 }
 
 export function getOddsApiKey() {
-  const resolved = resolveOddsApiKey();
-  if (isUsableEnvValue(resolved)) return resolved;
-  return cleanApiKey(readLegacyValue(getSettingDef("VITE_ODDS_API_KEY")));
+  return resolveOddsApiKey();
 }
 
 export { clearOddsApiKeyStorage as clearOddsApiKey, persistOddsApiKey as saveOddsApiKey };
-export { testOddsApiKey } from "../lib/oddsApiHealth.js";
+export { testOddsApiHealth, testOddsApiKey } from "../lib/oddsApiHealth.js";
 
 export function getSportsDataApiKey() {
-  const fromEnv = cleanApiKey(readEnvKeys(SPORTSDATA_ENV_KEYS));
-  if (isUsableEnvValue(fromEnv)) return fromEnv;
   const fromStorage = cleanApiKey(readStorageKeys(SPORTSDATA_STORAGE_KEYS));
   if (isUsableEnvValue(fromStorage)) return fromStorage;
+  const fromEnv = cleanApiKey(readEnvKeys(SPORTSDATA_ENV_KEYS));
+  if (isUsableEnvValue(fromEnv)) return fromEnv;
   return cleanApiKey(readLegacyValue(getSettingDef("VITE_SPORTSDATA_API_KEY")));
 }
 

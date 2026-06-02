@@ -165,8 +165,9 @@ function LivePropIngestionCountsPanel({ audit = null, liveFeedDiagnostics = null
           {feedDiagnostics.underdog.source} · route: {feedDiagnostics.underdog.route || "—"}
         </p>
         <p className="live-prop-ingestion-counts__line">
-          last fetch: {feedDiagnostics.lastFetchAt ? formatDateTime(feedDiagnostics.lastFetchAt) : "—"} · odds key:{" "}
-          {feedDiagnostics.oddsKeySource || "none"} · sportsdata key: {feedDiagnostics.sportsDataKeySource || "none"}
+          last fetch: {feedDiagnostics.lastFetchAt ? formatDateTime(feedDiagnostics.lastFetchAt) : "—"} · Odds key
+          source: {feedDiagnostics.oddsKeySource || "missing"} · SportsDataIO key source:{" "}
+          {feedDiagnostics.sportsDataKeySource || "missing"}
         </p>
       </div>
 

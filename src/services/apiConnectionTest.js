@@ -11,7 +11,7 @@ import {
   parseOddsApiAuthFailure,
   redactOddsApiUrl,
 } from "./oddsApiClient.js";
-import { getOddsApiKey, testOddsApiKey } from "../lib/oddsApiHealth.js";
+import { getOddsApiKey, testOddsApiHealth } from "../lib/oddsApiHealth.js";
 import {
   ENRICHMENT_TIMEOUT_MESSAGE,
   getApiTimeoutMs,
@@ -25,6 +25,7 @@ import { getOddsKeyLengthWarning, cleanApiKey } from "../utils/cleanApiKey.js";
 import { runSportsDataMultiEndpointTest, SPORTSDATA_STATUS_LABELS } from "./sportsDataAuthTest.js";
 import { clearSourceAuthBlock, getSourceState, isSourceInCooldown, SOURCE_IDS } from "./sourceRateLimit.js";
 import { readCachedBoard, readVerifiedCacheBoard } from "./pickStore.js";
+import { readSettingsMeta, writeSettingsMeta } from "./runtimeSettings.js";
 import { buildFeedHealthContext, mergeConnectionReportWithFeeds } from "./providerHealth.js";
 import { testMlbStatsApiConnection } from "./mlbStatsApiTest.js";
 
@@ -337,27 +338,24 @@ async function probeOddsApiForTest() {
       route: "https://api.the-odds-api.com/v4/sports/?apiKey=[REDACTED]",
       durationMs: 0,
       payload: null,
+      sportsCount: 0,
+      sportsListOk: false,
     };
   }
 
-  const result = await testOddsApiKey();
-  const httpStatus = result.status === "network_error" || result.status === "missing" ? 0 : Number(result.status) || 0;
-  const payload = result.data ?? null;
+  const result = await testOddsApiHealth();
+  const httpStatus = Number(result.httpStatus) || (result.ok ? 200 : 0);
+  const payload = result.raw ?? null;
   const sportsList = parseOddsSportsPayload(payload);
   const sportsCount = result.sportsCount ?? sportsList.length;
-  const sportsListOk = Boolean(result.ok && (result.sportsListOk ?? sportsCount > 0));
-  const responseBody = formatResponseBody(
-    typeof payload === "string" ? payload : "",
-    payload,
-    result.message
-  );
+  const sportsListOk = Boolean(result.ok && httpStatus === 200);
+  const responseBody = result.details || formatResponseBody("", payload, 400);
   const unauthorized = Boolean(result.unauthorized);
 
   console.info("[Odds API Test] Request URL:", redactOddsApiUrl(result.route || "https://api.the-odds-api.com/v4/sports/?apiKey=[REDACTED]"));
   console.info("[Odds API Test] Key length:", keyLength);
   console.info("[Odds API Test] HTTP status:", httpStatus);
   console.info("[Odds API Test] Response body:", responseBody);
-  if (result.via) console.info("[Odds API Test] Via:", result.via);
 
   logOddsApiExchange({
     url: result.route || "https://api.the-odds-api.com/v4/sports/?apiKey=[REDACTED]",
@@ -368,21 +366,22 @@ async function probeOddsApiForTest() {
   });
 
   return {
-    ok: sportsListOk || (result.ok && sportsCount === 0),
-    status: result.ok ? CONNECTION_STATUS.LIVE : CONNECTION_STATUS.FAILED,
+    ok: sportsListOk,
+    status: sportsListOk ? CONNECTION_STATUS.LIVE : CONNECTION_STATUS.FAILED,
     httpStatus,
-    responseBody: result.message || responseBody,
+    responseBody,
     keyLength,
     keyLengthWarning,
     unauthorized,
     remainingRequests: null,
-    route: "https://api.the-odds-api.com/v4/sports/?apiKey=[REDACTED]",
+    route: result.route || "https://api.the-odds-api.com/v4/sports/?apiKey=[REDACTED]",
     durationMs: Date.now() - startedAt,
     payload,
     sportsCount,
-    sportsListOk: result.ok ? sportsListOk || sportsCount === 0 : false,
-    preview: result.message || responseBody,
-    timedOut: result.status === "network_error" && /timeout|aborted/i.test(String(result.message || "")),
+    sportsListOk,
+    preview: responseBody,
+    timedOut: Boolean(result.networkError && /timeout|aborted/i.test(String(result.details || ""))),
+    networkError: Boolean(result.networkError),
   };
 }
 
@@ -405,7 +404,7 @@ async function testOddsApi() {
     };
   }
 
-  if (probe.ok || probe.sportsListOk) {
+  if (probe.ok && probe.sportsListOk && probe.httpStatus === 200) {
     clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
     const sportsLabel =
       probe.sportsCount > 0
@@ -422,8 +421,8 @@ async function testOddsApi() {
       remainingRequests: probe.remainingRequests,
       status: CONNECTION_STATUS.LIVE,
       message: sportsLabel,
-      settingsLine: probe.sportsCount > 0 ? "Connected" : "Connected — OK",
-      settingsStatus: probe.sportsCount > 0 ? "Connected" : "Connected — OK",
+      settingsLine: "Connected",
+      settingsStatus: "Connected",
       sportsListOk: true,
       sportsCount: probe.sportsCount,
       ...probe,
@@ -439,7 +438,31 @@ async function testOddsApi() {
     };
   }
 
-  if (probe.timedOut) {
+  if (probe.unauthorized) {
+    return {
+      provider: "Odds API",
+      route: probe.route,
+      keyConfigured: true,
+      keyLength: probe.keyLength,
+      httpStatus: probe.httpStatus || 401,
+      responseBody: probe.responseBody,
+      status: CONNECTION_STATUS.FAILED,
+      message: ODDS_API_INVALID_KEY_MESSAGE,
+      settingsLine: "Invalid Key",
+      settingsStatus: "Invalid Key",
+      unauthorized: true,
+      sportsListOk: false,
+      ...probe,
+      showError: true,
+      debugLine: probe.responseBody || ODDS_API_INVALID_KEY_MESSAGE,
+    };
+  }
+
+  if (probe.timedOut || probe.networkError) {
+    const networkLabel = probe.networkError ? "Network error" : "Timed out";
+    const networkMessage = probe.networkError
+      ? probe.responseBody || "Failed to reach Odds API"
+      : ENRICHMENT_TIMEOUT_MESSAGE;
     return {
       provider: "Odds API",
       route: probe.route,
@@ -448,13 +471,14 @@ async function testOddsApi() {
       httpStatus: probe.httpStatus,
       responseBody: probe.responseBody,
       status: CONNECTION_STATUS.DEGRADED,
-      message: ENRICHMENT_TIMEOUT_MESSAGE,
-      settingsLine: "Timed out",
-      settingsStatus: "Timed out",
-      timedOut: true,
+      message: networkMessage,
+      settingsLine: networkLabel,
+      settingsStatus: networkLabel,
+      timedOut: probe.timedOut,
+      networkError: probe.networkError,
       ...probe,
       showError: true,
-      debugLine: ENRICHMENT_TIMEOUT_MESSAGE,
+      debugLine: networkMessage,
     };
   }
 
@@ -657,8 +681,25 @@ function testVerifiedCache() {
   }
 }
 
+/** Clear cached provider health report so Retest All runs fresh probes. */
+export function clearProviderHealthCache() {
+  try {
+    const meta = readSettingsMeta();
+    writeSettingsMeta({
+      ...meta,
+      lastTestedAt: "",
+      lastConnectionReport: [],
+    });
+  } catch {
+    // ignore storage errors
+  }
+}
+
 /** Test all configured providers without throwing when keys are missing. */
 export async function testAllApiConnections(options = {}) {
+  if (options.clearCache !== false) {
+    clearProviderHealthCache();
+  }
   const startedAt = Date.now();
   const includeMlbStats = options.includeMlbStats !== false;
   const [pp, ud, odds, sd, statmuse, mlbStats, verifiedCache] = await Promise.all([

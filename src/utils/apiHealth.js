@@ -71,14 +71,15 @@ function isSportsDataConnected(row = {}, mlbPipelineStatus = null) {
     /stats|mlb/i.test(String(entry.id || entry.label || ""))
   );
   const playersOk =
-    playersTest?.ok === true ||
-    (Number(playersTest?.httpStatus) === 200 && Number(playersTest?.recordCount) >= 0);
-  const statsOk = statsTest?.ok === true || Number(statsTest?.httpStatus) === 200;
-  const settingsOk = /connected/i.test(String(safeRow.settingsLine || safeRow.statusLabel || ""));
-  const pipelineOk =
-    finite(mlbPipelineStatus?.sportsDataProfilesMatched ?? mlbPipelineStatus?.profilesMatched) > 0 ||
-    finite(mlbPipelineStatus?.projectionCount) > 0;
-  return Boolean(safeRow.ok || settingsOk || playersOk || statsOk || pipelineOk);
+    playersTest?.ok === true &&
+    Number(playersTest?.httpStatus) === 200 &&
+    Number(playersTest?.recordCount) > 0;
+  const statsOk =
+    statsTest?.ok === true && Number(statsTest?.httpStatus) === 200 && Number(statsTest?.recordCount) > 0;
+  const settingsOk =
+    /connected/i.test(String(safeRow.settingsLine || safeRow.statusLabel || "")) &&
+    (playersOk || statsOk || finite(safeRow.endpointTests?.find((e) => e.ok && Number(e.recordCount) > 0)?.recordCount) > 0);
+  return Boolean((safeRow.ok && (playersOk || statsOk)) || settingsOk);
 }
 
 function resolveOddsApiHealth({ row, keyConfigured, testedAt, oddsFeed = {} }) {
@@ -97,13 +98,13 @@ function resolveOddsApiHealth({ row, keyConfigured, testedAt, oddsFeed = {} }) {
   if (!keyConfigured) {
     return {
       status: "Missing API key",
-      color: API_STATUS_COLOR.RED,
+      color: API_STATUS_COLOR.YELLOW,
       detail: "Add Odds API key in Settings",
       debug: { ...debug, failureReason: "No API key saved" },
     };
   }
 
-  if (row?.unauthorized || /invalid/i.test(String(row?.settingsLine || row?.statusLabel || ""))) {
+  if (row?.unauthorized || /invalid/i.test(String(row?.settingsLine || row?.statusLabel || row?.settingsStatus || ""))) {
     return {
       status: "Invalid API key",
       color: API_STATUS_COLOR.RED,
@@ -121,9 +122,10 @@ function resolveOddsApiHealth({ row, keyConfigured, testedAt, oddsFeed = {} }) {
     };
   }
 
-  const sportsOk = Boolean(row?.sportsListOk || row?.ok);
+  const httpOk = Number(row?.httpStatus) === 200;
+  const sportsOk = Boolean(row?.sportsListOk && row?.ok && httpOk);
   const propsOk = hasUsableProps(oddsFeed);
-  if (sportsOk || propsOk) {
+  if (sportsOk) {
     const sportsCount = finite(row?.sportsCount);
     return {
       status: "Connected",

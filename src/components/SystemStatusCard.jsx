@@ -1,7 +1,7 @@
 import { memo, useState, useCallback } from "react";
 import { formatDateTime } from "../utils/formatters.js";
 import { readSettingsMeta, writeSettingsMeta } from "../services/runtimeSettings.js";
-import { testAllApiConnections } from "../services/apiConnectionTest.js";
+import { clearProviderHealthCache, testAllApiConnections } from "../services/apiConnectionTest.js";
 import { testMlbStatsApiConnection } from "../services/mlbStatsApiTest.js";
 import { getApiHealthStatus, apiStatusStyle, API_STATUS_COLOR } from "../utils/apiHealth.js";
 
@@ -75,6 +75,7 @@ function SystemStatusCard({
   const handleRetestAll = useCallback(async () => {
     setRetesting(true);
     setMlbStatsTest(null);
+    clearProviderHealthCache();
     onConnectionReportChange?.(null);
     try {
       const [report, mlbResult] = await Promise.all([
