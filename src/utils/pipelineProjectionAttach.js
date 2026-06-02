@@ -6,6 +6,22 @@ import { buildPropLookupKeys, buildPlayerStatKey, extractPlayerId, normalizeMerg
 import { countMergedProjections } from "./projectionCoverageAudit.js";
 import { applyProjectionProviderChain } from "./projectionProviderChain.js";
 
+/** Stable stats/season context for projection passes (browser-safe, no block-scope refs). */
+export function resolveProjectionPipelineContext(background = {}, debugInfo = {}) {
+  const statsMap =
+    background?.stats instanceof Map && background.stats.size
+      ? background.stats
+      : debugInfo?.statsMap instanceof Map
+        ? debugInfo.statsMap
+        : new Map();
+  const seasonStats = Array.isArray(background?.sportsDataSeasonStats)
+    ? background.sportsDataSeasonStats
+    : Array.isArray(debugInfo?.sportsDataSeasonStats)
+      ? debugInfo.sportsDataSeasonStats
+      : [];
+  return { seasonStats, statsMap };
+}
+
 function buildAttachLookup(sourceProps = []) {
   const lookup = new Map();
   for (const prop of sourceProps || []) {

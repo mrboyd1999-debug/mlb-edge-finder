@@ -253,7 +253,11 @@ import {
   STARTUP_NORMALIZED_PROP_LIMIT,
 } from "./utils/startupPerformance.js";
 import { prepareProjectionHotPath, MAX_PROJECTION_PROPS } from "./utils/projectionHotPath.js";
-import { applyLiveProjectionPipeline } from "./utils/pipelineProjectionAttach.js";
+import { applyLiveProjectionPipeline, resolveProjectionPipelineContext } from "./utils/pipelineProjectionAttach.js";
+import {
+  auditProjectionGenerationRejections,
+  logProjectionGenerationAudit,
+} from "./utils/projectionGenerationAudit.js";
 import {
   auditPipelineRejectionReasons,
   buildPipelineStageCounts,
@@ -2591,6 +2595,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   let mlbSecondaryPromise = null;
   let coreReadySent = false;
   let projectedWorkingProps = null;
+  let projectionBoardPool = null;
+  let seasonStatsData = [];
 
   if (MLB_ONLY_MODE) {
     resetProjectionFetchDebug();
@@ -2604,6 +2610,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
     const projectionBatch = hotPath.hot;
     const boardPool = hotPath.pool;
+    projectionBoardPool = boardPool;
     const fullDisplayBoard = boardPool.boardProps.length ? boardPool.boardProps : normalizedPool;
     const sportFilteredProps = boardPool.afterSportFilter;
     const marketFilteredProps = boardPool.afterMarketFilter;
@@ -2620,8 +2627,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       afterMarketFilter: marketFilteredProps.length,
       afterPlayerNormalization: boardPool.afterPlayerNormalization.length,
       afterLineValidation: boardPool.afterLineValidation.length,
-      afterProjectionFilter: projectionCandidates.length,
-      afterProjectionMerge: allDisplayProps.length,
+      afterProjectionFilter: boardPool.projectionCandidates.length || projectionCandidates.length,
+      afterProjectionMerge: 0,
       projectedProps: 0,
       afterHistoricalAttachment: 0,
       rejections: { ...boardPool.rejections },
@@ -2652,7 +2659,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     const enrichmentSettled = await providerWave.awaitEnrichmentFeeds();
     const seasonEntry = unwrapProviderSettled(enrichmentSettled[0]);
     const gamesEntry = unwrapProviderSettled(enrichmentSettled[1]);
-    let seasonStatsData = applySeasonStatsProviderResult(seasonEntry, debugInfo);
+    seasonStatsData = applySeasonStatsProviderResult(seasonEntry, debugInfo);
     const slateGames = applyGamesByDateProviderResult(gamesEntry, debugInfo);
     background.sportsDataSeasonStats = seasonStatsData;
     background.sportsDataSlateGames = slateGames;
@@ -2714,17 +2721,21 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     const canMergeProjections = allDisplayProps.length > 0;
     if (canMergeProjections) {
       const projectionStart = typeof performance !== "undefined" ? performance.now() : Date.now();
-      const mergeContext = {
-        seasonStats: seasonStatsData,
-        statsMap: stableStats.statsMap,
-      };
-      const merged = mergeProjectionsOntoProps(projectedWorkingProps, mergeContext);
+      const mergeContext = resolveProjectionPipelineContext(background, debugInfo);
+      seasonStatsData = mergeContext.seasonStats;
+      const mergeTargets =
+        boardPool.projectionCandidates?.length > 0
+          ? boardPool.projectionCandidates
+          : projectionCandidates.length
+            ? projectionCandidates
+            : allDisplayProps;
+      const merged = mergeProjectionsOntoProps(mergeTargets, mergeContext);
       projectedWorkingProps = merged.props;
       const projectionPipeline = applyLiveProjectionPipeline(fullDisplayBoard, projectedWorkingProps, mergeContext);
       allDisplayProps = projectionPipeline.props;
       workingNormalProps = allDisplayProps;
       workingActiveProps = allDisplayProps;
-      pipelinePropCountSnapshot.afterProjectionMerge = allDisplayProps.length;
+      pipelinePropCountSnapshot.afterProjectionMerge = projectionPipeline.projectedCount;
       pipelinePropCountSnapshot.projectedProps = projectionPipeline.projectedCount;
       console.log("PROJECTED", pipelinePropCountSnapshot.projectedProps);
 
@@ -2732,8 +2743,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         pipelinePropCountSnapshot.projectedProps < Math.min(allDisplayProps.length, 100);
       if (needsEngineProjections) {
         const enrichmentResult = enrichMlbPropsBatch(projectedWorkingProps, {
-          seasonStats: seasonStatsData,
-          statsMap: stableStats.statsMap,
+          seasonStats: mergeContext.seasonStats,
+          statsMap: mergeContext.statsMap,
           skipInitialMerge: true,
           initialMergeDebug: merged.debug,
         });
@@ -2743,9 +2754,30 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         workingNormalProps = allDisplayProps;
         workingActiveProps = allDisplayProps;
         pipelinePropCountSnapshot.projectedProps = enrichmentPipeline.projectedCount;
+        pipelinePropCountSnapshot.afterProjectionMerge = enrichmentPipeline.projectedCount;
         debugInfo.mlbEnrichmentDebug = enrichmentResult.debug;
         console.log("PROJECTED AFTER ENGINE", pipelinePropCountSnapshot.projectedProps);
       }
+
+      if (pipelinePropCountSnapshot.projectedProps < Math.min(mergeTargets.length, 100)) {
+        const recoveryPipeline = applyLiveProjectionPipeline(allDisplayProps, mergeTargets, mergeContext);
+        allDisplayProps = recoveryPipeline.props;
+        workingNormalProps = allDisplayProps;
+        workingActiveProps = allDisplayProps;
+        pipelinePropCountSnapshot.projectedProps = recoveryPipeline.projectedCount;
+        pipelinePropCountSnapshot.afterProjectionMerge = recoveryPipeline.projectedCount;
+        console.warn("[Projection Generation] recovery pass applied", {
+          candidates: mergeTargets.length,
+          projected: recoveryPipeline.projectedCount,
+        });
+      }
+
+      debugInfo.projectionGenerationAudit = logProjectionGenerationAudit(
+        auditProjectionGenerationRejections(
+          boardPool.projectionCandidates.length ? boardPool.projectionCandidates : mergeTargets,
+          { ...mergeContext, runProviderChain: true }
+        )
+      );
 
       debugInfo.projectionRuntimeMs = Math.round(
         (typeof performance !== "undefined" ? performance.now() : Date.now()) - projectionStart
@@ -3127,12 +3159,11 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       scoredProps.length && projectedWorkingProps?.length
         ? mergeScoredIntoDisplayProps(projectedWorkingProps, scoredProps)
         : scoredProps;
-    const scoredPipeline = applyLiveProjectionPipeline(allDisplayProps, scoredSources, {
-      seasonStats: seasonStatsData,
-      statsMap: stableStats.statsMap,
-    });
+    const mergeContext = resolveProjectionPipelineContext(background, debugInfo);
+    const scoredPipeline = applyLiveProjectionPipeline(allDisplayProps, scoredSources, mergeContext);
     allDisplayProps = scoredPipeline.props;
     pipelinePropCountSnapshot.projectedProps = scoredPipeline.projectedCount;
+    pipelinePropCountSnapshot.afterProjectionMerge = scoredPipeline.projectedCount;
   }
   if (emergencyDiagnostic?.success && emergencyDiagnostic.forcedVerifiedProp) {
     const canary = emergencyDiagnostic.forcedVerifiedProp;
@@ -3223,14 +3254,20 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     pipelineTraceNormalizedPool.length > 0 &&
     countMergedProjections(allDisplayProps) === 0
   ) {
-    const fallbackPipeline = applyLiveProjectionPipeline(allDisplayProps, [], {
-      seasonStats: seasonStatsData,
-      statsMap: stableStats.statsMap,
-    });
+    const mergeContext = resolveProjectionPipelineContext(background, debugInfo);
+    const fallbackTargets =
+      projectionBoardPool?.projectionCandidates?.length > 0
+        ? projectionBoardPool.projectionCandidates
+        : allDisplayProps;
+    const fallbackPipeline = applyLiveProjectionPipeline(allDisplayProps, fallbackTargets, mergeContext);
     allDisplayProps = fallbackPipeline.props;
     workingNormalProps = allDisplayProps;
     workingActiveProps = allDisplayProps;
     pipelinePropCountSnapshot.projectedProps = fallbackPipeline.projectedCount;
+    pipelinePropCountSnapshot.afterProjectionMerge = fallbackPipeline.projectedCount;
+    debugInfo.projectionGenerationAudit = logProjectionGenerationAudit(
+      auditProjectionGenerationRejections(fallbackTargets, { ...mergeContext, runProviderChain: true })
+    );
     console.warn("[Pipeline Trace] normalized fallback projections applied", {
       normalized: pipelineTraceNormalizedPool.length,
       projected: fallbackPipeline.projectedCount,
@@ -3546,17 +3583,22 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     afterPlayerNormalization: pipelinePropCountSnapshot.afterPlayerNormalization || allDisplayProps.length,
     afterLineValidation: pipelinePropCountSnapshot.afterLineValidation || allDisplayProps.length,
     projectionCandidates:
-      pipelinePropCountSnapshot.afterProjectionFilter || pipelinePropCountSnapshot.projectedProps || allDisplayProps.length,
+      pipelinePropCountSnapshot.afterProjectionFilter ||
+      debugInfo.projectionHotPath?.stats?.candidates ||
+      allDisplayProps.length,
     projectedProps:
       pipelinePropCountSnapshot.projectedProps ||
       countMergedProjections(allDisplayProps) ||
-      pipelinePropCountSnapshot.afterProjectionMerge ||
       0,
     afterHistoricalAttachment:
       pipelinePropCountSnapshot.afterHistoricalAttachment || countHistoricalAttachment(allDisplayProps).attached,
     verifiedProps: countVerifiedFilterProps(verificationPool),
     displayedProps: acceptedPropsForRender.length || liveRenderResult.counts?.rendered || displayProps.length || 0,
-    rejections: pipelinePropCountSnapshot.rejections || {},
+    rejections: {
+      ...(pipelinePropCountSnapshot.rejections || {}),
+      ...(debugInfo.projectionGenerationAudit?.rejectionReasons || {}),
+    },
+    projectionGenerationAudit: debugInfo.projectionGenerationAudit || null,
     boardProps: verificationPool,
   });
   logPipelinePropCountAudit(debugInfo.pipelinePropCountAudit);

@@ -460,6 +460,7 @@ export function buildProviderCoverageAudit({
     underdogStatusNote: udConnection.note || "",
     ingestionFallback: debugInfo.ingestionFallback || "",
     pipelinePropCountAudit: pipeline,
+    projectionGenerationAudit: pipeline.projectionGenerationAudit || debugInfo.projectionGenerationAudit || null,
     updatedAt: new Date().toISOString(),
   };
 

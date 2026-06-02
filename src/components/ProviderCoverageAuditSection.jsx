@@ -15,6 +15,7 @@ function ProviderCoverageAuditSection({ audit = null, loading = false }) {
   const udUsable = Number(audit?.underdogUsable ?? 0);
   const ppRaw = Number(audit?.prizepicksFetched ?? 0);
   const ppParsed = Number(audit?.prizepicksParsed ?? 0);
+  const projectionAudit = audit?.projectionGenerationAudit || null;
 
   return (
     <section className="provider-coverage-audit-section" aria-label="Provider coverage audit">
@@ -53,6 +54,30 @@ function ProviderCoverageAuditSection({ audit = null, loading = false }) {
         <MetricRow label="Projected Props" value={audit?.projected} />
         <MetricRow label="Verified Props" value={audit?.verifiedPlaysCount ?? audit?.verified ?? audit?.verifiedProps} />
       </div>
+      {projectionAudit?.rejectionRows?.length ? (
+        <div className="provider-coverage-audit-section__breakdown">
+          <p className="provider-coverage-audit-section__note">
+            Projection rejections — candidates: {projectionAudit.candidateCount ?? 0} · filtered:{" "}
+            {projectionAudit.filteredCount ?? 0}
+          </p>
+          <table className="provider-coverage-audit-section__table">
+            <thead>
+              <tr>
+                <th scope="col">Reason</th>
+                <th scope="col">Count</th>
+              </tr>
+            </thead>
+            <tbody>
+              {projectionAudit.rejectionRows.map((row) => (
+                <tr key={row.key}>
+                  <td>{row.label}</td>
+                  <td>{row.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
       {audit?.dataIntegrityMismatch && audit?.integrityWarning && Number(audit?.liveProviderCount ?? 0) === 0 ? (
         <p className="provider-coverage-audit-section__bottleneck" role="alert">
           {audit.integrityWarning}

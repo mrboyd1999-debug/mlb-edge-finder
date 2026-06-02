@@ -9,6 +9,7 @@ import {
   resolveSupportedMlbMarketKey,
 } from "./mlbAllowedMarkets.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
+import { hasMlbStatIndicator } from "./underdogSportDetection.js";
 import { resolveHistoricalDataPresent } from "./tierHistoricalValidation.js";
 import { countMlbQualityMetrics } from "./mlbQualityPass.js";
 
@@ -97,7 +98,7 @@ export function buildMlbProjectionBoardPool(props = [], { seenIds = null, relaxe
       rejections.unsupportedSport += 1;
       continue;
     }
-    if (sport !== "MLB") {
+    if (!sport && !hasMlbStatIndicator(prop)) {
       rejections.nonMLB += 1;
       continue;
     }

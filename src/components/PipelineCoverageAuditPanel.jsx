@@ -12,6 +12,8 @@ function PipelineCoverageAuditPanel({ audit = null }) {
   if (!audit) return null;
 
   const rejections = Object.entries(audit.rejections || {}).filter(([, count]) => Number(count) > 0);
+  const projectionAudit = audit.projectionGenerationAudit || null;
+  const projectionRejections = projectionAudit?.rejectionRows || [];
   const warning = audit.coverageWarning;
 
   return (
@@ -55,6 +57,35 @@ function PipelineCoverageAuditPanel({ audit = null }) {
                 {reason}: {count}
               </p>
             ))}
+          </div>
+        ) : null}
+
+        {projectionAudit ? (
+          <div className="pipeline-coverage-audit__projection-breakdown">
+            <p className="prop-pipeline-counters prop-pipeline-counters--meta" style={{ marginTop: 8, marginBottom: 4 }}>
+              Projection generation — candidates: {projectionAudit.candidateCount ?? 0} · filtered:{" "}
+              {projectionAudit.filteredCount ?? 0} · projected: {projectionAudit.projectedCount ?? 0}
+            </p>
+            {projectionRejections.length ? (
+              <table className="pipeline-coverage-audit__table">
+                <thead>
+                  <tr>
+                    <th scope="col">Rejection reason</th>
+                    <th scope="col">Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {projectionRejections.map((row) => (
+                    <tr key={row.key}>
+                      <td>{row.label}</td>
+                      <td>{row.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="prop-pipeline-counters prop-pipeline-counters--meta">No projection rejections recorded.</p>
+            )}
           </div>
         ) : null}
       </div>
