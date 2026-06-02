@@ -648,8 +648,8 @@ function applyConfidenceCaps(score, prop = {}, options = {}) {
       sample >= 8 &&
       Boolean(prop.hasVerifiedStats || prop.isVerifiedProjection) &&
       getPropVolatilityTier(prop) !== "HIGH";
-    capped = Math.min(capped, eliteEligible ? 70 : 65);
-    if (!eliteEligible && capped > 65) capReason = capReason || "Standard MLB confidence cap.";
+    capped = Math.min(capped, eliteEligible ? 92 : 82);
+    if (!eliteEligible && capped > 82) capReason = capReason || "Standard MLB confidence cap.";
   }
 
   return { score: Math.round(clamp(capped, 0, 100)), capReason };
@@ -726,7 +726,7 @@ function calculateMlbWeightedScore(prop = {}) {
   });
   const qualityWeight = getMlbQualityTierWeight(prop);
   weighted *= qualityWeight;
-  const boosted = clamp(Math.round(36 + weighted * 0.52), 38, 68);
+  const boosted = clamp(Math.round(42 + weighted * 0.58), 45, 92);
   const explanation = Object.entries(components).map(([key, comp]) => ({
     key,
     label: comp.label,

@@ -198,10 +198,10 @@ export function isVerifiedPlay(prop = {}, { probability, confidence } = {}) {
 }
 
 export function resolveDisplayConfidence(prop = {}, tier = PICK_TIER_RESEARCH, adjustedConfidence = null) {
+  void tier;
   const raw = adjustedConfidence ?? computeAdjustedConfidence(prop) ?? finiteOr(prop.confidenceScore ?? prop.confidence, NaN);
   if (!Number.isFinite(raw)) return null;
-  if (tier === PICK_TIER_RESEARCH) return Math.min(Math.round(raw), 70);
-  return Math.round(raw);
+  return clamp(Math.round(raw), CONFIDENCE_CALIBRATION_MIN, CONFIDENCE_CALIBRATION_MAX);
 }
 
 export { classifyConfidenceTier, classifyPropTier } from "./boardQuality.js";

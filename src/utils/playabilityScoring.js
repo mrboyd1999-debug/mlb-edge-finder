@@ -71,9 +71,14 @@ export function computePlayabilityBreakdown(prop = {}, options = {}) {
   const reliabilityComponent = computeProjectionReliabilityComponent(prop);
   const completenessComponent = computeDataCompletenessComponent(prop);
   const penaltyComponent = computePlayabilityPenaltyComponent(prop, sanityAudit);
+  const edgeComponent = resolveEdgePlayabilityComponent(prop, options.metrics);
 
   const weighted =
-    confidence * 0.5 + reliabilityComponent * 0.25 + completenessComponent * 0.25 - penaltyComponent;
+    confidence * 0.35 +
+    reliabilityComponent * 0.2 +
+    completenessComponent * 0.2 +
+    edgeComponent * 0.15 -
+    penaltyComponent;
 
   return {
     probability: finite(options.probability ?? prop.probabilityScore ?? prop.verifiedProbability),
@@ -83,10 +88,23 @@ export function computePlayabilityBreakdown(prop = {}, options = {}) {
     projectionComponent: round2(reliabilityComponent),
     reliabilityComponent: round2(reliabilityComponent),
     completenessComponent: round2(completenessComponent),
+    edgeComponent: round2(edgeComponent),
     penaltyComponent: round2(penaltyComponent),
     weightedRaw: round2(weighted),
     finalPlayability: round2(clamp(weighted, 0, 100)),
   };
+}
+
+function resolveEdgePlayabilityComponent(prop = {}, metrics = {}) {
+  const edgePct = finite(metrics?.edgePercent ?? prop.edgePercent, NaN);
+  if (Number.isFinite(edgePct)) return round2(clamp(50 + Math.abs(edgePct) * 1.05, 40, 95));
+  const line = finite(prop.line, NaN);
+  const projection = finite(prop.projection ?? prop.projectedValue, NaN);
+  if (!Number.isFinite(line) || !Number.isFinite(projection) || line <= 0) {
+    return NEUTRAL_PLAYABILITY_COMPONENT;
+  }
+  const gapPct = (Math.abs(projection - line) / line) * 100;
+  return round2(clamp(50 + gapPct * 0.85, 40, 95));
 }
 
 export function computePlayabilityScoreFromBreakdown(prop = {}, options = {}) {

@@ -10,14 +10,14 @@ import {
   VERIFICATION_STATUS,
 } from "./verificationStatus.js";
 
-export const TIER_A_METRICS = { confidence: 72, probability: 70 };
-export const ELITE_TIER_METRICS = { confidence: 72, probability: 70 };
-/** Playable tier — probability >= 65, confidence >= 68 */
-export const TIER_B_METRICS = { confidence: 68, probability: 65 };
-export const TIER_C_METRICS = { confidence: 62, probability: 60 };
-export const RESEARCH_TIER_METRICS = { confidence: 62 };
-/** Best Plays board — same thresholds as Tier B */
-export const BEST_PLAYS_BOARD_MIN = { confidence: 68, probability: 65 };
+export const TIER_A_METRICS = { confidence: 75, probability: 60 };
+export const ELITE_TIER_METRICS = { confidence: 85, probability: 75 };
+/** Playable tier — confidence 68-74 */
+export const TIER_B_METRICS = { confidence: 68, probability: 55 };
+export const TIER_C_METRICS = { confidence: 60, probability: 50 };
+export const RESEARCH_TIER_METRICS = { confidence: 58 };
+/** Best Plays board — Tier B floor */
+export const BEST_PLAYS_BOARD_MIN = { confidence: 68, probability: 55 };
 export const BEST_PLAY_DISPLAY_MIN = BEST_PLAYS_BOARD_MIN;
 export const PITCHER_PENDING_CONFIDENCE_PENALTY = 1;
 export const PITCHER_UNAVAILABLE_CONFIDENCE_PENALTY = 2;

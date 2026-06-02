@@ -262,9 +262,11 @@ export function applyEmergencyDisplayFallback(allDisplayProps = [], limit = 10) 
   }));
 }
 
-export function selectTop2FromDisplayProps(props = []) {
-  return selectTop2Picks(props);
+export function selectTop2FromDisplayProps(props = [], limit = 10) {
+  return selectTop2Picks(props, limit);
 }
+
+export const selectTop10FromDisplayProps = selectTop2FromDisplayProps;
 
 export function selectReadyFromDisplayProps(props = []) {
   return selectReadyToBetProps(props);

@@ -5836,7 +5836,7 @@ function scoreDFSProp(prop, context) {
   const confidenceBreakdown = confidenceResult.explanation;
   const manualConfidenceAdjustment = clamp(Number(manualStats?.confidenceAdjustment || 0), -15, 15);
   if (Number.isFinite(manualConfidenceAdjustment) && manualConfidenceAdjustment !== 0) {
-    confidenceScore = Math.round(clamp(confidenceScore + manualConfidenceAdjustment, 25, 70));
+    confidenceScore = Math.round(clamp(confidenceScore + manualConfidenceAdjustment, 25, 95));
   }
   if (marketResearchOnly && absoluteEdge < 1.5) {
     confidenceScore = Math.min(confidenceScore, 55);

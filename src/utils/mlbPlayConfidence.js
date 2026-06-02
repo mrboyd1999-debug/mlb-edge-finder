@@ -6,11 +6,12 @@ import { resolveBestPlayEdgePercent } from "./bestPlaysPipelineDebug.js";
 import { computeFormConfidenceScore } from "./matchupEnrichment.js";
 
 export const CONFIDENCE_WEIGHTS = {
-  dataCompleteness: 0.3,
-  sampleSize: 0.25,
-  lineVerification: 0.2,
-  pitcherAvailable: 0.15,
-  marketValidation: 0.1,
+  recentForm: 0.22,
+  seasonAverage: 0.18,
+  matchupQuality: 0.18,
+  pitcherQuality: 0.14,
+  dataCompleteness: 0.16,
+  sampleSize: 0.12,
 };
 
 export const CONFIDENCE_PENALTY_CAPS = {
@@ -297,63 +298,69 @@ export function buildConfidenceExplanation(breakdown = {}) {
     pitcherAvailable: breakdown.pitcherAvailable,
     marketValidation: breakdown.marketValidation,
     lines: [
+      `Recent form: ${Math.round(breakdown.lineVerification ?? breakdown.recentForm ?? 0)}%`,
+      `Season average: ${Math.round(breakdown.seasonAverage ?? 0)}%`,
+      `Matchup quality: ${Math.round(breakdown.marketValidation ?? breakdown.matchupQuality ?? 0)}%`,
+      `Pitcher quality: ${Math.round(breakdown.pitcherAvailable ?? 0)}%`,
       `Data completeness: ${Math.round(breakdown.dataCompleteness ?? 0)}%`,
       `Sample size: ${Math.round(breakdown.sampleSize ?? 0)}%`,
-      `Line verification: ${Math.round(breakdown.lineVerification ?? 0)}%`,
-      `Pitcher available: ${Math.round(breakdown.pitcherAvailable ?? 0)}%`,
     ],
   };
 }
 
-/** Weighted confidence from data quality — not projection-led. */
+/** Weighted confidence from form, season, matchup, pitcher, completeness, and sample size. */
 export function computeMlbConfidenceBreakdown(prop = {}, projection = null) {
-  void projection;
+  const recentForm = scoreRecentForm(prop, projection);
+  const seasonAverage = round2(resolveHistoricalHitRateScore(prop));
+  const matchupQuality = scoreMatchupQuality(prop);
+  const pitcherQuality = scorePitcherAvailability(prop);
   const dataCompleteness = scoreDataCompleteness(prop);
   const sampleSize = scoreSampleSize(prop);
-  const lineVerification = scoreLineVerification(prop);
-  const pitcherAvailable = scorePitcherAvailability(prop);
-  const marketValidation = scoreMarketValidationConfidence(prop);
 
   const weightedBase = round2(
-    dataCompleteness * CONFIDENCE_WEIGHTS.dataCompleteness +
-      sampleSize * CONFIDENCE_WEIGHTS.sampleSize +
-      lineVerification * CONFIDENCE_WEIGHTS.lineVerification +
-      pitcherAvailable * CONFIDENCE_WEIGHTS.pitcherAvailable +
-      marketValidation * CONFIDENCE_WEIGHTS.marketValidation
+    recentForm * CONFIDENCE_WEIGHTS.recentForm +
+      seasonAverage * CONFIDENCE_WEIGHTS.seasonAverage +
+      matchupQuality * CONFIDENCE_WEIGHTS.matchupQuality +
+      pitcherQuality * CONFIDENCE_WEIGHTS.pitcherQuality +
+      dataCompleteness * CONFIDENCE_WEIGHTS.dataCompleteness +
+      sampleSize * CONFIDENCE_WEIGHTS.sampleSize
   );
 
+  const edgeBoost = Math.min(8, Math.abs(resolveBestPlayEdgePercent({ ...prop, projection })) * 0.35);
   const { penalties, penaltyTotal, seasonPenalty, pitcherPenalty, matchupPenalty, integrityPenalty } =
     resolveConfidencePenalties(prop);
-  let afterPenalties = round2(clamp(weightedBase - penaltyTotal, CONFIDENCE_MIN, CONFIDENCE_MAX));
+  let afterPenalties = round2(clamp(weightedBase + edgeBoost - penaltyTotal, CONFIDENCE_MIN, CONFIDENCE_MAX));
   if (isMissingPitcherData(prop)) {
-    afterPenalties = round2(Math.max(afterPenalties - 2, weightedBase - 2, CONFIDENCE_MIN));
+    afterPenalties = round2(Math.max(afterPenalties - 2, CONFIDENCE_MIN));
   }
   const withFloor = applyConfidenceDisplayFloor(prop, projection, afterPenalties, prop.playabilityScore);
   const floorApplied = withFloor > afterPenalties;
   const confidenceExplanation = buildConfidenceExplanation({
     dataCompleteness,
     sampleSize,
-    lineVerification,
-    pitcherAvailable,
-    marketValidation,
+    lineVerification: recentForm,
+    pitcherAvailable: pitcherQuality,
+    marketValidation: matchupQuality,
   });
 
   return {
     dataCompleteness,
     sampleSize,
-    lineVerification,
-    pitcherAvailable,
-    marketValidation,
+    lineVerification: recentForm,
+    pitcherAvailable: pitcherQuality,
+    marketValidation: matchupQuality,
     confidenceExplanation,
     components: {
+      recentForm,
+      seasonAverage,
+      matchupQuality,
+      pitcherQuality,
       dataCompleteness,
       sampleSize,
-      lineVerification,
-      pitcherAvailable,
-      marketValidation,
     },
     weights: CONFIDENCE_WEIGHTS,
     weightedBase,
+    edgeBoost,
     penalties,
     penaltyTotal,
     seasonPenalty,
@@ -364,15 +371,15 @@ export function computeMlbConfidenceBreakdown(prop = {}, projection = null) {
     afterPenalties,
     floorApplied,
     final: withFloor,
-    projectionQuality: dataCompleteness,
-    recentForm: sampleSize,
-    edgeScore: lineVerification,
-    hitRate: pitcherAvailable,
-    matchupQuality: marketValidation,
-    historicalHitRate: sampleSize,
-    projectionQualityScore: dataCompleteness,
-    lineEdge: lineVerification,
-    sourceReliability: marketValidation,
+    projectionQuality: scoreProjectionQuality(prop, projection),
+    recentForm,
+    edgeScore: scoreLineEdge(prop, projection),
+    hitRate: seasonAverage,
+    matchupQuality,
+    historicalHitRate: seasonAverage,
+    projectionQualityScore: scoreProjectionQuality(prop, projection),
+    lineEdge: scoreLineEdge(prop, projection),
+    sourceReliability: dataCompleteness,
   };
 }
 

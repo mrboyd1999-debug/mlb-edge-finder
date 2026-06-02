@@ -262,7 +262,7 @@ export function calibrateRealisticConfidence(rawConfidence, prop = {}, edge = nu
   let maxCap = elite ? ELITE_CONFIDENCE_CAP : STANDARD_CONFIDENCE_CAP;
   const dq = computeGradingDataQuality(prop);
   if (dq < 45) maxCap = Math.min(maxCap, 58);
-  else if (dq < 52) maxCap = Math.min(maxCap, 68);
+  else if (dq < 52) maxCap = Math.min(maxCap, 74);
   if (prop.displayFallback || prop.isFallback || prop.isFallbackProjection) maxCap = Math.min(maxCap, 62);
 
   score = clamp(score, 45, maxCap);

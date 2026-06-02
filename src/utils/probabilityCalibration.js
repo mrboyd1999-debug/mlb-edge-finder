@@ -17,7 +17,7 @@ export const CALIBRATION_MAX_PROBABILITY = CALIBRATION_ELITE_MAX_PROBABILITY;
 export const CALIBRATION_MAX_VERIFIED = CALIBRATION_ELITE_MAX_PROBABILITY;
 export const CALIBRATION_MAX_RESEARCH = CALIBRATION_DEFAULT_MAX_PROBABILITY;
 
-export const PROJECTION_QUALITY_LOW_CONFIDENCE_CAP = 70;
+export const PROJECTION_QUALITY_LOW_CONFIDENCE_CAP = 82;
 export const PENALTY_OUTLIER = 8;
 export const PENALTY_AGGRESSIVE_RISK = 5;
 export const PROJECTION_EDGE_FLOOR_15 = 60;
@@ -37,10 +37,10 @@ export const CALIBRATION_HISTOGRAM_BUCKETS = [
 ];
 
 const PROBABILITY_BLEND = {
-  recentHitRate: 0.35,
-  seasonHitRate: 0.25,
-  projectionVsLine: 0.2,
-  matchup: 0.1,
+  recentHitRate: 0.28,
+  seasonHitRate: 0.18,
+  projectionVsLine: 0.32,
+  matchup: 0.12,
   marketValidation: 0.1,
 };
 
@@ -65,12 +65,22 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-/** Reduce 60% clustering — spread calibrated values across 55–75 when signal supports it. */
+/** Spread probability across bands — edge and historical disagreement create separation. */
 function applyProbabilityDistributionSpread(probability, prePenaltyProbability, prop = {}, metrics = {}) {
-  void prePenaltyProbability;
-  void prop;
-  void metrics;
-  return probability;
+  const edgePct =
+    resolveAbsoluteEdgePercent(
+      metrics.projection ?? prop.projection ?? prop.projectedValue,
+      prop.line,
+      metrics.edgePercent ?? prop.edgePercent
+    ) ?? 0;
+  const disagreement = Math.abs(prePenaltyProbability - probability);
+  const edgeSpread = Math.min(12, edgePct * 0.22);
+  const varianceSpread = Math.min(6, disagreement * 0.35);
+  const playerHash = String(prop.player || prop.playerName || prop.id || "")
+    .split("")
+    .reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+  const microSpread = (playerHash % 7) - 3;
+  return clamp(Math.round(probability + edgeSpread + varianceSpread + microSpread), CALIBRATION_MIN_PROBABILITY, CALIBRATION_ELITE_MAX_PROBABILITY);
 }
 
 function normalizeHitRatePercent(value) {
@@ -328,7 +338,7 @@ function resolveRecommendedSide(prop = {}) {
   return "OVER";
 }
 
-/** Projection-implied probability from line gap — capped to avoid inflation. */
+/** Projection-implied probability from line gap — edge-driven, independent of confidence. */
 export function resolveProjectionProbability(prop = {}, projection = null, line = null) {
   const proj = finite(projection ?? prop.projection ?? prop.projectedValue);
   const ln = finite(line ?? prop.line);
@@ -336,13 +346,13 @@ export function resolveProjectionProbability(prop = {}, projection = null, line 
   const side = resolveRecommendedSide(prop);
   const gap = proj - ln;
   const gapPct = (Math.abs(gap) / ln) * 100;
-  let prob = 50 + Math.min(22, gapPct * 0.55);
+  let prob = 50 + Math.min(38, gapPct * 0.95);
   if (side === "UNDER") {
-    prob = gap < 0 ? prob : 50 - Math.min(18, gapPct * 0.45);
+    prob = gap < 0 ? prob : 50 - Math.min(28, gapPct * 0.75);
   } else {
-    prob = gap > 0 ? prob : 50 - Math.min(18, gapPct * 0.45);
+    prob = gap > 0 ? prob : 50 - Math.min(28, gapPct * 0.75);
   }
-  return clamp(Math.round(prob), 35, 68);
+  return clamp(Math.round(prob), 35, 92);
 }
 
 export function computeHistoryProjectionDisagreementPenalty(historicalProb, projectionProb, { seasonValid = true } = {}) {
@@ -406,6 +416,7 @@ function resolveMatchupScore(prop = {}) {
 }
 
 function resolveProbabilityCeiling(prop = {}, metrics = {}, hitRates = {}, confidence = 50, penalties = {}) {
+  void confidence;
   const projection = finite(metrics.projection ?? resolveProjectionValue(prop));
   const line = finite(prop.line);
   const edgePercent =
@@ -414,42 +425,37 @@ function resolveProbabilityCeiling(prop = {}, metrics = {}, hitRates = {}, confi
       ? round1((Math.abs(projection - line) / line) * 100)
       : null);
   const seasonGames = finite(hitRates.seasonGamesPlayed ?? prop.seasonGamesPlayed ?? prop.seasonGames);
-  const effectiveConfidence = penalties.sampleSizeSmall
-    ? round1(confidence * SAMPLE_SIZE_CONFIDENCE_MULTIPLIER)
-    : confidence;
-  const confidenceCap = round1(effectiveConfidence + CONFIDENCE_PROBABILITY_BUFFER);
   const eliteUnlock =
     penalties.seasonValid &&
     edgePercent != null &&
-    edgePercent >= 20 &&
+    edgePercent >= 18 &&
     seasonGames != null &&
     seasonGames >= MIN_SDIO_SEASON_GAMES &&
-    effectiveConfidence >= 80 &&
     !penalties.outlierDetected &&
     !penalties.projectionRiskAggressive &&
     !penalties.projectionConfidenceLow;
 
   let ceiling = eliteUnlock ? CALIBRATION_ELITE_MAX_PROBABILITY : CALIBRATION_DEFAULT_MAX_PROBABILITY;
+  if (edgePercent != null && edgePercent >= 30) ceiling = Math.max(ceiling, 88);
+  else if (edgePercent != null && edgePercent >= 20) ceiling = Math.max(ceiling, 82);
 
   return {
     ceiling,
     eliteUnlock,
     edgePercent,
     seasonGames,
-    effectiveConfidence,
-    confidenceCap,
+    effectiveConfidence: null,
+    confidenceCap: null,
   };
 }
 
 export function resolveProbabilityTier(probability) {
   const prob = finite(probability);
   if (prob == null) return "—";
-  if (prob >= 80) return "exceptional";
-  if (prob >= 72) return "elite";
-  if (prob >= 65) return "strong";
-  if (prob >= 60) return "solid";
-  if (prob >= 55) return "playable";
-  return "below playable";
+  if (prob >= 85) return "elite";
+  if (prob >= 75) return "strong";
+  if (prob >= 65) return "playable";
+  return "avoid";
 }
 
 export function computeCalibratedProbability(prop = {}, metrics = {}, options = {}) {

@@ -3,6 +3,7 @@
  */
 
 import { computePlayabilityScore } from "./propCalibration.js";
+import { computeExpectedValueScore } from "../services/decisionEngine.js";
 import { isBlockedNonMlbPipelineProp, isSupportedMlbMarket } from "./mlbAllowedMarkets.js";
 import { canonicalMarketKey } from "./marketNormalization.js";
 import { PENALTY_AGGRESSIVE_RISK, PENALTY_OUTLIER } from "./probabilityCalibration.js";
@@ -15,6 +16,59 @@ function finite(value, fallback = 0) {
 
 function round1(value) {
   return Math.round(Number(value) * 10) / 10;
+}
+
+function resolveEvScore(prop = {}) {
+  return finite(prop.expectedValueScore ?? computeExpectedValueScore(prop), 0);
+}
+
+function resolveRankProbability(prop = {}) {
+  return finite(prop.probabilityScore ?? prop.verifiedProbability ?? prop.finalProbability, 0);
+}
+
+function resolveRankConfidence(prop = {}) {
+  return finite(
+    prop.displayConfidenceScore ?? prop.confidenceScore ?? prop.confidence ?? prop.finalConfidence,
+    0
+  );
+}
+
+export function buildScoreDiagnostics(prop = {}, rank = null) {
+  const evScore = resolveEvScore(prop);
+  return {
+    rank,
+    rawProjection: prop.projection ?? prop.projectedValue ?? null,
+    line: prop.line ?? null,
+    edge: prop.edge ?? null,
+    edgePercent: prop.edgePercent ?? null,
+    probability: resolveRankProbability(prop) || null,
+    confidence: resolveRankConfidence(prop) || null,
+    evScore: Number.isFinite(evScore) ? round1(evScore) : null,
+    playScore: (() => {
+      const value = prop.playabilityScore ?? prop.playabilityBreakdown?.finalPlayability;
+      const num = Number(value);
+      return Number.isFinite(num) ? round1(num) : null;
+    })(),
+    scoreBand: resolveScoreBand(prop),
+  };
+}
+
+export function resolveScoreBand(prop = {}) {
+  const confidence = resolveRankConfidence(prop);
+  const probability = resolveRankProbability(prop);
+  const score = Math.max(confidence, probability);
+  if (score >= 85) return "Elite";
+  if (score >= 75) return "Strong";
+  if (score >= 65) return "Playable";
+  return "Avoid";
+}
+
+function compareEvProbConf(a = {}, b = {}) {
+  const evDelta = resolveEvScore(b) - resolveEvScore(a);
+  if (evDelta !== 0) return evDelta;
+  const probDelta = resolveRankProbability(b) - resolveRankProbability(a);
+  if (probDelta !== 0) return probDelta;
+  return resolveRankConfidence(b) - resolveRankConfidence(a);
 }
 
 export const RANKING_PENALTY_OUTLIER = 20;
@@ -322,15 +376,9 @@ export function buildTopPlayRankExplanation(prop = {}) {
 export function compareTopPlayFinalScore(a = {}, b = {}) {
   const tierDelta = compareBestPlaysTierRank(a, b);
   if (tierDelta !== 0) return tierDelta;
-  const scoreDelta = computeTopPlayFinalScore(b) - computeTopPlayFinalScore(a);
-  if (scoreDelta !== 0) return scoreDelta;
-  const probDelta =
-    finite(b.probabilityScore ?? b.verifiedProbability, 0) - finite(a.probabilityScore ?? a.verifiedProbability, 0);
-  if (probDelta !== 0) return probDelta;
-  return (
-    finite(b.displayConfidenceScore ?? b.confidenceScore ?? b.confidence, 0) -
-    finite(a.displayConfidenceScore ?? a.confidenceScore ?? a.confidence, 0)
-  );
+  const primary = compareEvProbConf(a, b);
+  if (primary !== 0) return primary;
+  return computeTopPlayFinalScore(b) - computeTopPlayFinalScore(a);
 }
 
 export function resolvePlayabilityScore(prop = {}) {
@@ -367,7 +415,7 @@ export const computeVerifiedRankingScore = computeTopPickScore;
 export const computeWeightedBestPlayScore = computeTopPickScore;
 
 export function compareTopPickScore(a = {}, b = {}) {
-  return computeTopPickScore(b) - computeTopPickScore(a);
+  return compareEvProbConf(a, b) || computeTopPickScore(b) - computeTopPickScore(a);
 }
 
 export function resolveSanityScore(prop = {}) {
@@ -446,25 +494,16 @@ function compareStableVsOutlierPriority(a = {}, b = {}) {
   return 0;
 }
 
-/** Best Plays: ranking score with stable-data priority and validation penalties. */
+/** Best Plays: EV score, then probability, then confidence. */
 export function compareBestPlaysRank(a = {}, b = {}) {
   const stableCmp = compareStableVsOutlierPriority(a, b);
   if (stableCmp !== 0) return stableCmp;
 
-  const scoreA = finite(a.bestPlayRankingScore ?? computeBestPlayRankingScore(a).rankingScore, 0);
-  const scoreB = finite(b.bestPlayRankingScore ?? computeBestPlayRankingScore(b).rankingScore, 0);
-  if (scoreB !== scoreA) return scoreB - scoreA;
+  const primary = compareEvProbConf(a, b);
+  if (primary !== 0) return primary;
 
   const tierCmp = compareBestPlaysTierRank(a, b);
   if (tierCmp !== 0) return tierCmp;
-
-  const probA = finite(a.probabilityScore ?? a.verifiedProbability, 0);
-  const probB = finite(b.probabilityScore ?? b.verifiedProbability, 0);
-  if (probB !== probA) return probB - probA;
-
-  const confA = finite(a.displayConfidenceScore ?? a.confidenceScore ?? a.confidence, 0);
-  const confB = finite(b.displayConfidenceScore ?? b.confidenceScore ?? b.confidence, 0);
-  if (confB !== confA) return confB - confA;
 
   const edgeA = resolveRankingEdgePercent(a);
   const edgeB = resolveRankingEdgePercent(b);
@@ -539,13 +578,20 @@ export function buildBestPlayRankReason(prop = {}, rank = 1, audit = null) {
 
 export function annotateBestPlayRankingAudit(prop = {}, rank = null) {
   const playabilityScore = resolvePlayabilityScore(prop);
-  const audit = computeBestPlayRankingScore({ ...prop, playabilityScore });
+  const expectedValueScore = resolveEvScore({ ...prop, playabilityScore });
+  const audit = computeBestPlayRankingScore({ ...prop, playabilityScore, expectedValueScore });
   const resolvedRank = rank ?? prop.bestPlayRank ?? prop.topVerifiedRank ?? prop.topMlbPlayRank ?? null;
-  const finalRankReason = buildBestPlayRankReason({ ...prop, playabilityScore }, resolvedRank ?? 1, audit);
-  const legacyScore = computeTopPickScore({ ...prop, playabilityScore });
+  const finalRankReason = buildBestPlayRankReason({ ...prop, playabilityScore, expectedValueScore }, resolvedRank ?? 1, audit);
+  const legacyScore = computeTopPickScore({ ...prop, playabilityScore, expectedValueScore });
+  const scoreDiagnostics = buildScoreDiagnostics(
+    { ...prop, playabilityScore, expectedValueScore },
+    resolvedRank
+  );
   return {
     ...prop,
     playabilityScore,
+    expectedValueScore,
+    scoreDiagnostics,
     bestPlayRankingScore: audit.rankingScore,
     rankingScoreBase: audit.baseScore,
     topPickScore: audit.rankingScore,

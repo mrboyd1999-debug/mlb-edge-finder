@@ -53,7 +53,7 @@ export const SPORT_PROCESSING_LIMITS = MLB_ONLY_MODE
     };
 
 export const RENDER_LIMITS = {
-  topPicks: 2,
+  topPicks: 10,
   readyToBet: 20,
   goblins: 6,
   demons: 6,

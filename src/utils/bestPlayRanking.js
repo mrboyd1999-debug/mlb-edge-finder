@@ -97,7 +97,7 @@ export function computePlayEdgeScore({ projection, line, games } = {}) {
 /** @deprecated Use conservative probability from computeDisplayPropMetrics. */
 export function computeVerifiedProbability(edgeScore = 0) {
   const magnitude = Math.abs(finiteOr(edgeScore, 0));
-  return Math.max(50, Math.min(70, Math.round(50 + magnitude * 40)));
+  return Math.max(50, Math.min(92, Math.round(50 + magnitude * 55)));
 }
 
 export function resolvePlayConfidenceLabel(games = 0) {

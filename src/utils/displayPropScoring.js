@@ -194,11 +194,10 @@ export function computeDisplayEdgeValue(prop = {}) {
 }
 
 export function confidenceTierLabel(confidence = BASE_CONFIDENCE) {
-  if (confidence >= 68) return "ELITE";
-  if (confidence >= 62) return "STRONG";
-  if (confidence >= 56) return "SOLID";
-  if (confidence >= 50) return "LEAN";
-  return "RESEARCH ONLY";
+  if (confidence >= 85) return "ELITE";
+  if (confidence >= 75) return "STRONG";
+  if (confidence >= 65) return "PLAYABLE";
+  return "AVOID";
 }
 
 export function computeDisplayRiskLevel(confidence = BASE_CONFIDENCE) {
@@ -582,10 +581,12 @@ function isCorrelated(a = {}, b = {}) {
   return playerKey(a) && playerKey(a) === playerKey(b);
 }
 
-function pickTop2FromPool(pool = []) {
+const TOP_PICKS_LIMIT = 10;
+
+function pickTopFromPool(pool = [], limit = TOP_PICKS_LIMIT) {
   const selected = [];
   for (const prop of pool) {
-    if (selected.length >= 2) break;
+    if (selected.length >= limit) break;
     if (selected.some((pick) => isCorrelated(pick, prop))) continue;
     selected.push({ ...prop, topPick: true, whyThisPick: prop.whyThisPick || buildWhyThisPick(prop) });
   }
@@ -596,7 +597,7 @@ function filterRecommendableBoardProps(props = []) {
   return (props || []).filter(isVerifiedRecommendableProp);
 }
 
-export function selectTop2Picks(props = []) {
+export function selectTop2Picks(props = [], limit = TOP_PICKS_LIMIT) {
   const valid = sortPropsForDisplay(filterRecommendableBoardProps(props).filter(isValidDisplayProp));
   if (!valid.length) return [];
 
@@ -606,11 +607,16 @@ export function selectTop2Picks(props = []) {
       finiteOr(prop.confidence, 0) >= PREFERRED_TOP_PICK_CONFIDENCE &&
       finiteOr(prop.edge, 0) > 0
   );
-  const elitePicks = pickTop2FromPool(elitePool);
+  const elitePicks = pickTopFromPool(elitePool, limit);
   if (elitePicks.length) return elitePicks;
 
   const playablePool = valid.filter(isPlayablePickProp);
-  return pickTop2FromPool(playablePool);
+  return pickTopFromPool(playablePool, limit);
+}
+
+/** @deprecated Use selectTop2Picks with limit=10 */
+export function selectTop10Picks(props = []) {
+  return selectTop2Picks(props, TOP_PICKS_LIMIT);
 }
 
 export function selectNearMissProps(props = []) {

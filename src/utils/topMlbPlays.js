@@ -54,7 +54,7 @@ import {
   logProbabilityEngineSummary,
 } from "./probabilityEngineAudit.js";
 import { resolveBestPlayProjection, PROJECTION_JOIN_DEBUG, passesPlayboardPoolFilter } from "./bestPlaysPipelineDebug.js";
-import { compareBestPlaysRank, annotateBestPlayRankingAudit } from "./bestPlayRankingScore.js";
+import { compareBestPlaysRank, annotateBestPlayRankingAudit, buildScoreDiagnostics } from "./bestPlayRankingScore.js";
 import {
   dedupeByPlayerMarketBestScore,
   dedupeByPlayerBestScore,
@@ -90,7 +90,7 @@ import {
 
 export const TOP_MLB_PLAYS_LIMIT = HIGHEST_PROBABILITY_MAX_PLAYS;
 export const SECTION_BEST_PLAYS = HIGHEST_PROBABILITY_MAX_PLAYS;
-export const TOP_BEST_PLAYS_LIMIT = 3;
+export const TOP_BEST_PLAYS_LIMIT = 10;
 export const MAX_PLAYER_APPEARANCES = 1;
 export const WAITING_FOR_PROJECTIONS_MESSAGE = "Waiting for verified projections…";
 export const FALLBACK_PROJECTIONS_LABEL = "Relaxed ranking applied";
@@ -520,6 +520,16 @@ export function resolveTopMlbPlaySections(
   filterDiagnostics.confidenceSuppressionLog = logConfidenceSuppressionBatch(boardQualityPool);
   filterDiagnostics.tierAProbabilityAudit = auditTierAProbabilityPool(boardQualityPool);
   logFinalTierTable(topBestPlayPicks, "Best Plays shown");
+  if (topBestPlayPicks.length) {
+    console.info(
+      "[BestPlays] score diagnostics",
+      topBestPlayPicks.slice(0, 10).map((prop, idx) => ({
+        player: prop.playerName || prop.player,
+        market: prop.statType || prop.market,
+        ...buildScoreDiagnostics(prop, idx + 1),
+      }))
+    );
+  }
 
   const overallPlayCandidate = selectOverallPlay(boardQualityPool);
   const overallPlay = overallPlayCandidate

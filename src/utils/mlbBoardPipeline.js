@@ -27,8 +27,8 @@ export const TIER_A_RULES = {
 };
 
 export const TIER_B_RULES = {
-  confidence: 70,
-  probability: 67,
+  confidence: 68,
+  probability: 55,
   playability: 0,
 };
 
@@ -241,9 +241,10 @@ export function applyBoardProbabilityCaps(prop = {}, probability = null) {
   const aggressive = prop.projectionRisk === "AGGRESSIVE" || flags.projectionRisk === "AGGRESSIVE";
   const outlier = Boolean(prop.projectionOutlierDetected || flags.outlierDetected || flags.outlierWarning);
 
-  if (sampleGames != null && sampleGames < 10) value = Math.min(value, 69);
+  if (sampleGames != null && sampleGames < 5) value = Math.min(value, 72);
+  else if (sampleGames != null && sampleGames < 10) value = Math.min(value, 78);
 
-  if (aggressive || outlier) value = Math.min(value, 74);
+  if (aggressive || outlier) value = Math.min(value, 80);
 
   return Math.round(Math.max(50, value));
 }
