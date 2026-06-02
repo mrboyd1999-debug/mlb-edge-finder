@@ -3,6 +3,7 @@
  */
 
 import { resolveLastRefreshTimestamp } from "./cache.js";
+import { buildBoardFreshnessDebug, isBoardFreshForLiveDisplay } from "./boardFreshness.js";
 import { countMergedProjections } from "./projectionCoverageAudit.js";
 import { normalizeSource } from "./normalizeSource.js";
 import { isFakeOrFallbackProp } from "./livePropRender.js";
@@ -177,6 +178,7 @@ export function buildRenderSourceAudit({
   cacheStatus = "",
   debugInfo = null,
   lastUpdated = "",
+  boardFreshness = null,
 } = {}) {
   const context = {
     cacheStatus,
@@ -212,6 +214,18 @@ export function buildRenderSourceAudit({
     providerAudit: providerFetchAudit,
     debugInfo,
   });
+
+  const cacheUsed = /cached|stale|expired|local/i.test(String(cacheStatus || ""));
+  const freshness =
+    boardFreshness ||
+    buildBoardFreshnessDebug({
+      boardUpdatedAt: refreshTimestamp || lastUpdated,
+      currentFetchTime: debugInfo?.boardFreshness?.currentFetchTime || "",
+      liveProviderCount: sourceCounts.LIVE_PROVIDER_COUNT,
+      cacheUsed,
+    });
+  const boardFresh = isBoardFreshForLiveDisplay(refreshTimestamp || lastUpdated) && !freshness.cacheUsed;
+  const liveFeedMode = boardFresh && finiteCount(sourceCounts.LIVE_PROVIDER_COUNT) > 0;
 
   const audit = {
     ...(providerFetchAudit || {}),
@@ -249,10 +263,9 @@ export function buildRenderSourceAudit({
       providerFetchAudit?.lastSuccessfulFetchAt ||
       providerFetchAudit?.ingestionTimestamp ||
       "",
-    boardCacheActive:
-      renderingSource !== DATA_SOURCE_TAGS.LIVE_PROVIDER &&
-      (sourceBreakdown.LOCAL_STORAGE > 0 || sourceBreakdown.CACHE > 0),
-    feedMode: renderingSource === DATA_SOURCE_TAGS.LIVE_PROVIDER ? "LIVE" : "CACHE",
+    boardCacheActive: !liveFeedMode && (freshness.cacheUsed || freshness.stale),
+    feedMode: liveFeedMode ? "LIVE" : "CACHE",
+    boardFreshness: freshness,
     dataIntegrityMismatch: false,
     integrityWarning: "",
     updatedAt: new Date().toISOString(),

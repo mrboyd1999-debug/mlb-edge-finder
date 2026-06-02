@@ -9,9 +9,20 @@ function Metric({ label, value }) {
   );
 }
 
-function LiveBoardPipelineBanner({ trace = null, renderSourceAudit = null, loading = false }) {
+function LiveBoardPipelineBanner({
+  trace = null,
+  renderSourceAudit = null,
+  boardFreshness = null,
+  loading = false,
+  onClearCacheAndReload = null,
+}) {
+  const freshness = boardFreshness || renderSourceAudit?.boardFreshness || null;
   const liveProviderCount =
-    renderSourceAudit?.liveProviderCount ?? renderSourceAudit?.providerPlays ?? trace?.provider ?? 0;
+    freshness?.liveProviderCount ??
+    renderSourceAudit?.liveProviderCount ??
+    renderSourceAudit?.providerPlays ??
+    trace?.provider ??
+    0;
   const localStorageCount =
     renderSourceAudit?.localStorageCount ?? renderSourceAudit?.localStoragePlays ?? 0;
   const cacheCount = renderSourceAudit?.cacheCount ?? renderSourceAudit?.cachePlays ?? 0;
@@ -19,9 +30,9 @@ function LiveBoardPipelineBanner({ trace = null, renderSourceAudit = null, loadi
     ? formatDataSourceLabel(renderSourceAudit.renderingSource)
     : null;
 
-  if (!trace && !renderSourceAudit && !loading) return null;
+  if (!trace && !renderSourceAudit && !freshness && !loading) return null;
 
-  const isLive = Number(liveProviderCount) > 0;
+  const isLive = Boolean(freshness?.liveEligible);
 
   return (
     <section
@@ -43,12 +54,28 @@ function LiveBoardPipelineBanner({ trace = null, renderSourceAudit = null, loadi
             <Metric label="LOCAL_STORAGE_COUNT" value={localStorageCount} />
             <Metric label="CACHE_COUNT" value={cacheCount} />
           </p>
+          {freshness ? (
+            <p className="provider-feed-mode-banner__detail live-board-pipeline-banner__metrics">
+              <Metric label="currentFetchTime" value={freshness.currentFetchTime || "—"} />
+              <Metric label="boardUpdatedAt" value={freshness.boardUpdatedAt || "—"} />
+              <Metric label="boardAgeMinutes" value={freshness.boardAgeMinutes ?? "—"} />
+              <Metric label="cacheUsed" value={String(freshness.cacheUsed)} />
+              <Metric label="stale" value={String(freshness.stale)} />
+            </p>
+          ) : null}
           {trace ? (
             <p className="provider-feed-mode-banner__detail live-board-pipeline-banner__metrics">
               <Metric label="LIVE NORMALIZED" value={trace?.normalized} />
               <Metric label="LIVE PROJECTED" value={trace?.projected} />
               <Metric label="LIVE VERIFIED" value={trace?.verified} />
               <Metric label="LIVE RENDERED" value={trace?.rendered} />
+            </p>
+          ) : null}
+          {onClearCacheAndReload ? (
+            <p className="provider-feed-mode-banner__detail">
+              <button type="button" className="compact-form-button" onClick={onClearCacheAndReload}>
+                Clear Cache + Reload Live
+              </button>
             </p>
           ) : null}
         </>

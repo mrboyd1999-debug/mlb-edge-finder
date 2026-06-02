@@ -173,6 +173,24 @@ async function fetchWithTimeout(url, init, timeoutMs, externalSignal) {
   }
 }
 
+export function appendCacheBustParam(url, ts = Date.now()) {
+  const raw = String(url || "");
+  if (!raw) return raw;
+  try {
+    const base =
+      typeof window !== "undefined" && window.location?.origin
+        ? window.location.origin
+        : "http://localhost";
+    const parsed = new URL(raw, base);
+    parsed.searchParams.set("ts", String(ts));
+    if (/^https?:\/\//i.test(raw)) return parsed.toString();
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    const separator = raw.includes("?") ? "&" : "?";
+    return `${raw}${separator}ts=${ts}`;
+  }
+}
+
 export function clearApiCache({ preserveLastGood = true } = {}) {
   memoryCache.clear();
   inFlightRequests.clear();
@@ -198,9 +216,48 @@ export function clearApiCache({ preserveLastGood = true } = {}) {
   }
 }
 
+import { clearBoardCache } from "./pickStore.js";
+import { clearStartupBoardCache } from "./startupBoardCache.js";
+import { clearAllSmartCache } from "./smartCache.js";
+
+export function clearAllLiveDataCaches() {
+  clearApiCache({ preserveLastGood: false });
+  clearBoardCache();
+  clearStartupBoardCache();
+  clearAllSmartCache();
+  try {
+    const localKeys = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (!key) continue;
+      if (
+        key.startsWith("dfs-") ||
+        key.startsWith("mlb-last-good-") ||
+        key.startsWith("dfs-smart-cache:") ||
+        key === "pp_cache" ||
+        key === "ud_cache"
+      ) {
+        localKeys.push(key);
+      }
+    }
+    localKeys.forEach((key) => window.localStorage.removeItem(key));
+
+    const sessionKeys = [];
+    for (let i = 0; i < window.sessionStorage.length; i += 1) {
+      const key = window.sessionStorage.key(i);
+      if (!key) continue;
+      if (key.startsWith("dfs-") || key.startsWith("mlb-")) sessionKeys.push(key);
+    }
+    sessionKeys.forEach((key) => window.sessionStorage.removeItem(key));
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export async function resilientFetch(url, init = {}, options = {}) {
+  const bustedUrl = appendCacheBustParam(url);
   const source = options.source || "API";
-  const key = cacheKey(url, init);
+  const key = cacheKey(bustedUrl, init);
   const bypassCache = init.cache === "no-store" || options.ttlMs === 0;
   const ttlMs = bypassCache ? 0 : options.ttlMs ?? shortCacheTtlMs();
   const timeoutMs = options.timeoutMs ?? getApiTimeoutMs({ enrichment: Boolean(options.enrichment) });
@@ -251,7 +308,7 @@ export async function resilientFetch(url, init = {}, options = {}) {
       const headers = buildRotatingHeaders(init.headers || {});
       try {
         const response = await fetchWithTimeout(
-          url,
+          bustedUrl,
           { ...init, headers, signal: undefined },
           timeoutMs,
           externalSignal

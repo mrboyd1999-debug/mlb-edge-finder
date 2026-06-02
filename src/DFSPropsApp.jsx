@@ -16,7 +16,7 @@ import { fetchPlayerSeasonStats, fetchGamesByDate } from "./services/sportsDataS
 import { playerNamesMatch } from "./utils/playerNames.js";
 import { PRIZEPICKS_HTML_BANNER } from "./services/prizepicks";
 import { fetchInjuryNews } from "./services/injuryNews";
-import { clearApiCache, getRefreshCooldownMs, isDevEnvironment } from "./services/fetchUtil";
+import { clearAllLiveDataCaches, clearApiCache, getRefreshCooldownMs, isDevEnvironment } from "./services/fetchUtil";
 import {
   withBoardFetchLock,
   canAutoRefresh,
@@ -96,7 +96,6 @@ import {
 } from "./services/projectionEngine";
 import {
   DFS_CACHE_TTL_MS,
-  clearBoardCache,
   readCachedBoard,
   readVerifiedCacheBoard,
   readHistory,
@@ -285,6 +284,14 @@ import {
 } from "./utils/pipelinePropCountAudit.js";
 import { buildProviderCoverageAudit, logProviderCoverageSummary } from "./utils/providerCoverageAudit.js";
 import { clearStaleBoardCacheIfLiveFetchSucceeds, resolveLastRefreshTimestamp } from "./utils/cache.js";
+import {
+  buildBoardFreshnessDebug,
+  formatCachedDataNotice,
+  isBoardFreshForLiveDisplay,
+  isBoardStale,
+  resolveBoardAgeMinutes,
+  BOARD_LIVE_FRESH_MAX_AGE_MS,
+} from "./utils/boardFreshness.js";
 import { buildBoardSummary } from "./utils/boardSummary.js";
 import { buildAndLogPrizePicksPipelineAudit } from "./utils/prizePicksPipelineAudit.js";
 import {
@@ -3571,6 +3578,7 @@ export default function DFSPropsApp() {
   const [savedPicks, setSavedPicks] = useState(() => readSavedPicks());
   const [parlayHistory, setParlayHistory] = useState(() => trimHistoryToLimit(readParlayHistory()));
   const [lastUpdated, setLastUpdated] = useState("");
+  const [currentFetchTime, setCurrentFetchTime] = useState("");
   const [cacheStatus, setCacheStatus] = useState("");
   const [cacheNotice, setCacheNotice] = useState("");
   const [sourceStatus, setSourceStatus] = useState(DEFAULT_SOURCE_STATUS);
@@ -3589,6 +3597,7 @@ export default function DFSPropsApp() {
   const initialLoadRef = useRef(false);
   const lastRefreshAtRef = useRef(0);
   const lastAutoRefreshRef = useRef(0);
+  const lastSuccessfulFetchAtRef = useRef("");
   const scoringContextRef = useRef(null);
   const [mlbPipelineStatusTick, setMlbPipelineStatusTick] = useState(0);
 
@@ -3674,12 +3683,21 @@ export default function DFSPropsApp() {
       })
     );
     setLastUpdated(
-      cacheLayer === "live" || cacheLayer === "fresh"
-        ? new Date().toISOString()
-        : scopedBoard.updatedAt || ""
+      scopedBoard.updatedAt ||
+        (cacheLayer === "live" || cacheLayer === "fresh" ? new Date().toISOString() : "")
     );
+    if (cacheLayer === "live" || cacheLayer === "fresh") {
+      const fetchTime = scopedBoard.updatedAt || new Date().toISOString();
+      lastSuccessfulFetchAtRef.current = fetchTime;
+      setCurrentFetchTime(fetchTime);
+    }
     setCacheStatus(cacheLayer);
-    setCacheNotice(scopedBoard.cacheNotice || "");
+    setCacheNotice(
+      scopedBoard.cacheNotice ||
+        (/cached|stale|expired|local/i.test(String(cacheLayer || "")) && scopedBoard.updatedAt
+          ? formatCachedDataNotice(scopedBoard.updatedAt)
+          : "")
+    );
     setPipelineAudit(
       coercePipelineAudit({
         ...(scopedBoard.debugInfo?.pipelineAudit || {}),
@@ -3728,9 +3746,17 @@ export default function DFSPropsApp() {
     return withBoardFetchLock(async () => {
       beginRefreshDiagnostics({ force, autoRefresh });
       let refreshCacheContext = { active: false, timestamp: "", reason: "" };
+      const previousBoardEarly =
+        readVerifiedCacheBoard(DEFAULT_SOURCE_STATUS, { allowExpired: true }) ||
+        readCachedBoard(DEFAULT_SOURCE_STATUS, { allowExpired: true });
       const sourceCooldownRemaining = getMaxCooldownRemainingMs();
       const refreshCooldownRemaining = getRefreshCooldownMs() - (Date.now() - lastRefreshAtRef.current);
-      if (force && (sourceCooldownRemaining > 0 || refreshCooldownRemaining > 0)) {
+      const staleBoardActive = isBoardStale(lastUpdated || previousBoardEarly?.updatedAt || "");
+      if (
+        force &&
+        (sourceCooldownRemaining > 0 || refreshCooldownRemaining > 0) &&
+        !staleBoardActive
+      ) {
         const cooldownFallback =
           readVerifiedCacheBoard(DEFAULT_SOURCE_STATUS) || readCachedBoard(DEFAULT_SOURCE_STATUS, { allowExpired: true });
         if (
@@ -3769,11 +3795,14 @@ export default function DFSPropsApp() {
             readVerifiedCacheBoard(DEFAULT_SOURCE_STATUS) ||
             readCacheFirstStartupBundle(DEFAULT_SOURCE_STATUS).instant?.board
           : null;
+      const cachePaintFresh =
+        cachedForPaint?.updatedAt && isBoardFreshForLiveDisplay(cachedForPaint.updatedAt);
       const hasCachedPaint = Boolean(
-        cachedForPaint?.allDisplayProps?.length ||
-          cachedForPaint?.props?.length ||
-          cachedForPaint?.usableProps?.length ||
-          cachedForPaint?.qualifiedReadyProps?.length
+        cachePaintFresh &&
+          (cachedForPaint?.allDisplayProps?.length ||
+            cachedForPaint?.props?.length ||
+            cachedForPaint?.usableProps?.length ||
+            cachedForPaint?.qualifiedReadyProps?.length)
       );
       if (!autoRefresh && !hasCachedPaint) {
         setLoading(true);
@@ -3782,11 +3811,11 @@ export default function DFSPropsApp() {
       setError("");
       setLearningSaveNotice("");
       const fetchStartedAt = Date.now();
-      const previousBoard =
-        readVerifiedCacheBoard(DEFAULT_SOURCE_STATUS, { allowExpired: true }) ||
-        readCachedBoard(DEFAULT_SOURCE_STATUS, { allowExpired: true });
+      const previousBoard = previousBoardEarly;
       try {
         if (force) {
+          clearAllLiveDataCaches();
+        } else if (autoRefresh) {
           clearApiCache({ preserveLastGood: true });
         }
 
@@ -3832,7 +3861,14 @@ export default function DFSPropsApp() {
           });
         } else if (!force && !autoRefresh) {
           const cached = readCachedBoard(DEFAULT_SOURCE_STATUS) || readVerifiedCacheBoard(DEFAULT_SOURCE_STATUS);
-          if (cached?.allDisplayProps?.length || cached?.props?.length || cached?.usableProps?.length || cached?.qualifiedReadyProps?.length) {
+          const cachedFresh = cached?.updatedAt && isBoardFreshForLiveDisplay(cached.updatedAt);
+          if (
+            cachedFresh &&
+            (cached?.allDisplayProps?.length ||
+              cached?.props?.length ||
+              cached?.usableProps?.length ||
+              cached?.qualifiedReadyProps?.length)
+          ) {
             const layer = cached.cacheMetadata?.freshnessTier || resolveCacheLayer(new Date(cached.updatedAt).getTime(), DFS_CACHE_TTL_MS);
             refreshCacheContext = {
               active: false,
@@ -3978,24 +4014,25 @@ export default function DFSPropsApp() {
               board.debugInfo.providerCoverageAudit.cacheFallbackStage || refreshCacheContext.reason,
           };
         } else if (board.debugInfo?.providerCoverageAudit && hasLiveBoard) {
+          const fetchStamp = board.updatedAt || new Date().toISOString();
           const cacheRefresh = clearStaleBoardCacheIfLiveFetchSucceeds({
             livePropsCount: liveBoardProps.length,
             combinedUsable: board.debugInfo.providerCoverageAudit.combinedUsable,
             feedMode: "LIVE",
-            boardCacheTimestamp: refreshCacheContext.timestamp || board.updatedAt,
+            boardCacheTimestamp: fetchStamp,
             debugInfo: board.debugInfo,
           });
           board.debugInfo.providerCoverageAudit = {
             ...board.debugInfo.providerCoverageAudit,
             boardCacheActive: cacheRefresh.boardCacheActive,
-            boardCacheTimestamp: cacheRefresh.boardCacheTimestamp,
+            boardCacheTimestamp: fetchStamp,
             feedMode: cacheRefresh.feedMode,
             cacheFallbackStage: cacheRefresh.cacheFallbackStage || "",
             cacheBoardMessage: cacheRefresh.cacheBoardMessage || "",
-            ingestionTimestamp: cacheRefresh.ingestionTimestamp || new Date().toISOString(),
-            providerAuditTimestamp: cacheRefresh.providerAuditTimestamp,
-            renderedBoardTimestamp: cacheRefresh.renderedBoardTimestamp,
-            lastSuccessfulFetchAt: cacheRefresh.lastSuccessfulFetchAt || cacheRefresh.boardCacheTimestamp,
+            ingestionTimestamp: fetchStamp,
+            providerAuditTimestamp: fetchStamp,
+            renderedBoardTimestamp: fetchStamp,
+            lastSuccessfulFetchAt: fetchStamp,
             cacheStale: cacheRefresh.cacheStale,
           };
         }
@@ -4145,7 +4182,7 @@ export default function DFSPropsApp() {
         setLoadingStage("DONE");
       }
     });
-  }, [applyBoardState, platform]);
+  }, [applyBoardState, platform, lastUpdated]);
 
   useEffect(() => {
     writeCompactModePreference(compactMode);
@@ -4233,7 +4270,8 @@ export default function DFSPropsApp() {
     beginPerformanceTimer(PERFORMANCE_TIMERS.loadCachedBoard);
     const startupBundle = readCacheFirstStartupBundle(DEFAULT_SOURCE_STATUS);
     const instant = startupBundle.instant;
-    if (instant?.board) {
+    const instantFresh = instant?.board?.updatedAt && isBoardFreshForLiveDisplay(instant.board.updatedAt);
+    if (instant?.board && instantFresh) {
       applyBoardState(
         {
           ...instant.board,
@@ -4258,6 +4296,12 @@ export default function DFSPropsApp() {
         statsFromCache: startupBundle.statsFromCache,
         projectionSlice: startupBundle.projections?.length || 0,
       });
+    } else if (instant?.board) {
+      console.info("[DFS Startup] skipped stale cache paint — awaiting live refresh", {
+        updatedAt: instant.board.updatedAt,
+        boardAgeMinutes: resolveBoardAgeMinutes(instant.board.updatedAt),
+      });
+      endPerformanceTimer(PERFORMANCE_TIMERS.loadCachedBoard);
     } else {
       endPerformanceTimer(PERFORMANCE_TIMERS.loadCachedBoard);
     }
@@ -4839,7 +4883,6 @@ export default function DFSPropsApp() {
     }).parlayPicks;
   }, [streakSportBoards, parlayRiskMode, scoredDisplayProps, props, selectedSportUdProps, selectedBoardSport]);
   const parlayDashboard = useMemo(() => buildParlayDashboard(parlayHistory), [parlayHistory]);
-  const refreshBlocked = loading || refreshCooldownSec > 0 || sourceCooldownSec > 0;
   const refreshCountdownSec = Math.max(refreshCooldownSec, sourceCooldownSec);
   const rateLimitNotice =
     sourceCooldownSec > 0
@@ -4899,14 +4942,22 @@ export default function DFSPropsApp() {
   ]);
   const providerCoverageAuditDisplay = useMemo(() => {
     const fetchAudit = debugInfo?.providerCoverageAudit;
+    const cacheUsed = !/^(fresh|live)$/i.test(String(cacheStatus || "").trim());
+    const freshness = buildBoardFreshnessDebug({
+      boardUpdatedAt: lastUpdated,
+      currentFetchTime,
+      liveProviderCount: fetchAudit?.liveProviderCount ?? 0,
+      cacheUsed,
+    });
     return buildRenderSourceAudit({
       allDisplayProps,
       boardDisplayProps,
       topMlbPlayBoard,
       providerFetchAudit: fetchAudit,
       cacheStatus,
-      debugInfo,
+      debugInfo: { ...debugInfo, boardFreshness: freshness },
       lastUpdated,
+      boardFreshness: freshness,
     });
   }, [
     allDisplayProps,
@@ -4916,7 +4967,23 @@ export default function DFSPropsApp() {
     debugInfo,
     cacheStatus,
     lastUpdated,
+    currentFetchTime,
   ]);
+  const boardFreshness = useMemo(
+    () =>
+      providerCoverageAuditDisplay?.boardFreshness ||
+      buildBoardFreshnessDebug({
+        boardUpdatedAt: lastUpdated,
+        currentFetchTime,
+        liveProviderCount: providerCoverageAuditDisplay?.liveProviderCount ?? 0,
+        cacheUsed: !/^(fresh|live)$/i.test(String(cacheStatus || "").trim()),
+      }),
+    [providerCoverageAuditDisplay, lastUpdated, currentFetchTime, cacheStatus]
+  );
+  const refreshBlocked =
+    loading ||
+    (!boardFreshness.stale && refreshCooldownSec > 0) ||
+    (!boardFreshness.stale && sourceCooldownSec > 0);
   const lastUpdatedLabel = useMemo(() => {
     const ts = resolveLastRefreshTimestamp({
       lastUpdated,
@@ -4925,11 +4992,17 @@ export default function DFSPropsApp() {
       debugInfo,
     });
     if (!ts) return "Never";
-    if (providerCoverageAuditDisplay?.feedMode === "LIVE") {
+    if (boardFreshness.stale) {
+      return `${formatDateTime(ts)} — stale (refresh required)`;
+    }
+    if (boardFreshness.cacheUsed) {
+      return formatCachedDataNotice(ts);
+    }
+    if (providerCoverageAuditDisplay?.feedMode === "LIVE" && boardFreshness.liveEligible) {
       return formatDateTime(ts);
     }
     return `${formatDateTime(ts)}${/cached|stale|expired/i.test(String(cacheStatus || "")) ? " (cached)" : ""}`;
-  }, [lastUpdated, providerCoverageAuditDisplay, debugInfo, cacheStatus]);
+  }, [lastUpdated, providerCoverageAuditDisplay, debugInfo, cacheStatus, boardFreshness]);
   const boardSummary = useMemo(
     () =>
       buildBoardSummary({
@@ -4942,10 +5015,11 @@ export default function DFSPropsApp() {
     [boardDisplayProps, topMlbPlayBoard, providerCoverageAuditDisplay, lastUpdated, debugInfo]
   );
   const lastUpdatedMs = lastUpdated ? new Date(lastUpdated).getTime() : NaN;
-  const staleDataWarning =
-    Number(providerCoverageAuditDisplay?.liveProviderCount ?? 0) > 0
+  const staleDataWarning = boardFreshness.stale
+    ? "Stale data warning: refresh today's picks before using these lines."
+    : Number(providerCoverageAuditDisplay?.liveProviderCount ?? 0) > 0
       ? ""
-      : Number.isFinite(lastUpdatedMs) && Date.now() - lastUpdatedMs > DFS_CACHE_TTL_MS
+      : Number.isFinite(lastUpdatedMs) && Date.now() - lastUpdatedMs > BOARD_LIVE_FRESH_MAX_AGE_MS
         ? "Stale data warning: refresh today's picks before using these lines."
         : "";
   const historyResultByKey = useMemo(() => {
@@ -5144,9 +5218,18 @@ export default function DFSPropsApp() {
   }
 
   function handleSettingsSaved() {
-    clearApiCache({ preserveLastGood: true });
-    clearBoardCache();
+    clearAllLiveDataCaches();
   }
+
+  const handleClearCacheAndReloadLive = useCallback(() => {
+    clearAllLiveDataCaches();
+    lastSuccessfulFetchAtRef.current = "";
+    setCurrentFetchTime("");
+    setRefreshCooldownSec(0);
+    setSourceCooldownSec(0);
+    lastRefreshAtRef.current = 0;
+    loadProps({ force: true });
+  }, [loadProps]);
 
   function showMoreSection(section) {
     setVisibleLimits((current) => ({
@@ -5301,9 +5384,9 @@ export default function DFSPropsApp() {
 
   const mobileRefreshLabel = loading
     ? "Loading…"
-    : refreshCountdownSec > 0
-      ? `Wait ${refreshCountdownSec}s`
-      : "Refresh";
+    : boardFreshness.stale || refreshCountdownSec <= 0
+      ? "Refresh"
+      : `Wait ${refreshCountdownSec}s`;
 
   return (
     <>
@@ -5347,6 +5430,8 @@ export default function DFSPropsApp() {
       boardCacheTimestamp={lastUpdated}
       liveBoardPipelineTrace={debugInfo?.liveBoardPipelineTrace || null}
       boardSummary={boardSummary}
+      boardFreshness={boardFreshness}
+      onClearCacheAndReload={handleClearCacheAndReloadLive}
       performanceTracker={performanceTrackerDashboard}
     />
 

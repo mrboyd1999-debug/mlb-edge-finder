@@ -50,12 +50,17 @@ function countLiveProviderBoardProps(board = {}) {
   return rows.filter(isLiveProviderBoardProp).length;
 }
 
-/** Replace only when incoming fetch produced props; otherwise keep previous board. */
+/** Replace only when incoming fetch produced props; never merge stale props after a live fetch. */
 export function mergeBoardRefreshResult(previous = {}, incoming = {}) {
   const prevCount = countBoardProps(previous);
   const nextCount = countBoardProps(incoming);
   const liveProviderCount = countLiveProviderBoardProps(incoming);
   const providerRawCount = countProviderRawProps(incoming);
+  const liveFetchSucceeded = liveProviderCount > 0 || providerRawCount >= 50;
+
+  if (nextCount > 0 && liveFetchSucceeded) {
+    return { board: incoming, replaced: true, keptPrevious: false, merged: false };
+  }
 
   if (nextCount > 0 && (liveProviderCount > 0 || providerRawCount >= 50)) {
     return { board: incoming, replaced: true, keptPrevious: false };
@@ -73,7 +78,7 @@ export function mergeBoardRefreshResult(previous = {}, incoming = {}) {
     };
   }
 
-  if (nextCount > 0 && prevCount > 0 && nextCount < Math.max(20, Math.floor(prevCount * 0.45))) {
+  if (nextCount > 0 && prevCount > 0 && nextCount < Math.max(20, Math.floor(prevCount * 0.45)) && !liveFetchSucceeded) {
     const mergedProps = mergePropCollections(previous.allDisplayProps || previous.props, incoming.allDisplayProps || incoming.props);
     return {
       board: {

@@ -4,6 +4,10 @@ import {
   apiStatusStyle,
   API_STATUS_COLOR,
 } from "../utils/apiHealth.js";
+import {
+  resolveLiveFeedHeadline,
+  STALE_DATA_HEADLINE,
+} from "../utils/boardFreshness.js";
 import ApiStatusPanel from "./ApiStatusPanel.jsx";
 
 function ProviderFeedModeBanner({
@@ -16,6 +20,7 @@ function ProviderFeedModeBanner({
   pipelinePropCountAudit = null,
   feedHealthContext = null,
   debugSources = null,
+  boardFreshness = null,
   loading = false,
   showProviderDetails = false,
 }) {
@@ -27,16 +32,40 @@ function ProviderFeedModeBanner({
     pipelinePropCountAudit,
     feedHealthContext,
     debugSources,
+    boardFreshness,
   });
 
-  const liveAvailable =
-    health.overall.color === API_STATUS_COLOR.GREEN ||
-    Number(renderSourceAudit?.liveProviderCount ?? audit?.liveProviderCount ?? 0) > 0;
+  const freshness =
+    boardFreshness ||
+    renderSourceAudit?.boardFreshness ||
+    audit?.boardFreshness ||
+    null;
 
-  const headline = loading ? "Loading feeds…" : health.overall.status;
+  const liveAvailable = Boolean(freshness?.liveEligible) && !loading;
+
+  const headline = resolveLiveFeedHeadline({
+    loading,
+    boardFreshness: freshness,
+    apiHealthHeadline: health.overall.status,
+  });
+
   const headlineStyle = loading
     ? apiStatusStyle(API_STATUS_COLOR.YELLOW)
-    : apiStatusStyle(health.overall.color);
+    : freshness?.stale
+      ? apiStatusStyle(API_STATUS_COLOR.RED)
+      : liveAvailable
+        ? apiStatusStyle(API_STATUS_COLOR.GREEN)
+        : apiStatusStyle(health.overall.color);
+
+  const modeLabel = loading
+    ? "Loading…"
+    : freshness?.stale
+      ? STALE_DATA_HEADLINE
+      : liveAvailable
+        ? "Live Data Available"
+        : freshness?.cacheUsed
+          ? "Cached Data"
+          : "Limited";
 
   return (
     <section
@@ -45,7 +74,7 @@ function ProviderFeedModeBanner({
     >
       <div className="provider-feed-mode-banner__head">
         <strong className="provider-feed-mode-banner__title">{headline}</strong>
-        {!loading ? <span style={headlineStyle}>{liveAvailable ? "Live Data Available" : "Limited"}</span> : null}
+        {!loading ? <span style={headlineStyle}>{modeLabel}</span> : null}
       </div>
       {!loading && showProviderDetails ? (
         <p className="provider-feed-mode-banner__stats">

@@ -64,6 +64,8 @@ function DfsAnalyzerLayout({
   cacheStatus = "",
   liveBoardPipelineTrace = null,
   boardSummary = null,
+  boardFreshness = null,
+  onClearCacheAndReload = null,
 }) {
   const [connectionReport, setConnectionReport] = useState(() => {
     const meta = readSettingsMeta();
@@ -102,6 +104,7 @@ function DfsAnalyzerLayout({
         pipelinePropCountAudit={debugInfo?.pipelinePropCountAudit}
         feedHealthContext={feedHealthContext}
         debugSources={debugInfo?.sources}
+        boardFreshness={boardFreshness}
         loading={loading}
         showProviderDetails={debugPanelsVisible}
       />
@@ -164,7 +167,9 @@ function DfsAnalyzerLayout({
           <LiveBoardPipelineBanner
             trace={liveBoardPipelineTrace}
             renderSourceAudit={renderSourceAudit}
+            boardFreshness={boardFreshness}
             loading={loading}
+            onClearCacheAndReload={onClearCacheAndReload}
           />
           <ProviderFailureReasons audit={providerCoverageAudit} />
           <LivePropIngestionCountsPanel audit={providerCoverageAudit} />

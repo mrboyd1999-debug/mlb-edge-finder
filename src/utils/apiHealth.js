@@ -4,6 +4,7 @@
 
 import { getOddsApiKey, getSportsDataApiKey } from "../services/runtimeSettings.js";
 import { formatDateTime } from "./formatters.js";
+import { STALE_DATA_HEADLINE } from "./boardFreshness.js";
 import { resolvePrizePicksProviderHealth, resolveUnderdogPropCounts, underdogFeedIsConnected } from "./providerStatus.js";
 import { getUnderdogUsableCount } from "./providerCounts.js";
 
@@ -420,18 +421,33 @@ function resolveOverallHealth({
   sportsDataHealth,
   projectionHealth,
   propSourceAvailable,
+  boardFreshness = null,
 }) {
+  if (boardFreshness?.stale) {
+    return {
+      status: STALE_DATA_HEADLINE,
+      color: API_STATUS_COLOR.RED,
+      detail: "Board timestamp is not from today or is older than 15 minutes — refresh required",
+      debug: {
+        failureReason: "Stale board data",
+        boardAgeMinutes: boardFreshness.boardAgeMinutes,
+        boardUpdatedAt: boardFreshness.boardUpdatedAt,
+      },
+    };
+  }
+
   const coreGreen =
     oddsHealth.color === API_STATUS_COLOR.GREEN &&
     sportsDataHealth.color === API_STATUS_COLOR.GREEN &&
     projectionHealth.color === API_STATUS_COLOR.GREEN &&
-    propSourceAvailable;
+    propSourceAvailable &&
+    boardFreshness?.liveEligible;
 
   if (coreGreen) {
     return {
       status: "Live Data Available",
       color: API_STATUS_COLOR.GREEN,
-      detail: "Core providers connected with at least one prop source",
+      detail: "Core providers connected with fresh board data",
       debug: { failureReason: "" },
     };
   }
@@ -459,10 +475,10 @@ function resolveOverallHealth({
   }
 
   return {
-    status: "Live Data Available",
-    color: API_STATUS_COLOR.GREEN,
-    detail: "Usable data available",
-    debug: { failureReason: "" },
+    status: boardFreshness?.cacheUsed ? "Cached Data" : "Limited Data",
+    color: API_STATUS_COLOR.YELLOW,
+    detail: "Usable data available but not live-fresh",
+    debug: { failureReason: boardFreshness?.cacheUsed ? "Cache fallback active" : "Providers warming up" },
   };
 }
 
@@ -522,6 +538,7 @@ export function getApiHealthStatus({
   pipelinePropCountAudit = null,
   feedHealthContext = null,
   debugSources = null,
+  boardFreshness = null,
 } = {}) {
   const meta = connectionReport || {};
   const rows = meta.results || [];
@@ -591,6 +608,7 @@ export function getApiHealthStatus({
     sportsDataHealth: sportsDataIO,
     projectionHealth: projectionEngine,
     propSourceAvailable,
+    boardFreshness,
   });
 
   const statsVerification = resolveStatsVerificationFromHealth(sportsDataIO);

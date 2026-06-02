@@ -2,7 +2,10 @@
  * Board cache helpers — live fetch wins over stale localStorage paint.
  */
 
-export const BOARD_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+import { BOARD_LIVE_FRESH_MAX_AGE_MS } from "./boardFreshness.js";
+
+/** Board cache older than this is never painted as live. */
+export const BOARD_CACHE_MAX_AGE_MS = BOARD_LIVE_FRESH_MAX_AGE_MS;
 
 function finite(value) {
   const num = Number(value);
@@ -35,7 +38,6 @@ export function resolveLastRefreshTimestamp({
 } = {}) {
   const audit = providerAudit || debugInfo?.providerCoverageAudit || {};
   const liveFeed = audit?.liveFeedDiagnostics || {};
-  const liveMode = String(feedMode || audit.feedMode || "").toUpperCase() === "LIVE";
   const liveTs =
     audit.lastSuccessfulFetchAt ||
     liveFeed.lastSuccessfulFetchAt ||
@@ -44,11 +46,12 @@ export function resolveLastRefreshTimestamp({
     audit.providerAuditTimestamp ||
     "";
 
-  if (liveMode) {
-    return liveTs || lastUpdated || audit.boardCacheTimestamp || "";
-  }
+  if (lastUpdated) return lastUpdated;
 
-  return lastUpdated || liveTs || audit.boardCacheTimestamp || "";
+  const liveMode = String(feedMode || audit.feedMode || "").toUpperCase() === "LIVE";
+  if (liveMode && liveTs) return liveTs;
+
+  return audit.boardCacheTimestamp || liveTs || "";
 }
 
 /**

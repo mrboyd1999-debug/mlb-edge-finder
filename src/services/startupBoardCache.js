@@ -112,6 +112,14 @@ export function readInstantStartupBoard(defaultSourceStatus = {}) {
   return null;
 }
 
+export function clearStartupBoardCache() {
+  try {
+    Object.values(CACHE_KEYS).forEach((key) => window.localStorage.removeItem(key));
+  } catch {
+    // ignore
+  }
+}
+
 export function persistStartupBoardSlices(board = {}) {
   const props = board.allDisplayProps || board.props || board.usableProps || [];
   if (!props.length) return;

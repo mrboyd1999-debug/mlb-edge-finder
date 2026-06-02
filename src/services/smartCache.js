@@ -100,3 +100,30 @@ export function isBoardCacheFresh(updatedAt = "", ttlMs = CACHE_TTL.BOARD_MS) {
   if (!Number.isFinite(ts)) return false;
   return nowMs() - ts <= ttlMs;
 }
+
+export function clearSmartCacheNamespace(namespace = "") {
+  const prefix = `${STORAGE_PREFIX}${namespace}:`;
+  try {
+    const keys = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (key && key.startsWith(prefix)) keys.push(key);
+    }
+    keys.forEach((key) => window.localStorage.removeItem(key));
+  } catch {
+    // ignore
+  }
+}
+
+export function clearAllSmartCache() {
+  try {
+    const keys = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (key && key.startsWith(STORAGE_PREFIX)) keys.push(key);
+    }
+    keys.forEach((key) => window.localStorage.removeItem(key));
+  } catch {
+    // ignore
+  }
+}
