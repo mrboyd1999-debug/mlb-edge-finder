@@ -1021,7 +1021,7 @@ export function buildTopBestPlaysPicks(
   const rejectionSamples = buildBestPlayRejectionSamples(playerPool);
   const tierPools = buildBestPlaysTierPools(playerPool);
   const { eligible, tierA, tierB } = tierPools;
-  const { sourcePool, activeTier, usedFallback, fallbackNotice } = resolveBestPlaysSourcePool(tierPools);
+  let { sourcePool, activeTier, usedFallback, fallbackNotice } = resolveBestPlaysSourcePool(tierPools);
   const strictEligible = [...tierA, ...tierB];
   const dedupedByPlayer = dedupeByPlayerBestScore(sourcePool);
   const qualityPool = dedupedByPlayer.filter(passesBoardDisplayQualityGate);
@@ -1043,14 +1043,15 @@ export function buildTopBestPlaysPicks(
   if (!picks.length && tierPools.projectedFallback?.length) {
     picks = [...tierPools.projectedFallback]
       .sort((a, b) => {
-        const evA = Number(a.evScore ?? a.edge ?? a.playabilityScore ?? 0);
-        const evB = Number(b.evScore ?? b.edge ?? b.playabilityScore ?? 0);
-        return evB - evA;
+        const evA = finite(a.evScore ?? a.edge, 0);
+        const evB = finite(b.evScore ?? b.edge, 0);
+        if (evB !== evA) return evB - evA;
+        return compareTopPlayFinalScore(a, b);
       })
       .slice(0, 25);
-    diagnostics.usedProjectedEmergencyFallback = true;
-    diagnostics.fallbackNotice =
-      diagnostics.fallbackNotice || "Showing top projected props — tier A/B/C filters returned none.";
+    activeTier = "projected";
+    usedFallback = true;
+    fallbackNotice = "Showing top projected props — no Tier A/B/C picks met thresholds.";
   }
 
   diagnostics.activeTier = activeTier;

@@ -73,17 +73,6 @@ export function isDevEnvironment() {
   }
 }
 
-export function absoluteUrl(endpoint) {
-  const raw = String(endpoint || "");
-  if (!raw) return raw;
-  try {
-    if (typeof window === "undefined") return raw;
-    return new URL(raw, window.location.origin).toString();
-  } catch {
-    return raw;
-  }
-}
-
 export function getDevThrottleMs() {
   return isDevEnvironment() ? DEV_MIN_INTERVAL_MS : 0;
 }

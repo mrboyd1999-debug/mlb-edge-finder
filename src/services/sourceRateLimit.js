@@ -1,7 +1,5 @@
 /** Per-source rate-limit state, cooldowns, and request locks. */
 
-import { isDevEnvironment } from "./fetchUtil.js";
-
 export const SOURCE_IDS = {
   PRIZEPICKS: "PrizePicks",
   UNDERDOG: "Underdog",
@@ -34,6 +32,14 @@ const MIN_REQUEST_INTERVAL_MS = {
 /** Per-source soft retry queue — exponential backoff for transient failures. */
 const RETRY_QUEUE_BACKOFF_MS = [750, 1_500, 3_000, 6_000];
 const AUTH_FAILURE_COOLDOWN_MS = 30 * 60 * 1000;
+
+function isDevCooldownBypassed() {
+  try {
+    return import.meta.env?.DEV;
+  } catch {
+    return false;
+  }
+}
 
 const inFlightPromises = new Map();
 const lastDispatchAt = new Map();
@@ -100,16 +106,16 @@ export function getSourceState(sourceId) {
 }
 
 export function isSourceInCooldown(sourceId) {
-  if (isDevEnvironment()) return false;
+  if (isDevCooldownBypassed()) return false;
   return isSourceInCooldownFromState(getSourceState(sourceId));
 }
 
 export function getCooldownRemainingMs(sourceId) {
-  if (isDevEnvironment()) return 0;
   return Math.max(0, Number(getSourceState(sourceId).cooldownUntil || 0) - Date.now());
 }
 
 export function getMaxCooldownRemainingMs() {
+  if (isDevCooldownBypassed()) return 0;
   return Math.max(0, ...Object.values(SOURCE_IDS).map((id) => getCooldownRemainingMs(id)));
 }
 
@@ -278,6 +284,7 @@ function sleep(ms) {
  * `MIN_REQUEST_INTERVAL_MS[sourceId]` ms have elapsed since the last dispatch.
  */
 async function waitForSourceInterval(sourceId) {
+  if (isDevCooldownBypassed()) return;
   const minInterval = MIN_REQUEST_INTERVAL_MS[sourceId] || 0;
   if (!minInterval) return;
   const last = lastDispatchAt.get(sourceId) || 0;

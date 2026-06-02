@@ -1,4 +1,4 @@
-import { lineFeedJsonHeaders, resilientFetch, absoluteUrl } from "./fetchUtil.js";
+import { lineFeedJsonHeaders, resilientFetch } from "./fetchUtil.js";
 import {
   getLineFeedTimeoutMs,
   LINE_FEED_MAX_RETRIES,
@@ -799,6 +799,15 @@ export function auditPrizePicksPipelineStages(
   });
   logPrizePicksPipelineStages("PP_PROBE", stages);
   return stages;
+}
+
+function absoluteUrl(endpoint) {
+  try {
+    if (typeof window === "undefined") return String(endpoint || "");
+    return new URL(endpoint, window.location.origin).toString();
+  } catch {
+    return String(endpoint || "");
+  }
 }
 
 async function fetchPrizePicksEndpoint(

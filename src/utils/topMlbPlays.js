@@ -357,14 +357,8 @@ export function resolveTopMlbPlaySections(
     underdog: parsedUnderdogProps.length,
     liveVerified: liveVerifiedCount,
   });
-  console.log("[Pipeline Stage] fetch.input", {
-    displayProps: displayProps.length,
-    rawProps: rawProps.length,
-    parsedUnderdogProps: parsedUnderdogProps.length,
-  });
 
   const normalizedPool = buildBestPlaysCandidatePool(displayProps, rawProps, parsedUnderdogProps);
-  console.log("[Pipeline Stage] bestPlays.normalizedPool", { count: normalizedPool.length });
 
   const mergeContext = {
     seasonStats: options.sportsDataSeasonStats || [],
@@ -514,12 +508,6 @@ export function resolveTopMlbPlaySections(
   filterDiagnostics.bestPlayProjectedCount = projectedCount;
   filterDiagnostics.bestPlayUsedFallback = bestPlaysResult.usedFallback;
   filterDiagnostics.boardDiagnostics = bestPlaysResult.boardDiagnostics || bestPlaysResult.diagnostics?.boardDiagnostics || null;
-  console.log("[Pipeline Stage] bestPlays.board", {
-    propsEvaluated: filterDiagnostics.boardDiagnostics?.propsEvaluated ?? boardQualityPool.length,
-    propsShown: filterDiagnostics.boardDiagnostics?.propsShown ?? topBestPlayPicks.length,
-    topBestPlayPicks: topBestPlayPicks.length,
-    boardQualityPool: boardQualityPool.length,
-  });
   filterDiagnostics.top10ByScore = bestPlaysResult.diagnostics?.top10ByScore || [];
   filterDiagnostics.tierPropLog = bestPlaysResult.diagnostics?.tierPropLog || [];
   filterDiagnostics.verificationCounts = {

@@ -227,7 +227,7 @@ import {
 } from "./services/providerOrchestration.js";
 import { enrichPropsWithSportsData, generateMlbPropsFromSportsData } from "./services/propSportsDataEnrichment.js";
 import { mergeProjectionsOntoProps } from "./services/mlb/projectionMergePipeline.js";
-import { buildLiveRenderBoard, filterPlatformProps, isFakeOrFallbackProp } from "./utils/livePropRender.js";
+import { buildLiveRenderBoard, filterPlatformProps, isFakeOrFallbackProp, buildProjectedDisplayFallback } from "./utils/livePropRender.js";
 import {
   buildBypassLiveRenderResult,
   buildLiveBoardPipelineTrace,
@@ -2148,10 +2148,6 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     normalized: coreDisplayProps.length,
     filteredMlb: scopedCoreRawProps.length,
   });
-  console.log("[Pipeline Stage] post-merge", {
-    rawProps: rawProps.length,
-    normalizedProps: coreDisplayProps.length,
-  });
 
   if (
     typeof onCoreReady === "function" &&
@@ -2187,6 +2183,11 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   if (!debugInfo.parsedUnderdogProps?.length) {
     debugInfo.parsedUnderdogProps = filterUnderdogStreakPool(rawProps);
   }
+  console.log("[Pipeline Stage]", {
+    rawProps: rawProps.length,
+    prizePicksParsed: Number(prizePicksResult?.props?.length || 0),
+    underdogParsed: Number(underdogResult?.props?.length || 0),
+  });
 
   const parsedCount = Math.max(
     Number(prizePicksResult?.props?.length || 0),
@@ -2395,11 +2396,6 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     normalized: allDisplayProps.length,
     filteredMlb: workingNormalProps.length,
     display: allDisplayProps.length,
-  });
-  console.log("[Pipeline Stage] post-filter", {
-    rawProps: rawProps.length,
-    normalizedProps: allDisplayProps.length,
-    filteredProps: workingNormalProps.length,
   });
 
   if (allDisplayProps.length) {
@@ -3206,7 +3202,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   console.log("LIVE PROJECTED", pipelinePropCountSnapshot.projectedProps || countMergedProjections(allDisplayProps) || 0);
   console.log("LIVE VERIFIED", verifiedForTrace);
   console.log("LIVE RENDERED", liveRenderResult.props.length);
-  const pipelinePropStageCounts = {
+  console.log("[Pipeline Stage]", {
     rawProps: rawProps.length,
     normalizedProps: allDisplayProps.length,
     projectedProps:
@@ -3215,10 +3211,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       0,
     verifiedProps: verifiedForTrace,
     filteredProps: workingNormalProps.length,
-    displayedProps: liveRenderResult.props.length,
-  };
-  console.log("[Pipeline Stage Counts]", pipelinePropStageCounts);
-  debugInfo.pipelinePropStageCounts = pipelinePropStageCounts;
+    displayedProps: acceptedPropsForRender.length,
+  });
   debugInfo.liveBoardPipelineTrace = buildLiveBoardPipelineTrace({
     normalized: pipelineTraceNormalizedPool.length,
     provider: liveProviderPlayCount,
@@ -4395,8 +4389,8 @@ export default function DFSPropsApp() {
   );
   const boardDisplayProps = useMemo(() => {
     let base = acceptedPropsForRender.length ? acceptedPropsForRender : liveRenderBoard.props;
-    if (!base?.length && allDisplayProps.length) {
-      base = liveRenderBoard.props?.length ? liveRenderBoard.props : allDisplayProps;
+    if (!base.length && allDisplayProps.length) {
+      base = liveRenderBoard.props.length ? liveRenderBoard.props : allDisplayProps;
     }
     const slateGames = debugInfo?.sportsDataSlateGames || [];
     const withSlate =
@@ -4407,12 +4401,19 @@ export default function DFSPropsApp() {
           })
         : base;
     const withLines = attachMergedLineComparisons(withSlate, allDisplayProps);
-    return preferLiveProviderBoardProps(withLines, {
+    let preferred = preferLiveProviderBoardProps(withLines, {
       cacheStatus,
       debugInfo,
       lastUpdated,
       ingestionFallback: debugInfo?.ingestionFallback || "",
     });
+    if (!preferred.length && allDisplayProps.length) {
+      preferred = buildProjectedDisplayFallback(allDisplayProps, 25);
+      if (import.meta.env.DEV && preferred.length) {
+        console.warn("[Pipeline Stage] projected display fallback", { count: preferred.length });
+      }
+    }
+    return preferred;
   }, [acceptedPropsForRender, liveRenderBoard, cacheStatus, debugInfo, lastUpdated, allDisplayProps]);
 
   const prizePicksFeedProps = useMemo(() => {
@@ -4573,11 +4574,8 @@ export default function DFSPropsApp() {
         allDisplayProps.length,
         (boardDisplayProps || []).filter((p) => !p.isDemoData).length
       );
-      const board = resolveTopMlbPlaySections(
-        boardDisplayProps.length ? boardDisplayProps : allDisplayProps,
-        props.length ? props : allDisplayProps,
-        parsedUnderdogProps,
-        {
+      const displayPool = boardDisplayProps.length ? boardDisplayProps : allDisplayProps;
+      const board = resolveTopMlbPlaySections(displayPool, props, parsedUnderdogProps, {
         sourceStatus,
         lastUpdated,
         debugInfo,
@@ -5032,7 +5030,7 @@ export default function DFSPropsApp() {
   );
   const refreshBlocked =
     loading ||
-    (!isDevEnvironment() &&
+    (!devEnvironment &&
       !boardFreshness.stale &&
       (refreshCooldownSec > 0 || sourceCooldownSec > 0));
   const lastUpdatedLabel = useMemo(() => {

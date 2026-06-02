@@ -58,3 +58,23 @@ export function filterPlatformProps(props = [], platform = "") {
   if (!key) return props || [];
   return (props || []).filter((prop) => normalizeSource(prop) === key);
 }
+
+/** When tier filters empty the board, show top projected props instead of a blank UI. */
+export function buildProjectedDisplayFallback(props = [], limit = 25) {
+  return (props || [])
+    .filter((prop) => {
+      if (isFakeOrFallbackProp(prop)) return false;
+      const projection = Number(prop?.projection ?? prop?.projectedValue);
+      const line = Number(prop?.line);
+      const player = String(prop?.playerName || prop?.player || "").trim();
+      return player && Number.isFinite(line) && line > 0 && Number.isFinite(projection) && projection > 0;
+    })
+    .sort((a, b) => {
+      const evA = Number(a.evScore ?? a.edge ?? 0);
+      const evB = Number(b.evScore ?? b.edge ?? 0);
+      if (evB !== evA) return evB - evA;
+      return Number(b.confidenceScore ?? b.confidence ?? 0) - Number(a.confidenceScore ?? a.confidence ?? 0);
+    })
+    .slice(0, limit)
+    .map(preparePropForRender);
+}
