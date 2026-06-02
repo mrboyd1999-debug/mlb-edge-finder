@@ -4,6 +4,7 @@
 
 import { buildPropLookupKeys, buildPlayerStatKey, extractPlayerId, normalizeMergeId } from "./propMergeKeys.js";
 import { countMergedProjections } from "./projectionCoverageAudit.js";
+import { applyProjectionProviderChain } from "./projectionProviderChain.js";
 
 function buildAttachLookup(sourceProps = []) {
   const lookup = new Map();
@@ -82,7 +83,7 @@ export function buildNormalizedProjectionFallback(prop = {}) {
     edge: Number(edge.toFixed(3)),
     tier: "projected",
     finalTier: "C",
-    projectionSource: "fallback from live line",
+    projectionSource: "fallback",
     isNormalizedFallbackProjection: true,
     isFallbackProjection: true,
     isLiveRenderProp: prop.isLiveRenderProp ?? true,
@@ -104,16 +105,18 @@ export function applyFallbackProjectionsToProps(props = []) {
   return { props: merged, applied, projectedCount: countMergedProjections(merged) };
 }
 
-/** Sync engine projections onto the full normalized board, then fill gaps with line fallbacks. */
-export function applyLiveProjectionPipeline(normalizedProps = [], engineProps = []) {
+/** Sync engine projections onto the full normalized board, then run provider chain. */
+export function applyLiveProjectionPipeline(normalizedProps = [], engineProps = [], context = {}) {
   const synced = syncProjectionFieldsOntoProps(normalizedProps, engineProps);
   const engineAttached = countMergedProjections(synced);
-  const fallbackResult = applyFallbackProjectionsToProps(synced);
+  const providerResult = applyProjectionProviderChain(synced, context);
   return {
-    props: fallbackResult.props,
+    props: providerResult.props,
     engineAttached,
-    fallbackApplied: fallbackResult.applied,
-    projectedCount: fallbackResult.projectedCount,
+    fallbackApplied: providerResult.fallbackProjections,
+    generatedApplied: providerResult.generatedProjections,
+    projectedCount: countMergedProjections(providerResult.props),
+    projectionSourceCounts: providerResult.counts,
   };
 }
 
@@ -155,6 +158,9 @@ export function syncProjectionFieldsOntoProps(targetProps = [], sourceProps = []
       finalTier: source.finalTier ?? source.tier ?? prop.finalTier ?? prop.tier,
       projectionMerged: true,
       projectionStatus: source.projectionStatus || "matched",
+      projectionSource: source.projectionSource || prop.projectionSource || "sportsdataio",
+      isFallbackProjection: source.isFallbackProjection ?? prop.isFallbackProjection,
+      isGeneratedProjection: source.isGeneratedProjection ?? prop.isGeneratedProjection,
       isLiveRenderProp: prop.isLiveRenderProp ?? true,
       lineSourceBadge: prop.lineSourceBadge || source.lineSourceBadge || "LIVE",
     };

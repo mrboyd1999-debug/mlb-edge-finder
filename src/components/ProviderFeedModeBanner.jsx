@@ -25,6 +25,7 @@ function ProviderFeedModeBanner({
   boardFreshness = null,
   loading = false,
   showProviderDetails = false,
+  projectionSourceCounts = null,
 }) {
   const health = getApiHealthStatus({
     apiHealth,
@@ -85,6 +86,13 @@ function ProviderFeedModeBanner({
       ) : null}
       {!loading ? (
         <>
+          {projectionSourceCounts ? (
+            <p className="provider-feed-mode-banner__stats">
+              Projections — verified {projectionSourceCounts.sportsdataio || 0} · generated{" "}
+              {projectionSourceCounts.generated || 0} · fallback {projectionSourceCounts.fallback || 0}
+              {projectionSourceCounts.mlbstats ? ` · MLB Stats ${projectionSourceCounts.mlbstats}` : ""}
+            </p>
+          ) : null}
           {showProviderDetails ? (
             <ApiStatusPanel
               apiHealth={apiHealth}

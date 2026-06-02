@@ -9,6 +9,11 @@ import { withPlayerImageUrl } from "./playerImageFields.js";
 import { normalizeSource } from "./normalizeSource.js";
 import { canonicalMarketKey } from "./marketNormalization.js";
 import { hasRenderableRankingMetrics } from "./propDisplayFields.js";
+import {
+  applyProjectionProviderChain,
+  formatProjectionSourceLabel,
+  normalizeProjectionSourceBucket,
+} from "./projectionProviderChain.js";
 
 export const EMERGENCY_FALLBACK_NOTICE =
   "Fallback mode: showing highest projected MLB props because verification data is missing.";
@@ -65,10 +70,11 @@ function isPitcherMarket(prop = {}) {
 function hasVerifiedProjection(prop = {}) {
   const projection = finite(prop.projection ?? prop.projectedValue);
   if (projection == null || projection <= 0) return false;
-  const source = String(prop.projectionSource || prop.projectionStatus || "").toLowerCase();
-  if (prop.isNormalizedFallbackProjection || prop.isFallbackProjection) return false;
-  if (/fallback|normalized-fallback|estimate|missing|line-based/i.test(source)) return false;
-  return /verified|sportsdata|merged|engine|mlb-verified/i.test(source) || Boolean(prop.projectionMerged);
+  return normalizeProjectionSourceBucket(prop.projectionSource, prop) === "sportsdataio";
+}
+
+function isFallbackProjectionSource(prop = {}) {
+  return normalizeProjectionSourceBucket(prop.projectionSource, prop) === "fallback";
 }
 
 function isStatsVerified(prop = {}) {
@@ -192,6 +198,13 @@ export function calculateEmergencyConfidence(prop = {}, { hasProjection = false,
   if (String(prop.opponent || prop.opponentTeam || "").trim()) score += 5;
   if (String(prop.gameTime || prop.startTime || prop.eventTime || "").trim()) score += 5;
   if (isVerified || prop.hasVerifiedStats || prop.verificationStatus === "FULL") score += 20;
+
+  const projectionBucket = normalizeProjectionSourceBucket(prop.projectionSource, prop);
+  if (projectionBucket === "sportsdataio") score += 12;
+  else if (projectionBucket === "mlbstats") score += 8;
+  else if (projectionBucket === "generated") score += 5;
+  else if (projectionBucket === "fallback") score -= 8;
+
   return Math.round(clamp(score, MIN_CONFIDENCE, MAX_CONFIDENCE));
 }
 
@@ -270,9 +283,10 @@ export function normalizeEmergencyProp(prop = {}) {
 export function enrichEmergencyRankingFields(prop = {}) {
   let projection = finite(prop.projection ?? prop.projectedValue);
   const line = finite(prop.line);
-  const usedFallbackProjection = !(projection != null && projection > 0);
+  const projectionBucket = normalizeProjectionSourceBucket(prop.projectionSource, prop);
+  const usedFallbackProjection = isFallbackProjectionSource(prop);
 
-  if (usedFallbackProjection) {
+  if ((projection == null || projection <= 0) && projectionBucket !== "generated") {
     projection = buildMarketFallbackProjection(prop);
   }
 
@@ -281,7 +295,7 @@ export function enrichEmergencyRankingFields(prop = {}) {
   }
 
   const recommendedSide = resolveRecommendedSideFromProjection(projection, line);
-  const isVerified = isStatsVerified(prop);
+  const isVerified = isStatsVerified(prop) || projectionBucket === "sportsdataio";
   const normalized = normalizeEmergencyProp({
     ...prop,
     projection,
@@ -289,9 +303,11 @@ export function enrichEmergencyRankingFields(prop = {}) {
     recommendedSide,
     isFallbackProjection: usedFallbackProjection,
     isNormalizedFallbackProjection: usedFallbackProjection,
-    projectionSource: usedFallbackProjection ? "fallback from live line" : prop.projectionSource,
-    projectionStatus: usedFallbackProjection ? "normalized-fallback" : prop.projectionStatus || "estimated",
+    projectionSource: prop.projectionSource || projectionBucket,
+    projectionStatus: prop.projectionStatus || projectionBucket,
   });
+
+  const sourceLabel = formatProjectionSourceLabel(normalized.projectionSource || projectionBucket, prop);
 
   return {
     ...prop,
@@ -314,10 +330,15 @@ export function enrichEmergencyRankingFields(prop = {}) {
     displayConfidenceScore: normalized.confidence,
     dataCompleteness: normalized.confidence,
     emergencyTier: normalized.tier,
-    emergencyTierLabel: resolveEmergencyTier({ probability: normalized.probability, confidenceScore: normalized.confidence }).label,
+    emergencyTierLabel: resolveEmergencyTier({
+      probability: normalized.probability,
+      confidenceScore: normalized.confidence,
+    }).label,
     isEmergencyPlay: true,
     isFallbackProjection: usedFallbackProjection,
+    isGeneratedProjection: projectionBucket === "generated",
     projectionLabelSuffix: usedFallbackProjection ? " (fallback)" : "",
+    displayProjectionSource: sourceLabel,
   };
 }
 
@@ -367,18 +388,18 @@ export function isEmergencyPlayableProp(prop = {}) {
 }
 
 function ensureEmergencyProjection(prop = {}) {
-  const projection = Number(prop.projection ?? prop.projectedValue);
-  if (Number.isFinite(projection) && projection > 0) return prop;
-  const fallbackProjection = buildMarketFallbackProjection(prop);
-  if (fallbackProjection == null) return prop;
+  const projection = finite(prop.projection ?? prop.projectedValue);
+  if (projection != null && projection > 0) return prop;
+  const generated = buildMarketFallbackProjection(prop);
+  if (generated == null) return prop;
   return {
     ...prop,
-    projection: fallbackProjection,
-    projectedValue: fallbackProjection,
+    projection: generated,
+    projectedValue: generated,
     isFallbackProjection: true,
     isNormalizedFallbackProjection: true,
-    projectionSource: "fallback from live line",
-    projectionStatus: "normalized-fallback",
+    projectionSource: "fallback",
+    projectionStatus: "fallback",
   };
 }
 
@@ -580,6 +601,9 @@ function logEmergencyBoardDiagnostics({
   duplicateCountRemoved = 0,
   fallbackProjectionCount = 0,
   verifiedProjectionCount = 0,
+  generatedProjectionCount = 0,
+  mlbStatsProjectionCount = 0,
+  projectionSourceCounts = null,
 } = {}) {
   console.info("[Emergency MLB Board]", {
     rawPropsCount: rawCount,
@@ -588,8 +612,11 @@ function logEmergencyBoardDiagnostics({
     rankedCount,
     displayedCount,
     duplicateCountRemoved,
-    fallbackProjectionCount,
-    verifiedProjectionCount,
+    verifiedProjections: verifiedProjectionCount,
+    generatedProjections: generatedProjectionCount,
+    mlbStatsProjections: mlbStatsProjectionCount,
+    fallbackProjections: fallbackProjectionCount,
+    projectionSourceCounts,
   });
 }
 
@@ -598,7 +625,14 @@ export function buildEmergencyMlbBoard(displayProps = [], options = {}) {
   const playable = (displayProps || []).filter(isEmergencyPlayableProp);
   const normalizedCount = playable.length;
 
-  const withProjections = playable.map(ensureEmergencyProjection);
+  const providerResult = applyProjectionProviderChain(playable, {
+    statsMap: options.statsMap,
+    seasonStats: options.seasonStats || [],
+    maxFallbackRatio: 0.25,
+  });
+  const withProjections = providerResult.props.map((prop) =>
+    finite(prop.projection ?? prop.projectedValue) > 0 ? prop : ensureEmergencyProjection(prop)
+  );
   const projectedCount = withProjections.filter(
     (prop) => finite(prop.projection ?? prop.projectedValue) > 0
   ).length;
@@ -609,10 +643,10 @@ export function buildEmergencyMlbBoard(displayProps = [], options = {}) {
   const prepared = deduped.sort(compareEmergencyPlayRank);
   const rankedCount = prepared.length;
 
-  const fallbackProjectionCount = prepared.filter(
-    (prop) => prop.isFallbackProjection || prop.isNormalizedFallbackProjection
-  ).length;
-  const verifiedProjectionCount = prepared.filter((prop) => hasVerifiedProjection(prop)).length;
+  const fallbackProjectionCount = prepared.filter((prop) => isFallbackProjectionSource(prop)).length;
+  const verifiedProjectionCount = providerResult.counts?.sportsdataio ?? prepared.filter(hasVerifiedProjection).length;
+  const generatedProjectionCount = providerResult.counts?.generated ?? 0;
+  const mlbStatsProjectionCount = providerResult.counts?.mlbstats ?? 0;
 
   const top10 = prepared.slice(0, 10).map((prop, index) => annotateEmergencyPlay(prop, index + 1));
   warnIfProbabilityStuck(top10);
@@ -640,6 +674,9 @@ export function buildEmergencyMlbBoard(displayProps = [], options = {}) {
     duplicateCountRemoved: duplicatesRemoved,
     fallbackProjectionCount,
     verifiedProjectionCount,
+    generatedProjectionCount,
+    mlbStatsProjectionCount,
+    projectionSourceCounts: providerResult.counts,
   });
 
   const verifiedCount = prepared.filter(isStatsVerified).length;
@@ -686,6 +723,9 @@ export function buildEmergencyMlbBoard(displayProps = [], options = {}) {
       duplicateCountRemoved: duplicatesRemoved,
       fallbackProjectionCount,
       verifiedProjectionCount,
+      generatedProjectionCount,
+      mlbStatsProjectionCount,
+      projectionSourceCounts: providerResult.counts,
       tierCounts: {
         elite: prepared.filter((p) => resolveEmergencyTier(p).id === "elite").length,
         strong: prepared.filter((p) => resolveEmergencyTier(p).id === "strong").length,
@@ -697,6 +737,7 @@ export function buildEmergencyMlbBoard(displayProps = [], options = {}) {
     fallbackNotice,
     loadedPropCount: prepared.length,
     boardStatusNotice: options.boardStatusNotice || "",
+    projectionSourceCounts: providerResult.counts,
   };
 }
 

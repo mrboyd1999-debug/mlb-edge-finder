@@ -46,6 +46,7 @@ function DfsAnalyzerLayout({
   verificationFilterDiagnostics = null,
   debugPanelsVisible = false,
   boardStatusNotice = "",
+  projectionSourceCounts = null,
   prizePicksFeedProps,
   pipelineRenderCounts,
   savedDisplayPicks,
@@ -112,6 +113,9 @@ function DfsAnalyzerLayout({
         boardFreshness={boardFreshness}
         loading={loading}
         showProviderDetails={debugPanelsVisible}
+        projectionSourceCounts={
+          projectionSourceCounts || topMlbPlayBoard?.projectionSourceCounts || null
+        }
       />
 
       {!debugPanelsVisible ? null : <BoardSummaryCard summary={boardSummary} />}

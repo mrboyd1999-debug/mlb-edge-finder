@@ -158,6 +158,11 @@ function BestPlayRowCard({ prop, onOpen, rank, rankLabel, compact = false }) {
             <span>
               Projection <strong>{projectionLabel}</strong>
             </span>
+            {enriched.displayProjectionSource ? (
+              <span>
+                Source <strong>{enriched.displayProjectionSource}</strong>
+              </span>
+            ) : null}
             <span>
               Probability <strong>{probLabel}</strong>
             </span>

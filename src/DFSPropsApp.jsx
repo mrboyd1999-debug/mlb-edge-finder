@@ -2720,7 +2720,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       };
       const merged = mergeProjectionsOntoProps(projectedWorkingProps, mergeContext);
       projectedWorkingProps = merged.props;
-      const projectionPipeline = applyLiveProjectionPipeline(fullDisplayBoard, projectedWorkingProps);
+      const projectionPipeline = applyLiveProjectionPipeline(fullDisplayBoard, projectedWorkingProps, mergeContext);
       allDisplayProps = projectionPipeline.props;
       workingNormalProps = allDisplayProps;
       workingActiveProps = allDisplayProps;
@@ -2738,7 +2738,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
           initialMergeDebug: merged.debug,
         });
         projectedWorkingProps = enrichmentResult.props;
-        const enrichmentPipeline = applyLiveProjectionPipeline(fullDisplayBoard, projectedWorkingProps);
+        const enrichmentPipeline = applyLiveProjectionPipeline(fullDisplayBoard, projectedWorkingProps, mergeContext);
         allDisplayProps = enrichmentPipeline.props;
         workingNormalProps = allDisplayProps;
         workingActiveProps = allDisplayProps;
@@ -3127,7 +3127,10 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       scoredProps.length && projectedWorkingProps?.length
         ? mergeScoredIntoDisplayProps(projectedWorkingProps, scoredProps)
         : scoredProps;
-    const scoredPipeline = applyLiveProjectionPipeline(allDisplayProps, scoredSources);
+    const scoredPipeline = applyLiveProjectionPipeline(allDisplayProps, scoredSources, {
+      seasonStats: seasonStatsData,
+      statsMap: stableStats.statsMap,
+    });
     allDisplayProps = scoredPipeline.props;
     pipelinePropCountSnapshot.projectedProps = scoredPipeline.projectedCount;
   }
@@ -3220,7 +3223,10 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     pipelineTraceNormalizedPool.length > 0 &&
     countMergedProjections(allDisplayProps) === 0
   ) {
-    const fallbackPipeline = applyLiveProjectionPipeline(allDisplayProps, []);
+    const fallbackPipeline = applyLiveProjectionPipeline(allDisplayProps, [], {
+      seasonStats: seasonStatsData,
+      statsMap: stableStats.statsMap,
+    });
     allDisplayProps = fallbackPipeline.props;
     workingNormalProps = allDisplayProps;
     workingActiveProps = allDisplayProps;
@@ -4814,14 +4820,20 @@ export default function DFSPropsApp() {
   const topMlbPlayBoard = useMemo(() => {
     try {
       const displayPool = boardDisplayProps.length ? boardDisplayProps : allDisplayProps;
-      const board = buildEmergencyMlbBoard(displayPool);
+      const board = buildEmergencyMlbBoard(displayPool, {
+        statsMap: debugInfo?.statsMap,
+        seasonStats: debugInfo?.sportsDataSeasonStats || [],
+      });
       board.loadedPropCount = Math.max(board.loadedPropCount || 0, displayPool.length);
       return board;
     } catch (boardError) {
       console.error("[Best Plays] emergency board render failed", boardError);
-      return buildEmergencyMlbBoard(allDisplayProps);
+      return buildEmergencyMlbBoard(allDisplayProps, {
+        statsMap: debugInfo?.statsMap,
+        seasonStats: debugInfo?.sportsDataSeasonStats || [],
+      });
     }
-  }, [boardDisplayProps, allDisplayProps]);
+  }, [boardDisplayProps, allDisplayProps, debugInfo?.statsMap, debugInfo?.sportsDataSeasonStats]);
   const verificationFilterDiagnostics = useMemo(() => {
     if (!debugPanelsVisible) return topMlbPlayBoard?.filterDiagnostics || null;
 
@@ -5707,6 +5719,7 @@ export default function DFSPropsApp() {
       verificationFilterDiagnostics={verificationFilterDiagnostics}
       debugPanelsVisible={debugPanelsVisible}
       boardStatusNotice={boardStatusNotice}
+      projectionSourceCounts={topMlbPlayBoard?.projectionSourceCounts || null}
       savedDisplayPicks={savedDisplayPicks}
       onRemoveSavedPick={removeSavedPick}
       onClearSavedPicks={clearSavedPicksList}
