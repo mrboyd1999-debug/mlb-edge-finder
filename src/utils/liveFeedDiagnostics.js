@@ -6,6 +6,7 @@ import {
   getOddsApiKeySource,
   getSportsDataApiKeySource,
   formatSettingSourceLabel,
+  resolveSettingSource,
 } from "../services/runtimeSettings.js";
 import { getDebugFeedEvidence } from "./feedHardEvidence.js";
 import {
@@ -81,7 +82,6 @@ export function buildLiveFeedDiagnosticsSummary({
         route: ppEndpoints[0],
         proxyUrl: resolveSettingSource("VITE_PRIZEPICKS_PROXY_URL") === "env" ? "env-proxy" : "",
       }),
-      oddsKeySource: formatSettingSourceLabel(getOddsApiKeySource()),
       route: ppEndpoints[0] || null,
     },
     underdog: {
