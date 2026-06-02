@@ -17,14 +17,12 @@ export function computeConservativeStatProjection({
   const season = finite(seasonAvg);
   const ln = finite(line);
   const mod = finite(matchupModifier) ?? 1;
+  void ln;
+  void mod;
 
   if (l5 == null && season == null) return null;
 
-  const last5Component = l5 ?? season ?? ln ?? 0;
-  const seasonComponent = season ?? l5 ?? ln ?? 0;
-  const lineComponent = ln ?? season ?? l5 ?? 0;
-
-  const projection = last5Component * 0.5 + seasonComponent * 0.35 + lineComponent * mod * 0.15;
+  const projection = l5 * 0.55 + season * 0.45;
   if (!Number.isFinite(projection) || projection <= 0) return null;
   return Number(projection.toFixed(2));
 }

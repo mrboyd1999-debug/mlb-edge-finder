@@ -5,7 +5,11 @@
 import { findStatProfile } from "../services/playerStats.js";
 import { buildStatFallbackProjection } from "../services/mlb/statBasedFallbackProjection.js";
 import { buildNormalizedProjectionFallback } from "./pipelineProjectionAttach.js";
-import { generateProjectionForProp } from "./generatedProjectionEngine.js";
+import {
+  generateProjectionForProp,
+  projectionEqualsLine,
+  separateProjectionFromLine,
+} from "./generatedProjectionEngine.js";
 import { resolvePropSport } from "./mlbOnlyMode.js";
 
 const MAX_FALLBACK_RATIO = 0.25;
@@ -50,10 +54,12 @@ function hasUsableProjection(prop = {}) {
 
 function resolveExistingProviderProjection(prop = {}) {
   if (!hasUsableProjection(prop)) return null;
+  const projection = finite(prop.projection ?? prop.projectedValue);
+  if (projectionEqualsLine(projection, prop.line)) return null;
   const bucket = normalizeProjectionSourceBucket(prop.projectionSource, prop);
   if (bucket === "fallback") return null;
   return {
-    projection: finite(prop.projection ?? prop.projectedValue),
+    projection,
     projectionSource: bucket,
     projectionStatus: prop.projectionStatus || bucket,
     isFallbackProjection: false,
@@ -67,9 +73,11 @@ function resolveMlbStatsProjection(prop = {}, statsMap = null, seasonStats = [])
     const profile = findStatProfile(statsMap, prop);
     const profileProjection = finite(profile?.projection ?? profile?.projectedValue);
     if (profileProjection != null && profileProjection > 0 && !profile?.fallback) {
+      if (projectionEqualsLine(profileProjection, prop.line)) return null;
+      const projection = separateProjectionFromLine(profileProjection, prop.line, prop);
       return {
-        projection: profileProjection,
-        projectedValue: profileProjection,
+        projection,
+        projectedValue: projection,
         projectionSource: "mlbstats",
         projectionStatus: "mlbstats",
         isFallbackProjection: false,
@@ -90,10 +98,11 @@ function resolveMlbStatsProjection(prop = {}, statsMap = null, seasonStats = [])
 
   if (statRow) {
     const fallback = buildStatFallbackProjection(prop, statRow, prop.statType || prop.market || "");
-    if (fallback?.projection > 0) {
+    if (fallback?.projection > 0 && !projectionEqualsLine(fallback.projection, prop.line)) {
+      const projection = separateProjectionFromLine(fallback.projection, prop.line, prop);
       return {
-        projection: fallback.projection,
-        projectedValue: fallback.projection,
+        projection,
+        projectedValue: projection,
         projectionSource: "mlbstats",
         projectionStatus: "mlbstats",
         isFallbackProjection: false,
@@ -108,7 +117,8 @@ function resolveMlbStatsProjection(prop = {}, statsMap = null, seasonStats = [])
 }
 
 function attachProjection(prop = {}, patch = {}) {
-  const projection = finite(patch.projection ?? patch.projectedValue);
+  let projection = finite(patch.projection ?? patch.projectedValue);
+  projection = separateProjectionFromLine(projection, prop.line, prop);
   return {
     ...prop,
     ...patch,

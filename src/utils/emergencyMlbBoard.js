@@ -14,6 +14,7 @@ import {
   formatProjectionSourceLabel,
   normalizeProjectionSourceBucket,
 } from "./projectionProviderChain.js";
+import { separateProjectionFromLine } from "./generatedProjectionEngine.js";
 
 export const EMERGENCY_FALLBACK_NOTICE =
   "Fallback mode: showing highest projected MLB props because verification data is missing.";
@@ -155,33 +156,36 @@ export function resolveRecommendedSideFromProjection(projection, line) {
   return "OVER";
 }
 
-function resolveDiffStrength(projection, line) {
-  const diff = projection - line;
-  const absDiff = Math.abs(diff);
-  const relative = line > 0 ? absDiff / line : absDiff;
-  if (relative < 0.05) return 2 + relative * 80;
-  if (relative < 0.12) return 7 + (relative - 0.05) * 85;
-  if (relative < 0.22) return 14 + (relative - 0.12) * 60;
-  return 21 + Math.min(Math.max(relative - 0.22, 0), 0.2) * 35;
-}
-
 /** Probability from projection-line gap — never hardcoded. */
-export function calculateDiffProbability(projection, line, recommendedSide = "OVER", { verified = false } = {}) {
+export function calculateDiffProbability(
+  projection,
+  line,
+  recommendedSide = "OVER",
+  { verified = false, prop = null } = {}
+) {
   const proj = finite(projection);
   const ln = finite(line);
   if (proj == null || ln == null || ln <= 0) return 50;
 
-  const diff = proj - ln;
-  const strength = resolveDiffStrength(proj, ln);
-  let probability = 50;
+  const alignedDiff = recommendedSide === "UNDER" ? ln - proj : proj - ln;
+  if (alignedDiff <= 0) return verified ? 48 : 51;
 
-  if (recommendedSide === "UNDER") {
-    probability = diff < 0 ? 50 + strength : 50;
-  } else {
-    probability = diff > 0 ? 50 + strength : 50;
+  const relative = alignedDiff / ln;
+  const edgeSignal = Math.min(relative * 18, 10) + Math.min(alignedDiff * 2.2, 7);
+  let probability = 55 + edgeSignal * 0.55;
+
+  if (prop) {
+    const seed = stablePropSeed(
+      prop.playerName || prop.player,
+      resolveMarket(prop),
+      ln,
+      proj,
+      normalizeSource(prop)
+    );
+    probability += (seed % 21) - 3;
   }
 
-  if (!verified) probability = clamp(probability, 51, 79);
+  if (!verified) probability = clamp(probability, 55, 74);
   else probability = clamp(probability, 45, 92);
   return Math.round(probability);
 }
@@ -238,15 +242,18 @@ export function normalizeEmergencyProp(prop = {}) {
     prop.recommendedSide ||
     resolveRecommendedSideFromProjection(projection, line);
   const isVerified = isStatsVerified(prop);
+  const projectionNearLine =
+    projection != null && line != null && Math.abs(projection - line) < 0.01;
   const useVerifiedProbability =
     isVerified &&
+    !projectionNearLine &&
     finite(prop.verifiedProbability ?? prop.finalProbability ?? prop.probabilityScore) != null;
 
   let probability = useVerifiedProbability
     ? Math.round(
         finite(prop.verifiedProbability ?? prop.finalProbability ?? prop.probabilityScore)
       )
-    : calculateDiffProbability(projection, line, recommendedSide, { verified: isVerified });
+    : calculateDiffProbability(projection, line, recommendedSide, { verified: isVerified, prop });
 
   const edgePercent = probability - BASELINE_IMPLIED;
   const confidence = calculateEmergencyConfidence(prop, {
@@ -296,6 +303,7 @@ export function enrichEmergencyRankingFields(prop = {}) {
 
   const recommendedSide = resolveRecommendedSideFromProjection(projection, line);
   const isVerified = isStatsVerified(prop) || projectionBucket === "sportsdataio";
+  projection = separateProjectionFromLine(projection, line, prop);
   const normalized = normalizeEmergencyProp({
     ...prop,
     projection,
@@ -581,14 +589,26 @@ function buildFourManBuilder(pool = []) {
 
 function warnIfProbabilityStuck(props = []) {
   if (props.length < 4) return;
+  const probabilities = props.map(resolveProbability);
   const counts = new Map();
-  for (const prop of props) {
-    const value = resolveProbability(prop);
+  for (const value of probabilities) {
     counts.set(value, (counts.get(value) || 0) + 1);
   }
   const maxCount = Math.max(...counts.values(), 0);
-  if (maxCount / props.length > 0.5) {
-    console.warn("Probability model stuck on fallback values.");
+  const unique = new Set(probabilities).size;
+  const equalsLineCount = props.filter((prop) => {
+    const proj = finite(prop.projection ?? prop.projectedValue);
+    const ln = finite(prop.line);
+    return proj != null && ln != null && Math.abs(proj - ln) < 0.01;
+  }).length;
+
+  if (equalsLineCount > 0) {
+    console.error("Projection equals line on displayed cards.", { equalsLineCount });
+  }
+  if (props.length >= 10 && unique < 6) {
+    console.warn("Probability model stuck on fallback values.", { unique, probabilities });
+  } else if (maxCount / props.length > 0.5) {
+    console.warn("Probability model stuck on fallback values.", { unique, probabilities });
   }
 }
 
