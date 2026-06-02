@@ -1,5 +1,7 @@
 /** Per-source rate-limit state, cooldowns, and request locks. */
 
+import { isDevEnvironment } from "./fetchUtil.js";
+
 export const SOURCE_IDS = {
   PRIZEPICKS: "PrizePicks",
   UNDERDOG: "Underdog",
@@ -98,10 +100,12 @@ export function getSourceState(sourceId) {
 }
 
 export function isSourceInCooldown(sourceId) {
+  if (isDevEnvironment()) return false;
   return isSourceInCooldownFromState(getSourceState(sourceId));
 }
 
 export function getCooldownRemainingMs(sourceId) {
+  if (isDevEnvironment()) return 0;
   return Math.max(0, Number(getSourceState(sourceId).cooldownUntil || 0) - Date.now());
 }
 

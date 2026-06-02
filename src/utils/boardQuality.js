@@ -1040,6 +1040,19 @@ export function buildTopBestPlaysPicks(
 
   picks = picks.sort(compareTopPlayFinalScore).slice(0, limit);
 
+  if (!picks.length && tierPools.projectedFallback?.length) {
+    picks = [...tierPools.projectedFallback]
+      .sort((a, b) => {
+        const evA = Number(a.evScore ?? a.edge ?? a.playabilityScore ?? 0);
+        const evB = Number(b.evScore ?? b.edge ?? b.playabilityScore ?? 0);
+        return evB - evA;
+      })
+      .slice(0, 25);
+    diagnostics.usedProjectedEmergencyFallback = true;
+    diagnostics.fallbackNotice =
+      diagnostics.fallbackNotice || "Showing top projected props — tier A/B/C filters returned none.";
+  }
+
   diagnostics.activeTier = activeTier;
   diagnostics.tierADisplayed = picks.filter((prop) => resolveFinalTier(prop) === "A").length;
   diagnostics.tierBDisplayed = picks.filter((prop) => resolveFinalTier(prop) === "B").length;

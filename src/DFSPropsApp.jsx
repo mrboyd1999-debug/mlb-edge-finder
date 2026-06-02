@@ -2148,6 +2148,10 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     normalized: coreDisplayProps.length,
     filteredMlb: scopedCoreRawProps.length,
   });
+  console.log("[Pipeline Stage] post-merge", {
+    rawProps: rawProps.length,
+    normalizedProps: coreDisplayProps.length,
+  });
 
   if (
     typeof onCoreReady === "function" &&
@@ -2391,6 +2395,11 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     normalized: allDisplayProps.length,
     filteredMlb: workingNormalProps.length,
     display: allDisplayProps.length,
+  });
+  console.log("[Pipeline Stage] post-filter", {
+    rawProps: rawProps.length,
+    normalizedProps: allDisplayProps.length,
+    filteredProps: workingNormalProps.length,
   });
 
   if (allDisplayProps.length) {
@@ -3197,6 +3206,19 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   console.log("LIVE PROJECTED", pipelinePropCountSnapshot.projectedProps || countMergedProjections(allDisplayProps) || 0);
   console.log("LIVE VERIFIED", verifiedForTrace);
   console.log("LIVE RENDERED", liveRenderResult.props.length);
+  const pipelinePropStageCounts = {
+    rawProps: rawProps.length,
+    normalizedProps: allDisplayProps.length,
+    projectedProps:
+      pipelinePropCountSnapshot.projectedProps ||
+      countMergedProjections(allDisplayProps) ||
+      0,
+    verifiedProps: verifiedForTrace,
+    filteredProps: workingNormalProps.length,
+    displayedProps: liveRenderResult.props.length,
+  };
+  console.log("[Pipeline Stage Counts]", pipelinePropStageCounts);
+  debugInfo.pipelinePropStageCounts = pipelinePropStageCounts;
   debugInfo.liveBoardPipelineTrace = buildLiveBoardPipelineTrace({
     normalized: pipelineTraceNormalizedPool.length,
     provider: liveProviderPlayCount,
@@ -4372,7 +4394,10 @@ export default function DFSPropsApp() {
     [allDisplayProps, pipelineFallback, debugInfo?.ingestionFallback]
   );
   const boardDisplayProps = useMemo(() => {
-    const base = acceptedPropsForRender.length ? acceptedPropsForRender : liveRenderBoard.props;
+    let base = acceptedPropsForRender.length ? acceptedPropsForRender : liveRenderBoard.props;
+    if (!base?.length && allDisplayProps.length) {
+      base = liveRenderBoard.props?.length ? liveRenderBoard.props : allDisplayProps;
+    }
     const slateGames = debugInfo?.sportsDataSlateGames || [];
     const withSlate =
       slateGames.length && base?.length
@@ -4548,7 +4573,11 @@ export default function DFSPropsApp() {
         allDisplayProps.length,
         (boardDisplayProps || []).filter((p) => !p.isDemoData).length
       );
-      const board = resolveTopMlbPlaySections(boardDisplayProps, props, parsedUnderdogProps, {
+      const board = resolveTopMlbPlaySections(
+        boardDisplayProps.length ? boardDisplayProps : allDisplayProps,
+        props.length ? props : allDisplayProps,
+        parsedUnderdogProps,
+        {
         sourceStatus,
         lastUpdated,
         debugInfo,
@@ -5003,8 +5032,9 @@ export default function DFSPropsApp() {
   );
   const refreshBlocked =
     loading ||
-    (!boardFreshness.stale && refreshCooldownSec > 0) ||
-    (!boardFreshness.stale && sourceCooldownSec > 0);
+    (!isDevEnvironment() &&
+      !boardFreshness.stale &&
+      (refreshCooldownSec > 0 || sourceCooldownSec > 0));
   const lastUpdatedLabel = useMemo(() => {
     const ts = resolveLastRefreshTimestamp({
       lastUpdated,

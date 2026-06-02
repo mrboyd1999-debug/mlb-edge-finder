@@ -15,6 +15,11 @@ export function getAutoRefreshIntervalMs() {
 }
 
 export function getManualRefreshCooldownMs() {
+  try {
+    if (import.meta.env?.DEV) return 0;
+  } catch {
+    // ignore
+  }
   return MANUAL_REFRESH_COOLDOWN_MS;
 }
 
