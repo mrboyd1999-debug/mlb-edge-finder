@@ -49,10 +49,12 @@ export function buildBoardFreshnessDebug({
   boardUpdatedAt = "",
   currentFetchTime = "",
   liveProviderCount = 0,
+  liveNormalizedCount = 0,
   cacheUsed = false,
 } = {}) {
   const ageMinutes = resolveBoardAgeMinutes(boardUpdatedAt);
-  const fresh = isBoardFreshForLiveDisplay(boardUpdatedAt) && !cacheUsed;
+  const hasLiveNormalized = Number(liveNormalizedCount) > 0 && Number(liveProviderCount) > 0;
+  const fresh = hasLiveNormalized || (isBoardFreshForLiveDisplay(boardUpdatedAt) && !cacheUsed);
   const stale = !fresh;
 
   return {
@@ -60,6 +62,7 @@ export function buildBoardFreshnessDebug({
     boardUpdatedAt: boardUpdatedAt || "",
     boardAgeMinutes: ageMinutes,
     liveProviderCount: Number(liveProviderCount) || 0,
+    liveNormalizedCount: Number(liveNormalizedCount) || 0,
     cacheUsed: Boolean(cacheUsed),
     stale,
     fresh,

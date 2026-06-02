@@ -251,7 +251,7 @@ import {
   STARTUP_NORMALIZED_PROP_LIMIT,
 } from "./utils/startupPerformance.js";
 import { prepareProjectionHotPath, MAX_PROJECTION_PROPS } from "./utils/projectionHotPath.js";
-import { syncProjectionFieldsOntoProps } from "./utils/pipelineProjectionAttach.js";
+import { applyLiveProjectionPipeline } from "./utils/pipelineProjectionAttach.js";
 import {
   auditPipelineRejectionReasons,
   buildPipelineStageCounts,
@@ -2291,6 +2291,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
   debugInfo.allDisplayPropsCount = allDisplayProps.length;
   let pipelineTraceNormalizedPool = [...allDisplayProps];
+  let workingNormalProps = [...allDisplayProps];
+  let workingActiveProps = [...allDisplayProps];
   const liveProviderPlayCount = countLiveProviderProps(pipelineTraceNormalizedPool);
   console.log("NORMALIZED", allDisplayProps.length);
   console.log("LIVE NORMALIZED", pipelineTraceNormalizedPool.length);
@@ -2354,8 +2356,8 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   });
   const { slateProps, canonicalProps, activeProps, normalProps } = filtered;
   let usablePropsPool = buildUsablePropsPool(rawProps);
-  let workingActiveProps = Array.isArray(activeProps) ? activeProps : [];
-  let workingNormalProps = Array.isArray(normalProps) ? normalProps : [];
+  workingActiveProps = Array.isArray(activeProps) ? activeProps : workingActiveProps;
+  workingNormalProps = Array.isArray(normalProps) ? normalProps : workingNormalProps;
 
   const scoringStartupLimited = limitStartupPropPool(workingNormalProps);
   if (scoringStartupLimited.startupProps.length && workingNormalProps.length > STARTUP_NORMALIZED_PROP_LIMIT) {
@@ -2716,11 +2718,12 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       };
       const merged = mergeProjectionsOntoProps(projectedWorkingProps, mergeContext);
       projectedWorkingProps = merged.props;
-      allDisplayProps = syncProjectionFieldsOntoProps(fullDisplayBoard, projectedWorkingProps);
+      const projectionPipeline = applyLiveProjectionPipeline(fullDisplayBoard, projectedWorkingProps);
+      allDisplayProps = projectionPipeline.props;
       workingNormalProps = allDisplayProps;
       workingActiveProps = allDisplayProps;
       pipelinePropCountSnapshot.afterProjectionMerge = allDisplayProps.length;
-      pipelinePropCountSnapshot.projectedProps = countMergedProjections(allDisplayProps);
+      pipelinePropCountSnapshot.projectedProps = projectionPipeline.projectedCount;
       console.log("PROJECTED", pipelinePropCountSnapshot.projectedProps);
 
       const needsEngineProjections =
@@ -2733,10 +2736,11 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
           initialMergeDebug: merged.debug,
         });
         projectedWorkingProps = enrichmentResult.props;
-        allDisplayProps = syncProjectionFieldsOntoProps(fullDisplayBoard, projectedWorkingProps);
+        const enrichmentPipeline = applyLiveProjectionPipeline(fullDisplayBoard, projectedWorkingProps);
+        allDisplayProps = enrichmentPipeline.props;
         workingNormalProps = allDisplayProps;
         workingActiveProps = allDisplayProps;
-        pipelinePropCountSnapshot.projectedProps = countPropsWithProjections(allDisplayProps);
+        pipelinePropCountSnapshot.projectedProps = enrichmentPipeline.projectedCount;
         debugInfo.mlbEnrichmentDebug = enrichmentResult.debug;
         console.log("PROJECTED AFTER ENGINE", pipelinePropCountSnapshot.projectedProps);
       }
@@ -3116,11 +3120,14 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   debugInfo.projectionErrors = mlbProjectionDiagnostics.projectionErrors;
 
   allDisplayProps = mergeScoredIntoDisplayProps(allDisplayProps, scoredProps);
-  if (MLB_ONLY_MODE && scoredProps.length && projectedWorkingProps?.length) {
-    allDisplayProps = syncProjectionFieldsOntoProps(
-      allDisplayProps,
-      mergeScoredIntoDisplayProps(projectedWorkingProps, scoredProps)
-    );
+  if (MLB_ONLY_MODE && allDisplayProps.length) {
+    const scoredSources =
+      scoredProps.length && projectedWorkingProps?.length
+        ? mergeScoredIntoDisplayProps(projectedWorkingProps, scoredProps)
+        : scoredProps;
+    const scoredPipeline = applyLiveProjectionPipeline(allDisplayProps, scoredSources);
+    allDisplayProps = scoredPipeline.props;
+    pipelinePropCountSnapshot.projectedProps = scoredPipeline.projectedCount;
   }
   if (emergencyDiagnostic?.success && emergencyDiagnostic.forcedVerifiedProp) {
     const canary = emergencyDiagnostic.forcedVerifiedProp;
@@ -3133,6 +3140,10 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   }
   workingNormalProps = mergeScoredIntoDisplayProps(workingNormalProps, scoredProps);
   workingActiveProps = mergeScoredIntoDisplayProps(workingActiveProps, scoredProps);
+  if (MLB_ONLY_MODE && allDisplayProps.length) {
+    workingNormalProps = allDisplayProps;
+    workingActiveProps = allDisplayProps;
+  }
 
   if (typeof onCoreReady === "function" && allDisplayProps.length && MLB_ONLY_MODE && !coreReadySent) {
     try {
@@ -3202,6 +3213,21 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   const allowFallbackRender = Boolean(
     pipelineFallback && /sportsdata/i.test(String(debugInfo.ingestionFallback || ""))
   );
+  if (
+    MLB_ONLY_MODE &&
+    pipelineTraceNormalizedPool.length > 0 &&
+    countMergedProjections(allDisplayProps) === 0
+  ) {
+    const fallbackPipeline = applyLiveProjectionPipeline(allDisplayProps, []);
+    allDisplayProps = fallbackPipeline.props;
+    workingNormalProps = allDisplayProps;
+    workingActiveProps = allDisplayProps;
+    pipelinePropCountSnapshot.projectedProps = fallbackPipeline.projectedCount;
+    console.warn("[Pipeline Trace] normalized fallback projections applied", {
+      normalized: pipelineTraceNormalizedPool.length,
+      projected: fallbackPipeline.projectedCount,
+    });
+  }
   const bypassRenderProps = isPipelineBypassProjectionEnabled()
     ? pickUnderdogBypassRenderProps(pipelineTraceNormalizedPool, 20)
     : [];
@@ -3298,12 +3324,14 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     displayedProps: acceptedPropsForRender.length,
   });
   debugInfo.liveBoardPipelineTrace = buildLiveBoardPipelineTrace({
+    raw: rawProps.length,
     normalized: pipelineTraceNormalizedPool.length,
     provider: liveProviderPlayCount,
     combined: allDisplayProps.length,
     projected: pipelinePropCountSnapshot.projectedProps || countMergedProjections(allDisplayProps) || 0,
     verified: verifiedForTrace,
     rendered: liveRenderResult.props.length,
+    cacheUsed: false,
   });
   logLiveBoardPipelineTrace(debugInfo.liveBoardPipelineTrace);
   const modelSignalMap = buildModelSignalMap(filterVerifiedSportsbookProps(qualBoards.allDisplayable));
@@ -3938,7 +3966,7 @@ export default function DFSPropsApp() {
           clearApiCache({ preserveLastGood: true });
         }
 
-        if (hasCachedPaint) {
+        if (hasCachedPaint && !force) {
           const layer =
             cachedForPaint.cacheMetadata?.freshnessTier ||
             resolveCacheLayer(new Date(cachedForPaint.updatedAt).getTime(), DFS_CACHE_TTL_MS);
@@ -4161,6 +4189,12 @@ export default function DFSPropsApp() {
           };
         }
         applyBoardState(board, hasLiveBoard ? "fresh" : "cached");
+        if (board.debugInfo?.liveBoardPipelineTrace) {
+          board.debugInfo.liveBoardPipelineTrace = {
+            ...board.debugInfo.liveBoardPipelineTrace,
+            cacheUsed: Boolean(mergeResult.keptPrevious || (refreshCacheContext.painted && !hasLiveBoard)),
+          };
+        }
         if (force && hasLiveBoard) {
           console.log("[Refresh] fresh board", {
             props: board.props.length,
@@ -4506,7 +4540,11 @@ export default function DFSPropsApp() {
     [allDisplayProps, pipelineFallback, debugInfo?.ingestionFallback]
   );
   const boardDisplayProps = useMemo(() => {
+    const liveNormalized = Number(debugInfo?.liveBoardPipelineTrace?.normalized ?? 0);
     let base = acceptedPropsForRender.length ? acceptedPropsForRender : liveRenderBoard.props;
+    if (liveNormalized > 0 && countMergedProjections(allDisplayProps) > countMergedProjections(base)) {
+      base = allDisplayProps;
+    }
     if (!base.length && allDisplayProps.length) {
       base = liveRenderBoard.props.length ? liveRenderBoard.props : allDisplayProps;
     }
@@ -5146,6 +5184,7 @@ export default function DFSPropsApp() {
       boardUpdatedAt: lastUpdated,
       currentFetchTime,
       liveProviderCount: fetchAudit?.liveProviderCount ?? 0,
+      liveNormalizedCount: debugInfo?.liveBoardPipelineTrace?.normalized ?? 0,
       cacheUsed,
     });
     return buildRenderSourceAudit({
@@ -5175,9 +5214,10 @@ export default function DFSPropsApp() {
         boardUpdatedAt: lastUpdated,
         currentFetchTime,
         liveProviderCount: providerCoverageAuditDisplay?.liveProviderCount ?? 0,
+        liveNormalizedCount: debugInfo?.liveBoardPipelineTrace?.normalized ?? 0,
         cacheUsed: !/^(fresh|live)$/i.test(String(cacheStatus || "").trim()),
       }),
-    [providerCoverageAuditDisplay, lastUpdated, currentFetchTime, cacheStatus]
+    [providerCoverageAuditDisplay, lastUpdated, currentFetchTime, cacheStatus, debugInfo?.liveBoardPipelineTrace?.normalized]
   );
   const refreshBlocked =
     loading ||
@@ -5434,6 +5474,7 @@ export default function DFSPropsApp() {
 
   const handleRefresh = useCallback(async () => {
     console.log("[Refresh] started");
+    clearAllLiveDataCaches();
     setError("");
     setShowStaleCache(false);
     setRefreshCooldownSec(0);

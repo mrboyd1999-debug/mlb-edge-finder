@@ -1,6 +1,7 @@
 import { normalizeProp, isMinimalRenderableProp } from "./normalizeProp.js";
 import { filterResolvedSportProps } from "./underdogSportDetection.js";
 import { normalizeSource } from "./normalizeSource.js";
+import { isVerifiedSportsbookProp } from "./propValidation.js";
 
 export function isFakeOrFallbackProp(prop = {}) {
   if (!prop || typeof prop !== "object") return true;
@@ -77,4 +78,45 @@ export function buildProjectedDisplayFallback(props = [], limit = 25) {
     })
     .slice(0, limit)
     .map(preparePropForRender);
+}
+
+function isLiveProviderProp(prop = {}) {
+  const src = normalizeSource(prop);
+  if (src !== "prizepicks" && src !== "underdog") return false;
+  if (prop.fromCache || prop.cacheLayer) return false;
+  if (String(prop.lineSourceBadge || "").toUpperCase() === "CACHED") return false;
+  return true;
+}
+
+function hasPositiveProjection(prop = {}) {
+  const projection = Number(prop?.projection ?? prop?.projectedValue);
+  return Number.isFinite(projection) && projection > 0;
+}
+
+/** Best Plays priority: verified → projected → normalized fallback → cache only when live = 0. */
+export function buildLiveBestPlaysPriorityPools(props = []) {
+  const live = (props || []).filter((prop) => isLiveProviderProp(prop) && !isFakeOrFallbackProp(prop));
+  const liveVerifiedProps = live.filter((prop) => isVerifiedSportsbookProp(prop));
+  const liveProjectedProps = live.filter(
+    (prop) =>
+      hasPositiveProjection(prop) &&
+      !isVerifiedSportsbookProp(prop) &&
+      !prop.isNormalizedFallbackProjection
+  );
+  const liveNormalizedFallbackProps = live.filter((prop) => prop.isNormalizedFallbackProjection);
+  const pool = [...liveVerifiedProps, ...liveProjectedProps, ...liveNormalizedFallbackProps];
+  return {
+    liveVerifiedProps,
+    liveProjectedProps,
+    liveNormalizedFallbackProps,
+    liveTotal: pool.length,
+    pool,
+  };
+}
+
+/** Prefer live pools; fall back to cache-backed props only when live count is zero. */
+export function resolveLiveBestPlaysInputPool(props = []) {
+  const livePools = buildLiveBestPlaysPriorityPools(props);
+  if (livePools.liveTotal > 0) return livePools.pool;
+  return props || [];
 }

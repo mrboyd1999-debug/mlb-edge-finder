@@ -65,10 +65,12 @@ function LiveBoardPipelineBanner({
           ) : null}
           {trace ? (
             <p className="provider-feed-mode-banner__detail live-board-pipeline-banner__metrics">
-              <Metric label="LIVE NORMALIZED" value={trace?.normalized} />
-              <Metric label="LIVE PROJECTED" value={trace?.projected} />
-              <Metric label="LIVE VERIFIED" value={trace?.verified} />
-              <Metric label="LIVE RENDERED" value={trace?.rendered} />
+              <Metric label="LIVE_RAW" value={trace?.raw} />
+              <Metric label="LIVE_NORMALIZED" value={trace?.normalized} />
+              <Metric label="LIVE_PROJECTED" value={trace?.projected} />
+              <Metric label="LIVE_VERIFIED" value={trace?.verified} />
+              <Metric label="LIVE_RENDERED" value={trace?.rendered} />
+              <Metric label="CACHE_USED" value={String(trace?.cacheUsed ?? freshness?.cacheUsed ?? false)} />
             </p>
           ) : null}
           {onClearCacheAndReload ? (

@@ -44,12 +44,14 @@ export function logPipelineStageTrace(stages = {}) {
 }
 
 export function logLiveBoardPipelineTrace(stages = {}) {
+  console.log("LIVE_RAW", stages.raw ?? 0);
   console.log("LIVE NORMALIZED", stages.normalized ?? 0);
   console.log("LIVE PROVIDER", stages.provider ?? 0);
   console.log("LIVE COMBINED", stages.combined ?? 0);
   console.log("LIVE PROJECTED", stages.projected ?? 0);
   console.log("LIVE VERIFIED", stages.verified ?? 0);
   console.log("LIVE RENDERED", stages.rendered ?? 0);
+  console.log("CACHE_USED", Boolean(stages.cacheUsed));
 }
 
 export function pickUnderdogBypassRenderProps(normalizedPool = [], limit = 20) {
@@ -97,12 +99,14 @@ export function buildBypassLiveRenderResult(props = []) {
 
 export function buildLiveBoardPipelineTrace(stages = {}) {
   return {
+    raw: Number(stages.raw ?? 0),
     normalized: Number(stages.normalized ?? 0),
     provider: Number(stages.provider ?? 0),
     combined: Number(stages.combined ?? 0),
     projected: Number(stages.projected ?? 0),
     verified: Number(stages.verified ?? 0),
     rendered: Number(stages.rendered ?? 0),
+    cacheUsed: Boolean(stages.cacheUsed),
     updatedAt: new Date().toISOString(),
   };
 }

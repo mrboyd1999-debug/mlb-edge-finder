@@ -57,9 +57,21 @@ export function mergeBoardRefreshResult(previous = {}, incoming = {}) {
   const nextCount = countBoardProps(incoming);
   const liveProviderCount = countLiveProviderBoardProps(incoming);
   const providerRawCount = countProviderRawProps(incoming);
+  const normalizedCount = Number(
+    incoming.debugInfo?.liveBoardPipelineTrace?.normalized ??
+      incoming.debugInfo?.pipelinePropCountAudit?.normalizedProps ??
+      0
+  );
   const projectedCount = countMergedProjections(incoming.allDisplayProps || incoming.props || []);
   const liveFetchSucceeded =
-    liveProviderCount > 0 || providerRawCount >= 50 || projectedCount >= 20;
+    liveProviderCount > 0 ||
+    providerRawCount >= 50 ||
+    projectedCount >= 20 ||
+    normalizedCount >= 50;
+
+  if (nextCount > 0 && normalizedCount > 0 && liveProviderCount > 0) {
+    return { board: incoming, replaced: true, keptPrevious: false, merged: false };
+  }
 
   if (nextCount > 0 && liveFetchSucceeded) {
     return { board: incoming, replaced: true, keptPrevious: false, merged: false };

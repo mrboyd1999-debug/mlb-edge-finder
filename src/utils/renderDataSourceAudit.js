@@ -229,6 +229,7 @@ export function buildRenderSourceAudit({
       boardUpdatedAt: refreshTimestamp || lastUpdated,
       currentFetchTime: debugInfo?.boardFreshness?.currentFetchTime || "",
       liveProviderCount: sourceCounts.LIVE_PROVIDER_COUNT,
+      liveNormalizedCount: debugInfo?.liveBoardPipelineTrace?.normalized ?? 0,
       cacheUsed,
     });
   const boardFresh = isBoardFreshForLiveDisplay(refreshTimestamp || lastUpdated) && !freshness.cacheUsed;
