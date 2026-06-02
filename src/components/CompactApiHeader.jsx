@@ -6,6 +6,7 @@ function CompactApiHeader({
   loading = false,
   refreshBlocked = false,
   refreshCountdownSec = 0,
+  staleDataActive = false,
   onRefresh,
   lastUpdated = "",
   showDebugPanels = false,
@@ -13,9 +14,9 @@ function CompactApiHeader({
 }) {
   const refreshLabel = loading
     ? "Loading…"
-    : refreshCountdownSec > 0
-      ? `Wait ${formatCooldownRemaining(refreshCountdownSec * 1000)}`
-      : "Refresh";
+    : staleDataActive || refreshCountdownSec <= 0
+      ? "Refresh"
+      : `Wait ${formatCooldownRemaining(refreshCountdownSec * 1000)}`;
 
   return (
     <header className="compact-app-header">

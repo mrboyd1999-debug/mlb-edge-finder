@@ -55,19 +55,20 @@ function hasUsableProps(feed = {}) {
 }
 
 function isSportsDataConnected(row = {}, mlbPipelineStatus = null) {
-  const playersTest = row.endpointTests?.find((entry) => entry.id === "players");
-  const statsTest = row.endpointTests?.find((entry) =>
+  const safeRow = row && typeof row === "object" ? row : {};
+  const playersTest = safeRow.endpointTests?.find((entry) => entry.id === "players");
+  const statsTest = safeRow.endpointTests?.find((entry) =>
     /stats|mlb/i.test(String(entry.id || entry.label || ""))
   );
   const playersOk =
     playersTest?.ok === true ||
     (Number(playersTest?.httpStatus) === 200 && Number(playersTest?.recordCount) >= 0);
   const statsOk = statsTest?.ok === true || Number(statsTest?.httpStatus) === 200;
-  const settingsOk = /connected/i.test(String(row.settingsLine || row.statusLabel || ""));
+  const settingsOk = /connected/i.test(String(safeRow.settingsLine || safeRow.statusLabel || ""));
   const pipelineOk =
     finite(mlbPipelineStatus?.sportsDataProfilesMatched ?? mlbPipelineStatus?.profilesMatched) > 0 ||
     finite(mlbPipelineStatus?.projectionCount) > 0;
-  return Boolean(row.ok || settingsOk || playersOk || statsOk || pipelineOk);
+  return Boolean(safeRow.ok || settingsOk || playersOk || statsOk || pipelineOk);
 }
 
 function resolveOddsApiHealth({ row, keyConfigured, testedAt, oddsFeed = {} }) {
@@ -150,10 +151,11 @@ function resolveOddsApiHealth({ row, keyConfigured, testedAt, oddsFeed = {} }) {
 }
 
 function resolveSportsDataHealth({ row, keyConfigured, testedAt, mlbPipelineStatus = null }) {
-  const playersTest = row?.endpointTests?.find((entry) => entry.id === "players");
+  const safeRow = row && typeof row === "object" ? row : {};
+  const playersTest = safeRow.endpointTests?.find((entry) => entry.id === "players");
   const debug = {
     endpointTested: playersTest?.url || "/Players",
-    responseCode: playersTest?.httpStatus ?? row?.httpStatus ?? row?.status ?? null,
+    responseCode: playersTest?.httpStatus ?? safeRow.httpStatus ?? safeRow.status ?? null,
     lastChecked: testedAt || null,
     cacheAge: "—",
     propsReturned: finite(mlbPipelineStatus?.profilesMatched ?? mlbPipelineStatus?.sportsDataProfilesMatched),
@@ -170,16 +172,16 @@ function resolveSportsDataHealth({ row, keyConfigured, testedAt, mlbPipelineStat
     };
   }
 
-  if (row?.unauthorized || /invalid/i.test(String(row?.settingsLine || row?.statusLabel || ""))) {
+  if (safeRow.unauthorized || /invalid/i.test(String(safeRow.settingsLine || safeRow.statusLabel || ""))) {
     return {
       status: "Invalid API key",
       color: API_STATUS_COLOR.RED,
-      detail: row?.message || "Key rejected by SportsDataIO",
+      detail: safeRow.message || "Key rejected by SportsDataIO",
       debug: { ...debug, failureReason: "Unauthorized / invalid key" },
     };
   }
 
-  if (row?.rateLimited) {
+  if (safeRow.rateLimited) {
     return {
       status: "Rate limited",
       color: API_STATUS_COLOR.YELLOW,
@@ -188,7 +190,7 @@ function resolveSportsDataHealth({ row, keyConfigured, testedAt, mlbPipelineStat
     };
   }
 
-  if (isSportsDataConnected(row, mlbPipelineStatus)) {
+  if (isSportsDataConnected(safeRow, mlbPipelineStatus)) {
     return {
       status: "Connected",
       color: API_STATUS_COLOR.GREEN,
@@ -199,20 +201,20 @@ function resolveSportsDataHealth({ row, keyConfigured, testedAt, mlbPipelineStat
     };
   }
 
-  if (row?.timedOut || row?.networkError) {
+  if (safeRow.timedOut || safeRow.networkError) {
     return {
       status: "Network failure",
       color: API_STATUS_COLOR.RED,
-      detail: row?.preview || row?.message || "SportsDataIO request failed",
-      debug: { ...debug, failureReason: row?.preview || "Network failure" },
+      detail: safeRow.preview || safeRow.message || "SportsDataIO request failed",
+      debug: { ...debug, failureReason: safeRow.preview || "Network failure" },
     };
   }
 
   return {
     status: "Required provider unavailable",
     color: API_STATUS_COLOR.RED,
-    detail: playersTest?.message || row?.message || "SportsDataIO endpoints failed",
-    debug: { ...debug, failureReason: playersTest?.message || row?.message || "Endpoint failed" },
+    detail: playersTest?.message || safeRow.message || "SportsDataIO endpoints failed",
+    debug: { ...debug, failureReason: playersTest?.message || safeRow.message || "Endpoint failed" },
   };
 }
 
@@ -426,7 +428,7 @@ function resolveOverallHealth({
   if (boardFreshness?.stale) {
     return {
       status: STALE_DATA_HEADLINE,
-      color: API_STATUS_COLOR.RED,
+      color: API_STATUS_COLOR.YELLOW,
       detail: "Board timestamp is not from today or is older than 15 minutes — refresh required",
       debug: {
         failureReason: "Stale board data",

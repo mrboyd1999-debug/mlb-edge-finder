@@ -235,7 +235,10 @@ export function clearAllLiveDataCaches() {
         key.startsWith("mlb-last-good-") ||
         key.startsWith("dfs-smart-cache:") ||
         key === "pp_cache" ||
-        key === "ud_cache"
+        key === "ud_cache" ||
+        key === "mlb_board_cache" ||
+        key === "mlb_props_cache" ||
+        key === "provider_board_cache"
       ) {
         localKeys.push(key);
       }

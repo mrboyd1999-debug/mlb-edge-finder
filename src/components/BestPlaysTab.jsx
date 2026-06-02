@@ -35,6 +35,10 @@ function BestPlaysTab({
   onOpen,
   filterDiagnostics = null,
   showDebugPanels = false,
+  staleDataActive = false,
+  showStaleCache = false,
+  onShowStaleCache,
+  boardUpdatedAt = "",
 }) {
   const [payoutFilter, setPayoutFilter] = useState("all");
   const topBestPlaysSection = useMemo(() => findSection(sections, "top-10-best-plays"), [sections]);
@@ -59,6 +63,23 @@ function BestPlaysTab({
           Loading MLB verified plays…
           {loadingStage ? ` (${liveBoardLoadingMessage(loadingStage)})` : ""}
         </p>
+      </div>
+    );
+  }
+
+  if (staleDataActive && !showStaleCache) {
+    return (
+      <div className="compact-tab-panel">
+        <section className="compact-section">
+          <h2>Best Plays</h2>
+          <p className="compact-form-notice">
+            Board data is stale{boardUpdatedAt ? ` (${boardUpdatedAt})` : ""}. Click Refresh to load today&apos;s lines,
+            or view the cached board below.
+          </p>
+          <button type="button" className="compact-form-button" onClick={onShowStaleCache}>
+            Show stale cache
+          </button>
+        </section>
       </div>
     );
   }

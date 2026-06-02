@@ -52,7 +52,7 @@ function ProviderFeedModeBanner({
   const headlineStyle = loading
     ? apiStatusStyle(API_STATUS_COLOR.YELLOW)
     : freshness?.stale
-      ? apiStatusStyle(API_STATUS_COLOR.RED)
+      ? apiStatusStyle(API_STATUS_COLOR.YELLOW)
       : liveAvailable
         ? apiStatusStyle(API_STATUS_COLOR.GREEN)
         : apiStatusStyle(health.overall.color);

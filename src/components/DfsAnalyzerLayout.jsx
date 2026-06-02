@@ -35,6 +35,7 @@ function DfsAnalyzerLayout({
   loadError,
   refreshBlocked,
   refreshCountdownSec,
+  staleDataActive = false,
   onRefresh,
   lastUpdatedLabel,
   learningSaveNotice,
@@ -66,6 +67,8 @@ function DfsAnalyzerLayout({
   boardSummary = null,
   boardFreshness = null,
   onClearCacheAndReload = null,
+  showStaleCache = false,
+  onShowStaleCache,
 }) {
   const [connectionReport, setConnectionReport] = useState(() => {
     const meta = readSettingsMeta();
@@ -88,6 +91,7 @@ function DfsAnalyzerLayout({
         loading={loading}
         refreshBlocked={refreshBlocked}
         refreshCountdownSec={refreshCountdownSec}
+        staleDataActive={staleDataActive}
         onRefresh={onRefresh}
         showDebugPanels={showDebugPanels}
         onToggleDebugPanels={onShowDebugPanelsChange ? () => onShowDebugPanelsChange(!showDebugPanels) : undefined}
@@ -125,6 +129,10 @@ function DfsAnalyzerLayout({
             onOpen={onOpenProp}
             filterDiagnostics={topMlbPlayBoard?.filterDiagnostics}
             showDebugPanels={debugPanelsVisible}
+            staleDataActive={Boolean(boardFreshness?.stale)}
+            showStaleCache={showStaleCache}
+            onShowStaleCache={onShowStaleCache}
+            boardUpdatedAt={boardFreshness?.boardUpdatedAt || lastUpdatedLabel}
           />
         </SectionErrorBoundary>
       ) : null}

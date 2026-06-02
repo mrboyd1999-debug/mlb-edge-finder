@@ -2261,20 +2261,13 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
   let deferredDisplayProps = [];
   const normalizedBeforeStartupCap = allDisplayProps.length;
-  const startupLimited = limitStartupPropPool(workingNormalProps.length ? workingNormalProps : allDisplayProps);
-  deferredDisplayProps = startupLimited.deferredProps;
-  if (startupLimited.startupProps.length && workingNormalProps.length) {
-    workingNormalProps = startupLimited.startupProps;
-    workingActiveProps = workingActiveProps.slice(0, startupLimited.startupProps.length);
+  const displayStartupLimited = limitStartupPropPool(allDisplayProps);
+  deferredDisplayProps = displayStartupLimited.deferredProps;
+  if (displayStartupLimited.startupProps.length && allDisplayProps.length > STARTUP_NORMALIZED_PROP_LIMIT) {
+    allDisplayProps = displayStartupLimited.startupProps;
   } else if (allDisplayProps.length > STARTUP_NORMALIZED_PROP_LIMIT) {
     deferredDisplayProps = allDisplayProps.slice(STARTUP_NORMALIZED_PROP_LIMIT);
   }
-  debugInfo.startupPropLimit = {
-    processed: allDisplayProps.length,
-    scoringBatch: workingNormalProps.length,
-    deferred: deferredDisplayProps.length,
-    eligible: startupLimited.totalEligible || normalizedBeforeStartupCap,
-  };
   endPerformanceTimer(PERFORMANCE_TIMERS.normalizeProps);
 
   debugInfo.allDisplayPropsCount = allDisplayProps.length;
@@ -2342,8 +2335,21 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   });
   const { slateProps, canonicalProps, activeProps, normalProps } = filtered;
   let usablePropsPool = buildUsablePropsPool(rawProps);
-  let workingActiveProps = activeProps;
-  let workingNormalProps = normalProps;
+  let workingActiveProps = Array.isArray(activeProps) ? activeProps : [];
+  let workingNormalProps = Array.isArray(normalProps) ? normalProps : [];
+
+  const scoringStartupLimited = limitStartupPropPool(workingNormalProps);
+  if (scoringStartupLimited.startupProps.length && workingNormalProps.length > STARTUP_NORMALIZED_PROP_LIMIT) {
+    workingNormalProps = scoringStartupLimited.startupProps;
+    workingActiveProps = workingActiveProps.slice(0, scoringStartupLimited.startupProps.length);
+    deferredDisplayProps = [...deferredDisplayProps, ...scoringStartupLimited.deferredProps];
+  }
+  debugInfo.startupPropLimit = {
+    processed: allDisplayProps.length,
+    scoringBatch: workingNormalProps.length,
+    deferred: deferredDisplayProps.length,
+    eligible: displayStartupLimited.totalEligible || normalizedBeforeStartupCap,
+  };
 
   const verifiedFromUsable = filterVerifiedSportsbookProps(usablePropsPool);
 
@@ -3579,6 +3585,7 @@ export default function DFSPropsApp() {
   const [parlayHistory, setParlayHistory] = useState(() => trimHistoryToLimit(readParlayHistory()));
   const [lastUpdated, setLastUpdated] = useState("");
   const [currentFetchTime, setCurrentFetchTime] = useState("");
+  const [showStaleCache, setShowStaleCache] = useState(false);
   const [cacheStatus, setCacheStatus] = useState("");
   const [cacheNotice, setCacheNotice] = useState("");
   const [sourceStatus, setSourceStatus] = useState(DEFAULT_SOURCE_STATUS);
@@ -3734,6 +3741,9 @@ export default function DFSPropsApp() {
   }, [platform]);
 
   const loadProps = useCallback(async ({ force = false, autoRefresh = false } = {}) => {
+    if (force) {
+      console.log("[Refresh] started");
+    }
     if (!force && !autoRefresh && !isTabActive()) {
       console.info("[DFS Refresh] skipped — tab inactive");
       return;
@@ -3815,6 +3825,7 @@ export default function DFSPropsApp() {
       try {
         if (force) {
           clearAllLiveDataCaches();
+          console.log("[Refresh] cache cleared");
         } else if (autoRefresh) {
           clearApiCache({ preserveLastGood: true });
         }
@@ -4037,6 +4048,13 @@ export default function DFSPropsApp() {
           };
         }
         applyBoardState(board, hasLiveBoard ? "fresh" : "cached");
+        if (force && hasLiveBoard) {
+          console.log("[Refresh] fresh board", {
+            props: board.props.length,
+            updatedAt: board.updatedAt,
+            sourceStatus: board.sourceStatus,
+          });
+        }
         persistStartupBoardSlices(board);
         if (result.deferredDisplayProps?.length) {
           scheduleBackgroundWork(() => {
@@ -4087,6 +4105,9 @@ export default function DFSPropsApp() {
           sourceStatus: board.sourceStatus,
           autoRefresh,
         });
+        if (force) {
+          console.log("[Refresh] completed");
+        }
         setLoadingStage("DONE");
         beginPerformanceTimer(PERFORMANCE_TIMERS.renderDashboard);
         endPerformanceTimer(PERFORMANCE_TIMERS.renderDashboard);
@@ -5225,10 +5246,26 @@ export default function DFSPropsApp() {
     clearAllLiveDataCaches();
     lastSuccessfulFetchAtRef.current = "";
     setCurrentFetchTime("");
+    setShowStaleCache(false);
     setRefreshCooldownSec(0);
     setSourceCooldownSec(0);
     lastRefreshAtRef.current = 0;
     loadProps({ force: true });
+  }, [loadProps]);
+
+  const handleRefresh = useCallback(async () => {
+    console.log("[Refresh] started");
+    setError("");
+    setShowStaleCache(false);
+    setRefreshCooldownSec(0);
+    setSourceCooldownSec(0);
+    lastRefreshAtRef.current = 0;
+    try {
+      await loadProps({ force: true });
+    } catch (refreshError) {
+      console.error("[Refresh] failed", refreshError);
+      setError(getErrorMessage(refreshError));
+    }
   }, [loadProps]);
 
   function showMoreSection(section) {
@@ -5400,7 +5437,8 @@ export default function DFSPropsApp() {
       loadError={error}
       refreshBlocked={refreshBlocked}
       refreshCountdownSec={refreshCountdownSec}
-      onRefresh={() => loadProps({ force: true })}
+      staleDataActive={boardFreshness.stale}
+      onRefresh={handleRefresh}
       lastUpdatedLabel={lastUpdatedLabel}
       learningSaveNotice={learningSaveNotice}
       boardLookupProps={boardLookupProps}
@@ -5432,6 +5470,8 @@ export default function DFSPropsApp() {
       boardSummary={boardSummary}
       boardFreshness={boardFreshness}
       onClearCacheAndReload={handleClearCacheAndReloadLive}
+      showStaleCache={showStaleCache}
+      onShowStaleCache={() => setShowStaleCache(true)}
       performanceTracker={performanceTrackerDashboard}
     />
 
