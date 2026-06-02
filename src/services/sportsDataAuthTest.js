@@ -1,6 +1,9 @@
 import { cleanApiKey } from "../utils/cleanApiKey.js";
-import { getSportsDataApiKey } from "../config/apiConfig.js";
-import { getSportsDataTimeoutMs } from "../utils/apiTimeout.js";
+import { getSportsDataApiKey, getSportsDataApiKeySource } from "../config/apiConfig.js";
+import {
+  getSportsDataHealthTimeoutMs,
+  SPORTSDATA_HEALTH_MAX_RETRIES,
+} from "../utils/apiTimeout.js";
 
 export const SPORTSDATA_MLB_UPSTREAM = "https://api.sportsdata.io/v3/mlb";
 export const SPORTSDATA_MLB_PLAYERS_PATH = "/scores/json/Players";
@@ -16,6 +19,7 @@ export const SPORTSDATA_STATUS_LABELS = {
   RATE_LIMITED: "Rate limited",
   PROXY_ERROR: "Proxy error",
   NETWORK_ERROR: "Network error",
+  TIMEOUT: "Timed out",
   NOT_CONFIGURED: "Not configured",
 };
 
@@ -27,16 +31,17 @@ export function buildSportsDataTestEndpoints(date = new Date()) {
   const day = isoDateLocal(date);
   return [
     {
-      id: "players",
-      label: "Players",
-      upstreamPath: SPORTSDATA_MLB_PLAYERS_PATH,
-      proxyRoute: `${SPORTSDATA_MLB_BASE_ROUTE}${SPORTSDATA_MLB_PLAYERS_PATH}`,
-    },
-    {
       id: "teams",
       label: "Teams",
       upstreamPath: "/scores/json/Teams",
       proxyRoute: `${SPORTSDATA_MLB_BASE_ROUTE}/scores/json/Teams`,
+      lightweight: true,
+    },
+    {
+      id: "players",
+      label: "Players",
+      upstreamPath: SPORTSDATA_MLB_PLAYERS_PATH,
+      proxyRoute: `${SPORTSDATA_MLB_BASE_ROUTE}${SPORTSDATA_MLB_PLAYERS_PATH}`,
     },
     {
       id: "gamesByDate",
@@ -80,7 +85,7 @@ export function classifySportsDataFailure({ httpStatus = 0, text = "", timedOut 
   const body = summarizeResponseBody(text);
 
   if (timedOut) {
-    return { statusLabel: SPORTSDATA_STATUS_LABELS.NETWORK_ERROR, message: body || "Request timed out" };
+    return { statusLabel: SPORTSDATA_STATUS_LABELS.TIMEOUT, message: body || "Request timed out" };
   }
   if (networkError) {
     return { statusLabel: SPORTSDATA_STATUS_LABELS.NETWORK_ERROR, message: body || "Network request failed" };
@@ -109,12 +114,11 @@ export function classifySportsDataFailure({ httpStatus = 0, text = "", timedOut 
   return { statusLabel: SPORTSDATA_STATUS_LABELS.NETWORK_ERROR, message: body || "Unknown error" };
 }
 
-export async function probeSportsDataEndpointViaProxy(endpoint, { apiKey = "" } = {}) {
+export async function probeSportsDataEndpointViaProxy(endpoint, { apiKey = "", timeoutMs = null } = {}) {
   const cleanedKey = cleanApiKey(apiKey || getSportsDataApiKey());
   const upstreamUrl = redactSportsDataUpstreamUrl(endpoint.upstreamPath);
   const startedAt = Date.now();
-
-  console.info("[SportsDataIO Test] URL:", upstreamUrl, "· key length:", cleanedKey.length);
+  const probeTimeoutMs = timeoutMs ?? getSportsDataHealthTimeoutMs();
 
   if (!cleanedKey) {
     return {
@@ -122,6 +126,7 @@ export async function probeSportsDataEndpointViaProxy(endpoint, { apiKey = "" } 
       upstreamUrl,
       httpStatus: 0,
       ok: false,
+      timedOut: false,
       includedInPlan: false,
       statusLabel: SPORTSDATA_STATUS_LABELS.NOT_CONFIGURED,
       message: "No SportsDataIO key saved",
@@ -131,7 +136,7 @@ export async function probeSportsDataEndpointViaProxy(endpoint, { apiKey = "" } 
   }
 
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), getSportsDataTimeoutMs());
+  const timer = window.setTimeout(() => controller.abort(), probeTimeoutMs);
 
   try {
     const response = await fetch(endpoint.proxyRoute, {
@@ -152,6 +157,9 @@ export async function probeSportsDataEndpointViaProxy(endpoint, { apiKey = "" } 
 
     const httpStatus = Number(payload?.responseCode ?? response.status ?? 0);
     const responseBody = summarizeResponseBody(text, payload);
+    console.info("[API HEALTH] SportsDataIO response code:", httpStatus);
+    console.info("[API HEALTH] SportsDataIO response preview:", responseBody);
+
     const arrayOk = response.ok && Array.isArray(payload);
     const envelopeOk =
       response.ok &&
@@ -168,6 +176,7 @@ export async function probeSportsDataEndpointViaProxy(endpoint, { apiKey = "" } 
         upstreamUrl,
         httpStatus: 200,
         ok: true,
+        timedOut: false,
         includedInPlan: true,
         statusLabel: SPORTSDATA_STATUS_LABELS.CONNECTED,
         message: `OK — ${payload.length} records`,
@@ -188,13 +197,11 @@ export async function probeSportsDataEndpointViaProxy(endpoint, { apiKey = "" } 
       upstreamUrl,
       httpStatus,
       ok: false,
+      timedOut: false,
       includedInPlan:
         failure.statusLabel === SPORTSDATA_STATUS_LABELS.ENDPOINT_NOT_INCLUDED
           ? false
-          : failure.statusLabel === SPORTSDATA_STATUS_LABELS.INVALID_KEY ||
-              failure.statusLabel === SPORTSDATA_STATUS_LABELS.UNAUTHORIZED
-            ? null
-            : null,
+          : null,
       statusLabel: failure.statusLabel,
       message: failure.message,
       responseBody: failure.message,
@@ -208,11 +215,13 @@ export async function probeSportsDataEndpointViaProxy(endpoint, { apiKey = "" } 
       timedOut,
       networkError: !timedOut,
     });
+    console.error("[API HEALTH] SportsDataIO probe error:", error?.message || error);
     return {
       ...endpoint,
       upstreamUrl,
       httpStatus: timedOut ? 408 : 0,
       ok: false,
+      timedOut,
       includedInPlan: false,
       statusLabel: failure.statusLabel,
       message: failure.message,
@@ -224,6 +233,24 @@ export async function probeSportsDataEndpointViaProxy(endpoint, { apiKey = "" } 
   }
 }
 
+async function probeSportsDataEndpointWithRetry(endpoint, { apiKey = "" } = {}) {
+  let lastResult = null;
+  for (let attempt = 0; attempt < SPORTSDATA_HEALTH_MAX_RETRIES; attempt += 1) {
+    if (attempt > 0) {
+      const delayMs = Math.min(1000 * 2 ** (attempt - 1), 8000);
+      await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+    }
+    lastResult = await probeSportsDataEndpointViaProxy(endpoint, { apiKey });
+    console.info(
+      `[SportsDataIO Test] ${endpoint.label} attempt ${attempt + 1}/${SPORTSDATA_HEALTH_MAX_RETRIES}: HTTP ${lastResult.httpStatus} · ${lastResult.statusLabel}`
+    );
+    if (lastResult.ok) return lastResult;
+    if (lastResult.httpStatus === 401 || lastResult.httpStatus === 403) return lastResult;
+    if (!lastResult.timedOut) break;
+  }
+  return lastResult;
+}
+
 export function resolveSportsDataOverallStatus(endpointTests = []) {
   const tests = endpointTests || [];
   if (!tests.length) {
@@ -232,6 +259,7 @@ export function resolveSportsDataOverallStatus(endpointTests = []) {
       settingsLine: SPORTSDATA_STATUS_LABELS.NOT_CONFIGURED,
       ok: false,
       showError: true,
+      timedOut: false,
     };
   }
   const okCount = tests.filter((row) => row.ok).length;
@@ -241,6 +269,18 @@ export function resolveSportsDataOverallStatus(endpointTests = []) {
       settingsLine: SPORTSDATA_STATUS_LABELS.CONNECTED,
       ok: true,
       showError: false,
+      timedOut: false,
+    };
+  }
+  const timedOut = tests.every((row) => row.timedOut || row.statusLabel === SPORTSDATA_STATUS_LABELS.TIMEOUT);
+  if (timedOut) {
+    return {
+      statusLabel: SPORTSDATA_STATUS_LABELS.TIMEOUT,
+      settingsLine: SPORTSDATA_STATUS_LABELS.TIMEOUT,
+      ok: false,
+      showError: true,
+      timedOut: true,
+      primaryFailure: tests[0],
     };
   }
   const priority = [
@@ -250,6 +290,7 @@ export function resolveSportsDataOverallStatus(endpointTests = []) {
     SPORTSDATA_STATUS_LABELS.RATE_LIMITED,
     SPORTSDATA_STATUS_LABELS.PROXY_ERROR,
     SPORTSDATA_STATUS_LABELS.NETWORK_ERROR,
+    SPORTSDATA_STATUS_LABELS.TIMEOUT,
   ];
   for (const label of priority) {
     const match = tests.find((row) => row.statusLabel === label);
@@ -278,19 +319,40 @@ export async function runSportsDataMultiEndpointTest({ apiKey = "" } = {}) {
   const endpoints = buildSportsDataTestEndpoints();
   const endpointTests = [];
 
-  for (const endpoint of endpoints) {
-    const result = await probeSportsDataEndpointViaProxy(endpoint, { apiKey: cleanedKey });
-    endpointTests.push(result);
-    console.info(
-      `[SportsDataIO Test] ${endpoint.label}: HTTP ${result.httpStatus} · ${result.statusLabel} · ${result.message}`
-    );
+  console.info("[API HEALTH] SportsDataIO key source:", getSportsDataApiKeySource());
+
+  const lightweight = endpoints.find((row) => row.lightweight) || endpoints[0];
+  const keyCheck = await probeSportsDataEndpointWithRetry(lightweight, { apiKey: cleanedKey });
+  endpointTests.push(keyCheck);
+
+  if (keyCheck.ok) {
+    for (const endpoint of endpoints.filter((row) => row.id !== lightweight.id)) {
+      const result = await probeSportsDataEndpointWithRetry(endpoint, { apiKey: cleanedKey });
+      endpointTests.push(result);
+      console.info(
+        `[SportsDataIO Test] ${endpoint.label}: HTTP ${result.httpStatus} · ${result.statusLabel} · ${result.message}`
+      );
+    }
+  } else if (keyCheck.httpStatus !== 401 && keyCheck.httpStatus !== 403) {
+    for (const endpoint of endpoints.filter((row) => row.id !== lightweight.id)) {
+      const result = await probeSportsDataEndpointWithRetry(endpoint, { apiKey: cleanedKey });
+      endpointTests.push(result);
+      if (result.ok) break;
+    }
   }
 
   const overall = resolveSportsDataOverallStatus(endpointTests);
+  const primaryFailure = overall.primaryFailure || endpointTests.find((row) => !row.ok) || endpointTests[0];
+  console.info("[API HEALTH] SportsDataIO status:", overall.statusLabel);
+  if (primaryFailure) {
+    console.info("[API HEALTH] SportsDataIO response code:", primaryFailure.httpStatus ?? "—");
+    console.info("[API HEALTH] SportsDataIO response preview:", primaryFailure.responseBody || primaryFailure.message || "—");
+  }
+
   const mlbStatsFallbackNote =
     overall.ok || !cleanedKey
       ? ""
-      : "SportsDataIO unavailable — using MLB Stats API for player matching and projections.";
+      : "SportsDataIO unavailable — using MLB Stats + generated projections.";
 
   return {
     cleanedKey,

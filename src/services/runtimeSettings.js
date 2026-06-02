@@ -6,22 +6,46 @@ import { cleanApiKey } from "../utils/cleanApiKey.js";
 import { normalizeProxyUrl } from "../utils/providerProxy.js";
 
 /** User-facing keys shown in Settings — live feeds (PP/UD) use built-in routes, not user keys. */
+export const ODDS_ENV_KEYS = [
+  "VITE_ODDS_API_KEY",
+  "ODDS_API_KEY",
+  "THE_ODDS_API_KEY",
+];
+export const ODDS_STORAGE_KEYS = [
+  "VITE_ODDS_API_KEY",
+  "odds_api_key",
+  "odds-api-key",
+  "the-odds-api-key",
+];
+export const SPORTSDATA_ENV_KEYS = [
+  "VITE_SPORTSDATAIO_API_KEY",
+  "VITE_SPORTSDATA_API_KEY",
+  "SPORTSDATAIO_API_KEY",
+  "SPORTSDATA_API_KEY",
+  "SPORTS_DATA_IO_API_KEY",
+];
+export const SPORTSDATA_STORAGE_KEYS = [
+  "VITE_SPORTSDATAIO_API_KEY",
+  "VITE_SPORTSDATA_API_KEY",
+  "sportsdataio_api_key",
+];
+
 export const USER_SETTING_DEFS = [
   {
     key: "VITE_ODDS_API_KEY",
     label: "Odds API Key",
     type: "secret",
     placeholder: "Paste The Odds API key",
-    envKeys: ["VITE_ODDS_API_KEY", "ODDS_API_KEY"],
-    legacyStorageKeys: ["odds-api-key", "the-odds-api-key"],
+    envKeys: ODDS_ENV_KEYS,
+    legacyStorageKeys: ["odds-api-key", "the-odds-api-key", "odds_api_key"],
   },
   {
     key: "VITE_SPORTSDATA_API_KEY",
     label: "SportsDataIO API Key",
     type: "secret",
     placeholder: "Paste your SportsDataIO MLB subscription key",
-    envKeys: ["VITE_SPORTSDATA_API_KEY", "VITE_SPORTSDATAIO_API_KEY", "SPORTSDATA_API_KEY"],
-    legacyStorageKeys: [],
+    envKeys: SPORTSDATA_ENV_KEYS,
+    legacyStorageKeys: ["sportsdataio_api_key", "VITE_SPORTSDATAIO_API_KEY"],
   },
   {
     key: "VITE_PRIZEPICKS_PROXY_URL",
@@ -75,13 +99,43 @@ function isUsableEnvValue(value) {
   return true;
 }
 
-function readEnvValue(def = {}) {
-  const keys = def.envKeys || [def.key];
-  for (const envKey of keys) {
+function readEnvKeys(envKeys = []) {
+  for (const envKey of envKeys) {
     const value = import.meta.env?.[envKey];
     if (isUsableEnvValue(value)) return String(value).trim();
   }
   return "";
+}
+
+function readStorageKeys(keys = []) {
+  for (const key of keys) {
+    const value = readStorageValue(key);
+    if (isUsableEnvValue(value)) return value;
+  }
+  return "";
+}
+
+export function maskApiKeyPreview(key = "") {
+  const cleaned = cleanApiKey(key);
+  if (!cleaned) return "missing";
+  if (cleaned.length <= 8) return "••••••••";
+  return `${cleaned.slice(0, 4)}••••${cleaned.slice(-4)}`;
+}
+
+export function getOddsApiKeySource() {
+  if (readEnvKeys(ODDS_ENV_KEYS)) return "env";
+  if (readStorageKeys(ODDS_STORAGE_KEYS)) return "localStorage";
+  return "missing";
+}
+
+export function getSportsDataApiKeySource() {
+  if (readEnvKeys(SPORTSDATA_ENV_KEYS)) return "env";
+  if (readStorageKeys(SPORTSDATA_STORAGE_KEYS)) return "localStorage";
+  return "missing";
+}
+
+function readEnvValue(def = {}) {
+  return readEnvKeys(def.envKeys || [def.key]);
 }
 
 function readStorageValue(key) {
@@ -114,9 +168,10 @@ export function resolveSettingSource(key) {
 }
 
 export function formatSettingSourceLabel(source = null) {
-  if (source === "env") return "From .env.local";
-  if (source === "localStorage") return "From browser storage";
-  if (source === "legacy") return "From legacy storage";
+  if (source === "env") return "env";
+  if (source === "localStorage") return "localStorage";
+  if (source === "legacy") return "legacy";
+  if (source === "missing") return "missing";
   return "Not configured";
 }
 
@@ -151,9 +206,11 @@ export function writeRuntimeSettings(settings = {}) {
     if (key === "VITE_ODDS_API_KEY") {
       try {
         if (value) {
+          window.localStorage.setItem("odds_api_key", value);
           window.localStorage.setItem("odds-api-key", value);
           window.localStorage.setItem("the-odds-api-key", value);
         } else {
+          window.localStorage.removeItem("odds_api_key");
           window.localStorage.removeItem("odds-api-key");
           window.localStorage.removeItem("the-odds-api-key");
         }
@@ -162,6 +219,19 @@ export function writeRuntimeSettings(settings = {}) {
       }
       clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
       resetOddsApiStartupValidation();
+    }
+    if (key === "VITE_SPORTSDATA_API_KEY") {
+      try {
+        if (value) {
+          window.localStorage.setItem("sportsdataio_api_key", value);
+          window.localStorage.setItem("VITE_SPORTSDATAIO_API_KEY", value);
+        } else {
+          window.localStorage.removeItem("sportsdataio_api_key");
+          window.localStorage.removeItem("VITE_SPORTSDATAIO_API_KEY");
+        }
+      } catch {
+        // ignore
+      }
     }
     if (key === "VITE_PRIZEPICKS_PROXY_URL") {
       try {
@@ -222,37 +292,33 @@ export function getRawProxyUrl(platform = "") {
 }
 
 export function getOddsApiKey() {
-  const fromEnv = cleanApiKey(import.meta.env?.VITE_ODDS_API_KEY || "");
+  const fromEnv = cleanApiKey(readEnvKeys(ODDS_ENV_KEYS));
   if (isUsableEnvValue(fromEnv)) return fromEnv;
-  return cleanApiKey(getEffectiveSetting("VITE_ODDS_API_KEY"));
+  const fromStorage = cleanApiKey(readStorageKeys(ODDS_STORAGE_KEYS));
+  if (isUsableEnvValue(fromStorage)) return fromStorage;
+  return cleanApiKey(readLegacyValue(getSettingDef("VITE_ODDS_API_KEY")));
 }
 
 export function getSportsDataApiKey() {
-  const fromEnv = cleanApiKey(
-    import.meta.env?.VITE_SPORTSDATA_API_KEY || import.meta.env?.VITE_SPORTSDATAIO_API_KEY || ""
-  );
+  const fromEnv = cleanApiKey(readEnvKeys(SPORTSDATA_ENV_KEYS));
   if (isUsableEnvValue(fromEnv)) return fromEnv;
-  return cleanApiKey(getEffectiveSetting("VITE_SPORTSDATA_API_KEY"));
+  const fromStorage = cleanApiKey(readStorageKeys(SPORTSDATA_STORAGE_KEYS));
+  if (isUsableEnvValue(fromStorage)) return fromStorage;
+  return cleanApiKey(readLegacyValue(getSettingDef("VITE_SPORTSDATA_API_KEY")));
 }
 
 /** Copy env keys into localStorage when unset so Settings + health treat providers as configured. */
 export function ensureEnvKeysSyncedToLocalStorage() {
   if (typeof window === "undefined") return;
 
-  const envOdds = isUsableEnvValue(import.meta.env?.VITE_ODDS_API_KEY)
-    ? cleanApiKey(import.meta.env.VITE_ODDS_API_KEY)
-    : "";
-  const envSportsData = isUsableEnvValue(
-    import.meta.env?.VITE_SPORTSDATA_API_KEY || import.meta.env?.VITE_SPORTSDATAIO_API_KEY
-  )
-    ? cleanApiKey(
-        import.meta.env?.VITE_SPORTSDATA_API_KEY || import.meta.env?.VITE_SPORTSDATAIO_API_KEY
-      )
-    : "";
+  const envOdds = cleanApiKey(readEnvKeys(ODDS_ENV_KEYS));
+  const envSportsData = cleanApiKey(readEnvKeys(SPORTSDATA_ENV_KEYS));
 
   const patch = {};
-  if (envOdds && !readStorageValue("VITE_ODDS_API_KEY")) patch.VITE_ODDS_API_KEY = envOdds;
-  if (envSportsData && !readStorageValue("VITE_SPORTSDATA_API_KEY")) {
+  if (isUsableEnvValue(envOdds) && !readStorageValue("VITE_ODDS_API_KEY")) {
+    patch.VITE_ODDS_API_KEY = envOdds;
+  }
+  if (isUsableEnvValue(envSportsData) && !readStorageValue("VITE_SPORTSDATA_API_KEY")) {
     patch.VITE_SPORTSDATA_API_KEY = envSportsData;
   }
 

@@ -9,6 +9,11 @@ import {
   writeSettingsMeta,
   resolveSettingSource,
   formatSettingSourceLabel,
+  getOddsApiKey,
+  getSportsDataApiKey,
+  getOddsApiKeySource,
+  getSportsDataApiKeySource,
+  maskApiKeyPreview,
 } from "../services/runtimeSettings.js";
 import {
   testOddsAPI,
@@ -95,7 +100,27 @@ export default function SettingsPanel({
 
   async function handleSave() {
     const { cleaned } = persistDraft();
-    setNotice(buildSaveNotice(cleaned));
+    setTestingAll(true);
+    try {
+      const report = await testAllApiConnections({ feedContext: feedHealthContext });
+      setConnectionReport(report);
+      writeSettingsMeta({
+        ...readSettingsMeta(),
+        lastTestedAt: report.testedAt,
+        lastConnectionReport: report.results,
+      });
+      onConnectionReportChange?.(report);
+      const oddsRow = findProviderRow(report.results || [], "Odds API");
+      const sdRow = findProviderRow(report.results || [], "SportsDataIO");
+      const parts = [buildSaveNotice(cleaned), "Providers retested."];
+      if (oddsRow?.settingsLine) parts.push(`Odds API: ${oddsRow.settingsLine}.`);
+      if (sdRow?.settingsLine) parts.push(`SportsDataIO: ${sdRow.settingsLine}.`);
+      setNotice(parts.join(" "));
+    } catch (error) {
+      setNotice(error?.message || "Keys saved, but provider retest failed.");
+    } finally {
+      setTestingAll(false);
+    }
   }
 
   async function handleTestOdds() {
@@ -203,9 +228,11 @@ export default function SettingsPanel({
   const ppProxySaved = Boolean(saved[ppProxyDef.key]?.trim());
   const oddsKeyWarning = getOddsKeyLengthWarning(cleanedOddsDraft);
   const sdRow = findProviderRow(connectionReport?.results || [], "SportsDataIO");
-  const oddsKeySource = resolveSettingSource(oddsDef.key);
-  const sdKeySource = resolveSettingSource(sdDef.key);
+  const oddsKeySource = getOddsApiKeySource();
+  const sdKeySource = getSportsDataApiKeySource();
   const ppProxySource = resolveSettingSource(ppProxyDef.key);
+  const oddsKeyPreview = maskApiKeyPreview(getOddsApiKey());
+  const sdKeyPreview = maskApiKeyPreview(getSportsDataApiKey());
 
   return (
     <details id="section-settings" ref={panelRef} className="settings-panel compact-settings-details">
@@ -222,6 +249,9 @@ export default function SettingsPanel({
             <span className="settings-api-row__head">
               <span>{oddsDef.label}</span>
               <span className="settings-api-row__saved">{formatSettingSourceLabel(oddsKeySource)}</span>
+              {oddsKeyPreview !== "missing" ? (
+                <span className="settings-api-row__saved">Key {oddsKeyPreview}</span>
+              ) : null}
               {oddsSaved ? (
                 <span className="settings-api-row__saved">Active · {saved[oddsDef.key].length} chars</span>
               ) : null}
@@ -246,6 +276,9 @@ export default function SettingsPanel({
             <span className="settings-api-row__head">
               <span>{sdDef.label}</span>
               <span className="settings-api-row__saved">{formatSettingSourceLabel(sdKeySource)}</span>
+              {sdKeyPreview !== "missing" ? (
+                <span className="settings-api-row__saved">Key {sdKeyPreview}</span>
+              ) : null}
               {sdSaved ? (
                 <span className="settings-api-row__saved">Active · {saved[sdDef.key].length} chars</span>
               ) : null}

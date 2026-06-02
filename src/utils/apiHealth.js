@@ -2,7 +2,13 @@
  * Central API health status — standardized green / yellow / red labels.
  */
 
-import { getOddsApiKey, getSportsDataApiKey } from "../services/runtimeSettings.js";
+import {
+  getOddsApiKey,
+  getSportsDataApiKey,
+  getOddsApiKeySource,
+  getSportsDataApiKeySource,
+  maskApiKeyPreview,
+} from "../services/runtimeSettings.js";
 import { formatDateTime } from "./formatters.js";
 import { STALE_DATA_HEADLINE } from "./boardFreshness.js";
 import { resolvePrizePicksProviderHealth, resolveUnderdogPropCounts, underdogFeedIsConnected } from "./providerStatus.js";
@@ -56,6 +62,10 @@ function hasUsableProps(feed = {}) {
 
 function isSportsDataConnected(row = {}, mlbPipelineStatus = null) {
   const safeRow = row && typeof row === "object" ? row : {};
+  const endpointOk = (safeRow.endpointTests || []).some(
+    (entry) => entry?.ok === true || Number(entry?.httpStatus) === 200
+  );
+  if (endpointOk || safeRow.ok) return true;
   const playersTest = safeRow.endpointTests?.find((entry) => entry.id === "players");
   const statsTest = safeRow.endpointTests?.find((entry) =>
     /stats|mlb/i.test(String(entry.id || entry.label || ""))
@@ -73,12 +83,14 @@ function isSportsDataConnected(row = {}, mlbPipelineStatus = null) {
 
 function resolveOddsApiHealth({ row, keyConfigured, testedAt, oddsFeed = {} }) {
   const debug = {
-    endpointTested: "/sports",
+    endpointTested: "https://api.the-odds-api.com/v4/sports/",
     responseCode: row?.httpStatus ?? row?.status ?? null,
     lastChecked: testedAt || null,
     cacheAge: oddsFeed.cacheAge || "—",
     propsReturned: finite(oddsFeed.usableCount ?? oddsFeed.parsedCount),
     keyPresent: keyConfigured,
+    keySource: getOddsApiKeySource(),
+    keyPreview: maskApiKeyPreview(getOddsApiKey()),
     failureReason: "",
   };
 
@@ -112,30 +124,27 @@ function resolveOddsApiHealth({ row, keyConfigured, testedAt, oddsFeed = {} }) {
   const sportsOk = Boolean(row?.sportsListOk || row?.ok);
   const propsOk = hasUsableProps(oddsFeed);
   if (sportsOk || propsOk) {
+    const sportsCount = finite(row?.sportsCount);
     return {
       status: "Connected",
       color: API_STATUS_COLOR.GREEN,
-      detail: propsOk
-        ? `${debug.propsReturned} odds props available`
-        : row?.sportsCount != null
-          ? `${row.sportsCount} sports listed`
-          : "Sports endpoint OK",
+      detail: sportsCount > 0 ? `Connected — ${sportsCount} sports listed` : "Connected",
       debug: { ...debug, failureReason: "" },
     };
   }
 
   if (row?.timedOut || row?.networkError) {
     return {
-      status: "Network failure",
-      color: API_STATUS_COLOR.RED,
-      detail: row?.preview || row?.message || "Odds API request failed",
-      debug: { ...debug, failureReason: row?.preview || "Network failure" },
+      status: "Timed out",
+      color: API_STATUS_COLOR.YELLOW,
+      detail: row?.preview || row?.message || "Odds API request timed out",
+      debug: { ...debug, failureReason: row?.preview || "Timed out" },
     };
   }
 
   if (!testedAt) {
     return {
-      status: "Missing optional data",
+      status: "Not tested yet",
       color: API_STATUS_COLOR.YELLOW,
       detail: "Save key and run Retest All",
       debug: { ...debug, failureReason: "Not tested yet" },
@@ -143,41 +152,71 @@ function resolveOddsApiHealth({ row, keyConfigured, testedAt, oddsFeed = {} }) {
   }
 
   return {
-    status: "Network failure",
-    color: API_STATUS_COLOR.RED,
+    status: "Probe failed",
+    color: API_STATUS_COLOR.YELLOW,
     detail: row?.preview || row?.message || "Odds API probe failed",
     debug: { ...debug, failureReason: row?.preview || "Probe failed" },
   };
 }
 
-function resolveSportsDataHealth({ row, keyConfigured, testedAt, mlbPipelineStatus = null }) {
+function resolveSportsDataHealth({ row, keyConfigured, testedAt, mlbPipelineStatus = null, mlbStatsProjectionCount = 0 } = {}) {
   const safeRow = row && typeof row === "object" ? row : {};
-  const playersTest = safeRow.endpointTests?.find((entry) => entry.id === "players");
+  const successTest =
+    (safeRow.endpointTests || []).find((entry) => entry?.ok) ||
+    safeRow.endpointTests?.find((entry) => Number(entry?.httpStatus) === 200);
   const debug = {
-    endpointTested: playersTest?.url || "/Players",
-    responseCode: playersTest?.httpStatus ?? safeRow.httpStatus ?? safeRow.status ?? null,
+    endpointTested: successTest?.upstreamUrl || successTest?.proxyRoute || "/scores/json/Teams",
+    responseCode: successTest?.httpStatus ?? safeRow.httpStatus ?? safeRow.status ?? null,
     lastChecked: testedAt || null,
     cacheAge: "—",
-    propsReturned: finite(mlbPipelineStatus?.profilesMatched ?? mlbPipelineStatus?.sportsDataProfilesMatched),
+    propsReturned: finite(mlbStatsProjectionCount ?? mlbPipelineStatus?.profilesMatched),
     keyPresent: keyConfigured,
+    keySource: getSportsDataApiKeySource(),
+    keyPreview: maskApiKeyPreview(getSportsDataApiKey()),
     failureReason: "",
   };
 
   if (!keyConfigured) {
     return {
-      status: "Optional — unavailable",
-      color: API_STATUS_COLOR.YELLOW,
-      detail: "SportsDataIO unavailable — using MLB Stats + generated projections",
+      status: "Missing API key",
+      color: API_STATUS_COLOR.RED,
+      detail: "Add SportsDataIO key in Settings",
       debug: { ...debug, failureReason: "No API key saved" },
     };
   }
 
-  if (safeRow.unauthorized || /invalid/i.test(String(safeRow.settingsLine || safeRow.statusLabel || ""))) {
+  if (
+    safeRow.unauthorized ||
+    /invalid key|unauthorized/i.test(String(safeRow.settingsLine || safeRow.statusLabel || "")) ||
+    safeRow.httpStatus === 401 ||
+    safeRow.httpStatus === 403
+  ) {
     return {
-      status: "Optional — unavailable",
+      status: "Invalid API key",
+      color: API_STATUS_COLOR.RED,
+      detail: safeRow.responseBody || "SportsDataIO rejected the API key",
+      debug: { ...debug, failureReason: "Unauthorized / invalid key" },
+    };
+  }
+
+  if (isSportsDataConnected(safeRow, mlbPipelineStatus) || finite(mlbStatsProjectionCount) > 0) {
+    return {
+      status: "Connected",
+      color: API_STATUS_COLOR.GREEN,
+      detail:
+        finite(mlbStatsProjectionCount) > 0
+          ? `${mlbStatsProjectionCount} MLB Stats projections in use`
+          : successTest?.message || "SportsDataIO endpoint OK",
+      debug: { ...debug, failureReason: "" },
+    };
+  }
+
+  if (safeRow.timedOut || safeRow.statusLabel === "Timed out") {
+    return {
+      status: "Timed out",
       color: API_STATUS_COLOR.YELLOW,
       detail: "SportsDataIO unavailable — using MLB Stats + generated projections",
-      debug: { ...debug, failureReason: "Unauthorized / invalid key" },
+      debug: { ...debug, failureReason: safeRow.preview || "Timed out" },
     };
   }
 
@@ -190,31 +229,14 @@ function resolveSportsDataHealth({ row, keyConfigured, testedAt, mlbPipelineStat
     };
   }
 
-  if (isSportsDataConnected(safeRow, mlbPipelineStatus)) {
-    return {
-      status: "Connected",
-      color: API_STATUS_COLOR.GREEN,
-      detail: debug.propsReturned
-        ? `${debug.propsReturned} player profiles matched`
-        : playersTest?.message || "Player endpoint OK",
-      debug: { ...debug, failureReason: "" },
-    };
-  }
-
-  if (safeRow.timedOut || safeRow.networkError) {
-    return {
-      status: "Optional — unavailable",
-      color: API_STATUS_COLOR.YELLOW,
-      detail: "SportsDataIO unavailable — using MLB Stats + generated projections",
-      debug: { ...debug, failureReason: safeRow.preview || "Network failure" },
-    };
-  }
-
   return {
     status: "Optional — unavailable",
     color: API_STATUS_COLOR.YELLOW,
     detail: "SportsDataIO unavailable — using MLB Stats + generated projections",
-    debug: { ...debug, failureReason: playersTest?.message || safeRow.message || "Endpoint failed" },
+    debug: {
+      ...debug,
+      failureReason: successTest?.message || safeRow.message || safeRow.responseBody || "Endpoint failed",
+    },
   };
 }
 
@@ -604,6 +626,7 @@ export function getApiHealthStatus({
     keyConfigured: sdKeyConfigured,
     testedAt,
     mlbPipelineStatus,
+    mlbStatsProjectionCount,
   });
   const underdog = resolveUnderdogHealth(udFeed, {
     pipelinePropCountAudit: pipelinePropCountAudit || feedHealthContext?.pipelinePropCountAudit,
@@ -646,6 +669,13 @@ export function getApiHealthStatus({
   });
 
   const statsVerification = resolveStatsVerificationFromHealth(sportsDataIO, mlbStats);
+
+  console.info("[API HEALTH] Odds API key source:", getOddsApiKeySource());
+  console.info("[API HEALTH] Odds API status:", oddsApi.status);
+  console.info("[API HEALTH] SportsDataIO key source:", getSportsDataApiKeySource());
+  console.info("[API HEALTH] SportsDataIO status:", sportsDataIO.status);
+  console.info("[API HEALTH] SportsDataIO response code:", sportsDataIO.debug?.responseCode ?? "—");
+  console.info("[API HEALTH] SportsDataIO response preview:", sportsDataIO.debug?.failureReason || sportsDataIO.detail || "—");
 
   return {
     oddsApi,
@@ -699,6 +729,8 @@ export function formatApiHealthDebugRow(label, entry = {}) {
     cacheAge: debug.cacheAge || "—",
     propsReturned: debug.propsReturned ?? "—",
     keyPresent: debug.keyPresent ? "Yes" : "No",
+    keySource: debug.keySource || "—",
+    keyPreview: debug.keyPreview || "—",
     failureReason: debug.failureReason || "—",
   };
 }

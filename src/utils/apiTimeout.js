@@ -6,6 +6,9 @@ export const MOBILE_TIMEOUT_MS = 5_000;
 export const DESKTOP_TIMEOUT_MS = 8_000;
 export const LINE_FEED_TIMEOUT_MS = 30_000;
 export const SPORTSDATA_TIMEOUT_MS = 8_000;
+/** SportsDataIO health probe — longer timeout with retries. */
+export const SPORTSDATA_HEALTH_TIMEOUT_MS = 45_000;
+export const SPORTSDATA_HEALTH_MAX_RETRIES = 3;
 /** MLB player stat profiles — fail fast and fall back to season merge + cache. */
 export const MLB_STATS_FETCH_TIMEOUT_MS = 8_000;
 /** Hard cap for board refresh — UI must exit loading within this window. */
@@ -60,6 +63,11 @@ export function getLineFeedTimeoutMs() {
 /** SportsDataIO enrichment — background-only, must not block core MLB feed. */
 export function getSportsDataTimeoutMs() {
   return SPORTSDATA_TIMEOUT_MS;
+}
+
+/** SportsDataIO health checks — allow slow proxy responses. */
+export function getSportsDataHealthTimeoutMs() {
+  return SPORTSDATA_HEALTH_TIMEOUT_MS;
 }
 
 /** MLB stats enrichment — blocking; do not use short mobile/desktop caps. */

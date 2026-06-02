@@ -1,4 +1,9 @@
 import { getOddsApiKey, getProxyUrl, getRawProxyUrl, getSportsDataApiKey, getStatmuseApiKey } from "../config/apiConfig.js";
+import {
+  getOddsApiKeySource,
+  getSportsDataApiKeySource,
+  maskApiKeyPreview,
+} from "../services/runtimeSettings.js";
 import { resolvePrizePicksFetchEndpoints } from "../utils/providerProxy.js";
 import {
   buildOddsApiProxyUrl,
@@ -436,6 +441,7 @@ async function testOddsApi() {
 
   if (probe.ok || probe.sportsListOk) {
     clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
+    const sportsLabel = `Connected — ${probe.sportsCount} sports listed`;
     return {
       provider: "Odds API",
       route: probe.route,
@@ -446,7 +452,7 @@ async function testOddsApi() {
       responseBody: probe.responseBody,
       remainingRequests: probe.remainingRequests,
       status: CONNECTION_STATUS.LIVE,
-      message: CONNECTION_MESSAGES.CONNECTED,
+      message: sportsLabel,
       settingsLine: "Connected",
       settingsStatus: "Connected",
       sportsListOk: true,
@@ -460,7 +466,26 @@ async function testOddsApi() {
       debugLine:
         probe.remainingRequests != null
           ? `${probe.sportsCount} sports · ${probe.remainingRequests} requests remaining`
-          : `${probe.sportsCount} sports`,
+          : sportsLabel,
+    };
+  }
+
+  if (probe.timedOut) {
+    return {
+      provider: "Odds API",
+      route: probe.route,
+      keyConfigured: true,
+      keyLength: probe.keyLength,
+      httpStatus: probe.httpStatus,
+      responseBody: probe.responseBody,
+      status: CONNECTION_STATUS.DEGRADED,
+      message: ENRICHMENT_TIMEOUT_MESSAGE,
+      settingsLine: "Timed out",
+      settingsStatus: "Timed out",
+      timedOut: true,
+      ...probe,
+      showError: true,
+      debugLine: ENRICHMENT_TIMEOUT_MESSAGE,
     };
   }
 
@@ -517,12 +542,18 @@ async function testSportsDataProvider() {
   const multi = await runSportsDataMultiEndpointTest({ apiKey: sportsDataKey });
   const state = getSourceState(SOURCE_IDS.SPORTSDATA);
   const primary = multi.primaryFailure || multi.endpointTests?.[0] || {};
-  const playersTest = multi.endpointTests?.find((row) => row.id === "players") || primary;
-  const playersOk = playersTest?.ok === true || Number(playersTest?.httpStatus) === 200;
-  const connected = multi.ok && playersOk;
+  const connected = multi.ok;
+  const timedOut = Boolean(multi.timedOut);
+  const unauthorized =
+    multi.statusLabel === SPORTSDATA_STATUS_LABELS.INVALID_KEY ||
+    multi.statusLabel === SPORTSDATA_STATUS_LABELS.UNAUTHORIZED ||
+    primary.httpStatus === 401 ||
+    primary.httpStatus === 403;
   const detailMessage = connected
-    ? `Players endpoint OK — ${playersTest.recordCount ?? "?"} records`
-    : [multi.statusLabel, primary.message].filter(Boolean).join(" — ");
+    ? `Connected — ${multi.endpointTests?.find((row) => row.ok)?.label || "MLB endpoint"} OK`
+    : timedOut
+      ? "Timed out — SportsDataIO optional"
+      : [multi.statusLabel, primary.message].filter(Boolean).join(" — ");
 
   return {
     provider: "SportsDataIO",
@@ -531,18 +562,21 @@ async function testSportsDataProvider() {
     keyLength: multi.keyLength,
     httpStatus: primary.httpStatus ?? 0,
     responseBody: primary.responseBody || primary.message || "",
-    settingsLine: connected ? "Connected" : multi.settingsLine || "Failed",
-    settingsStatus: connected ? "Connected" : multi.settingsLine || "Failed",
+    settingsLine: connected ? "Connected" : timedOut ? "Timed out" : multi.settingsLine || "Failed",
+    settingsStatus: connected ? "Connected" : timedOut ? "Timed out" : multi.settingsLine || "Failed",
     statusLabel: connected ? SPORTSDATA_STATUS_LABELS.CONNECTED : multi.statusLabel,
-    showError: !connected && multi.showError,
+    showError: !connected,
     debugLine: detailMessage,
-    status: connected ? CONNECTION_STATUS.LIVE : CONNECTION_STATUS.FAILED,
+    status: connected
+      ? CONNECTION_STATUS.LIVE
+      : timedOut
+        ? CONNECTION_STATUS.DEGRADED
+        : CONNECTION_STATUS.FAILED,
     message: detailMessage,
     proxied: true,
     ok: multi.ok,
-    unauthorized:
-      multi.statusLabel === SPORTSDATA_STATUS_LABELS.INVALID_KEY ||
-      multi.statusLabel === SPORTSDATA_STATUS_LABELS.UNAUTHORIZED,
+    timedOut,
+    unauthorized,
     rateLimited: multi.statusLabel === SPORTSDATA_STATUS_LABELS.RATE_LIMITED,
     endpointTests: multi.endpointTests,
     mlbStatsFallbackNote: multi.mlbStatsFallbackNote,
@@ -687,6 +721,7 @@ export async function testAllApiConnections(options = {}) {
     durationMs: Date.now() - startedAt,
     results: normalizedResults,
   };
+  logApiHealthDiagnostics(report);
   const feedContext =
     options.feedContext ||
     buildFeedHealthContext({
@@ -696,6 +731,24 @@ export async function testAllApiConnections(options = {}) {
       lastUpdated: options.lastUpdated || "",
     });
   return mergeConnectionReportWithFeeds(report, feedContext);
+}
+
+export function logApiHealthDiagnostics(report = {}) {
+  const oddsRow = (report.results || []).find((row) => row.provider === "Odds API") || {};
+  const sdRow = (report.results || []).find((row) => row.provider === "SportsDataIO") || {};
+  const oddsKey = getOddsApiKey();
+  const sdKey = getSportsDataApiKey();
+  console.info("[API HEALTH] Odds API key source:", getOddsApiKeySource());
+  console.info("[API HEALTH] Odds API key preview:", maskApiKeyPreview(oddsKey));
+  console.info("[API HEALTH] Odds API status:", oddsRow.settingsLine || oddsRow.status || "unknown");
+  console.info("[API HEALTH] SportsDataIO key source:", getSportsDataApiKeySource());
+  console.info("[API HEALTH] SportsDataIO key preview:", maskApiKeyPreview(sdKey));
+  console.info("[API HEALTH] SportsDataIO status:", sdRow.settingsLine || sdRow.statusLabel || sdRow.status || "unknown");
+  console.info("[API HEALTH] SportsDataIO response code:", sdRow.httpStatus ?? "—");
+  console.info(
+    "[API HEALTH] SportsDataIO response preview:",
+    sdRow.responseBody || sdRow.preview || sdRow.message || "—"
+  );
 }
 
 export { mergeConnectionReportWithFeeds, buildFeedHealthContext } from "./providerHealth.js";

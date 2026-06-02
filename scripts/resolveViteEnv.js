@@ -63,29 +63,37 @@ export function resolveProjectEnv(mode = "development", root = process.cwd()) {
   const oddsKey = firstUsable(
     merged.VITE_ODDS_API_KEY,
     merged.ODDS_API_KEY,
+    merged.THE_ODDS_API_KEY,
     process.env.VITE_ODDS_API_KEY,
-    process.env.ODDS_API_KEY
+    process.env.ODDS_API_KEY,
+    process.env.THE_ODDS_API_KEY
   );
   const sportsDataKey = firstUsable(
-    merged.VITE_SPORTSDATA_API_KEY,
     merged.VITE_SPORTSDATAIO_API_KEY,
-    merged.SPORTSDATA_API_KEY,
+    merged.VITE_SPORTSDATA_API_KEY,
     merged.SPORTSDATAIO_API_KEY,
-    process.env.VITE_SPORTSDATA_API_KEY,
+    merged.SPORTSDATA_API_KEY,
+    merged.SPORTS_DATA_IO_API_KEY,
     process.env.VITE_SPORTSDATAIO_API_KEY,
-    process.env.SPORTSDATA_API_KEY
+    process.env.VITE_SPORTSDATA_API_KEY,
+    process.env.SPORTSDATAIO_API_KEY,
+    process.env.SPORTSDATA_API_KEY,
+    process.env.SPORTS_DATA_IO_API_KEY
   );
 
   return {
     ...merged,
     VITE_ODDS_API_KEY: oddsKey,
     ODDS_API_KEY: oddsKey,
+    THE_ODDS_API_KEY: oddsKey,
     VITE_SPORTSDATA_API_KEY: sportsDataKey,
     VITE_SPORTSDATAIO_API_KEY: firstUsable(
       merged.VITE_SPORTSDATAIO_API_KEY,
       sportsDataKey,
       process.env.VITE_SPORTSDATAIO_API_KEY
     ),
+    SPORTSDATAIO_API_KEY: firstUsable(merged.SPORTSDATAIO_API_KEY, sportsDataKey, process.env.SPORTSDATAIO_API_KEY),
     SPORTSDATA_API_KEY: sportsDataKey,
+    SPORTS_DATA_IO_API_KEY: firstUsable(merged.SPORTS_DATA_IO_API_KEY, sportsDataKey, process.env.SPORTS_DATA_IO_API_KEY),
   };
 }

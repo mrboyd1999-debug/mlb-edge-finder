@@ -18,11 +18,14 @@ import {
   USER_SETTING_DEFS,
   getEffectiveSetting,
   getOddsApiKey,
+  getOddsApiKeySource,
   getProxyUrl,
   getRawProxyUrl,
   getSportsDataApiKey,
+  getSportsDataApiKeySource,
   getStatmuseApiKey,
   isSettingConfigured,
+  maskApiKeyPreview,
   resolveSettingSource,
 } from "../services/runtimeSettings.js";
 
@@ -45,6 +48,9 @@ export {
   getStatmuseApiKey,
   isSettingConfigured,
   resolveSettingSource,
+  getOddsApiKeySource,
+  getSportsDataApiKeySource,
+  maskApiKeyPreview,
   RUNTIME_SETTING_DEFS,
   USER_SETTING_DEFS,
 };

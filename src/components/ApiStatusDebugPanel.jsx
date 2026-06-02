@@ -59,6 +59,8 @@ function ApiStatusDebugPanel({
               <span>Cache age: {row.cacheAge}</span>
               <span>Props returned: {row.propsReturned}</span>
               <span>Key present: {row.keyPresent}</span>
+              <span>Key source: {row.keySource}</span>
+              <span>Key preview: {row.keyPreview}</span>
               {row.failureReason && row.failureReason !== "—" ? (
                 <span style={{ color: "#fca5a5" }}>Failure: {row.failureReason}</span>
               ) : null}
