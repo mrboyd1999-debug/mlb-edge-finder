@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import { validateOddsApiKeyOnce } from "./services/oddsApiClient.js";
+import { ensureEnvKeysSyncedToLocalStorage } from "./services/runtimeSettings.js";
 import { logEnvStartupDiagnostics } from "./utils/envStartupDiagnostics.js";
 import "./styles.css";
 
@@ -35,6 +36,14 @@ function installGlobalErrorHandlers() {
 }
 
 installGlobalErrorHandlers();
+console.log("ODDS ENV", import.meta.env.VITE_ODDS_API_KEY ? "FOUND" : "MISSING");
+console.log(
+  "SPORTSDATA ENV",
+  import.meta.env.VITE_SPORTSDATA_API_KEY || import.meta.env.VITE_SPORTSDATAIO_API_KEY
+    ? "FOUND"
+    : "MISSING"
+);
+ensureEnvKeysSyncedToLocalStorage();
 logEnvStartupDiagnostics();
 void validateOddsApiKeyOnce();
 

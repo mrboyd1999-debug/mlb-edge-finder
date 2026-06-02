@@ -5,7 +5,7 @@ export const SPORTSDATA_MLB_STATUS_PATH = "/scores/json/AreAnyGamesInProgress";
 export const SPORTSDATA_MLB_PLAYERS_PATH = "/scores/json/Players";
 export const SPORTSDATA_UPSTREAM_TIMEOUT_MS = 30_000;
 
-export function resolveSportsDataApiKeyFromRequest(req) {
+export function resolveSportsDataApiKeyFromRequest(req, fallbackApiKey = "") {
   const headers = req?.headers || {};
   const headerKey =
     headers["x-sportsdata-api-key"] ||
@@ -25,7 +25,15 @@ export function resolveSportsDataApiKeyFromRequest(req) {
     // ignore malformed URLs
   }
 
-  return cleanApiKey(process.env.SPORTSDATA_API_KEY || process.env.VITE_SPORTSDATA_API_KEY || "");
+  const fromFallback = cleanApiKey(fallbackApiKey);
+  if (fromFallback) return fromFallback;
+
+  return cleanApiKey(
+    process.env.SPORTSDATA_API_KEY ||
+      process.env.VITE_SPORTSDATA_API_KEY ||
+      process.env.VITE_SPORTSDATAIO_API_KEY ||
+      ""
+  );
 }
 
 export function isSportsDataHealthPayload(payload) {

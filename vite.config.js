@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { resolveProjectEnv } from "./scripts/resolveViteEnv.js";
 import {
   buildPrizePicksFallbackPayload,
   getPrizePicksServerCooldownRemainingMs,
@@ -21,23 +22,43 @@ import {
 import { normalizeProxyUrl } from "./src/utils/providerProxy.js";
 
 const API_FOOTBALL_KEY = process.env.API_FOOTBALL_KEY || process.env.VITE_API_FOOTBALL_KEY || "";
-const ODDS_API_KEY = process.env.ODDS_API_KEY || process.env.VITE_ODDS_API_KEY || "";
 
 const UNDERDOG_TARGET = "https://api.underdogfantasy.com";
 const UPSTREAM_TIMEOUT_MS = 10_000;
 
-export default defineConfig({
-  plugins: [dfsApiProxy(), react()],
-  server: {
-    host: "0.0.0.0",
-  },
-  appType: "spa",
+export default defineConfig(({ mode }) => {
+  const projectEnv = resolveProjectEnv(mode);
+  const ODDS_API_KEY = projectEnv.VITE_ODDS_API_KEY || "";
+  const SPORTSDATA_API_KEY =
+    projectEnv.VITE_SPORTSDATA_API_KEY || projectEnv.VITE_SPORTSDATAIO_API_KEY || "";
+
+  return {
+    define: {
+      "import.meta.env.VITE_ODDS_API_KEY": JSON.stringify(ODDS_API_KEY),
+      "import.meta.env.VITE_SPORTSDATA_API_KEY": JSON.stringify(SPORTSDATA_API_KEY),
+      "import.meta.env.VITE_SPORTSDATAIO_API_KEY": JSON.stringify(
+        projectEnv.VITE_SPORTSDATAIO_API_KEY || SPORTSDATA_API_KEY
+      ),
+    },
+    plugins: [dfsApiProxy({ projectEnv, oddsApiKey: ODDS_API_KEY, sportsDataApiKey: SPORTSDATA_API_KEY }), react()],
+    server: {
+      host: "0.0.0.0",
+    },
+    appType: "spa",
+  };
 });
 
 /**
  * Intercepts /api/* BEFORE Vite can serve api/*.js source files from the repo root.
  */
-function dfsApiProxy() {
+function dfsApiProxy({ projectEnv = {}, oddsApiKey = "", sportsDataApiKey = "" } = {}) {
+  const resolvedOddsKey = oddsApiKey || projectEnv.VITE_ODDS_API_KEY || "";
+  const resolvedSportsDataKey =
+    sportsDataApiKey ||
+    projectEnv.VITE_SPORTSDATA_API_KEY ||
+    projectEnv.VITE_SPORTSDATAIO_API_KEY ||
+    "";
+
   return {
     name: "dfs-api-proxy",
     enforce: "pre",
@@ -66,6 +87,10 @@ function dfsApiProxy() {
                 sportsdataio: "/api/sportsdataio/mlb-status",
                 bestPlays: "/api/best-plays",
               },
+              env: {
+                oddsApiKey: Boolean(resolvedOddsKey),
+                sportsDataApiKey: Boolean(resolvedSportsDataKey),
+              },
               timestamp: new Date().toISOString(),
             });
             return;
@@ -82,7 +107,7 @@ function dfsApiProxy() {
           }
 
           if (pathname.startsWith("/api/underdog")) {
-            await proxyUpstream(req, res, UNDERDOG_TARGET, rewriteUnderdogPath, underdogHeaders(), "Underdog");
+            await proxyUpstream(req, res, UNDERDOG_TARGET, rewriteUnderdogPath, underdogHeaders(), "Underdog", resolvedOddsKey);
             return;
           }
 
@@ -92,27 +117,27 @@ function dfsApiProxy() {
           }
 
           if (pathname.startsWith("/api/mlb")) {
-            await proxyUpstream(req, res, "https://statsapi.mlb.com", rewriteMlbStatsPath, mlbStatsHeaders(), "MLB Stats");
+            await proxyUpstream(req, res, "https://statsapi.mlb.com", rewriteMlbStatsPath, mlbStatsHeaders(), "MLB Stats", resolvedOddsKey);
             return;
           }
 
           if (pathname.startsWith("/api/sportsbookOdds")) {
-            await proxyUpstream(req, res, "https://api.the-odds-api.com", rewriteSportsbookPath, { accept: "application/json" }, "Odds");
+            await proxyUpstream(req, res, "https://api.the-odds-api.com", rewriteSportsbookPath, { accept: "application/json" }, "Odds", resolvedOddsKey);
             return;
           }
 
           if (pathname === "/api/sportsdataio/mlb-status") {
-            await handleSportsDataMlbStatus(req, res);
+            await handleSportsDataMlbStatus(req, res, resolvedSportsDataKey);
             return;
           }
 
           if (pathname.startsWith("/api/sportsdataio/")) {
-            await proxySportsDataIoPath(req, res);
+            await proxySportsDataIoPath(req, res, "", resolvedSportsDataKey);
             return;
           }
 
           if (pathname.startsWith("/api/sportsdata")) {
-            await proxySportsDataIoPath(req, res, pathname.replace(/^\/api\/sportsdata/, "/api/sportsdataio"));
+            await proxySportsDataIoPath(req, res, pathname.replace(/^\/api\/sportsdata/, "/api/sportsdataio"), resolvedSportsDataKey);
             return;
           }
 
@@ -325,13 +350,13 @@ async function fetchPrizePicksUpstream(req, targetBase) {
   }
 }
 
-async function proxyUpstream(req, res, targetBase, rewriteFn, headers, source) {
+async function proxyUpstream(req, res, targetBase, rewriteFn, headers, source, oddsApiKey = "") {
   const fullUrl = req.url || "";
   let targetPath = rewriteFn(fullUrl);
   const upstreamUrl = configuredProxyUrl(fullUrl, source) || new URL(targetPath, targetBase);
 
-  if (source === "Odds" && ODDS_API_KEY && !upstreamUrl.searchParams.has("apiKey")) {
-    upstreamUrl.searchParams.set("apiKey", ODDS_API_KEY.trim());
+  if (source === "Odds" && oddsApiKey && !upstreamUrl.searchParams.has("apiKey")) {
+    upstreamUrl.searchParams.set("apiKey", oddsApiKey.trim());
   }
   const clientOddsKey = upstreamUrl.searchParams.get("apiKey");
   if (clientOddsKey) {
@@ -551,9 +576,9 @@ async function handleMlbSearch(req, res) {
   }
 }
 
-async function handleSportsDataMlbStatus(req, res) {
+async function handleSportsDataMlbStatus(req, res, fallbackApiKey = "") {
   const startedAt = Date.now();
-  const apiKey = resolveSportsDataApiKeyFromRequest(req);
+  const apiKey = resolveSportsDataApiKeyFromRequest(req, fallbackApiKey);
   if (!apiKey) {
     sendJson(res, 200, {
       ok: false,
@@ -577,11 +602,11 @@ async function handleSportsDataMlbStatus(req, res) {
   });
 }
 
-async function proxySportsDataIoPath(req, res, rewrittenPath = "") {
+async function proxySportsDataIoPath(req, res, rewrittenPath = "", fallbackApiKey = "") {
   const fullUrl = rewrittenPath || req.url || "";
   const parsed = new URL(fullUrl, "http://localhost");
   const subPath = parsed.pathname.replace(/^\/api\/sportsdataio/, "") || "/";
-  const apiKey = resolveSportsDataApiKeyFromRequest(req);
+  const apiKey = resolveSportsDataApiKeyFromRequest(req, fallbackApiKey);
 
   if (!apiKey) {
     sendJson(res, 200, {

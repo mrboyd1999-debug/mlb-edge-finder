@@ -65,11 +65,21 @@ export const USER_SETTING_KEYS = USER_SETTING_DEFS.map((def) => def.key);
 
 const SETTINGS_META_KEY = "dfs-runtime-settings-meta-v1";
 
+const PLACEHOLDER_PATTERN =
+  /^(your_|paste_|replace_|example_|xxx+|000+)|(_here|_key)$/i;
+
+function isUsableEnvValue(value) {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return false;
+  if (PLACEHOLDER_PATTERN.test(trimmed)) return false;
+  return true;
+}
+
 function readEnvValue(def = {}) {
   const keys = def.envKeys || [def.key];
   for (const envKey of keys) {
-    const value = String(import.meta.env?.[envKey] || "").trim();
-    if (value) return value;
+    const value = import.meta.env?.[envKey];
+    if (isUsableEnvValue(value)) return String(value).trim();
   }
   return "";
 }
@@ -206,7 +216,7 @@ export function getRawProxyUrl(platform = "") {
 
 export function getOddsApiKey() {
   const fromEnv = cleanApiKey(import.meta.env?.VITE_ODDS_API_KEY || "");
-  if (fromEnv) return fromEnv;
+  if (isUsableEnvValue(fromEnv)) return fromEnv;
   return cleanApiKey(getEffectiveSetting("VITE_ODDS_API_KEY"));
 }
 
@@ -214,8 +224,34 @@ export function getSportsDataApiKey() {
   const fromEnv = cleanApiKey(
     import.meta.env?.VITE_SPORTSDATA_API_KEY || import.meta.env?.VITE_SPORTSDATAIO_API_KEY || ""
   );
-  if (fromEnv) return fromEnv;
+  if (isUsableEnvValue(fromEnv)) return fromEnv;
   return cleanApiKey(getEffectiveSetting("VITE_SPORTSDATA_API_KEY"));
+}
+
+/** Copy env keys into localStorage when unset so Settings + health treat providers as configured. */
+export function ensureEnvKeysSyncedToLocalStorage() {
+  if (typeof window === "undefined") return;
+
+  const envOdds = isUsableEnvValue(import.meta.env?.VITE_ODDS_API_KEY)
+    ? cleanApiKey(import.meta.env.VITE_ODDS_API_KEY)
+    : "";
+  const envSportsData = isUsableEnvValue(
+    import.meta.env?.VITE_SPORTSDATA_API_KEY || import.meta.env?.VITE_SPORTSDATAIO_API_KEY
+  )
+    ? cleanApiKey(
+        import.meta.env?.VITE_SPORTSDATA_API_KEY || import.meta.env?.VITE_SPORTSDATAIO_API_KEY
+      )
+    : "";
+
+  const patch = {};
+  if (envOdds && !readStorageValue("VITE_ODDS_API_KEY")) patch.VITE_ODDS_API_KEY = envOdds;
+  if (envSportsData && !readStorageValue("VITE_SPORTSDATA_API_KEY")) {
+    patch.VITE_SPORTSDATA_API_KEY = envSportsData;
+  }
+
+  if (Object.keys(patch).length) {
+    writeRuntimeSettings({ ...readRuntimeSettings(), ...patch });
+  }
 }
 
 export function getStatmuseApiKey() {
