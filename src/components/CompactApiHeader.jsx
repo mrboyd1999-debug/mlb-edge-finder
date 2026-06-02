@@ -1,0 +1,46 @@
+import { memo } from "react";
+import { formatCooldownRemaining } from "../services/sourceRateLimit.js";
+
+function CompactApiHeader({
+  title = "MLB Pick Finder",
+  loading = false,
+  refreshBlocked = false,
+  refreshCountdownSec = 0,
+  staleDataActive = false,
+  onRefresh,
+  lastUpdated = "",
+  showDebugPanels = false,
+  onToggleDebugPanels,
+}) {
+  const refreshLabel = loading
+    ? "Loading…"
+    : staleDataActive || refreshCountdownSec <= 0
+      ? "Refresh"
+      : `Wait ${formatCooldownRemaining(refreshCountdownSec * 1000)}`;
+
+  return (
+    <header className="compact-app-header">
+      <div className="compact-app-header__top">
+        <div>
+          <h1 className="compact-app-header__title">{title}</h1>
+          {lastUpdated ? <p className="compact-app-header__updated">Updated {lastUpdated}</p> : null}
+        </div>
+        <button
+          type="button"
+          className="compact-app-header__refresh"
+          disabled={refreshBlocked || loading}
+          onClick={onRefresh}
+        >
+          {refreshLabel}
+        </button>
+        {onToggleDebugPanels ? (
+          <button type="button" className="compact-app-header__refresh" onClick={onToggleDebugPanels}>
+            {showDebugPanels ? "Hide Debug Diagnostics" : "Show Debug Diagnostics"}
+          </button>
+        ) : null}
+      </div>
+    </header>
+  );
+}
+
+export default memo(CompactApiHeader);

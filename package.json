@@ -4,12 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "vercel-dev": "vercel dev",
+    "server": "node server.js",
+    "proxy": "node server/prizepicks-proxy.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
+    "axios": "^1.9.0",
+    "express": "^5.1.0",
     "vite": "latest",
     "react": "latest",
     "react-dom": "latest"

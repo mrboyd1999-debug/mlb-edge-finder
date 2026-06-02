@@ -1,0 +1,263 @@
+import { memo, useState, useCallback } from "react";
+import SectionErrorBoundary from "./SectionErrorBoundary.jsx";
+import AppHeader from "./AppHeader.jsx";
+import CompactAppTabs from "./CompactAppTabs.jsx";
+import SystemStatusCard from "./SystemStatusCard.jsx";
+import VerificationFailureBreakdown from "./VerificationFailureBreakdown.jsx";
+import PlayerLookupPanel from "./PlayerLookupPanel.jsx";
+import BestPlaysTab from "./BestPlaysTab.jsx";
+import PlatformFeedTab from "./PlatformFeedTab.jsx";
+import SavedPicksTab from "./SavedPicksTab.jsx";
+import SettingsPanel from "./SettingsPanel.jsx";
+import DeveloperDebugPanel from "./DeveloperDebugPanel.jsx";
+import ProjectionProviderWarning from "./ProjectionProviderWarning.jsx";
+import ApiSetupBanner from "./ApiSetupBanner.jsx";
+import HistoricalCoverageBanner from "./HistoricalCoverageBanner.jsx";
+import ProviderFailureReasons from "./ProviderFailureReasons.jsx";
+import LiveDataCard from "./LiveDataCard.jsx";
+import BoardSummaryCard from "./BoardSummaryCard.jsx";
+import LiveBoardPipelineBanner from "./LiveBoardPipelineBanner.jsx";
+import LiveFeedDiagnosticsPanel from "./LiveFeedDiagnosticsPanel.jsx";
+import LivePropIngestionCountsPanel from "./LivePropIngestionCountsPanel.jsx";
+import ProviderCoverageAuditSection from "./ProviderCoverageAuditSection.jsx";
+import LiveFeedTestPanel from "./LiveFeedTestPanel.jsx";
+import RenderingSourceDiagnosticsPanel from "./RenderingSourceDiagnosticsPanel.jsx";
+import { readSettingsMeta, writeSettingsMeta } from "../services/runtimeSettings.js";
+import { clearProviderHealthCache, testAllApiConnections } from "../services/apiConnectionTest.js";
+import { isDebugModeEnabled } from "../utils/devMode.js";
+
+function DfsAnalyzerLayout({
+  appView,
+  setAppView,
+  apiHealth,
+  loading,
+  loadingStage,
+  pipelineDiagnostics,
+  loadError,
+  refreshBlocked,
+  refreshCountdownSec,
+  staleDataActive = false,
+  onRefresh,
+  lastUpdatedLabel,
+  learningSaveNotice,
+  boardLookupProps = [],
+  onOpenProp,
+  onSavePick,
+  topMlbPlayBoard,
+  verificationFilterDiagnostics = null,
+  debugPanelsVisible = false,
+  boardStatusNotice = "",
+  projectionSourceCounts = null,
+  prizePicksFeedProps,
+  pipelineRenderCounts,
+  savedDisplayPicks,
+  onRemoveSavedPick,
+  onClearSavedPicks,
+  onGradeSavedPick,
+  onSectionError,
+  showDebugPanels,
+  onShowDebugPanelsChange,
+  onSettingsSaved,
+  feedHealthContext,
+  underdogDebugSnapshot,
+  debugInfo,
+  mlbPipelineStatus,
+  statsAttachmentAudit = null,
+  providerCoverageAudit = null,
+  renderSourceAudit = null,
+  cacheStatus = "",
+  liveBoardPipelineTrace = null,
+  boardSummary = null,
+  boardFreshness = null,
+  onClearCacheAndReload = null,
+  showStaleCache = false,
+  onShowStaleCache,
+}) {
+  const [connectionReport, setConnectionReport] = useState(() => {
+    const meta = readSettingsMeta();
+    if (meta.lastTestedAt && Array.isArray(meta.lastConnectionReport)) {
+      return { testedAt: meta.lastTestedAt, results: meta.lastConnectionReport };
+    }
+    return null;
+  });
+
+  const handleConnectionReportChange = useCallback((report) => {
+    if (report) setConnectionReport(report);
+  }, []);
+
+  const handleRefreshWithHealth = useCallback(async () => {
+    clearProviderHealthCache();
+    setConnectionReport(null);
+    await onRefresh?.();
+    try {
+      const report = await testAllApiConnections({
+        feedContext: feedHealthContext,
+        debugInfo,
+        allDisplayProps: debugInfo?.allDisplayProps || [],
+        sourceStatus: debugInfo?.sources || {},
+        lastUpdated: debugInfo?.lastUpdated || "",
+      });
+      writeSettingsMeta({
+        ...readSettingsMeta(),
+        lastTestedAt: report.testedAt,
+        lastConnectionReport: report.results,
+      });
+      setConnectionReport(report);
+    } catch (error) {
+      console.error("[DFS Refresh] provider health retest failed", error);
+    }
+  }, [onRefresh, feedHealthContext, debugInfo]);
+
+  const debugModeEnabled = isDebugModeEnabled();
+
+  return (
+    <main className="dfs-app-page compact-dfs-app">
+      <AppHeader
+        title="MLB Pick Finder"
+        loading={loading}
+        refreshBlocked={refreshBlocked}
+        refreshCountdownSec={refreshCountdownSec}
+        staleDataActive={staleDataActive}
+        onRefresh={handleRefreshWithHealth}
+        showDebugPanels={showDebugPanels}
+        onToggleDebugPanels={onShowDebugPanelsChange ? () => onShowDebugPanelsChange(!showDebugPanels) : undefined}
+        lastUpdated={lastUpdatedLabel}
+      />
+
+      <LiveDataCard
+        apiHealth={apiHealth}
+        connectionReport={connectionReport}
+        audit={providerCoverageAudit}
+        renderSourceAudit={renderSourceAudit}
+        mlbPipelineStatus={mlbPipelineStatus}
+        pipelineProjectionStats={pipelineRenderCounts?.projectionStats ?? null}
+        pipelinePropCountAudit={debugInfo?.pipelinePropCountAudit}
+        feedHealthContext={feedHealthContext}
+        debugSources={debugInfo?.sources}
+        boardFreshness={boardFreshness}
+        loading={loading}
+        showProviderDetails={debugPanelsVisible}
+        projectionSourceCounts={
+          projectionSourceCounts || topMlbPlayBoard?.projectionSourceCounts || null
+        }
+      />
+
+      {!debugPanelsVisible ? null : <BoardSummaryCard summary={boardSummary} />}
+
+      <CompactAppTabs activeTab={appView} onChange={setAppView} />
+
+      {learningSaveNotice ? <p className="compact-form-notice">{learningSaveNotice}</p> : null}
+
+      {appView === "bestPlays" ? (
+        <SectionErrorBoundary name="Verified Plays" onError={onSectionError}>
+          <BestPlaysTab
+            sections={topMlbPlayBoard?.sections || []}
+            loading={loading}
+            loadingStage={loadingStage}
+            loadError={loadError}
+            onOpen={onOpenProp}
+            filterDiagnostics={topMlbPlayBoard?.filterDiagnostics}
+            boardStatusNotice={boardStatusNotice}
+          />
+        </SectionErrorBoundary>
+      ) : null}
+
+      {appView === "prizepicks" ? (
+        <SectionErrorBoundary name="MLB Props" onError={onSectionError}>
+          <PlatformFeedTab
+            platformLabel="MLB Props · Research"
+            picks={prizePicksFeedProps || []}
+            loading={loading}
+            onOpen={onOpenProp}
+            onSave={onSavePick}
+            cacheStatus={cacheStatus}
+            savedPicks={savedDisplayPicks || []}
+          />
+        </SectionErrorBoundary>
+      ) : null}
+
+      {appView === "manual" ? (
+        <SectionErrorBoundary name="Player Lookup" onError={onSectionError}>
+          <PlayerLookupPanel boardProps={boardLookupProps} loading={loading} onOpenProp={onOpenProp} />
+        </SectionErrorBoundary>
+      ) : null}
+
+      {appView === "saved" ? (
+        <SectionErrorBoundary name="Saved Picks" onError={onSectionError}>
+          <SavedPicksTab
+            picks={savedDisplayPicks || []}
+            onOpen={onOpenProp}
+            onDelete={onRemoveSavedPick}
+            onClearAll={onClearSavedPicks}
+            onGrade={onGradeSavedPick}
+          />
+        </SectionErrorBoundary>
+      ) : null}
+
+      {debugPanelsVisible ? (
+        <details className="compact-settings-details debug-diagnostics-panel" open>
+          <summary>Debug Diagnostics</summary>
+          <LiveBoardPipelineBanner
+            trace={liveBoardPipelineTrace}
+            renderSourceAudit={renderSourceAudit}
+            boardFreshness={boardFreshness}
+            loading={loading}
+            onClearCacheAndReload={onClearCacheAndReload}
+          />
+          <ProviderFailureReasons audit={providerCoverageAudit} />
+          <LivePropIngestionCountsPanel audit={providerCoverageAudit} />
+          <SystemStatusCard
+            apiHealth={apiHealth}
+            mlbPipelineStatus={mlbPipelineStatus}
+            connectionReport={connectionReport}
+            onConnectionReportChange={handleConnectionReportChange}
+            feedHealthContext={feedHealthContext}
+            pipelineProjectionStats={pipelineRenderCounts?.projectionStats ?? null}
+            pipelinePropCountAudit={debugInfo?.pipelinePropCountAudit}
+            debugSources={debugInfo?.sources}
+          />
+          <ProviderCoverageAuditSection audit={providerCoverageAudit} loading={loading} />
+          <LiveFeedDiagnosticsPanel audit={providerCoverageAudit} />
+          <LiveFeedTestPanel />
+          <RenderingSourceDiagnosticsPanel audit={renderSourceAudit} />
+          <VerificationFailureBreakdown
+            filterDiagnostics={verificationFilterDiagnostics || topMlbPlayBoard?.filterDiagnostics}
+            heavyAuditEnabled
+          />
+          <HistoricalCoverageBanner audit={statsAttachmentAudit} loading={loading} />
+          <ApiSetupBanner onOpenSettings={() => setAppView("settings")} />
+          <ProjectionProviderWarning status={debugInfo?.projectionProvider} />
+          <SettingsPanel
+            onSaved={onSettingsSaved}
+            onClearCaches={onSettingsSaved}
+            onConnectionReportChange={handleConnectionReportChange}
+            feedHealthContext={feedHealthContext}
+          />
+          <details className="compact-settings-details developer-debug-details">
+            <summary>Developer Debug</summary>
+            <DeveloperDebugPanel
+              connectionReport={connectionReport}
+              lastTestedAt={connectionReport?.testedAt || readSettingsMeta().lastTestedAt || ""}
+              apiHealth={apiHealth}
+              mlbPipelineStatus={mlbPipelineStatus}
+              feedHealthContext={feedHealthContext}
+              underdogDebugSnapshot={underdogDebugSnapshot}
+              rejectionAudit={debugInfo?.rejectionAudit}
+              projectionCoverageAudit={debugInfo?.projectionCoverageAudit}
+              statsAttachmentAudit={debugInfo?.statsAttachmentAudit}
+              pipelinePropCountAudit={debugInfo?.pipelinePropCountAudit}
+              providerCoverageAudit={debugInfo?.providerCoverageAudit}
+              prizePicksDiagnostics={debugInfo?.sources?.PrizePicks?.diagnostics}
+              bestPlaysFilter={topMlbPlayBoard?.filterDiagnostics}
+              showDebugPanels={showDebugPanels}
+              onShowDebugPanelsChange={onShowDebugPanelsChange}
+              debugModeEnabled={debugModeEnabled}
+            />
+          </details>
+        </details>
+      ) : null}
+    </main>
+  );
+}
+
+export default memo(DfsAnalyzerLayout);

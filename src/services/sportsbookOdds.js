@@ -1,4 +1,29 @@
-import { cachedFetch } from "./fetchUtil.js";
+import { fetchJsonSafe, getCacheTtlMs } from "./fetchUtil.js";
+import { ENRICHMENT_MAX_RETRIES, getApiTimeoutMs } from "../utils/apiTimeout.js";
+import { canonicalStatType } from "../utils/marketNormalization.js";
+import {
+  buildOddsApiProxyUrl,
+  getTrimmedOddsApiKey,
+  isOddsApiKeyUsable,
+  logOddsApiExchange,
+  ODDS_API_INVALID_KEY_MESSAGE,
+  parseOddsApiAuthFailure,
+} from "./oddsApiClient.js";
+import {
+  SOURCE_IDS,
+  cachedLinesMessage,
+  isSourceAuthBlocked,
+  isSourceInCooldown,
+  recordSource429,
+  recordSourceAuthFailure,
+  recordSourceSuccess,
+  recordSourceFailure,
+  markSourceCached,
+  withSourceRequestLock,
+} from "./sourceRateLimit.js";
+
+const ODDS_CACHE_KEY = "dfs-odds-last-good-comparisons";
+const ODDS_CACHE_MAX_MS = 60 * 60 * 1000;
 
 const SPORT_KEYS = {
   MLB: "baseball_mlb",
@@ -8,8 +33,6 @@ const SPORT_KEYS = {
   "WTA Tennis": "tennis_wta",
   Soccer: "soccer_epl",
 };
-
-const API_KEY = import.meta.env.VITE_ODDS_API_KEY;
 
 const COMPARISON_BOOKS = new Set([
   "fanduel",
@@ -22,7 +45,11 @@ const COMPARISON_BOOKS = new Set([
 const MAX_EVENTS_PER_SPORT = 10;
 
 export async function fetchSportsbookComparison({ props = [] } = {}) {
-  const apiKey = getOddsApiKey();
+  return withSourceRequestLock(SOURCE_IDS.ODDS_API, () => fetchSportsbookComparisonInternal({ props }));
+}
+
+async function fetchSportsbookComparisonInternal({ props = [] } = {}) {
+  const apiKey = getTrimmedOddsApiKey();
   if (!props.length) {
     return {
       source: "Sportsbook comparison",
@@ -30,11 +57,41 @@ export async function fetchSportsbookComparison({ props = [] } = {}) {
       warnings: [],
     };
   }
-  if (!apiKey) {
+  if (!isOddsApiKeyUsable()) {
     return {
       source: "Sportsbook comparison",
       comparisons: [],
-      warnings: ["Missing API key."],
+      warnings: apiKey ? [ODDS_API_INVALID_KEY_MESSAGE] : ["Missing API key."],
+      authFailed: Boolean(apiKey),
+      authDisabled: true,
+    };
+  }
+
+  if (isSourceAuthBlocked(SOURCE_IDS.ODDS_API)) {
+    return {
+      source: "Sportsbook comparison",
+      comparisons: [],
+      warnings: [ODDS_API_INVALID_KEY_MESSAGE],
+      authFailed: true,
+    };
+  }
+
+  if (isSourceInCooldown(SOURCE_IDS.ODDS_API)) {
+    const cached = readOddsCache();
+    if (cached?.comparisons?.length) {
+      return {
+        source: "Sportsbook comparison",
+        comparisons: cached.comparisons,
+        warnings: [cachedLinesMessage(cached.savedAt) || "Odds API rate limited — using cached comparisons."],
+        cached: true,
+        lastSuccessfulFetchAt: cached.savedAt,
+      };
+    }
+    return {
+      source: "Sportsbook comparison",
+      comparisons: [],
+      warnings: ["Odds API rate limited. No cached comparisons available."],
+      rateLimited: true,
     };
   }
 
@@ -50,11 +107,75 @@ export async function fetchSportsbookComparison({ props = [] } = {}) {
     .filter((item) => item.status === "rejected")
     .map((item) => friendlyOddsError(item.reason));
 
+  const rateLimited = warnings.some((warning) => /rate limit|429|API limit/i.test(warning));
+  if (rateLimited) {
+    recordSource429(SOURCE_IDS.ODDS_API);
+    const cached = readOddsCache();
+    if (cached?.comparisons?.length) {
+      return {
+        source: "Sportsbook comparison",
+        comparisons: cached.comparisons,
+        warnings: [cachedLinesMessage(cached.savedAt), ...warnings],
+        cached: true,
+        lastSuccessfulFetchAt: cached.savedAt,
+        rateLimited: true,
+      };
+    }
+  }
+
+  if (comparisons.length) {
+    writeOddsCache(comparisons);
+    recordSourceSuccess(SOURCE_IDS.ODDS_API);
+    return {
+      source: "Sportsbook comparison",
+      comparisons,
+      warnings,
+      lastSuccessfulFetchAt: new Date().toISOString(),
+    };
+  }
+
+  if (warnings.length) {
+    recordSourceFailure(SOURCE_IDS.ODDS_API, warnings[0]);
+    const cached = readOddsCache();
+    if (cached?.comparisons?.length) {
+      markSourceCached(SOURCE_IDS.ODDS_API, cached.savedAt);
+      return {
+        source: "Sportsbook comparison",
+        comparisons: cached.comparisons,
+        warnings: [cachedLinesMessage(cached.savedAt), ...warnings],
+        cached: true,
+        lastSuccessfulFetchAt: cached.savedAt,
+      };
+    }
+  }
+
   return {
     source: "Sportsbook comparison",
     comparisons,
     warnings,
   };
+}
+
+function writeOddsCache(comparisons = []) {
+  try {
+    window.localStorage.setItem(
+      ODDS_CACHE_KEY,
+      JSON.stringify({ savedAt: new Date().toISOString(), comparisons: comparisons.slice(0, 500) })
+    );
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function readOddsCache() {
+  try {
+    const cached = JSON.parse(window.localStorage.getItem(ODDS_CACHE_KEY) || "null");
+    if (!cached?.comparisons || !Array.isArray(cached.comparisons)) return null;
+    if (Date.now() - new Date(cached.savedAt).getTime() > ODDS_CACHE_MAX_MS) return null;
+    return cached;
+  } catch {
+    return null;
+  }
 }
 
 async function fetchSportMarkets(apiKey, sport, propsForSport) {
@@ -63,12 +184,38 @@ async function fetchSportMarkets(apiKey, sport, propsForSport) {
   const markets = unique(propsForSport.map(marketForProp).filter(Boolean));
   if (!markets.length) return [];
 
-  const eventsUrl = new URL(`https://api.the-odds-api.com/v4/sports/${sportKey}/events`);
-  eventsUrl.searchParams.set("apiKey", apiKey);
+  const eventsUrl = buildOddsApiProxyUrl(`/v4/sports/${sportKey}/events`);
 
-  const eventsResponse = await cachedFetch(eventsUrl.toString());
-  if (!eventsResponse.ok) throw new Error(oddsApiErrorMessage(eventsResponse.status));
-  const events = await eventsResponse.json();
+  const result = await fetchJsonSafe(eventsUrl.toString(), {}, {
+    source: "Sportsbook odds events",
+    ttlMs: getCacheTtlMs(),
+    maxRetries: ENRICHMENT_MAX_RETRIES,
+    skip429Retry: true,
+    enrichment: true,
+    timeoutMs: getApiTimeoutMs({ enrichment: true }),
+  });
+  logOddsApiExchange({
+    url: eventsUrl.toString(),
+    status: result.response?.status,
+    text: result.text,
+    data: result.data,
+    label: "Sportsbook odds events",
+  });
+  const authFailure = parseOddsApiAuthFailure({
+    data: result.data,
+    status: result.response?.status,
+    text: result.text,
+  });
+  if (authFailure) {
+    recordSourceAuthFailure(SOURCE_IDS.ODDS_API, authFailure);
+    throw new Error(authFailure);
+  }
+  if (!result.ok) {
+    if (result.rateLimited) throw new Error(oddsApiErrorMessage(429));
+    throw new Error(result.error || "Could not load sportsbook comparison data.");
+  }
+  const events = result.data;
+  if (events?.error) throw new Error(events.message || "Could not load sportsbook comparison data.");
   const now = Date.now();
   const upcomingEvents = (events || [])
     .filter((event) => new Date(event.commence_time).getTime() > now)
@@ -76,7 +223,7 @@ async function fetchSportMarkets(apiKey, sport, propsForSport) {
     .slice(0, MAX_EVENTS_PER_SPORT);
 
   const settled = await Promise.allSettled(
-    upcomingEvents.map((event) => fetchEventPlayerProps(apiKey, sportKey, sport, event.id, markets))
+    upcomingEvents.map((event) => fetchEventPlayerProps(sportKey, sport, event.id, markets))
   );
 
   return aggregateSportsbookLines(
@@ -84,16 +231,43 @@ async function fetchSportMarkets(apiKey, sport, propsForSport) {
   );
 }
 
-async function fetchEventPlayerProps(apiKey, sportKey, sport, eventId, markets) {
-  const url = new URL(`https://api.the-odds-api.com/v4/sports/${sportKey}/events/${eventId}/odds`);
-  url.searchParams.set("apiKey", apiKey);
-  url.searchParams.set("regions", "us");
-  url.searchParams.set("markets", markets.join(","));
-  url.searchParams.set("oddsFormat", "american");
+async function fetchEventPlayerProps(sportKey, sport, eventId, markets) {
+  const url = buildOddsApiProxyUrl(`/v4/sports/${sportKey}/events/${eventId}/odds`, {
+    regions: "us",
+    markets: markets.join(","),
+    oddsFormat: "american",
+  });
 
-  const response = await cachedFetch(url.toString());
-  if (!response.ok) throw new Error(oddsApiErrorMessage(response.status));
-  const event = await response.json();
+  const result = await fetchJsonSafe(url.toString(), {}, {
+    source: "Sportsbook odds props",
+    ttlMs: getCacheTtlMs(),
+    maxRetries: ENRICHMENT_MAX_RETRIES,
+    skip429Retry: true,
+    enrichment: true,
+    timeoutMs: getApiTimeoutMs({ enrichment: true }),
+  });
+  logOddsApiExchange({
+    url: url.toString(),
+    status: result.response?.status,
+    text: result.text,
+    data: result.data,
+    label: "Sportsbook odds props",
+  });
+  const authFailure = parseOddsApiAuthFailure({
+    data: result.data,
+    status: result.response?.status,
+    text: result.text,
+  });
+  if (authFailure) {
+    recordSourceAuthFailure(SOURCE_IDS.ODDS_API, authFailure);
+    throw new Error(authFailure);
+  }
+  if (!result.ok) {
+    if (result.rateLimited) throw new Error(oddsApiErrorMessage(429));
+    throw new Error(result.error || "Could not load sportsbook comparison data.");
+  }
+  const event = result.data;
+  if (event?.error) throw new Error(event.message || "Could not load sportsbook comparison data.");
 
   return (event.bookmakers || [])
     .filter((book) => COMPARISON_BOOKS.has(book.key))
@@ -173,6 +347,8 @@ function marketForProp(prop) {
   if (prop.sport === "MLB" && key === "strikeouts") return "player_strikeouts";
   if (prop.sport === "MLB" && key === "totalBases") return "batter_total_bases";
   if (prop.sport === "MLB" && key === "hits") return "batter_hits";
+  if (prop.sport === "MLB" && key === "homeRuns") return "batter_home_runs";
+  if (prop.sport === "MLB" && key === "stolenBases") return "batter_stolen_bases";
   if (prop.sport === "MLB" && key === "rbis") return "batter_rbis";
   if (prop.sport === "MLB" && key === "runs") return "batter_runs_scored";
   if (isBasketballSport(prop.sport) && key === "points") return "player_points";
@@ -196,11 +372,15 @@ function statTypeFromMarket(market) {
     player_strikeouts: "Strikeouts",
     batter_total_bases: "Total Bases",
     batter_hits: "Hits",
+    batter_home_runs: "Home Runs",
+    batter_stolen_bases: "Stolen Bases",
     batter_rbis: "RBIs",
     batter_runs_scored: "Runs",
     player_points: "Points",
     player_rebounds: "Rebounds",
     player_assists: "Assists",
+    player_points_rebounds: "Points + Rebounds",
+    player_points_assists: "Points + Assists",
     player_points_rebounds_assists: "Points + Rebounds + Assists",
     player_threes: "3-Pointers Made",
     player_shots: "Shots",
@@ -209,28 +389,6 @@ function statTypeFromMarket(market) {
     player_saves: "Goalie Saves",
   };
   return map[market] || market;
-}
-
-function canonicalStatType(statType) {
-  const key = normalize(statType);
-  if (key.includes("pitchesthrown") || key.includes("pitchcount")) return "pitchesThrown";
-  if (key.includes("strikeout")) return "strikeouts";
-  if (key.includes("hitsrunsrbis") || key.includes("hrr")) return "hitsRunsRbis";
-  if (key.includes("totalbases")) return "totalBases";
-  if (key === "hits") return "hits";
-  if (key === "rbis" || key === "rbi") return "rbis";
-  if (key === "runs") return "runs";
-  if (key.includes("pointsreboundsassists") || key === "pra") return "pra";
-  if (key === "points") return "points";
-  if (key === "rebounds") return "rebounds";
-  if (key === "assists") return "assists";
-  if (key.includes("3pointers") || key.includes("threepointers")) return "threes";
-  if (key.includes("shotsontarget")) return "shotsOnTarget";
-  if (key === "shots" || key.includes("shotsattempted")) return "shots";
-  if (key.includes("passesattempted") || key === "passes") return "passesAttempted";
-  if (key.includes("goalsallowed")) return "goalsAllowed";
-  if (key.includes("goaliesaves") || key.includes("keepersaves") || key === "saves") return "goalieSaves";
-  return key;
 }
 
 function average(values) {
@@ -247,21 +405,8 @@ function normalize(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function getOddsApiKey() {
-  try {
-    return (
-      API_KEY ||
-      window.localStorage.getItem("odds-api-key") ||
-      window.localStorage.getItem("the-odds-api-key") ||
-      ""
-    ).trim();
-  } catch {
-    return "";
-  }
-}
-
 function oddsApiErrorMessage(status) {
-  if (status === 401 || status === 403) return "Missing API key.";
+  if (status === 401 || status === 403) return ODDS_API_INVALID_KEY_MESSAGE;
   if (status === 429) return "API limit reached. Try again later or upgrade plan.";
   if (status === 422) return "Unsupported sportsbook market skipped.";
   return "Could not load sportsbook comparison data.";
@@ -269,6 +414,8 @@ function oddsApiErrorMessage(status) {
 
 function friendlyOddsError(error) {
   const message = error?.message || "Could not load sportsbook comparison data.";
+  if (message.includes(ODDS_API_INVALID_KEY_MESSAGE)) return message;
+  if (/401|403|unauthorized|invalid api key|subscription/i.test(message)) return ODDS_API_INVALID_KEY_MESSAGE;
   if (message.includes("Unsupported sportsbook market")) return message;
   if (message.includes("API limit reached")) return message;
   if (message.includes("Missing API key")) return message;

@@ -1,0 +1,157 @@
+/** Shared API timeout + enrichment helpers (mobile 5s / desktop 8s). */
+
+export const ENRICHMENT_TIMEOUT_MESSAGE = "Timed out — using base feed.";
+export const ENRICHMENT_MAX_RETRIES = 1;
+export const MOBILE_TIMEOUT_MS = 5_000;
+export const DESKTOP_TIMEOUT_MS = 8_000;
+export const LINE_FEED_TIMEOUT_MS = 30_000;
+export const SPORTSDATA_TIMEOUT_MS = 8_000;
+/** SportsDataIO health probe — longer timeout with retries. */
+export const SPORTSDATA_HEALTH_TIMEOUT_MS = 45_000;
+export const SPORTSDATA_HEALTH_MAX_RETRIES = 3;
+/** MLB player stat profiles — fail fast and fall back to season merge + cache. */
+export const MLB_STATS_FETCH_TIMEOUT_MS = 8_000;
+/** Hard cap for board refresh — UI must exit loading within this window. */
+export const BOARD_LOAD_TIMEOUT_MS = 20_000;
+/** Per-provider cap during board load — do not block on slow PrizePicks retries. */
+export const BOARD_PROVIDER_TIMEOUT_MS = 8_000;
+/** Per-provider caps — independent; do not use global mobile/desktop caps. */
+/** Progressive per-attempt timeouts before declaring fetch failure. */
+export const PRIZEPICKS_FETCH_TIMEOUT_MS = 8_000;
+export const PRIZEPICKS_RETRY_DELAY_MS = 1_000;
+export const PRIZEPICKS_MAX_RETRIES = 1;
+export const PRIZEPICKS_RETRY_TIMEOUTS_MS = [PRIZEPICKS_FETCH_TIMEOUT_MS, PRIZEPICKS_FETCH_TIMEOUT_MS];
+export const UNDERDOG_RETRY_TIMEOUTS_MS = [500, 1_000, 2_000];
+export const PROVIDER_RETRY_DELAY_MS = 250;
+
+const PROVIDER_POST_PROCESSING_BUDGET_MS = 12_000;
+
+export function getProviderRetryAttemptBudgetMs(retryTimeouts = PRIZEPICKS_RETRY_TIMEOUTS_MS) {
+  const attempts = Array.isArray(retryTimeouts) ? retryTimeouts : [retryTimeouts];
+  const attemptMs = attempts.reduce((sum, ms) => sum + finiteRetryMs(ms), 0);
+  const delayMs = Math.max(0, attempts.length - 1) * PROVIDER_RETRY_DELAY_MS;
+  return attemptMs + delayMs + 500 + PROVIDER_POST_PROCESSING_BUDGET_MS;
+}
+
+function finiteRetryMs(value) {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? num : 0;
+}
+
+/** Outer wrapper must outlive inner retry loop (500 + 1000 + 2000 + delays). */
+export const PRIZEPICKS_PROVIDER_TIMEOUT_MS = getProviderRetryAttemptBudgetMs(PRIZEPICKS_RETRY_TIMEOUTS_MS);
+export const UNDERDOG_PROVIDER_TIMEOUT_MS = getProviderRetryAttemptBudgetMs(UNDERDOG_RETRY_TIMEOUTS_MS);
+export const LINE_FEED_RETRY_DELAY_MS = 2_000;
+export const LINE_FEED_MAX_RETRIES = 2;
+
+export function isMobileViewport() {
+  if (typeof window === "undefined") return false;
+  if (window.matchMedia?.("(max-width: 768px)").matches) return true;
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "");
+}
+
+export function getApiTimeoutMs({ enrichment = false } = {}) {
+  void enrichment;
+  return isMobileViewport() ? MOBILE_TIMEOUT_MS : DESKTOP_TIMEOUT_MS;
+}
+
+/** PrizePicks / Underdog line feeds — longer timeout for flaky proxies. */
+export function getLineFeedTimeoutMs() {
+  return LINE_FEED_TIMEOUT_MS;
+}
+
+/** SportsDataIO enrichment — background-only, must not block core MLB feed. */
+export function getSportsDataTimeoutMs() {
+  return SPORTSDATA_TIMEOUT_MS;
+}
+
+/** SportsDataIO health checks — allow slow proxy responses. */
+export function getSportsDataHealthTimeoutMs() {
+  return SPORTSDATA_HEALTH_TIMEOUT_MS;
+}
+
+/** MLB stats enrichment — blocking; do not use short mobile/desktop caps. */
+export function getMlbStatsFetchTimeoutMs() {
+  return MLB_STATS_FETCH_TIMEOUT_MS;
+}
+
+export function isAbortOrTimeoutError(error) {
+  const message = String(error?.message || error || "");
+  return error?.name === "AbortError" || /timed out|abort/i.test(message);
+}
+
+export function isTimeoutPreview(preview = "") {
+  return /timed out|abort/i.test(String(preview || ""));
+}
+
+/**
+ * Race a promise against a hard timeout. Returns fallback (or default enrichment shape) on timeout.
+ */
+export async function withFetchTimeout(promiseOrFn, timeoutMs, { fallback, label = "fetch" } = {}) {
+  const run = typeof promiseOrFn === "function" ? promiseOrFn() : promiseOrFn;
+  let settled = false;
+  let timer = null;
+
+  const resolveTimeoutResult = () =>
+    typeof fallback === "function"
+      ? fallback({ timedOut: true, label })
+      : fallback ?? { timedOut: true, warnings: [ENRICHMENT_TIMEOUT_MESSAGE] };
+
+  try {
+    const result = await Promise.race([
+      Promise.resolve(run).then((value) => {
+        settled = true;
+        return value;
+      }),
+      new Promise((resolve, reject) => {
+        timer = window.setTimeout(() => {
+          if (settled) return;
+          console.warn(`[API Timeout] ${label} timed out after ${timeoutMs}ms`);
+          try {
+            resolve(resolveTimeoutResult());
+          } catch (error) {
+            reject(error);
+          }
+        }, timeoutMs);
+      }),
+    ]);
+    return result;
+  } finally {
+    if (timer != null) window.clearTimeout(timer);
+  }
+}
+
+/** Hard reject on timeout — use for board-level load guards. */
+export function withTimeout(
+  promise,
+  ms = BOARD_LOAD_TIMEOUT_MS,
+  message = "Feed load timeout"
+) {
+  let timer = null;
+  return Promise.race([
+    Promise.resolve(promise).finally(() => {
+      if (timer != null) window.clearTimeout(timer);
+    }),
+    new Promise((_, reject) => {
+      timer = window.setTimeout(() => {
+        reject(new Error(message));
+      }, ms);
+    }),
+  ]);
+}
+
+/** AbortController wrapper for probe-style fetches. */
+export async function fetchWithAbortTimeout(url, init = {}, timeoutMs = getApiTimeoutMs()) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (isAbortOrTimeoutError(error)) {
+      throw new Error(ENRICHMENT_TIMEOUT_MESSAGE);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "players": [],
+  "meta": {
+    "description": "MLB player → team map. Hydrated at runtime from SportsDataIO season stats and merged into memory.",
+    "version": 1
+  }
+}
