@@ -251,6 +251,12 @@ import {
   STARTUP_NORMALIZED_PROP_LIMIT,
 } from "./utils/startupPerformance.js";
 import { prepareProjectionHotPath, MAX_PROJECTION_PROPS } from "./utils/projectionHotPath.js";
+import { syncProjectionFieldsOntoProps } from "./utils/pipelineProjectionAttach.js";
+import {
+  auditPipelineRejectionReasons,
+  buildPipelineStageCounts,
+  logPipelineStageDiagnostics,
+} from "./utils/pipelineStageDiagnostics.js";
 import { persistStartupBoardSlices, readInstantStartupBoard } from "./services/startupBoardCache.js";
 import {
   mergeBoardRefreshResult,
@@ -2580,6 +2586,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   };
   let mlbSecondaryPromise = null;
   let coreReadySent = false;
+  let projectedWorkingProps = null;
 
   if (MLB_ONLY_MODE) {
     resetProjectionFetchDebug();
@@ -2593,12 +2600,14 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
     const projectionBatch = hotPath.hot;
     const boardPool = hotPath.pool;
+    const fullDisplayBoard = boardPool.boardProps.length ? boardPool.boardProps : normalizedPool;
     const sportFilteredProps = boardPool.afterSportFilter;
     const marketFilteredProps = boardPool.afterMarketFilter;
     const projectionCandidates = projectionBatch;
-    allDisplayProps = projectionBatch;
-    workingNormalProps = projectionBatch;
-    workingActiveProps = projectionBatch;
+    projectedWorkingProps = projectionBatch;
+    allDisplayProps = fullDisplayBoard;
+    workingNormalProps = fullDisplayBoard;
+    workingActiveProps = fullDisplayBoard;
     pipelinePropCountSnapshot = {
       normalizedProps: normalizedPropsSnapshot,
       afterSportFilter: sportFilteredProps.length,
@@ -2705,8 +2714,9 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         seasonStats: seasonStatsData,
         statsMap: stableStats.statsMap,
       };
-      const merged = mergeProjectionsOntoProps(allDisplayProps, mergeContext);
-      allDisplayProps = merged.props;
+      const merged = mergeProjectionsOntoProps(projectedWorkingProps, mergeContext);
+      projectedWorkingProps = merged.props;
+      allDisplayProps = syncProjectionFieldsOntoProps(fullDisplayBoard, projectedWorkingProps);
       workingNormalProps = allDisplayProps;
       workingActiveProps = allDisplayProps;
       pipelinePropCountSnapshot.afterProjectionMerge = allDisplayProps.length;
@@ -2716,13 +2726,14 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       const needsEngineProjections =
         pipelinePropCountSnapshot.projectedProps < Math.min(allDisplayProps.length, 100);
       if (needsEngineProjections) {
-        const enrichmentResult = enrichMlbPropsBatch(allDisplayProps, {
+        const enrichmentResult = enrichMlbPropsBatch(projectedWorkingProps, {
           seasonStats: seasonStatsData,
           statsMap: stableStats.statsMap,
           skipInitialMerge: true,
           initialMergeDebug: merged.debug,
         });
-        allDisplayProps = enrichmentResult.props;
+        projectedWorkingProps = enrichmentResult.props;
+        allDisplayProps = syncProjectionFieldsOntoProps(fullDisplayBoard, projectedWorkingProps);
         workingNormalProps = allDisplayProps;
         workingActiveProps = allDisplayProps;
         pipelinePropCountSnapshot.projectedProps = countPropsWithProjections(allDisplayProps);
@@ -2886,6 +2897,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       });
     })();
   } else {
+  projectedWorkingProps = workingNormalProps;
   const statsFetchProps = pickUniquePropsForStatsFetch(workingNormalProps);
   const statsApplied = await fetchMlbProjectionStatsBlocking(statsFetchProps, debugInfo);
   const stableStats = resolveStableStatsMap(statsApplied.stats);
@@ -3104,6 +3116,12 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   debugInfo.projectionErrors = mlbProjectionDiagnostics.projectionErrors;
 
   allDisplayProps = mergeScoredIntoDisplayProps(allDisplayProps, scoredProps);
+  if (MLB_ONLY_MODE && scoredProps.length && projectedWorkingProps?.length) {
+    allDisplayProps = syncProjectionFieldsOntoProps(
+      allDisplayProps,
+      mergeScoredIntoDisplayProps(projectedWorkingProps, scoredProps)
+    );
+  }
   if (emergencyDiagnostic?.success && emergencyDiagnostic.forcedVerifiedProp) {
     const canary = emergencyDiagnostic.forcedVerifiedProp;
     const hasCanary = allDisplayProps.some(
@@ -3213,15 +3231,56 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     pipelineFallback = false;
   } else {
     liveRenderResult = buildLiveRenderBoard(allDisplayProps, { allowFallbackProps: allowFallbackRender });
+    const projectedOnBoard = countMergedProjections(allDisplayProps);
+    if (!liveRenderResult.props.length && projectedOnBoard > 0) {
+      const fallbackProps = buildProjectedDisplayFallback(allDisplayProps, 100);
+      liveRenderResult = {
+        props: fallbackProps,
+        counts: {
+          fetched: allDisplayProps.length,
+          normalized: fallbackProps.length,
+          rendered: fallbackProps.length,
+          filteredOut: Math.max(0, allDisplayProps.length - fallbackProps.length),
+        },
+      };
+      console.warn("[Pipeline Trace] projected display fallback", { projectedOnBoard, rendered: fallbackProps.length });
+    }
     if (import.meta.env.DEV && allDisplayProps.length > 0 && liveRenderResult.props.length === 0) {
       console.warn("[Pipeline Trace] RENDERED dropped to 0 in buildLiveRenderBoard", liveRenderResult.counts);
     }
   }
-  const acceptedPropsForRender = liveRenderResult.props;
-  debugInfo.pipelineRenderCounts = liveRenderResult.counts;
+  let acceptedPropsForRender = liveRenderResult.props;
   const verifiedForTrace = countVerifiedFilterProps(
     acceptedPropsForRender.length ? acceptedPropsForRender : allDisplayProps
   );
+  if (countMergedProjections(allDisplayProps) > 0 && verifiedForTrace === 0 && acceptedPropsForRender.length < 20) {
+    const projectedFallback = buildProjectedDisplayFallback(allDisplayProps, 100);
+    if (projectedFallback.length > acceptedPropsForRender.length) {
+      acceptedPropsForRender = projectedFallback;
+      liveRenderResult = {
+        ...liveRenderResult,
+        props: projectedFallback,
+        counts: {
+          ...liveRenderResult.counts,
+          rendered: projectedFallback.length,
+        },
+      };
+      console.warn("[Pipeline Trace] verified=0 projected fallback", { rendered: projectedFallback.length });
+    }
+  }
+  debugInfo.pipelineRenderCounts = liveRenderResult.counts;
+  debugInfo.pipelineStageCounts = buildPipelineStageCounts({
+    raw: rawProps.length,
+    normalized: allDisplayProps.length,
+    projected: pipelinePropCountSnapshot.projectedProps || countMergedProjections(allDisplayProps) || 0,
+    verified: verifiedForTrace,
+    displayed: acceptedPropsForRender.length,
+  });
+  debugInfo.pipelineRejectionAudit = auditPipelineRejectionReasons(
+    allDisplayProps,
+    projectedWorkingProps || allDisplayProps
+  );
+  logPipelineStageDiagnostics(debugInfo.pipelineStageCounts, debugInfo.pipelineRejectionAudit);
   console.log("VERIFIED", verifiedForTrace);
   console.log("RENDERED", liveRenderResult.props.length);
   console.log("LIVE PROJECTED", pipelinePropCountSnapshot.projectedProps || countMergedProjections(allDisplayProps) || 0);
@@ -4467,9 +4526,14 @@ export default function DFSPropsApp() {
       ingestionFallback: debugInfo?.ingestionFallback || "",
     });
     if (!preferred.length && allDisplayProps.length) {
-      preferred = buildProjectedDisplayFallback(allDisplayProps, 25);
+      preferred = buildProjectedDisplayFallback(allDisplayProps, 100);
       if (import.meta.env.DEV && preferred.length) {
         console.warn("[Pipeline Stage] projected display fallback", { count: preferred.length });
+      }
+    } else if (preferred.length < 20 && countMergedProjections(allDisplayProps) > 0) {
+      const projectedFallback = buildProjectedDisplayFallback(allDisplayProps, 100);
+      if (projectedFallback.length > preferred.length) {
+        preferred = projectedFallback;
       }
     }
     return preferred;
@@ -4785,6 +4849,8 @@ export default function DFSPropsApp() {
       projectionRuntimeMs: debugInfo?.projectionRuntimeMs ?? null,
       renderRuntimeMs: debugInfo?.renderRuntimeMs ?? null,
       projectionHotPath: debugInfo?.projectionHotPath || null,
+      pipelineStageCounts: debugInfo?.pipelineStageCounts || null,
+      pipelineRejectionAudit: debugInfo?.pipelineRejectionAudit || null,
     };
   }, [
     liveRenderBoard,

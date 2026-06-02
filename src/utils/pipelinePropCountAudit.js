@@ -53,11 +53,20 @@ function isValidPropLine(prop = {}) {
   return Number.isFinite(line) && line > 0;
 }
 
+/** Temporary relaxed gate — player + line + market only. */
+export function passesRelaxedProjectionEligibility(prop = {}) {
+  const playerName = String(prop.playerName || prop.player || "").trim();
+  if (!playerName) return false;
+  if (!isValidPropLine(prop)) return false;
+  const statType = String(prop.statType || prop.market || prop.propType || "").trim();
+  return Boolean(statType);
+}
+
 /**
  * Build projection board pool — only hard-drop non-MLB, missing player, bad line.
  * Unsupported markets stay on board with flags (Research Only path).
  */
-export function buildMlbProjectionBoardPool(props = [], { seenIds = null } = {}) {
+export function buildMlbProjectionBoardPool(props = [], { seenIds = null, relaxedEligibility = false } = {}) {
   const rejections = createEmptyPipelineRejections();
   const seen = seenIds instanceof Set ? seenIds : new Set();
   const afterDuplicateRemoval = [];
@@ -128,7 +137,7 @@ export function buildMlbProjectionBoardPool(props = [], { seenIds = null } = {})
     };
     boardProps.push(enriched);
 
-    if (statType && isValidPropLine(enriched)) {
+    if (passesRelaxedProjectionEligibility(enriched) || (statType && isValidPropLine(enriched))) {
       projectionCandidates.push(enriched);
     }
   }

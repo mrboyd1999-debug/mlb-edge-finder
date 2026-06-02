@@ -23,7 +23,7 @@ import { countLiveUnifiedProps } from "./unifiedPropNormalizer.js";
 import { buildLiveFetchFailureSummary } from "./liveFetchAudit.js";
 import { isMinimalRenderableProp } from "./normalizeProp.js";
 import { filterQualityMlbProps, auditQualityMlbProps } from "./mlbPropQualityFilter.js";
-import { isFakeOrFallbackProp } from "./livePropRender.js";
+import { isFakeOrFallbackProp, buildProjectedDisplayFallback } from "./livePropRender.js";
 import { highestProbabilityLabel, qualifiesAsHighestProbabilityPick } from "./conservativeProjection.js";
 import {
   HIGHEST_PROBABILITY_MAX_PLAYS,
@@ -492,17 +492,27 @@ export function resolveTopMlbPlaySections(
     [...(bestPlaysResult.picks || []), ...(bestPlaysResult.morePlays || bestPlaysResult.topRankedUnique || [])],
     10
   );
-  const topBestPlayPicks = uniqueBestPlays.slice(0, TOP_BEST_PLAYS_LIMIT).map((prop, idx) =>
+  let topBestPlayPicks = uniqueBestPlays.slice(0, TOP_BEST_PLAYS_LIMIT).map((prop, idx) =>
     annotateHighestProbabilityPlay(annotateBestPlayRankingAudit(prop, idx + 1), idx + 1)
   );
-  const morePlayPicks = uniqueBestPlays.slice(TOP_BEST_PLAYS_LIMIT).map((prop, idx) =>
+  if (!topBestPlayPicks.length && engineProjectedPool.length) {
+    topBestPlayPicks = buildProjectedDisplayFallback(enrichedPool, 20).map((prop, idx) =>
+      annotateHighestProbabilityPlay(annotateBestPlayRankingAudit(prop, idx + 1), idx + 1)
+    );
+    filterDiagnostics.bestPlayUsedProjectedFallback = true;
+    filterDiagnostics.bestPlayFallbackNotice = "Showing top projected props — verification filters did not pass.";
+  }
+  let morePlayPicks = uniqueBestPlays.slice(TOP_BEST_PLAYS_LIMIT).map((prop, idx) =>
     annotateHighestProbabilityPlay(
       annotateBestPlayRankingAudit(prop, idx + TOP_BEST_PLAYS_LIMIT + 1),
       idx + TOP_BEST_PLAYS_LIMIT + 1
     )
   );
-  filterDiagnostics.bestPlayDebugPlays = bestPlaysResult.debugPlays || [];
+  if (!morePlayPicks.length && topBestPlayPicks.length > TOP_BEST_PLAYS_LIMIT) {
+    morePlayPicks = topBestPlayPicks.slice(TOP_BEST_PLAYS_LIMIT);
+  }
   filterDiagnostics.bestPlayFilterAudit = bestPlaysResult.diagnostics;
+  filterDiagnostics.bestPlayDebugPlays = bestPlaysResult.debugPlays || [];
   filterDiagnostics.bestPlayRejectionSamples = bestPlaysResult.rejectionSamples;
   filterDiagnostics.bestPlayQualifiedStrict = bestPlaysResult.qualifiedStrict;
   filterDiagnostics.bestPlayProjectedCount = projectedCount;
@@ -610,7 +620,7 @@ export function resolveTopMlbPlaySections(
             loadedPropCount,
             boardPoolCount: boardQualityPool.length,
           }),
-      fallbackNotice: bestPlaysResult.fallbackNotice || "",
+      fallbackNotice: bestPlaysResult.fallbackNotice || filterDiagnostics.bestPlayFallbackNotice || "",
       picks: topBestPlayPicks,
     },
     {

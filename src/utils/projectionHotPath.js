@@ -2,12 +2,11 @@
  * Pre-projection filter + rank — cap engine work for fast Best Plays paint.
  */
 
-import { buildMlbProjectionBoardPool } from "./pipelinePropCountAudit.js";
+import { buildMlbProjectionBoardPool, passesRelaxedProjectionEligibility } from "./pipelinePropCountAudit.js";
 import { resolveSupportedMlbMarketKey } from "./mlbAllowedMarkets.js";
 import { isUpcomingSlateProp } from "./slateFilter.js";
-import { getStaleFilterReason } from "./stalePropFilter.js";
 
-export const MAX_PROJECTION_PROPS = 250;
+export const MAX_PROJECTION_PROPS = 1000;
 
 function nowMs() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -29,15 +28,13 @@ export function rankPropForProjectionPriority(prop = {}) {
 }
 
 /**
- * MLB-only pool: dedupe, drop suspended/unavailable/missing player+line, rank, cap.
+ * MLB-only pool: dedupe, require player + line + market only, rank, cap engine batch.
  */
-export function prepareProjectionHotPath(props = [], limit = MAX_PROJECTION_PROPS, filterOptions = {}) {
+export function prepareProjectionHotPath(props = [], limit = MAX_PROJECTION_PROPS, _filterOptions = {}) {
   const filterStart = nowMs();
-  const pool = buildMlbProjectionBoardPool(props);
-  const availabilityFiltered = pool.projectionCandidates.filter(
-    (prop) => !getStaleFilterReason(prop, filterOptions)
-  );
-  const ranked = [...availabilityFiltered].sort(
+  const pool = buildMlbProjectionBoardPool(props, { relaxedEligibility: true });
+  const eligibilityFiltered = pool.projectionCandidates.filter(passesRelaxedProjectionEligibility);
+  const ranked = [...eligibilityFiltered].sort(
     (a, b) => rankPropForProjectionPriority(b) - rankPropForProjectionPriority(a)
   );
   const hot = ranked.slice(0, limit);
@@ -53,7 +50,7 @@ export function prepareProjectionHotPath(props = [], limit = MAX_PROJECTION_PROP
       input: props.length,
       afterPool: pool.boardProps.length,
       candidates: pool.projectionCandidates.length,
-      afterAvailability: availabilityFiltered.length,
+      afterEligibility: eligibilityFiltered.length,
       hot: hot.length,
       deferred: deferred.length,
       limit,

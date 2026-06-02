@@ -133,6 +133,13 @@ export function preferLiveProviderBoardProps(props = [], context = {}) {
     if (buckets[tag]?.length) return buckets[tag];
   }
 
+  const projectedLive = (props || []).filter((prop) => {
+    if (isFakeOrFallbackProp(prop)) return false;
+    const projection = Number(prop.projection ?? prop.projectedValue);
+    return Number.isFinite(projection) && projection > 0;
+  });
+  if (projectedLive.length) return projectedLive;
+
   return props;
 }
 
