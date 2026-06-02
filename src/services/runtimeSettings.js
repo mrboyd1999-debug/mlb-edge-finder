@@ -4,12 +4,13 @@ import { clearSourceAuthBlock, SOURCE_IDS } from "./sourceRateLimit.js";
 import { resetOddsApiStartupValidation } from "./oddsApiClient.js";
 import { cleanApiKey } from "../utils/cleanApiKey.js";
 import {
-  clearOddsApiKey as clearOddsApiKeyStorage,
-  getOddsApiKey as resolveOddsApiKey,
-  getOddsApiKeySource as resolveOddsApiKeySource,
-  saveOddsApiKey as persistOddsApiKey,
-} from "../lib/apiKeys.js";
-import { testOddsApiHealth, testOddsApiKey } from "../lib/oddsApiHealth.js";
+  getOddsKey as resolveOddsApiKey,
+  getOddsKeySource as resolveOddsApiKeySource,
+  saveOddsKey as persistOddsApiKey,
+  resetOddsKey as clearOddsApiKeyStorage,
+  purgeLegacyOddsStorageKeys,
+} from "../lib/oddsKey.js";
+import { testOddsApi, testOddsApiHealth, testOddsApiKey } from "../lib/testOddsApi.js";
 import { normalizeProxyUrl } from "../utils/providerProxy.js";
 
 /** User-facing keys shown in Settings — live feeds (PP/UD) use built-in routes, not user keys. */
@@ -18,13 +19,7 @@ export const ODDS_ENV_KEYS = [
   "ODDS_API_KEY",
   "THE_ODDS_API_KEY",
 ];
-export const ODDS_STORAGE_KEYS = [
-  "odds_api_key",
-  "oddsApiKey",
-  "VITE_ODDS_API_KEY",
-  "odds-api-key",
-  "the-odds-api-key",
-];
+export const ODDS_STORAGE_KEYS = ["odds_api_key"];
 export const SPORTSDATA_ENV_KEYS = [
   "VITE_SPORTSDATAIO_API_KEY",
   "VITE_SPORTSDATA_API_KEY",
@@ -45,7 +40,7 @@ export const USER_SETTING_DEFS = [
     type: "secret",
     placeholder: "Paste The Odds API key",
     envKeys: ODDS_ENV_KEYS,
-    legacyStorageKeys: ["odds-api-key", "the-odds-api-key", "odds_api_key"],
+    legacyStorageKeys: [],
   },
   {
     key: "VITE_SPORTSDATA_API_KEY",
@@ -208,16 +203,19 @@ export function writeRuntimeSettings(settings = {}) {
       value = cleanApiKey(value);
     }
     try {
-      if (value) window.localStorage.setItem(key, value);
-      else window.localStorage.removeItem(key);
+      if (key === "VITE_ODDS_API_KEY") {
+        if (value) persistOddsApiKey(value);
+        else clearOddsApiKeyStorage();
+        purgeLegacyOddsStorageKeys();
+        clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
+        resetOddsApiStartupValidation();
+      } else if (value) {
+        window.localStorage.setItem(key, value);
+      } else {
+        window.localStorage.removeItem(key);
+      }
     } catch {
       // ignore private-mode storage errors
-    }
-    if (key === "VITE_ODDS_API_KEY") {
-      if (value) persistOddsApiKey(value);
-      else clearOddsApiKeyStorage();
-      clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
-      resetOddsApiStartupValidation();
     }
     if (key === "VITE_SPORTSDATA_API_KEY") {
       try {
@@ -295,7 +293,7 @@ export function getOddsApiKey() {
 }
 
 export { clearOddsApiKeyStorage as clearOddsApiKey, persistOddsApiKey as saveOddsApiKey };
-export { testOddsApiHealth, testOddsApiKey } from "../lib/oddsApiHealth.js";
+export { testOddsApi, testOddsApiHealth, testOddsApiKey } from "../lib/testOddsApi.js";
 
 export function getSportsDataApiKey() {
   const fromStorage = cleanApiKey(readStorageKeys(SPORTSDATA_STORAGE_KEYS));
@@ -313,7 +311,7 @@ export function ensureEnvKeysSyncedToLocalStorage() {
   const envSportsData = cleanApiKey(readEnvKeys(SPORTSDATA_ENV_KEYS));
 
   const patch = {};
-  if (isUsableEnvValue(envOdds) && !readStorageValue("VITE_ODDS_API_KEY")) {
+  if (isUsableEnvValue(envOdds) && !readStorageKeys(ODDS_STORAGE_KEYS)) {
     patch.VITE_ODDS_API_KEY = envOdds;
   }
   if (isUsableEnvValue(envSportsData) && !readStorageValue("VITE_SPORTSDATA_API_KEY")) {

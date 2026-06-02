@@ -1,4 +1,5 @@
-import { getOddsApiKey as getRuntimeOddsApiKey, testOddsApiKey } from "../lib/oddsApiHealth.js";
+import { getOddsKey as getRuntimeOddsApiKey, getOddsKeyDebugMeta } from "../lib/oddsKey.js";
+import { testOddsApiKey } from "../lib/testOddsApi.js";
 import { cleanApiKey } from "../utils/cleanApiKey.js";
 import { clearSourceAuthBlock, isSourceAuthBlocked, recordSourceAuthFailure, SOURCE_IDS } from "./sourceRateLimit.js";
 
@@ -30,10 +31,13 @@ export function isOddsApiKeyUsable() {
 }
 
 export function getOddsApiKeyDebugInfo() {
-  const key = getTrimmedOddsApiKey();
+  const meta = getOddsKeyDebugMeta();
   return {
-    configured: Boolean(key),
-    keyLength: key.length,
+    configured: meta.keyPresent,
+    keyLength: meta.keyLength,
+    keySource: meta.source,
+    keyFirst4: meta.first4,
+    keyLast4: meta.last4,
   };
 }
 

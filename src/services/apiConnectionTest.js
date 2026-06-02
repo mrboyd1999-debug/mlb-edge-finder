@@ -11,7 +11,8 @@ import {
   parseOddsApiAuthFailure,
   redactOddsApiUrl,
 } from "./oddsApiClient.js";
-import { getOddsApiKey, testOddsApiHealth } from "../lib/oddsApiHealth.js";
+import { getOddsApiKey, getOddsKeyDebugMeta } from "../lib/oddsKey.js";
+import { testOddsApi as runOddsApiHealthProbe } from "../lib/testOddsApi.js";
 import {
   ENRICHMENT_TIMEOUT_MESSAGE,
   getApiTimeoutMs,
@@ -343,7 +344,8 @@ async function probeOddsApiForTest() {
     };
   }
 
-  const result = await testOddsApiHealth();
+  const result = await runOddsApiHealthProbe();
+  const keyMeta = getOddsKeyDebugMeta();
   const httpStatus = Number(result.httpStatus) || (result.ok ? 200 : 0);
   const payload = result.raw ?? null;
   const sportsList = parseOddsSportsPayload(payload);
@@ -372,6 +374,14 @@ async function probeOddsApiForTest() {
     responseBody,
     keyLength,
     keyLengthWarning,
+    keySource: keyMeta.source,
+    keyFirst4: keyMeta.first4,
+    keyLast4: keyMeta.last4,
+    oddsRawError: sportsListOk
+      ? ""
+      : typeof result.raw === "object" && result.raw
+        ? JSON.stringify(result.raw)
+        : String(result.details || responseBody || ""),
     unauthorized,
     remainingRequests: null,
     route: result.route || "https://api.the-odds-api.com/v4/sports/?apiKey=[REDACTED]",

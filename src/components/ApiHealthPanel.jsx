@@ -37,11 +37,19 @@ function providerDetails(label, row, testedAt) {
   }
   if (label === "Odds API") {
     const keyDebug = getOddsApiKeyDebugInfo();
+    const rawError =
+      row?.oddsRawError ||
+      (row?.showError && row?.responseBody ? String(row.responseBody) : "") ||
+      "";
     return {
       result: row?.settingsLine || "Not tested",
       error: formatProviderError(row),
       keyLength: row?.keyLength ?? keyDebug.keyLength,
       keyConfigured: row?.keyConfigured ?? keyDebug.configured,
+      keySource: row?.keySource ?? keyDebug.keySource,
+      keyFirst4: row?.keyFirst4 ?? keyDebug.keyFirst4,
+      keyLast4: row?.keyLast4 ?? keyDebug.keyLast4,
+      rawError,
     };
   }
   return {
@@ -93,9 +101,16 @@ export default function ApiHealthPanel({ connectionReport = null, lastTestedAt =
               ) : isOddsApi ? (
                 <>
                   <span style={styles.compactFlags}>Status: {details.result}</span>
+                  <span style={styles.compactFlags}>Key source: {details.keySource || "missing"}</span>
                   <span style={styles.compactFlags}>
-                    Odds key length: {details.keyConfigured ? details.keyLength : 0}
+                    Key debug: len {details.keyConfigured ? details.keyLength : 0}
+                    {details.keyConfigured ? ` · ${details.keyFirst4}…${details.keyLast4}` : ""}
                   </span>
+                  {details.rawError ? (
+                    <span style={{ ...styles.compactFlags, color: "#fca5a5" }}>
+                      Raw error: {String(details.rawError).slice(0, 240)}
+                    </span>
+                  ) : null}
                 </>
               ) : (
                 <span style={styles.compactFlags}>Status: {details.result}</span>

@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import { validateOddsApiKeyOnce } from "./services/oddsApiClient.js";
+import { purgeLegacyOddsStorageKeys } from "./lib/oddsKey.js";
 import { ensureEnvKeysSyncedToLocalStorage } from "./services/runtimeSettings.js";
 import { logEnvStartupDiagnostics } from "./utils/envStartupDiagnostics.js";
 import "./styles.css";
@@ -43,6 +44,7 @@ console.log(
     ? "FOUND"
     : "MISSING"
 );
+purgeLegacyOddsStorageKeys();
 ensureEnvKeysSyncedToLocalStorage();
 logEnvStartupDiagnostics();
 void validateOddsApiKeyOnce();

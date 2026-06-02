@@ -15,9 +15,9 @@ import {
   getSportsDataApiKeySource,
   maskApiKeyPreview,
   saveOddsApiKey,
-  clearOddsApiKey,
 } from "../services/runtimeSettings.js";
-import { testOddsApiHealth } from "../lib/oddsApiHealth.js";
+import { getOddsKeyDebugMeta, resetOddsKey, saveOddsKey } from "../lib/oddsKey.js";
+import { testOddsApi } from "../lib/testOddsApi.js";
 import { clearProviderHealthCache } from "../services/apiConnectionTest.js";
 import { clearSourceAuthBlock, SOURCE_IDS } from "../services/sourceRateLimit.js";
 import { resetOddsApiStartupValidation } from "../services/oddsApiClient.js";
@@ -85,9 +85,9 @@ export default function SettingsPanel({
   function persistDraft() {
     const cleaned = cleanUserDraft(draft);
     if (cleaned.VITE_ODDS_API_KEY) {
-      saveOddsApiKey(cleaned.VITE_ODDS_API_KEY);
+      saveOddsKey(cleaned.VITE_ODDS_API_KEY);
     } else {
-      clearOddsApiKey();
+      resetOddsKey();
     }
     clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
     resetOddsApiStartupValidation();
@@ -137,7 +137,7 @@ export default function SettingsPanel({
   }
 
   function handleResetOddsKey() {
-    clearOddsApiKey();
+    resetOddsKey();
     clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
     resetOddsApiStartupValidation();
     clearProviderHealthCache();
@@ -150,7 +150,7 @@ export default function SettingsPanel({
       setNotice("Enter an Odds API key before saving.");
       return;
     }
-    saveOddsApiKey(cleaned);
+    saveOddsKey(cleaned);
     clearSourceAuthBlock(SOURCE_IDS.ODDS_API);
     resetOddsApiStartupValidation();
     setDraft((current) => ({ ...current, VITE_ODDS_API_KEY: cleaned }));
@@ -158,7 +158,7 @@ export default function SettingsPanel({
     setSaved(readRuntimeSettings());
     setTestingOdds(true);
     try {
-      const health = await testOddsApiHealth();
+      const health = await testOddsApi();
       const report = await testOddsAPI();
       setConnectionReport((current) => {
         const merged = mergeProviderResult(current, report, "Odds API");
@@ -170,10 +170,18 @@ export default function SettingsPanel({
         onConnectionReportChange?.(merged);
         return merged;
       });
+      const meta = getOddsKeyDebugMeta();
+      const failDebug = health.ok
+        ? ""
+        : ` · len ${meta.keyLength} · ${meta.first4}…${meta.last4} · raw: ${
+            typeof health.raw === "object" && health.raw
+              ? JSON.stringify(health.raw)
+              : health.details || health.status
+          }`;
       setNotice(
         health.ok
           ? `Odds API connected. ${health.details || ""}`
-          : `${health.status}: ${health.details || "Test failed"}`
+          : `${health.status}: ${health.details || "Test failed"}${failDebug}`
       );
     } catch (error) {
       setNotice(error?.message || "Odds API save/test failed.");
@@ -186,9 +194,16 @@ export default function SettingsPanel({
     setTestingOdds(true);
     try {
       const { cleaned } = persistDraft();
-      const direct = await testOddsApiHealth();
+      const direct = await testOddsApi();
       if (!direct.ok && cleaned.VITE_ODDS_API_KEY) {
-        setNotice(direct.details || direct.status || "Odds API test failed.");
+        const meta = getOddsKeyDebugMeta();
+        const raw =
+          typeof direct.raw === "object" && direct.raw
+            ? JSON.stringify(direct.raw)
+            : direct.details || direct.status;
+        setNotice(
+          `${direct.status || "Odds API test failed"} · len ${meta.keyLength} · ${meta.first4}…${meta.last4} · raw: ${raw}`
+        );
       }
       const report = await testOddsAPI();
       setConnectionReport((current) => {
@@ -293,11 +308,13 @@ export default function SettingsPanel({
   const ppProxySaved = Boolean(saved[ppProxyDef.key]?.trim());
   const oddsKeyWarning = getOddsKeyLengthWarning(cleanedOddsDraft);
   const sdRow = findProviderRow(connectionReport?.results || [], "SportsDataIO");
-  const oddsKeySource = getOddsApiKeySource();
+  const oddsKeySource = oddsKeyDebug.source || getOddsApiKeySource();
   const sdKeySource = getSportsDataApiKeySource();
   const ppProxySource = resolveSettingSource(ppProxyDef.key);
   const oddsKeyPreview = maskApiKeyPreview(getOddsApiKey());
+  const oddsKeyDebug = getOddsKeyDebugMeta();
   const sdKeyPreview = maskApiKeyPreview(getSportsDataApiKey());
+  const oddsRow = findProviderRow(connectionReport?.results || [], "Odds API");
 
   return (
     <details id="section-settings" ref={panelRef} className="settings-panel compact-settings-details">
@@ -330,6 +347,27 @@ export default function SettingsPanel({
               placeholder={oddsDef.placeholder}
             />
             {oddsKeyWarning ? <span className="settings-api-row__warning">{oddsKeyWarning}</span> : null}
+            <p className="settings-api-row__hint" style={{ margin: "8px 0 0", fontSize: 12, lineHeight: 1.45, color: "#94a3b8" }}>
+              Key source: {oddsKeyDebug.source}
+              {oddsKeyDebug.keyPresent ? (
+                <>
+                  {" "}
+                  · len {oddsKeyDebug.keyLength} · {oddsKeyDebug.first4}…{oddsKeyDebug.last4}
+                </>
+              ) : null}
+              {oddsRow?.settingsLine ? (
+                <>
+                  <br />
+                  Odds API status: {oddsRow.settingsLine}
+                </>
+              ) : null}
+              {oddsRow?.showError && oddsRow?.oddsRawError ? (
+                <>
+                  <br />
+                  Raw error: {String(oddsRow.oddsRawError).slice(0, 240)}
+                </>
+              ) : null}
+            </p>
           </label>
           <button type="button" style={styles.secondaryButton} onClick={handleSaveOddsKey} disabled={testingOdds}>
             {testingOdds ? "Saving…" : "Save Odds Key"}
