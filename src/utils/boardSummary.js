@@ -20,12 +20,12 @@ export function buildBoardSummary({
   const filterDiagnostics = topMlbPlayBoard?.filterDiagnostics || {};
   const verificationCounts = filterDiagnostics.verificationCounts || {};
 
-  let tierA = finiteCount(verificationCounts.tierA);
-  let tierB = finiteCount(verificationCounts.tierB);
+  let tierA = finiteCount(verificationCounts.tierA ?? filterDiagnostics.tierA);
+  let tierB = finiteCount(verificationCounts.tierB ?? filterDiagnostics.tierB);
 
   if (!tierA && !tierB) {
     for (const prop of boardDisplayProps || []) {
-      const tier = String(prop.finalTier || prop.tier || "").toUpperCase();
+      const tier = String(prop.finalTier || prop.tier || prop.emergencyTier || "").toUpperCase();
       if (tier === "A") tierA += 1;
       if (tier === "B") tierB += 1;
     }

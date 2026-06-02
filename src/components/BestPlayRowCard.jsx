@@ -32,6 +32,8 @@ function resolveLeanSideLabel(prop = {}, recommendedSide = "PASS") {
 }
 
 function formatMatchup(prop = {}) {
+  const display = String(prop.displayMatchup || "").trim();
+  if (display) return display.replace(/\s+vs\.?\s+/gi, " @ ");
   const raw = String(prop.matchup || "").trim();
   if (raw) return raw.replace(/\s+vs\.?\s+/gi, " @ ");
   const team = prop.team || prop.playerTeam || "";

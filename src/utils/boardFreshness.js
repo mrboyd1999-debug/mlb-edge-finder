@@ -1,10 +1,10 @@
 /**
- * Board freshness — live status requires today's data under 15 minutes old.
+ * Board freshness — live status when feeds or projections are current.
  */
 
 import { formatDateTime } from "./formatters.js";
 
-export const BOARD_LIVE_FRESH_MAX_AGE_MS = 15 * 60 * 1000;
+export const BOARD_LIVE_FRESH_MAX_AGE_MS = 10 * 60 * 1000;
 export const STALE_DATA_HEADLINE = "STALE DATA — refresh required";
 export const CACHE_DATA_HEADLINE = "Cache Data";
 export const LIVE_DATA_HEADLINE = "Live Data Available";
@@ -53,11 +53,25 @@ export function buildBoardFreshnessDebug({
   liveProviderCount = 0,
   liveNormalizedCount = 0,
   cacheUsed = false,
+  projectionCount = 0,
+  prizePicksConnected = false,
+  underdogConnected = false,
 } = {}) {
   const ageMinutes = resolveBoardAgeMinutes(boardUpdatedAt);
   const hasLiveNormalized = Number(liveNormalizedCount) > 0 && Number(liveProviderCount) > 0;
-  const fresh = hasLiveNormalized || (isBoardFreshForLiveDisplay(boardUpdatedAt) && !cacheUsed);
-  const stale = !fresh;
+  const providerFresh =
+    (prizePicksConnected || underdogConnected || Number(liveProviderCount) > 0) &&
+    isBoardFreshForLiveDisplay(boardUpdatedAt);
+  const projectionHealthy = Number(projectionCount) >= 500;
+  const bothProvidersFailed =
+    !prizePicksConnected && !underdogConnected && Number(liveProviderCount) === 0;
+  const boardAgeStale = ageMinutes != null && ageMinutes > 10;
+
+  const fresh =
+    providerFresh ||
+    projectionHealthy ||
+    (hasLiveNormalized && isBoardFreshForLiveDisplay(boardUpdatedAt) && !cacheUsed);
+  const stale = bothProvidersFailed || (boardAgeStale && !providerFresh && !projectionHealthy);
 
   return {
     currentFetchTime: currentFetchTime || "",
@@ -65,10 +79,13 @@ export function buildBoardFreshnessDebug({
     boardAgeMinutes: ageMinutes,
     liveProviderCount: Number(liveProviderCount) || 0,
     liveNormalizedCount: Number(liveNormalizedCount) || 0,
+    projectionCount: Number(projectionCount) || 0,
+    prizePicksConnected: Boolean(prizePicksConnected),
+    underdogConnected: Boolean(underdogConnected),
     cacheUsed: Boolean(cacheUsed),
     stale,
     fresh,
-    liveEligible: fresh && Number(liveProviderCount) > 0,
+    liveEligible: fresh && (Number(liveProviderCount) > 0 || providerFresh || projectionHealthy),
   };
 }
 
@@ -83,7 +100,7 @@ export function resolveLiveFeedHeadline({
   apiHealthHeadline = "",
 } = {}) {
   if (loading) return "Loading feeds…";
-  if (boardFreshness?.liveEligible && !boardFreshness?.cacheUsed) return LIVE_DATA_HEADLINE;
+  if (boardFreshness?.liveEligible && !boardFreshness?.stale) return LIVE_DATA_HEADLINE;
   if (boardFreshness?.stale) return STALE_DATA_HEADLINE;
   if (boardFreshness?.cacheUsed) return CACHE_DATA_HEADLINE;
   return apiHealthHeadline || "Limited";

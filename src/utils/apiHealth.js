@@ -165,18 +165,18 @@ function resolveSportsDataHealth({ row, keyConfigured, testedAt, mlbPipelineStat
 
   if (!keyConfigured) {
     return {
-      status: "Missing API key",
-      color: API_STATUS_COLOR.RED,
-      detail: "Add SportsDataIO key in Settings",
+      status: "Optional — unavailable",
+      color: API_STATUS_COLOR.YELLOW,
+      detail: "SportsDataIO unavailable — using MLB Stats + generated projections",
       debug: { ...debug, failureReason: "No API key saved" },
     };
   }
 
   if (safeRow.unauthorized || /invalid/i.test(String(safeRow.settingsLine || safeRow.statusLabel || ""))) {
     return {
-      status: "Invalid API key",
-      color: API_STATUS_COLOR.RED,
-      detail: safeRow.message || "Key rejected by SportsDataIO",
+      status: "Optional — unavailable",
+      color: API_STATUS_COLOR.YELLOW,
+      detail: "SportsDataIO unavailable — using MLB Stats + generated projections",
       debug: { ...debug, failureReason: "Unauthorized / invalid key" },
     };
   }
@@ -203,17 +203,17 @@ function resolveSportsDataHealth({ row, keyConfigured, testedAt, mlbPipelineStat
 
   if (safeRow.timedOut || safeRow.networkError) {
     return {
-      status: "Network failure",
-      color: API_STATUS_COLOR.RED,
-      detail: safeRow.preview || safeRow.message || "SportsDataIO request failed",
+      status: "Optional — unavailable",
+      color: API_STATUS_COLOR.YELLOW,
+      detail: "SportsDataIO unavailable — using MLB Stats + generated projections",
       debug: { ...debug, failureReason: safeRow.preview || "Network failure" },
     };
   }
 
   return {
-    status: "Required provider unavailable",
-    color: API_STATUS_COLOR.RED,
-    detail: playersTest?.message || safeRow.message || "SportsDataIO endpoints failed",
+    status: "Optional — unavailable",
+    color: API_STATUS_COLOR.YELLOW,
+    detail: "SportsDataIO unavailable — using MLB Stats + generated projections",
     debug: { ...debug, failureReason: playersTest?.message || safeRow.message || "Endpoint failed" },
   };
 }
@@ -315,16 +315,25 @@ function resolvePrizePicksHealth(feed = {}, options = {}) {
   return resolvePrizePicksProviderHealth(feed, options);
 }
 
-function resolveMlbStatsHealth({ sportsDataHealth, mlbStatsTest = null, mlbPipelineStatus = null }) {
+function resolveMlbStatsHealth({ sportsDataHealth, mlbStatsTest = null, mlbPipelineStatus = null, mlbStatsProjectionCount = 0 } = {}) {
   const debug = {
     endpointTested: mlbStatsTest?.searchEndpoint || "/people/search",
     responseCode: mlbStatsTest?.searchStatus ?? null,
     lastChecked: mlbStatsTest?.testedAt || mlbPipelineStatus?.mlbStatsApi?.lastSuccessAt || null,
     cacheAge: mlbPipelineStatus?.mlbStatsApi?.usingCache ? "cached" : "—",
-    propsReturned: finite(mlbStatsTest?.playerCount ?? mlbPipelineStatus?.profilesMatched),
+    propsReturned: finite(mlbStatsTest?.playerCount ?? mlbPipelineStatus?.profilesMatched ?? mlbStatsProjectionCount),
     keyPresent: true,
     failureReason: "",
   };
+
+  if (finite(mlbStatsProjectionCount) > 0) {
+    return {
+      status: "Connected",
+      color: API_STATUS_COLOR.GREEN,
+      detail: `${mlbStatsProjectionCount} MLB Stats projections in use`,
+      debug: { ...debug, failureReason: "" },
+    };
+  }
 
   if (sportsDataHealth.color === API_STATUS_COLOR.GREEN) {
     return {
@@ -381,6 +390,17 @@ function resolveProjectionEngineHealth({ pipelineProjectionStats = null, mlbPipe
     failureReason: pipelineProjectionStats?.lastError || mlbPipelineStatus?.projectionApi?.lastError || "",
   };
 
+  if (projectionCount >= 500) {
+    const normalized = finite(pipelineProjectionStats?.normalizedCount ?? pipelineProjectionStats?.normalized);
+    const pct = normalized > 0 ? Math.round((projectionCount / normalized) * 100) : 100;
+    return {
+      status: "Connected",
+      color: API_STATUS_COLOR.GREEN,
+      detail: `${projectionCount} projections · ${pct}% coverage`,
+      debug: { ...debug, failureReason: "" },
+    };
+  }
+
   if (projectionCount > 0) {
     const normalized = finite(pipelineProjectionStats?.normalizedCount ?? pipelineProjectionStats?.normalized);
     const pct = normalized > 0 ? Math.round((projectionCount / normalized) * 100) : 100;
@@ -425,11 +445,15 @@ function resolveOverallHealth({
   propSourceAvailable,
   boardFreshness = null,
 }) {
-  if (boardFreshness?.stale) {
+  if (
+    boardFreshness?.stale &&
+    !boardFreshness?.fresh &&
+    !boardFreshness?.liveEligible
+  ) {
     return {
       status: STALE_DATA_HEADLINE,
       color: API_STATUS_COLOR.YELLOW,
-      detail: "Board timestamp is not from today or is older than 15 minutes — refresh required",
+      detail: "Both prop feeds failed or board is older than 10 minutes — refresh required",
       debug: {
         failureReason: "Stale board data",
         boardAgeMinutes: boardFreshness.boardAgeMinutes,
@@ -440,23 +464,23 @@ function resolveOverallHealth({
 
   const coreGreen =
     oddsHealth.color === API_STATUS_COLOR.GREEN &&
-    sportsDataHealth.color === API_STATUS_COLOR.GREEN &&
     projectionHealth.color === API_STATUS_COLOR.GREEN &&
     propSourceAvailable &&
-    boardFreshness?.liveEligible;
+    (boardFreshness?.liveEligible || boardFreshness?.fresh);
 
   if (coreGreen) {
     return {
       status: "Live Data Available",
       color: API_STATUS_COLOR.GREEN,
-      detail: "Core providers connected with fresh board data",
+      detail: sportsDataHealth.color === API_STATUS_COLOR.YELLOW
+        ? "Core providers connected · SportsDataIO optional and unavailable"
+        : "Core providers connected with fresh board data",
       debug: { failureReason: "" },
     };
   }
 
   const anyRedRequired =
     oddsHealth.color === API_STATUS_COLOR.RED ||
-    sportsDataHealth.color === API_STATUS_COLOR.RED ||
     (!propSourceAvailable && oddsHealth.color !== API_STATUS_COLOR.GREEN);
 
   if (anyRedRequired) {
@@ -467,7 +491,6 @@ function resolveOverallHealth({
       debug: {
         failureReason: [
           oddsHealth.color === API_STATUS_COLOR.RED ? "Odds API" : null,
-          sportsDataHealth.color === API_STATUS_COLOR.RED ? "SportsDataIO" : null,
           !propSourceAvailable ? "Prop sources" : null,
         ]
           .filter(Boolean)
@@ -484,8 +507,15 @@ function resolveOverallHealth({
   };
 }
 
-/** Stats verification label when SportsDataIO is primary. */
-export function resolveStatsVerificationFromHealth(sportsDataHealth = {}) {
+/** Stats verification label — SportsDataIO optional. */
+export function resolveStatsVerificationFromHealth(sportsDataHealth = {}, mlbStatsHealth = {}) {
+  if (mlbStatsHealth.color === API_STATUS_COLOR.GREEN) {
+    return {
+      status: "Live via MLB Stats",
+      detail: mlbStatsHealth.detail || "MLB Stats projections available",
+      color: API_STATUS_COLOR.GREEN,
+    };
+  }
   if (sportsDataHealth.color === API_STATUS_COLOR.GREEN) {
     return {
       status: "Live via SportsDataIO",
@@ -495,7 +525,7 @@ export function resolveStatsVerificationFromHealth(sportsDataHealth = {}) {
   }
   return {
     status: "Partial Verification",
-    detail: sportsDataHealth.detail || "Limited stat verification available",
+    detail: sportsDataHealth.detail || "Using MLB Stats + generated projections",
     color: API_STATUS_COLOR.YELLOW,
   };
 }
@@ -541,6 +571,7 @@ export function getApiHealthStatus({
   feedHealthContext = null,
   debugSources = null,
   boardFreshness = null,
+  mlbStatsProjectionCount = 0,
 } = {}) {
   const meta = connectionReport || {};
   const rows = meta.results || [];
@@ -592,6 +623,7 @@ export function getApiHealthStatus({
     sportsDataHealth: sportsDataIO,
     mlbStatsTest,
     mlbPipelineStatus,
+    mlbStatsProjectionCount,
   });
   const projectionEngine = resolveProjectionEngineHealth({
     pipelineProjectionStats,
@@ -613,7 +645,7 @@ export function getApiHealthStatus({
     boardFreshness,
   });
 
-  const statsVerification = resolveStatsVerificationFromHealth(sportsDataIO);
+  const statsVerification = resolveStatsVerificationFromHealth(sportsDataIO, mlbStats);
 
   return {
     oddsApi,

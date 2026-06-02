@@ -36,6 +36,7 @@ function ProviderFeedModeBanner({
     feedHealthContext,
     debugSources,
     boardFreshness,
+    mlbStatsProjectionCount: projectionSourceCounts?.mlbstats || 0,
   });
 
   const freshness =

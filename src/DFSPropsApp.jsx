@@ -4823,6 +4823,7 @@ export default function DFSPropsApp() {
       const board = buildEmergencyMlbBoard(displayPool, {
         statsMap: debugInfo?.statsMap,
         seasonStats: debugInfo?.sportsDataSeasonStats || [],
+        sportsDataUnavailable: apiHealth?.SportsDataIO?.color !== "green",
       });
       board.loadedPropCount = Math.max(board.loadedPropCount || 0, displayPool.length);
       return board;
@@ -4831,9 +4832,10 @@ export default function DFSPropsApp() {
       return buildEmergencyMlbBoard(allDisplayProps, {
         statsMap: debugInfo?.statsMap,
         seasonStats: debugInfo?.sportsDataSeasonStats || [],
+        sportsDataUnavailable: apiHealth?.SportsDataIO?.color !== "green",
       });
     }
-  }, [boardDisplayProps, allDisplayProps, debugInfo?.statsMap, debugInfo?.sportsDataSeasonStats]);
+  }, [boardDisplayProps, allDisplayProps, debugInfo?.statsMap, debugInfo?.sportsDataSeasonStats, apiHealth?.SportsDataIO?.color]);
   const verificationFilterDiagnostics = useMemo(() => {
     if (!debugPanelsVisible) return topMlbPlayBoard?.filterDiagnostics || null;
 
@@ -5223,12 +5225,18 @@ export default function DFSPropsApp() {
   const providerCoverageAuditDisplay = useMemo(() => {
     const fetchAudit = debugInfo?.providerCoverageAudit;
     const cacheUsed = !/^(fresh|live)$/i.test(String(cacheStatus || "").trim());
+    const projectionCount = countPropsWithProjections(allDisplayProps);
     const freshness = buildBoardFreshnessDebug({
       boardUpdatedAt: lastUpdated,
       currentFetchTime,
       liveProviderCount: fetchAudit?.liveProviderCount ?? 0,
       liveNormalizedCount: debugInfo?.liveBoardPipelineTrace?.normalized ?? 0,
       cacheUsed,
+      projectionCount,
+      prizePicksConnected:
+        apiHealth?.PrizePicks?.color === "green" || Number(fetchAudit?.prizepicksUsable) > 0,
+      underdogConnected:
+        apiHealth?.Underdog?.color === "green" || Number(fetchAudit?.underdogUsable) > 0,
     });
     return buildRenderSourceAudit({
       allDisplayProps,
@@ -5249,6 +5257,8 @@ export default function DFSPropsApp() {
     cacheStatus,
     lastUpdated,
     currentFetchTime,
+    apiHealth?.PrizePicks?.color,
+    apiHealth?.Underdog?.color,
   ]);
   const boardFreshness = useMemo(
     () =>
@@ -5259,8 +5269,20 @@ export default function DFSPropsApp() {
         liveProviderCount: providerCoverageAuditDisplay?.liveProviderCount ?? 0,
         liveNormalizedCount: debugInfo?.liveBoardPipelineTrace?.normalized ?? 0,
         cacheUsed: !/^(fresh|live)$/i.test(String(cacheStatus || "").trim()),
+        projectionCount: countPropsWithProjections(allDisplayProps),
+        prizePicksConnected: apiHealth?.PrizePicks?.color === "green",
+        underdogConnected: apiHealth?.Underdog?.color === "green",
       }),
-    [providerCoverageAuditDisplay, lastUpdated, currentFetchTime, cacheStatus, debugInfo?.liveBoardPipelineTrace?.normalized]
+    [
+      providerCoverageAuditDisplay,
+      lastUpdated,
+      currentFetchTime,
+      cacheStatus,
+      debugInfo?.liveBoardPipelineTrace?.normalized,
+      allDisplayProps,
+      apiHealth?.PrizePicks?.color,
+      apiHealth?.Underdog?.color,
+    ]
   );
   const boardStatusNotice = useMemo(() => {
     if (loading) return "";
@@ -5309,7 +5331,7 @@ export default function DFSPropsApp() {
   );
   const lastUpdatedMs = lastUpdated ? new Date(lastUpdated).getTime() : NaN;
   const staleDataWarning =
-    boardFreshness.stale && !boardFreshness.liveEligible
+    boardFreshness.stale && !boardFreshness.fresh && !boardFreshness.liveEligible
       ? "Stale data warning: refresh today's picks before using these lines."
       : "";
   const historyResultByKey = useMemo(() => {
