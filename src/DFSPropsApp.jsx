@@ -250,6 +250,7 @@ import {
   scheduleBackgroundWork,
   STARTUP_NORMALIZED_PROP_LIMIT,
 } from "./utils/startupPerformance.js";
+import { prepareProjectionHotPath, MAX_PROJECTION_PROPS } from "./utils/projectionHotPath.js";
 import { persistStartupBoardSlices, readInstantStartupBoard } from "./services/startupBoardCache.js";
 import {
   mergeBoardRefreshResult,
@@ -2354,6 +2355,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     scoringBatch: workingNormalProps.length,
     deferred: deferredDisplayProps.length,
     eligible: displayStartupLimited.totalEligible || normalizedBeforeStartupCap,
+    projectionCap: MAX_PROJECTION_PROPS,
   };
 
   const verifiedFromUsable = filterVerifiedSportsbookProps(usablePropsPool);
@@ -2569,21 +2571,27 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     afterHistoricalAttachment: 0,
     rejections: {},
   };
+  let mlbSecondaryPromise = null;
+  let coreReadySent = false;
 
   if (MLB_ONLY_MODE) {
     resetProjectionFetchDebug();
 
     const normalizedPool = [...allDisplayProps];
     const normalizedPropsSnapshot = normalizedPool.length;
-    const boardPool = buildMlbProjectionBoardPool(normalizedPool);
+    const hotPath = prepareProjectionHotPath(normalizedPool, MAX_PROJECTION_PROPS, filterOptions);
+    debugInfo.filterRuntimeMs = hotPath.filterRuntimeMs;
+    debugInfo.projectionHotPath = hotPath.stats;
+    deferredDisplayProps = [...deferredDisplayProps, ...hotPath.deferred];
+
+    const projectionBatch = hotPath.hot;
+    const boardPool = hotPath.pool;
     const sportFilteredProps = boardPool.afterSportFilter;
     const marketFilteredProps = boardPool.afterMarketFilter;
-    const projectionCandidates = boardPool.projectionCandidates;
-    allDisplayProps = boardPool.boardProps;
-    const workingNormalPool = buildMlbProjectionBoardPool(workingNormalProps);
-    const workingActivePool = buildMlbProjectionBoardPool(workingActiveProps);
-    workingNormalProps = workingNormalPool.boardProps;
-    workingActiveProps = workingActivePool.boardProps;
+    const projectionCandidates = projectionBatch;
+    allDisplayProps = projectionBatch;
+    workingNormalProps = projectionBatch;
+    workingActiveProps = projectionBatch;
     pipelinePropCountSnapshot = {
       normalizedProps: normalizedPropsSnapshot,
       afterSportFilter: sportFilteredProps.length,
@@ -2604,17 +2612,19 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     if (normalizedPropsSnapshot > 0 && allDisplayProps.length === 0) {
       const recovered = recoverNormalizedBoardProps(normalizedPool, boardPool);
       if (recovered.length) {
-        allDisplayProps = recovered;
-        workingNormalProps = recovered;
-        workingActiveProps = recovered;
-        pipelinePropCountSnapshot.afterProjectionMerge = recovered.length;
+        const recoveredHot = prepareProjectionHotPath(recovered, MAX_PROJECTION_PROPS, filterOptions);
+        allDisplayProps = recoveredHot.hot;
+        workingNormalProps = recoveredHot.hot;
+        workingActiveProps = recoveredHot.hot;
+        deferredDisplayProps = [...deferredDisplayProps, ...recoveredHot.deferred];
+        pipelinePropCountSnapshot.afterProjectionMerge = recoveredHot.hot.length;
         console.warn("[Live Board Fix] Recovered combined board from normalized pool", {
           normalized: normalizedPropsSnapshot,
-          recovered: recovered.length,
+          recovered: recoveredHot.hot.length,
           rejections: boardPool.rejections,
         });
       } else if (import.meta.env.DEV) {
-        console.warn("[Pipeline Trace] COMBINED dropped to 0 after buildMlbProjectionBoardPool", boardPool.rejections);
+        console.warn("[Pipeline Trace] COMBINED dropped to 0 after prepareProjectionHotPath", boardPool.rejections);
       }
     }
     setPipelineStageCount(PIPELINE_STAGES.NORMALIZED_PROPS_COUNT, allDisplayProps.length);
@@ -2628,7 +2638,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     background.sportsDataSlateGames = slateGames;
 
     const statsFetchProps = pickUniquePropsForStatsFetch(
-      projectionCandidates.length ? projectionCandidates : allDisplayProps.length ? allDisplayProps : workingNormalProps
+      projectionCandidates.length ? projectionCandidates : allDisplayProps
     );
     traceProjectionExecutionPath("fetchDFSProps:stats-fetch-start", {
       statsFetchPropCount: statsFetchProps.length,
@@ -2636,6 +2646,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       statsCapMs: getMlbStatsFetchTimeoutMs(),
       enrichmentTimeoutMs,
       mlbOnlyMode: MLB_ONLY_MODE,
+      projectionCap: MAX_PROJECTION_PROPS,
     });
 
     const statsApplied = await fetchMlbProjectionStatsBlocking(statsFetchProps, debugInfo);
@@ -2682,14 +2693,15 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
 
     const canMergeProjections = allDisplayProps.length > 0;
     if (canMergeProjections) {
+      const projectionStart = typeof performance !== "undefined" ? performance.now() : Date.now();
       const mergeContext = {
         seasonStats: seasonStatsData,
         statsMap: stableStats.statsMap,
       };
       const merged = mergeProjectionsOntoProps(allDisplayProps, mergeContext);
       allDisplayProps = merged.props;
-      workingNormalProps = mergeProjectionsOntoProps(workingNormalProps, mergeContext).props;
-      workingActiveProps = mergeProjectionsOntoProps(workingActiveProps, mergeContext).props;
+      workingNormalProps = allDisplayProps;
+      workingActiveProps = allDisplayProps;
       pipelinePropCountSnapshot.afterProjectionMerge = allDisplayProps.length;
       pipelinePropCountSnapshot.projectedProps = countMergedProjections(allDisplayProps);
       console.log("PROJECTED", pipelinePropCountSnapshot.projectedProps);
@@ -2704,22 +2716,16 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
           initialMergeDebug: merged.debug,
         });
         allDisplayProps = enrichmentResult.props;
-        workingNormalProps = enrichMlbPropsBatch(workingNormalProps, {
-          seasonStats: seasonStatsData,
-          statsMap: stableStats.statsMap,
-          skipInitialMerge: true,
-          initialMergeDebug: merged.debug,
-        }).props;
-        workingActiveProps = enrichMlbPropsBatch(workingActiveProps, {
-          seasonStats: seasonStatsData,
-          statsMap: stableStats.statsMap,
-          skipInitialMerge: true,
-          initialMergeDebug: merged.debug,
-        }).props;
+        workingNormalProps = allDisplayProps;
+        workingActiveProps = allDisplayProps;
         pipelinePropCountSnapshot.projectedProps = countPropsWithProjections(allDisplayProps);
         debugInfo.mlbEnrichmentDebug = enrichmentResult.debug;
         console.log("PROJECTED AFTER ENGINE", pipelinePropCountSnapshot.projectedProps);
       }
+
+      debugInfo.projectionRuntimeMs = Math.round(
+        (typeof performance !== "undefined" ? performance.now() : Date.now()) - projectionStart
+      );
 
       pipelinePropCountSnapshot.rejections = {
         ...pipelinePropCountSnapshot.rejections,
@@ -2754,21 +2760,15 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         logAttach: import.meta.env.DEV,
       };
       allDisplayProps = attachHistoricalStatsToProps(allDisplayProps, historicalContext);
-      workingNormalProps = attachHistoricalStatsToProps(workingNormalProps, historicalContext);
-      workingActiveProps = attachHistoricalStatsToProps(workingActiveProps, historicalContext);
+      workingNormalProps = allDisplayProps;
+      workingActiveProps = allDisplayProps;
       if (slateGames.length) {
         allDisplayProps = attachSportsDataSlateToProps(allDisplayProps, {
           games: slateGames,
           seasonRows: seasonStatsData,
         });
-        workingNormalProps = attachSportsDataSlateToProps(workingNormalProps, {
-          games: slateGames,
-          seasonRows: seasonStatsData,
-        });
-        workingActiveProps = attachSportsDataSlateToProps(workingActiveProps, {
-          games: slateGames,
-          seasonRows: seasonStatsData,
-        });
+        workingNormalProps = allDisplayProps;
+        workingActiveProps = allDisplayProps;
       }
       debugInfo.historicalMatchLog = buildProjectedHistoricalMatchLog(allDisplayProps, historicalContext);
       debugInfo.topProjectedDebugPlays = [...allDisplayProps]
@@ -2810,20 +2810,6 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
         statsEnrichmentFailed: Boolean(debugInfo.statsEnrichmentFailed) && merged.debug?.projectionCandidateCount === 0,
         statsEnrichmentError: debugInfo.statsEnrichmentError || "",
       });
-      if (typeof onCoreReady === "function" && allDisplayProps.length) {
-        try {
-          onCoreReady(
-            buildCoreBoardPreview({
-              rawProps: scopedRawProps,
-              allDisplayProps,
-              sourceStatus,
-              debugInfo,
-            })
-          );
-        } catch (error) {
-          console.warn("[DFS Pipeline] onCoreReady failed after stats merge", error);
-        }
-      }
     } else {
       debugInfo.projectionProvider = buildProjectionProviderSummary({
         statsMap: background.stats,
@@ -2841,55 +2827,57 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
       { label: "sportsbook", run: () => fetchSportsbookComparison({ props: workingNormalProps }) },
       { label: "news", run: () => fetchInjuryNews({ props: workingNormalProps }) },
     ];
-    const secondaryResults = await Promise.allSettled(
-      secondaryJobs.map((job) =>
-        withFetchTimeout(job.run, secondaryCapMs, {
-          label: job.label,
-          fallback: () => enrichmentBackgroundFallback(job.label),
-        })
-      )
-    );
-    secondaryResults.forEach((result, index) => {
-      const label = secondaryJobs[index].label;
-      if (result.status !== "fulfilled") {
-        if (label === "sportsbook") backgroundWarnings.push("Sportsbook comparison unavailable.");
-        if (label === "news") backgroundWarnings.push("Could not load injury/news data.");
-        return;
-      }
-      backgroundWarnings.push(...(result.value.warnings || []));
-      if (label === "sportsbook") {
-        background.comparisons = result.value.comparisons || [];
-        sourceStatus["The Odds API"] = result.value.cached
-          ? "Cached"
-          : result.value.rateLimited
+    mlbSecondaryPromise = (async () => {
+      const secondaryResults = await Promise.allSettled(
+        secondaryJobs.map((job) =>
+          withFetchTimeout(job.run, secondaryCapMs, {
+            label: job.label,
+            fallback: () => enrichmentBackgroundFallback(job.label),
+          })
+        )
+      );
+      secondaryResults.forEach((result, index) => {
+        const label = secondaryJobs[index].label;
+        if (result.status !== "fulfilled") {
+          if (label === "sportsbook") backgroundWarnings.push("Sportsbook comparison unavailable.");
+          if (label === "news") backgroundWarnings.push("Could not load injury/news data.");
+          return;
+        }
+        backgroundWarnings.push(...(result.value.warnings || []));
+        if (label === "sportsbook") {
+          background.comparisons = result.value.comparisons || [];
+          sourceStatus["The Odds API"] = result.value.cached
             ? "Cached"
-            : sportsbookSourceStatus(result.value);
-        const playerPropsCount = Number(debugInfo.sources["The Odds API"]?.propsAfterParsing || 0);
-        debugInfo.sources["The Odds API"] = {
-          ...debugInfo.sources["The Odds API"],
-          status: sourceStatus["The Odds API"],
-          apiStatus: sourceStatus["The Odds API"],
-          rawPropsLoaded: Math.max(playerPropsCount, normalProps.length),
-          propsAfterParsing: Math.max(playerPropsCount, background.comparisons.length),
-          propsAfterFilters: background.comparisons.length,
-          usablePropsCount: Math.max(playerPropsCount, background.comparisons.length),
-          message:
-            playerPropsCount > 0
-              ? `${playerPropsCount} player props · ${background.comparisons.length} line comparisons`
-              : background.comparisons.length > 0
-                ? (result.value.warnings || []).join(" ")
-                : EMPTY_SOURCE_MESSAGE,
-          lastSuccessfulFetchAt: result.value.lastSuccessfulFetchAt || debugInfo.sources["The Odds API"]?.lastSuccessfulFetchAt || "",
-          lineSourceBadge:
-            playerPropsCount > 0 || background.comparisons.length > 0
-              ? result.value.cached || result.value.rateLimited
-                ? "CACHED"
-                : "LIVE"
-              : debugInfo.sources["The Odds API"]?.lineSourceBadge || "EMPTY",
-        };
-      }
-      if (label === "news") background.news = result.value.news || new Map();
-    });
+            : result.value.rateLimited
+              ? "Cached"
+              : sportsbookSourceStatus(result.value);
+          const playerPropsCount = Number(debugInfo.sources["The Odds API"]?.propsAfterParsing || 0);
+          debugInfo.sources["The Odds API"] = {
+            ...debugInfo.sources["The Odds API"],
+            status: sourceStatus["The Odds API"],
+            apiStatus: sourceStatus["The Odds API"],
+            rawPropsLoaded: Math.max(playerPropsCount, normalProps.length),
+            propsAfterParsing: Math.max(playerPropsCount, background.comparisons.length),
+            propsAfterFilters: background.comparisons.length,
+            usablePropsCount: Math.max(playerPropsCount, background.comparisons.length),
+            message:
+              playerPropsCount > 0
+                ? `${playerPropsCount} player props · ${background.comparisons.length} line comparisons`
+                : background.comparisons.length > 0
+                  ? (result.value.warnings || []).join(" ")
+                  : EMPTY_SOURCE_MESSAGE,
+            lastSuccessfulFetchAt: result.value.lastSuccessfulFetchAt || debugInfo.sources["The Odds API"]?.lastSuccessfulFetchAt || "",
+            lineSourceBadge:
+              playerPropsCount > 0 || background.comparisons.length > 0
+                ? result.value.cached || result.value.rateLimited
+                  ? "CACHED"
+                  : "LIVE"
+                : debugInfo.sources["The Odds API"]?.lineSourceBadge || "EMPTY",
+          };
+        }
+        if (label === "news") background.news = result.value.news || new Map();
+      });
+    })();
   } else {
   const statsFetchProps = pickUniquePropsForStatsFetch(workingNormalProps);
   const statsApplied = await fetchMlbProjectionStatsBlocking(statsFetchProps, debugInfo);
@@ -2996,6 +2984,15 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     backgroundWarnings.push("MLB stats fetch timed out before projections could complete.");
   }
 
+  const historyRows = readHistory();
+  const historyWeights = buildHistoryAccuracyWeights(historyRows);
+  if (mlbSecondaryPromise) {
+    await Promise.race([
+      mlbSecondaryPromise.catch(() => {}),
+      new Promise((resolve) => setTimeout(resolve, 900)),
+    ]);
+  }
+
   const lineComparisonMap = buildLineComparisonMap(workingNormalProps);
   const sportsbookComparisonMap = buildSportsbookComparisonMap(background.comparisons);
   const lineMovementMap = updateLineMovementMap(workingActiveProps, sportsbookComparisonMap);
@@ -3007,9 +3004,7 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
     lineMovementMap,
     manualStatsMap: background.manualStatsMap,
   };
-  const historyRows = readHistory();
   scoringContext.historyRows = historyRows;
-  const historyWeights = buildHistoryAccuracyWeights(historyRows);
   reportProgress("PROJECT");
   resetProjectionPipelineErrors();
   let emergencyDiagnostic = null;
@@ -3113,6 +3108,29 @@ async function fetchDFSProps({ platform = "both", sport = "all", statType = "all
   }
   workingNormalProps = mergeScoredIntoDisplayProps(workingNormalProps, scoredProps);
   workingActiveProps = mergeScoredIntoDisplayProps(workingActiveProps, scoredProps);
+
+  if (typeof onCoreReady === "function" && allDisplayProps.length && MLB_ONLY_MODE && !coreReadySent) {
+    try {
+      coreReadySent = true;
+      onCoreReady(
+        buildCoreBoardPreview({
+          rawProps: scopedRawProps,
+          allDisplayProps,
+          sourceStatus,
+          debugInfo: {
+            ...debugInfo,
+            filterRuntimeMs: debugInfo.filterRuntimeMs,
+            projectionRuntimeMs: debugInfo.projectionRuntimeMs,
+          },
+        })
+      );
+    } catch (error) {
+      console.warn("[DFS Pipeline] onCoreReady failed after scoring", error);
+    }
+  }
+  if (mlbSecondaryPromise) {
+    mlbSecondaryPromise.catch(() => {});
+  }
 
   pipelineStageCounts = buildPipelineStageReport({
     ...pipelineStageCounts,
@@ -3650,6 +3668,7 @@ export default function DFSPropsApp() {
   }, [refreshCooldownSec, sourceCooldownSec]);
 
   const applyBoardState = useCallback((board, cacheLayer = "fresh") => {
+    const renderStart = typeof performance !== "undefined" ? performance.now() : Date.now();
     const scopedBoard = sanitizeBoardForMlbOnly(board || {});
     const sourceRows =
       scopedBoard.allDisplayProps?.length
@@ -3703,6 +3722,11 @@ export default function DFSPropsApp() {
         ...(scopedBoard.debugInfo || createDebugInfo(platform)),
         acceptedPropsForRender: renderAccepted,
         cacheAnalytics: scopedBoard.cacheAnalytics || scopedBoard.cacheMetadata?.cacheAnalytics || scopedBoard.debugInfo?.cacheAnalytics || null,
+        renderRuntimeMs: Math.round(
+          (typeof performance !== "undefined" ? performance.now() : Date.now()) - renderStart
+        ),
+        filterRuntimeMs: scopedBoard.debugInfo?.filterRuntimeMs,
+        projectionRuntimeMs: scopedBoard.debugInfo?.projectionRuntimeMs,
       })
     );
     setLastUpdated(
@@ -4073,6 +4097,8 @@ export default function DFSPropsApp() {
         }
         persistStartupBoardSlices(board);
         if (result.deferredDisplayProps?.length) {
+          const deferredCount = result.deferredDisplayProps.length;
+          setCacheNotice(`Loading remaining props… (${deferredCount} queued)`);
           scheduleBackgroundWork(() => {
             setAllDisplayProps((current) => {
               const seen = new Set((current || []).map((prop) => prop.id));
@@ -4084,7 +4110,18 @@ export default function DFSPropsApp() {
               }
               return merged;
             });
-          }, { delayMs: 900 });
+            setProps((current) => {
+              const seen = new Set((current || []).map((prop) => prop.id));
+              const merged = [...(current || [])];
+              for (const prop of result.deferredDisplayProps) {
+                if (!prop?.id || seen.has(prop.id)) continue;
+                seen.add(prop.id);
+                merged.push(prop);
+              }
+              return merged.length > (current || []).length ? merged : current;
+            });
+            setCacheNotice("");
+          }, { delayMs: 200 });
         }
         if (board.props.length || board.allDisplayProps?.length || board.usableProps?.length) {
           setError((current) => resolveUiErrorMessage(current, board.allDisplayProps || board.props, board.sourceStatus));
@@ -4565,17 +4602,20 @@ export default function DFSPropsApp() {
         .slice(0, 40),
     [visibleHistory]
   );
-  const topMlbPlayBoard = useMemo(() => {
-    try {
+  const projectedPropsPool = useMemo(
+    () => resolveEngineProjectedPool(allDisplayProps),
+    [allDisplayProps]
+  );
+  const resolveTopMlbPlayBoard = useCallback(
+    (displayPool) => {
       const fetchFailureReasons = buildLiveFetchFailureSummary(debugInfo?.sources || {}, {
         suppressWhenPrimaryLoaded: true,
       });
       const loadedPropCount = Math.max(
         allDisplayProps.length,
-        (boardDisplayProps || []).filter((p) => !p.isDemoData).length
+        (displayPool || []).filter((p) => !p.isDemoData).length
       );
-      const displayPool = boardDisplayProps.length ? boardDisplayProps : allDisplayProps;
-      const board = resolveTopMlbPlaySections(displayPool, props, parsedUnderdogProps, {
+      return resolveTopMlbPlaySections(displayPool, props, parsedUnderdogProps, {
         sourceStatus,
         lastUpdated,
         debugInfo,
@@ -4588,7 +4628,26 @@ export default function DFSPropsApp() {
         loadedPropCount,
         lightweight: !debugPanelsVisible,
       });
-      board.loadedPropCount = loadedPropCount;
+    },
+    [
+      allDisplayProps.length,
+      props,
+      parsedUnderdogProps,
+      sourceStatus,
+      lastUpdated,
+      debugInfo,
+      error,
+      debugPanelsVisible,
+    ]
+  );
+  const topMlbPlayBoard = useMemo(() => {
+    try {
+      const displayPool = boardDisplayProps.length ? boardDisplayProps : allDisplayProps;
+      const board = resolveTopMlbPlayBoard(displayPool);
+      board.loadedPropCount = Math.max(
+        allDisplayProps.length,
+        (boardDisplayProps || []).filter((p) => !p.isDemoData).length
+      );
       if (board.pipelineDebug) {
         board.pipelineDebug.apiKeys = {
           PrizePicks: "configured",
@@ -4607,7 +4666,7 @@ export default function DFSPropsApp() {
         loadedPropCount: 0,
       };
     }
-  }, [boardDisplayProps, props, parsedUnderdogProps, sourceStatus, lastUpdated, debugInfo, error, allDisplayProps.length, debugPanelsVisible]);
+  }, [boardDisplayProps, allDisplayProps, resolveTopMlbPlayBoard]);
   const verificationFilterDiagnostics = useMemo(() => {
     if (!debugPanelsVisible) return topMlbPlayBoard?.filterDiagnostics || null;
 
@@ -4626,7 +4685,7 @@ export default function DFSPropsApp() {
     }
 
     const statsMap = debugInfo?.statsMap || scoringContextRef.current?.stats || null;
-    const projectedPool = resolveEngineProjectedPool(allDisplayProps);
+    const projectedPool = projectedPropsPool;
     if (!projectedPool.length && !allDisplayProps.length) return base;
 
     const dashboard = buildVerificationDashboard(allDisplayProps, {
@@ -4650,7 +4709,7 @@ export default function DFSPropsApp() {
         filtered: dashboard.verifiedPasses,
       },
     };
-  }, [topMlbPlayBoard, allDisplayProps, debugInfo?.statsMap, debugInfo?.sportsDataSeasonStats, debugInfo?.topProjectedDebugPlays, debugInfo?.historicalMatchLog, debugPanelsVisible]);
+  }, [topMlbPlayBoard, allDisplayProps, projectedPropsPool, debugInfo?.statsMap, debugInfo?.sportsDataSeasonStats, debugInfo?.topProjectedDebugPlays, debugInfo?.historicalMatchLog, debugPanelsVisible]);
   const pipelineRenderCounts = useMemo(() => {
     const base = liveRenderBoard.counts;
     const audit = verificationFilterDiagnostics || topMlbPlayBoard?.filterDiagnostics;
@@ -4700,6 +4759,10 @@ export default function DFSPropsApp() {
       filteredLowConfidence: audit?.filteredLowConfidence || 0,
       filteredWeakEdge: audit?.filteredWeakEdge || 0,
       filteredOut: audit?.filteredOut || base.filteredOut,
+      filterRuntimeMs: debugInfo?.filterRuntimeMs ?? null,
+      projectionRuntimeMs: debugInfo?.projectionRuntimeMs ?? null,
+      renderRuntimeMs: debugInfo?.renderRuntimeMs ?? null,
+      projectionHotPath: debugInfo?.projectionHotPath || null,
     };
   }, [
     liveRenderBoard,
